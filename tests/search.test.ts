@@ -115,7 +115,7 @@ describe('search', () => {
 describe('refs', () => {
   it('빈 저장소도 던지지 않고 빈 스냅샷을 낸다', async () => {
     const s = await refs(exec, empty)
-    expect(s).toMatchObject({ head: { branch: 'main', hash: null }, local: [], remotes: [], tags: [], stashes: [] })
+    expect(s).toMatchObject({ head: { branch: 'main', hash: null }, local: [], remotes: [], tags: [], stashes: [], submodules: [] })
     expect(s.worktrees).toHaveLength(1)
     expect(s.worktrees[0]).toMatchObject({ isMain: true, head: null })
   })

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react'
-import type { Branch, Repo, Source, Stash, Tag, Worktree } from '@shared/types'
+import type { Branch, Repo, Source, Stash, SubmoduleInfo, Tag, Worktree } from '@shared/types'
 import { useT } from '../i18n'
 import { formatDate } from '../lib/format'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
@@ -22,6 +22,7 @@ import {
   IconRepo,
   IconSearch,
   IconStash,
+  IconSubmodule,
   IconTag,
   IconWorktree
 } from './icons'
@@ -92,17 +93,19 @@ interface RowProps {
   title?: string
   active?: boolean
   muted?: boolean
+  disabled?: boolean
   trailing?: ReactNode
   onClick?(): void
   onFilter?(): void
 }
 
-function ItemRow({ depth, icon, label, title, active, muted, trailing, onClick, onFilter }: RowProps): React.JSX.Element {
+function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing, onClick, onFilter }: RowProps): React.JSX.Element {
   const t = useT()
   return (
     <div
       role="button"
       tabIndex={0}
+      aria-disabled={disabled || undefined}
       className={`side-item${active ? ' is-active' : ''}${muted ? ' is-muted' : ''}`}
       style={{ paddingLeft: 8 + depth * 14 }}
       title={title ?? label}
@@ -207,7 +210,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const config = useAppStore((s) => s.config)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   const refs = useAppStore((s) => s.refs)
-  const { selectRepo, openAddDialog, removeRepo, updateRepo } = useAppStore.getState()
+  const { selectRepo, addRepo, openAddDialog, removeRepo, updateRepo } = useAppStore.getState()
   const filter = useLogStore((s) => s.filter)
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
@@ -242,6 +245,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   )
   const tags = useMemo(() => (refs?.tags ?? []).filter((x) => matches(q, x.name)), [refs, q])
   const stashes = useMemo(() => (refs?.stashes ?? []).filter((s) => matches(q, s.message, s.ref)), [refs, q])
+  const submodules = useMemo(() => (refs?.submodules ?? []).filter((m) => matches(q, m.name, m.path)), [refs, q])
   const worktrees = useMemo(() => (refs?.worktrees ?? []).filter((w) => matches(q, w.path, w.branch ?? undefined)), [refs, q])
 
   // 필터로 다른 ref 만 보는 중이면 찾는 커밋이 목록에 없을 수 있으므로 전체 보기로 돌아간 뒤 찾아간다
@@ -252,6 +256,29 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   }
   // 폴더·리모트 접힘 키는 저장소마다 따로 둔다
   const scoped = (key: string): string => `${activeRepoId}:${key}`
+  /** 서브모듈을 같은 환경의 저장소로 연다: 등록돼 있으면 전환, 아니면 같은 그룹으로 등록 후 전환 */
+  const openSubmodule = (m: SubmoduleInfo): void => {
+    const parent = config?.repos.find((r) => r.id === activeRepoId)
+    const source = config?.sources.find((x) => x.id === parent?.sourceId)
+    if (!config || !parent || !source) return
+    // Windows 로컬 저장소는 역슬래시 경로로 저장돼 있다
+    const win = parent.path.includes('\\') && !parent.path.startsWith('/')
+    const rel = win ? m.path.replace(/\//g, '\\') : m.path
+    const path = `${parent.path.replace(/[\\/]+$/, '')}${win ? '\\' : '/'}${rel}`
+    const norm = (p: string): string => (win ? p.replace(/\\/g, '/').toLowerCase() : p)
+    const existing = config.repos.find((r) => r.sourceId === source.id && norm(r.path) === norm(path))
+    if (existing) {
+      selectRepo(existing.id)
+      return
+    }
+    void addRepo({
+      kind: source.kind,
+      ...(source.distro ? { distro: source.distro } : {}),
+      ...(source.sshHost ? { sshHost: source.sshHost } : {}),
+      path,
+      ...(parent.group ? { group: parent.group } : {})
+    }).catch((err: unknown) => useAppStore.setState({ error: err instanceof Error ? err.message : String(err) }))
+  }
   const solo = (f: LogFilter): void => useLogStore.getState().setFilter(f)
   const isFiltered = (rev: string): boolean => filter?.rev === rev
 
@@ -537,6 +564,41 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                   />
                 )}
               />
+            </Section>
+
+            <Section id="submodules" title={t('sidebar.submodules')} count={submodules.length}>
+              {submodules.length === 0 && <div className="sidebar__empty">{t('sidebar.submoduleEmpty')}</div>}
+              {submodules.map((m) => {
+                const uninit = m.status === 'uninitialized'
+                const modified = m.status === 'modified'
+                const short = (h?: string): string => (h ? h.slice(0, 7) : '')
+                const state = uninit
+                  ? t('sidebar.submoduleUninitTip')
+                  : modified
+                    ? t('sidebar.submoduleModifiedTip', { recorded: short(m.recorded), head: short(m.head) })
+                    : m.status === 'unknown'
+                      ? t('sidebar.submoduleUnknown')
+                      : t('sidebar.submoduleOpen')
+                return (
+                  <ItemRow
+                    key={m.path}
+                    depth={0}
+                    icon={<IconSubmodule size={13} />}
+                    label={m.name}
+                    title={[m.path, m.url, state].filter(Boolean).join('\n')}
+                    muted={uninit}
+                    disabled={uninit}
+                    trailing={
+                      uninit ? (
+                        <span className="side-badge">{t('sidebar.submoduleUninit')}</span>
+                      ) : modified ? (
+                        <span className="side-badge is-modified">{t('sidebar.submoduleModified')}</span>
+                      ) : undefined
+                    }
+                    onClick={uninit ? undefined : () => openSubmodule(m)}
+                  />
+                )
+              })}
             </Section>
           </>
         )}
