@@ -11,6 +11,7 @@ import type { RepoWatcher } from '../services/RepoWatcher'
 import { GitHubApiError } from '../github/client'
 import type { GitHubService } from '../github/service'
 import { registerGithubIpc } from './github'
+import { applyTitleBarTheme } from '../titleBar'
 
 type Handler<C extends IpcChannel> = (e: IpcMainInvokeEvent, ...args: IpcArgs<C>) => Promise<IpcResult<C>> | IpcResult<C>
 
@@ -140,5 +141,11 @@ export function registerIpc(config: ConfigStore, repos: RepoService, watcher: Re
   handle('req:cancel', (_e, requestId) => {
     repos.cancel(requestId)
     gh.cancel(requestId)
+  })
+  handle('win:setTitleBarTheme', (e, theme) => {
+    if (!theme || typeof theme !== 'object' || typeof theme.dark !== 'boolean') throw new Error('잘못된 입력입니다')
+    if (theme.dim !== undefined && typeof theme.dim !== 'boolean') throw new Error('잘못된 입력입니다')
+    const win = BrowserWindow.fromWebContents(e.sender)
+    if (win) applyTitleBarTheme(win, theme.dark, theme.dim === true)
   })
 }

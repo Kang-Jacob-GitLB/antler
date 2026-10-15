@@ -11,6 +11,7 @@ import type {
   UiPrefs
 } from '@shared/types'
 import { api, errorMessage } from '../lib/api'
+import { setTitleBarDark } from '../lib/titleBarSync'
 
 type ResolvedTheme = 'dark' | 'light'
 
@@ -34,8 +35,8 @@ interface AppState {
   updateRepo(id: string, patch: RepoPatch): Promise<void>
   removeRepo(id: string): Promise<void>
   setUi(patch: Partial<UiPrefs>): Promise<void>
-  cycleTheme(): void
-  toggleLocale(): void
+  setTheme(theme: ThemePref): void
+  setLocale(locale: Locale): void
   setSwitcherOpen(open: boolean): void
   clearError(): void
 }
@@ -47,7 +48,10 @@ export function resolveTheme(pref: ThemePref, systemDark: boolean): ResolvedThem
 }
 
 function applyTheme(pref: ThemePref, systemDark: boolean): void {
-  document.documentElement.dataset['theme'] = resolveTheme(pref, systemDark)
+  const theme = resolveTheme(pref, systemDark)
+  document.documentElement.dataset['theme'] = theme
+  // 제목 표시줄 오버레이(창 컨트롤) 색도 같이 바꾼다
+  setTitleBarDark(theme === 'dark')
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -146,15 +150,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  cycleTheme() {
-    const cur = get().config?.ui.theme ?? 'system'
-    const next: ThemePref = cur === 'system' ? 'dark' : cur === 'dark' ? 'light' : 'system'
+  setTheme(next) {
     applyTheme(next, get().systemDark)
     void get().setUi({ theme: next })
   },
 
-  toggleLocale() {
-    const next: Locale = get().config?.ui.locale === 'en' ? 'ko' : 'en'
+  setLocale(next) {
     document.documentElement.lang = next
     void get().setUi({ locale: next })
   },

@@ -1,3 +1,4 @@
+import type { Locale, ThemePref } from '@shared/types'
 import { useT } from '../i18n'
 import { useActiveRepo, useAppStore } from '../stores/appStore'
 import { useLogStore } from '../stores/logStore'
@@ -5,6 +6,7 @@ import { useSearchStore } from '../stores/searchStore'
 import { GhAuthButton } from './github/GhAuthButton'
 import { AntlerMark } from './brand'
 import { EnvBadge } from './EnvBadge'
+import { MenuButton } from './MenuButton'
 import {
   IconBranch,
   IconChevronDown,
@@ -26,7 +28,7 @@ export function Toolbar(): React.JSX.Element {
   const head = useAppStore((s) => s.head)
   const theme = useAppStore((s) => s.config?.ui.theme ?? 'system')
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
-  const { cycleTheme, toggleLocale, refreshRefs, setSwitcherOpen } = useAppStore.getState()
+  const { setTheme, setLocale, refreshRefs, setSwitcherOpen } = useAppStore.getState()
   const reload = useLogStore((s) => s.reload)
   const filter = useLogStore((s) => s.filter)
   const setFilter = useLogStore((s) => s.setFilter)
@@ -88,13 +90,31 @@ export function Toolbar(): React.JSX.Element {
             <IconRefresh />
           </button>
         )}
-        <button className="icon-btn" title={t('toolbar.theme', { mode: t(`theme.${theme}`) })} onClick={cycleTheme}>
+        <MenuButton<ThemePref>
+          label={t('toolbar.themeMenu')}
+          value={theme}
+          onChange={setTheme}
+          options={[
+            { value: 'system', label: t('theme.system'), icon: <IconMonitor size={14} /> },
+            { value: 'light', label: t('theme.light'), icon: <IconSun size={14} /> },
+            { value: 'dark', label: t('theme.dark'), icon: <IconMoon size={14} /> }
+          ]}
+        >
           <ThemeIcon />
-        </button>
-        <button className="icon-btn icon-btn--text" title={t('toolbar.locale')} onClick={toggleLocale}>
+        </MenuButton>
+        <MenuButton<Locale>
+          label={t('toolbar.localeMenu')}
+          value={locale}
+          onChange={setLocale}
+          className="icon-btn--text"
+          options={[
+            { value: 'ko', label: '한국어' },
+            { value: 'en', label: 'English' }
+          ]}
+        >
           <IconGlobe />
           <span>{locale.toUpperCase()}</span>
-        </button>
+        </MenuButton>
       </div>
     </header>
   )

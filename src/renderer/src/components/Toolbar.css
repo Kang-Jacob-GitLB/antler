@@ -7,6 +7,25 @@
   background: var(--toolbar-bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  /* 툴바가 제목 표시줄: 빈 곳을 잡아 끌면 창이 움직인다. 상호작용 요소만 no-drag */
+  -webkit-app-region: drag;
+  user-select: none;
+}
+/* win·linux: OS 창 컨트롤 오버레이 자리. WCO 값이 있으면 그 폭에 맞추고 없으면 138px */
+:root:not([data-platform='darwin']) .toolbar {
+  padding-right: max(
+    var(--space-3),
+    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)))
+  );
+}
+/* mac: 신호등 버튼 자리 */
+:root[data-platform='darwin'] .toolbar {
+  padding-left: 78px;
+}
+.crumb,
+.filter-chip,
+.toolbar__actions {
+  -webkit-app-region: no-drag;
 }
 
 .toolbar__brand {
@@ -76,8 +95,10 @@ button.crumb:hover {
   align-items: center;
   gap: 2px;
 }
-.icon-btn--text {
+/* base.css 의 .icon-btn(inline-grid)과 우선순위가 같으면 로드 순서에 따라 글자가 아이콘 아래로 떨어진다 */
+.icon-btn.icon-btn--text {
   display: inline-flex;
+  align-items: center;
   width: auto;
   padding: 0 6px;
   gap: 4px;
