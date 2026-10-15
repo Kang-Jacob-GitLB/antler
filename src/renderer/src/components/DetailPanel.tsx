@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Commit, CommitDetail, FileChange } from '@shared/types'
 import { useT } from '../i18n'
@@ -9,9 +9,17 @@ import { useDetailStore } from '../stores/detailStore'
 import { useLogStore } from '../stores/logStore'
 import { FileStatusIcon } from './FileStatusIcon'
 import { IconCopy } from './icons'
+import { markdownToHtml } from '../lib/markdown'
+import { HtmlBody } from './github/GhBits'
 import './DetailPanel.css'
 
 const FILE_ROW_H = 26
+
+/** 커밋 메시지 본문 — 마크다운으로 렌더링한다(정화·링크 처리는 HtmlBody) */
+const CommitBody = memo(function CommitBody({ body }: { body: string }) {
+  const html = useMemo(() => markdownToHtml(body), [body])
+  return <HtmlBody html={html} className="detail__body" />
+})
 
 /** 경로를 (디렉터리, 파일 이름)으로 나눈다 */
 function splitPath(path: string): [dir: string, base: string] {
@@ -179,7 +187,7 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
         </div>
 
         <h2 className="detail__subject selectable">{commit.subject}</h2>
-        {d?.body && <pre className="detail__body selectable">{d.body}</pre>}
+        {d?.body && <CommitBody body={d.body} />}
 
         <div className="detail__person">
           <span

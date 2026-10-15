@@ -236,6 +236,7 @@ tests/           vitest + fixtures/
 | happy-dom | renderer 의 HTML 정화(sanitize) 테스트에 쓰는 가벼운 DOM 구현 — 테스트 전용 |
 | playwright-core | 빌드된 앱을 실제로 띄워 측정·스크린샷(`scripts/drive.mjs`) — 브라우저 다운로드 없는 core 판 |
 | @resvg/resvg-js, png2icons | 아이콘 생성(`pnpm icons`): SVG → PNG, PNG → ico/icns |
+| marked | 커밋 메시지 본문을 마크다운으로 렌더(GFM). 결과 HTML 은 `lib/sanitize.ts` 허용 목록으로 정화 |
 | pretendard | UI 폰트 Pretendard Variable(OFL 1.1). woff2 하나만 renderer 자산으로 번들 |
 
 ## 알려진 한계

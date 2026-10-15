@@ -73,8 +73,19 @@
   font-size: var(--fs-md);
   line-height: 1.55;
   color: var(--text-secondary);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+/* .gh-body 타이포를 공유하되 커밋 본문은 한 단계 작게 */
+.detail__body.gh-body {
+  font-size: var(--fs-md);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.detail__body h1,
+.detail__body h2,
+.detail__body h3 {
+  font-size: 1em;
+  color: var(--text-primary);
 }
 
 .detail__person {
