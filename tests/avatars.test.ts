@@ -170,6 +170,46 @@ describe('AvatarResolver', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it('고른 커밋이 404(로컬 브랜치에만 있음)면 같은 작성자의 push 된 커밋으로 다시 묻는다', async () => {
+    const { fetch, calls } = fakeFetch((req) => {
+      const sha = new URL(req.url).searchParams.get('sha')
+      if (sha === SHA_C) return commit(SHA_C, { login: 'dev', id: 7, avatar_url: 'https://avatars.githubusercontent.com/u/7?v=4' })
+      return json({ message: 'Not Found' }, { status: 404, headers: RATE(50) })
+    })
+    const asked: string[] = []
+    const fallback = async (email: string): Promise<string[]> => {
+      asked.push(email)
+      return [SHA_A, SHA_B, SHA_C] // 원래 sha(A)는 빼고 앞에서 2개(B, C)까지 쓴다
+    }
+    const r = new AvatarResolver(new GitHubClient(fetch))
+    const out = await r.resolve(slug, [{ email: 'dev@corp.io', sha: SHA_A }], signal, fallback)
+    expect(out['dev@corp.io']).toEqual({ login: 'dev', url: 'https://avatars.githubusercontent.com/u/7' })
+    expect(asked).toEqual(['dev@corp.io'])
+    expect(calls.map((c) => new URL(c.url).searchParams.get('sha'))).toEqual([SHA_A, SHA_B, SHA_C])
+    // 이메일은 로컬 대체 조회에만 쓰이고 GitHub 요청에는 실리지 않는다
+    for (const c of calls) expect(c.url).not.toContain('corp.io')
+  })
+
+  it('404 가 아닌 결과(계정 없음·한도)면 대체 조회를 하지 않고, 대체 후보도 2개까지만 쓴다', async () => {
+    const { fetch, calls } = fakeFetch((req) => {
+      const sha = new URL(req.url).searchParams.get('sha')
+      if (sha === SHA_A) return commit(SHA_A, null) // 계정과 연결 안 된 작성자 — 확정 결과
+      return json({ message: 'Not Found' }, { status: 404, headers: RATE(50) })
+    })
+    let fallbackCalls = 0
+    const fallback = async (): Promise<string[]> => {
+      fallbackCalls++
+      return ['d'.repeat(40), 'e'.repeat(40), 'f'.repeat(40)]
+    }
+    const r = new AvatarResolver(new GitHubClient(fetch))
+    const out = await r.resolve(slug, [{ email: 'none@corp.io', sha: SHA_A }, { email: 'gone@corp.io', sha: SHA_B }], signal, fallback)
+    expect(out['none@corp.io']).toBeNull()
+    expect(out).not.toHaveProperty('gone@corp.io')
+    // none: 1회(대체 없음) · gone: 원래 1회 + 대체 2회
+    expect(fallbackCalls).toBe(1)
+    expect(calls).toHaveLength(4)
+  })
+
   it('남은 호출이 10 미만이면 멈추고 reset 이후 재개한다', async () => {
     let t = 1_900_000_000_000 - 3_600_000
     const reset = 1_900_000_000

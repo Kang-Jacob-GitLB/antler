@@ -38,7 +38,13 @@ export interface AvatarBlock {
   signedIn: boolean
 }
 
-const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/
+/** 고른 커밋이 404(push 안 됨)일 때 같은 작성자의 push 된 커밋으로 더 시도하는 횟수 */
+export const FALLBACK_SHAS = 2
+
+/** 404 때 같은 작성자의 다른(push 된) 커밋 sha 를 찾아 주는 함수. 이메일은 GitHub 로 보내지 않고 로컬 git 에서만 쓴다 */
+export type ShaFallback = (email: string) => Promise<string[]>
+
+const LOGIN_RE =/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/
 
 interface Entry {
   /** 해석된 계정(null=GitHub 계정과 연결되지 않음) */
@@ -82,7 +88,12 @@ export class AvatarResolver {
    * authors 를 해석한다. 결과에 없는 키는 "지금은 모름"(한도·네트워크·GitHub 가 모르는 커밋)이라 나중에 다시 물어도 된다.
    * slug 가 null(GitHub 저장소 아님)이면 noreply 이메일과 캐시만 쓴다.
    */
-  async resolve(slug: { owner: string; repo: string } | null, authors: GhAvatarQuery[], signal: AbortSignal): Promise<Record<string, GhAuthorAvatar | null>> {
+  async resolve(
+    slug: { owner: string; repo: string } | null,
+    authors: GhAvatarQuery[],
+    signal: AbortSignal,
+    fallback?: ShaFallback
+  ): Promise<Record<string, GhAuthorAvatar | null>> {
     this.load()
     const out: Record<string, GhAuthorAvatar | null> = {}
     const todo: Promise<void>[] = []
@@ -107,7 +118,9 @@ export class AvatarResolver {
       else if (todo.length < PER_CALL_CAP) {
         // 동시 요청이 같은 작성자를 중복 조회하지 않도록 시작 즉시 등록한다(실제 호출은 동시성 슬롯을 받은 뒤)
         const base = `/repos/${encodeURIComponent(slug.owner)}/${encodeURIComponent(slug.repo)}/commits`
-        const p = this.limited(() => this.lookup(base, a.sha, key, signal), signal).finally(() => this.inflight.delete(key))
+        const p = this.limited(() => this.lookupWithFallback(base, a, key, signal, fallback), signal).finally(() =>
+          this.inflight.delete(key)
+        )
         this.inflight.set(key, p)
         todo.push(p)
       }
@@ -191,15 +204,37 @@ export class AvatarResolver {
   }
 
   /**
+   * 고른 커밋으로 묻고, GitHub 가 모르는 커밋(404 — 로컬 브랜치에만 있는 커밋)이면 같은 작성자의 push 된 커밋으로
+   * FALLBACK_SHAS 번까지 다시 묻는다. 비공개 저장소를 비로그인으로 묻는 경우처럼 저장소 자체가 막혔으면 더 묻지 않는다.
+   */
+  private async lookupWithFallback(base: string, a: GhAvatarQuery, key: string, signal: AbortSignal, fallback?: ShaFallback): Promise<void> {
+    const first = a.sha.toLowerCase()
+    if ((await this.lookup(base, first, key, signal)) !== 'unknown-sha' || !fallback) return
+    const sk = AvatarResolver.slugKeyOfBase(base)
+    let candidates: string[]
+    try {
+      candidates = (await fallback(a.email)).filter((s) => s !== first).slice(0, FALLBACK_SHAS)
+    } catch {
+      return
+    }
+    for (const sha of candidates) {
+      if (signal.aborted || !this.canCall()) return
+      if (sk && !this.client.hasToken() && this.anonProbe.get(sk)?.private) return
+      if ((await this.lookup(base, sha, key, signal)) !== 'unknown-sha') return
+    }
+  }
+
+  /**
    * sha 한 건 조회: 그 커밋 한 개만 가져오는 목록 호출(GET /commits?sha=<sha>&per_page=1)로 author 를 읽는다.
    * GET /commits/{sha} 는 변경 파일 목록까지 실어 응답이 커질 수 있어 이쪽을 쓴다.
    */
-  private async lookup(base: string, sha: string, key: string, signal: AbortSignal): Promise<void> {
+  /** 결과: 'resolved' 기록함(계정 있음/없음) · 'unknown-sha' GitHub 가 모르는 커밋(다른 커밋으로 더 물어볼 만함) · 'other' 그 밖 */
+  private async lookup(base: string, sha: string, key: string, signal: AbortSignal): Promise<'resolved' | 'unknown-sha' | 'other'> {
     // 같은 묶음에서 먼저 간 조회들이 이 저장소를 비공개로 판정했다면, 이미 대기열에 들어온 나머지도 보내지 않는다
     const sk = AvatarResolver.slugKeyOfBase(base)
     if (sk && !this.client.hasToken() && this.anonProbe.get(sk)?.private) {
       this.retryAt.set(key, this.now() + UNKNOWN_SHA_RETRY_MS)
-      return
+      return 'other'
     }
     this.calls++
     try {
@@ -207,17 +242,20 @@ export class AvatarResolver {
       const c = Array.isArray(data) ? data[0] : undefined
       if (!c || typeof c.sha !== 'string' || c.sha.toLowerCase() !== sha) {
         this.retryAt.set(key, this.now() + NETWORK_RETRY_MS)
-        return
+        return 'other'
       }
       void this.probe(base, 'ok', signal)
       const a = c.author
-      if (!a) return this.store(key, null)
+      if (!a) {
+        this.store(key, null)
+        return 'resolved'
+      }
       const login = typeof a.login === 'string' && LOGIN_RE.test(a.login) ? a.login : null
       const id = typeof a.id === 'number' && Number.isSafeInteger(a.id) && a.id > 0 ? a.id : undefined
-      if (!login) return this.store(key, null)
-      this.store(key, { login, url: normalizeAvatarUrl(a.avatar_url, login, id) ?? avatarBaseUrl(login, id) })
+      this.store(key, login ? { login, url: normalizeAvatarUrl(a.avatar_url, login, id) ?? avatarBaseUrl(login, id) } : null)
+      return 'resolved'
     } catch (err) {
-      if (err instanceof AbortError) return
+      if (err instanceof AbortError) return 'other'
       if (err instanceof GitHubApiError) {
         if (err.code === 'GH_RATE_LIMIT') {
           const reset = this.client.rate?.reset
@@ -230,12 +268,14 @@ export class AvatarResolver {
           // 아직 push 하지 않은 커밋 등 — 다른 커밋으로 다시 시도할 수 있도록 기록은 남기지 않는다
           this.retryAt.set(key, this.now() + UNKNOWN_SHA_RETRY_MS)
           if (err.code === 'GH_NOT_FOUND') await this.probe(base, 'notFound', signal)
+          return 'unknown-sha'
         } else {
           this.retryAt.set(key, this.now() + NETWORK_RETRY_MS)
         }
-        return
+        return 'other'
       }
       this.retryAt.set(key, this.now() + NETWORK_RETRY_MS)
+      return 'other'
     }
   }
 

@@ -20,7 +20,7 @@ import type {
 } from '@shared/types'
 import { AbortError } from '../executors/GitExecutor'
 import * as api from './api'
-import { AvatarResolver } from './avatars'
+import { AvatarResolver, FALLBACK_SHAS } from './avatars'
 import { GitHubApiError, GitHubClient } from './client'
 import { GhCliError, type GhCli } from './ghCli'
 import { DeviceFlow, MISSING_CLIENT_ID_MESSAGE, type DeviceSession, type SleepFn } from './deviceFlow'
@@ -30,7 +30,11 @@ import { parsePat as parsePatInput } from './validate'
 export interface GitHubServiceDeps {
   /** 설정(ui.githubClientId 만 읽는다) */
   config: { get(): { ui: { githubClientId?: string | undefined } } }
-  repos: { ghRepo(repoId: string): Promise<GhRepoRef | null> }
+  repos: {
+    ghRepo(repoId: string): Promise<GhRepoRef | null>
+    /** 아바타 404 대비: 그 작성자의 push 된 커밋 sha(없으면 빈 배열). 없으면 대체 조회를 하지 않는다 */
+    pushedShasByAuthor?(repoId: string, email: string, limit: number, signal?: AbortSignal): Promise<string[]>
+  }
   store: TokenStore
   fetchImpl?: typeof fetch
   sleep?: SleepFn
@@ -280,7 +284,13 @@ export class GitHubService {
     return this.withSignal(requestId, async (own) => {
       const ref = await this.deps.repos.ghRepo(repoId).catch(() => null)
       const slug = ref ? { owner: ref.owner, repo: ref.repo } : null
-      const avatars = await this.avatarResolver.resolve(slug, authors, AbortSignal.any([epoch, own]))
+      const signal = AbortSignal.any([epoch, own])
+      // 고른 커밋이 push 안 된 것이라 404 면, 같은 작성자의 push 된 커밋으로 다시 묻는다
+      const pushed = this.deps.repos.pushedShasByAuthor?.bind(this.deps.repos)
+      const fallback = pushed
+        ? (email: string): Promise<string[]> => pushed(repoId, email, FALLBACK_SHAS + 1, signal).catch(() => [])
+        : undefined
+      const avatars = await this.avatarResolver.resolve(slug, authors, signal, fallback)
       // 풀리지 않은 작성자가 남아 있을 때만 막힌 이유를 알린다(전부 풀렸으면 알릴 것이 없다)
       const unresolved = authors.some((a) => !(a.email in avatars))
       const blocked = unresolved && slug ? this.avatarResolver.blockedFor(slug) : null
