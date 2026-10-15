@@ -15,10 +15,7 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  border-radius: var(--neu-radius);
   background: var(--list-bg);
-  box-shadow: var(--neu-raised);
 }
 
 /* ── 머리 ── */
@@ -29,7 +26,7 @@
   height: 40px;
   padding: 0 var(--space-2) 0 var(--space-3);
   border-bottom: 1px solid var(--border);
-  background: var(--neu-bg);
+  background: var(--bg-surface);
   flex-shrink: 0;
 }
 .diff-head__path {
@@ -78,34 +75,26 @@
   display: inline-flex;
   padding: 2px;
   border-radius: var(--radius-md);
-  background: var(--neu-bg);
-  box-shadow: var(--neu-inset-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
 }
 .seg__btn {
   height: 22px;
   padding: 0 10px;
-  border-radius: var(--radius-sm);
+  border-radius: 4px;
   font-size: var(--fs-sm);
   color: var(--text-secondary);
   transition:
-    box-shadow var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease);
 }
 .seg__btn:hover {
   color: var(--text-primary);
 }
 .seg__btn.is-on {
-  background: var(--neu-bg);
-  color: var(--accent-text);
-  box-shadow: var(--neu-raised-sm);
-}
-.seg__btn:focus-visible {
-  box-shadow: var(--focus-ring);
-}
-@media (prefers-reduced-motion: reduce) {
-  .seg__btn {
-    transition: none;
-  }
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--border-strong);
 }
 
 .diff-meta {
@@ -259,7 +248,7 @@
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--border);
-  background: var(--neu-bg);
+  background: var(--bg-surface);
   font-size: var(--fs-sm);
   color: var(--text-secondary);
   flex-shrink: 0;

@@ -4,10 +4,7 @@
   flex-shrink: 0;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  border-radius: var(--neu-radius);
   background: var(--panel-bg);
-  box-shadow: var(--neu-raised);
 }
 
 .detail__empty {
@@ -53,16 +50,12 @@
 .detail__parent {
   padding: 1px 6px;
   border-radius: var(--radius-sm);
-  background: var(--neu-bg);
-  box-shadow: var(--neu-raised-sm);
+  background: var(--bg-elevated);
   color: var(--accent-text);
   font-size: var(--fs-sm);
 }
 .detail__parent:hover {
   background: var(--accent-soft);
-}
-.detail__parent:active {
-  box-shadow: var(--neu-pressed);
 }
 
 .detail__subject {
@@ -75,8 +68,7 @@
 .detail__body {
   margin: 0 0 var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
-  box-shadow: var(--neu-inset-sm);
+  border-left: 2px solid var(--border-strong);
   font-family: var(--font-ui);
   font-size: var(--fs-md);
   line-height: 1.55;
@@ -183,9 +175,8 @@
   background: var(--row-hover);
 }
 .file-row.is-active {
-  /* 선택 행 하나만 눌린 모양(가상 목록의 일반 행에는 그림자 없음) */
   background: var(--row-selected);
-  box-shadow: var(--neu-pressed), inset 2px 0 0 var(--row-selected-edge);
+  box-shadow: inset 2px 0 0 var(--row-selected-edge);
 }
 .file-row__name {
   flex: 1;

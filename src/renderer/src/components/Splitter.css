@@ -1,8 +1,8 @@
 .splitter {
   position: relative;
-  width: var(--neu-gap);
+  width: 1px;
   flex-shrink: 0;
-  background: transparent;
+  background: var(--border);
   cursor: col-resize;
   z-index: 2;
 }
@@ -10,13 +10,12 @@
 .splitter::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: 0 -4px;
 }
 .splitter::after {
   content: '';
   position: absolute;
-  inset: 24px calc(50% - 1px);
-  border-radius: 2px;
+  inset: 0 -1px;
   background: var(--splitter-hover);
   opacity: 0;
   transition: opacity var(--dur-med) var(--ease);

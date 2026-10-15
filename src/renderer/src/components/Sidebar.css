@@ -1,9 +1,7 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  border-radius: var(--neu-radius);
   background: var(--sidebar-bg);
-  box-shadow: var(--neu-raised);
   flex-shrink: 0;
   min-width: 0;
   overflow: hidden;
@@ -18,13 +16,13 @@
   margin: var(--space-2);
   padding: 0 4px 0 var(--space-2);
   border-radius: var(--radius-md);
-  background: var(--neu-bg);
-  box-shadow: var(--neu-inset-sm);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
   flex-shrink: 0;
-  transition: box-shadow var(--dur-fast) var(--ease);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 .sidebar__filter:focus-within {
-  box-shadow: var(--neu-inset-sm), 0 0 0 1px var(--accent);
+  border-color: var(--accent);
 }
 .sidebar__filter-icon {
   color: var(--text-muted);
@@ -113,8 +111,7 @@
   height: 16px;
   line-height: 16px;
   border-radius: 8px;
-  background: transparent;
-  box-shadow: var(--neu-inset-sm);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 10px;
   font-weight: 600;
@@ -145,7 +142,6 @@
 }
 .side-item.is-active {
   background: var(--row-selected);
-  box-shadow: var(--neu-pressed);
   color: var(--text-primary);
 }
 .side-item.is-active::before {
@@ -206,7 +202,7 @@
   opacity: 1;
 }
 .side-item__action:hover {
-  box-shadow: var(--neu-raised-sm);
+  background: var(--bg-base);
   color: var(--accent-text);
 }
 
@@ -224,7 +220,7 @@
   height: 16px;
   line-height: 16px;
   border-radius: 8px;
-  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   font-size: 10px;
   font-weight: 600;
