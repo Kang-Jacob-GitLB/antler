@@ -67,6 +67,38 @@ for (const [theme, t] of Object.entries(themes)) {
     })
     console.log(`  ${fg.padEnd(18)} ${t[fg]}  ≥${min}  ${cells.join('  ')}`)
   }
+
+  // 그래프 노드 이니셜: 레인 색 위 글자(어두운 글자·흰 글자 중 큰 쪽)가 AA 4.5 를 넘는지.
+  // 둘 다 모자라면 renderer(graph/nodeStyle.ts nodeColors)가 채움색을 밀어 맞추므로 보정 후 값을 함께 검사한다
+  const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+  const ratioRgb = (a, b) => {
+    const l = (c) => lum('#' + c.map((v) => Math.round(v).toString(16).padStart(2, '0')).join(''))
+    const [hi, lo] = [l(a), l(b)].sort((x, y) => y - x)
+    return (hi + 0.05) / (lo + 0.05)
+  }
+  const DARK = [0x12, 0x0f, 0x0d]
+  const WHITE = [255, 255, 255]
+  const notes = []
+  for (let i = 0; i < 8; i++) {
+    const lane = t[`--lane-${i}`]
+    if (!lane) continue
+    const c = rgb(lane)
+    const [rd, rw] = [ratioRgb(c, DARK), ratioRgb(c, WHITE)]
+    const text = rd >= rw ? DARK : WHITE
+    let best = Math.max(rd, rw)
+    let tag = rd >= rw ? '어두운 글자' : '흰 글자'
+    if (best < 4.5) {
+      const target = text === DARK ? WHITE : DARK
+      for (let k = 1; k <= 20 && best < 4.5; k++) {
+        const m = c.map((v, j) => v + (target[j] - v) * (k / 20))
+        best = ratioRgb(m, text)
+        tag += ` (채움 ${k * 5}% 보정)`
+      }
+    }
+    if (best < 4.5) failed++
+    notes.push(`lane-${i} ${best.toFixed(2)} ${tag}${best < 4.5 ? ' ✗' : ''}`)
+  }
+  console.log(`  그래프 노드 글자: ${notes.join(' | ')}`)
 }
-console.log(failed ? `\n${failed}건 기준 미달` : '\n모든 대비 기준 통과')
+console.log(failed ?`\n${failed}건 기준 미달` : '\n모든 대비 기준 통과')
 process.exit(failed ? 1 : 0)

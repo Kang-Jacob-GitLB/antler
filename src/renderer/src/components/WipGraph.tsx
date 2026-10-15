@@ -4,8 +4,10 @@ import { useAppStore } from '../stores/appStore'
 import { useLogStore } from '../stores/logStore'
 import { GRAPH_PAD, laneWidth, useGraphVersion } from './GraphCanvas'
 
-/** WIP 노드 반지름(커밋 노드보다 조금 작은 점선 링) */
+/** 이니셜 노드를 쓸 만큼 레인 간격이 넓을 때(GraphCanvas 의 AVATAR_MIN_LANE_W 와 같은 기준)의 WIP 노드 반지름 */
+const WIP_R_WIDE = 7
 const WIP_R_NARROW = 4.5
+const AVATAR_MIN_LANE_W = 13
 
 interface Props {
   scrollEl: HTMLDivElement | null
@@ -25,6 +27,7 @@ export function WipGraph({ scrollEl, rowHeight, left, width, topOffset }: Props)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const frame = useRef(0)
   const version = useGraphVersion()
+  const avatars = useAppStore((s) => s.config?.ui.graphInitials !== false)
   const headHash = useAppStore((s) => s.head?.hash ?? null)
   // HEAD 커밋이 불러온 목록에 있으면 그 행 번호(없으면 연결선 없이 노드만 그린다)
   const headIndex = useLogStore((s) => (headHash ? (s.index.get(headHash) ?? -1) : -1))
@@ -49,8 +52,8 @@ export function WipGraph({ scrollEl, rowHeight, left, width, topOffset }: Props)
     const muted = cs.getPropertyValue('--text-muted').trim()
     const bg = cs.getPropertyValue('--list-bg').trim() || cs.getPropertyValue('--bg-base').trim()
     const top = scrollEl.scrollTop
-    const lw = laneWidth(graphEngine.maxWidth)
-    const r = Math.min(WIP_R_NARROW, lw / 2 - 0.5)
+    const lw = laneWidth(graphEngine.maxWidth, avatars)
+    const r = avatars && lw >= AVATAR_MIN_LANE_W ? WIP_R_WIDE : Math.min(WIP_R_NARROW, lw / 2 - 0.5)
     const x = (lane: number): number => GRAPH_PAD + lane * lw + lw / 2
     const headRow = headIndex >= 0 ? graphEngine.row(headIndex) : null
     const cx = x(headRow?.lane ?? 0)
@@ -100,7 +103,7 @@ export function WipGraph({ scrollEl, rowHeight, left, width, topOffset }: Props)
     }
   }, [scrollEl, schedule])
 
-  useEffect(schedule, [schedule, version, width, headIndex, topOffset, left])
+  useEffect(schedule, [schedule, version, width, headIndex, avatars, topOffset, left])
 
   return <canvas ref={canvasRef} className="graph-canvas" style={{ left }} aria-hidden="true" />
 }

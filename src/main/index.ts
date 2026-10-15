@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, safeStorage, session, shell } from 'electron'
+import { AVATAR_CACHE_FILE } from './github/avatars'
 import { GitHubService } from './github/service'
 import { TokenStore } from './github/tokenStore'
 import { registerIpc } from './ipc/handlers'
@@ -90,7 +91,12 @@ app.whenReady().then(() => {
   watcher = new RepoWatcher(repos, (repoId) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })
   })
-  gh = new GitHubService({ config, repos, store: new TokenStore(app.getPath('userData'), safeStorage) })
+  gh = new GitHubService({
+    config,
+    repos,
+    store: new TokenStore(app.getPath('userData'), safeStorage),
+    avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE)
+  })
   registerIpc(config, repos, watcher, gh)
 
   // 카메라·마이크 등 어떤 권한도 주지 않는다

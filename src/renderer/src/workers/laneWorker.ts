@@ -3,7 +3,8 @@
 import { LaneBuilder, type GraphCommit, type GraphRow } from '../graph/lanes'
 
 export type LaneRequest =
-  | { type: 'reset'; gen: number }
+  /** tip: 기본 브랜치 끝 커밋(굵게 그릴 줄기의 시작). 없으면 줄기를 표시하지 않는다 */
+  | { type: 'reset'; gen: number; tip?: string | null }
   | { type: 'append'; gen: number; start: number; commits: GraphCommit[] }
 
 export type LaneResponse = { type: 'rows'; gen: number; start: number; rows: GraphRow[]; maxWidth: number }
@@ -15,7 +16,7 @@ let next = 0
 self.onmessage = (e: MessageEvent<LaneRequest>) => {
   const m = e.data
   if (m.type === 'reset') {
-    builder = new LaneBuilder()
+    builder = new LaneBuilder(m.tip ?? null)
     gen = m.gen
     next = 0
     return

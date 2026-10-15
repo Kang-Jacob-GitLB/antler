@@ -1,0 +1,151 @@
+/* 커밋 활동 미니맵: 커밋 표 위의 얇은 띠 */
+.minimap {
+  position: relative;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 제목·합계·버튼 줄. 펼친 상태에서는 차트 위에 겹쳐 높이를 아낀다 */
+.minimap__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 26px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.minimap:not(.is-collapsed) .minimap__bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.minimap:not(.is-collapsed) .minimap__bar > * {
+  pointer-events: auto;
+}
+.minimap__title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.minimap__total {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.minimap__spacer {
+  flex: 1;
+}
+/* 차트 위에 얹히는 라벨·버튼이 선과 겹쳐도 읽히도록 */
+.minimap:not(.is-collapsed) .minimap__title,
+.minimap:not(.is-collapsed) .minimap__total {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+}
+
+.minimap__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.minimap__btn:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.minimap__btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.minimap__btn.is-on {
+  color: var(--accent-text);
+  border-color: var(--border-strong);
+}
+/* 그래프 이니셜 토글 아이콘: 작은 원 안의 글자 */
+.minimap__ini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1.4px solid currentColor;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+.minimap__chev {
+  transition: transform 0.15s ease;
+}
+.minimap__chev.is-collapsed {
+  transform: rotate(-90deg);
+}
+
+.minimap__chart {
+  position: relative;
+  height: 52px;
+  cursor: pointer;
+}
+.minimap__chart.is-busy {
+  cursor: progress;
+}
+.minimap__chart canvas {
+  display: block;
+}
+.minimap__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* 호버 툴팁은 띠 아래로 떨어뜨려 표 머리글 위에 뜬다 */
+.minimap__tip {
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 20;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.minimap__spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: minimap-spin 0.8s linear infinite;
+}
+@keyframes minimap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .minimap__spinner {
+    animation-duration: 2.4s;
+  }
+  .minimap__chev {
+    transition: none;
+  }
+}
