@@ -30,6 +30,8 @@ const FILES_MAX_PAGES = 30
 const COMMITS_MAX = 250
 const COMMENTS_MAX_PAGES = 10
 const REVIEWS_MAX_PAGES = 3
+/** 필터링 결과가 빈 쪽이면 이어서 읽는 추가 쪽 수의 상한 */
+const EMPTY_PAGE_MAX_EXTRA = 5
 
 // ── 원본 JSON 모양(쓰는 필드만) ───────────────────────────
 
@@ -214,8 +216,9 @@ function mapReviewState(state: string | undefined): GhReviewState {
       return 'commented'
     case 'PENDING':
       return 'pending'
+    case 'DISMISSED':
+      return 'dismissed'
     default:
-      // DISMISSED 등
       return 'none'
   }
 }
@@ -313,30 +316,60 @@ async function fetchChecks(c: GitHubClient, r: Slug, sha: string, signal?: Abort
 }
 
 /**
+ * issues 엔드포인트처럼 항목을 걸러내는 목록 조회. 걸러낸 뒤 빈 쪽이고 hasMore 면
+ * 항목이 나올 때까지(또는 hasMore 가 끝날 때까지, 추가 5쪽 상한) 다음 쪽을 이어서 읽는다.
+ * 추가 쪽을 읽었다면 호출자가 다음에 요청할 쪽을 nextPage 로 알린다.
+ */
+async function fetchFiltered<R, T>(
+  c: GitHubClient,
+  path: string,
+  baseQuery: Record<string, string | number | undefined>,
+  page: number,
+  pick: (raw: R) => T | null,
+  signal?: AbortSignal
+): Promise<GhListResult<T>> {
+  let cur = page
+  for (let extra = 0; ; extra++) {
+    const res = await c.get<R[]>(path, { query: { ...baseQuery, page: cur }, ...(signal ? { signal } : {}) })
+    const items: T[] = []
+    for (const raw of res.data) {
+      const v = pick(raw)
+      if (v !== null) items.push(v)
+    }
+    if (items.length > 0 || !res.hasMore || extra >= EMPTY_PAGE_MAX_EXTRA) {
+      return { items, hasMore: res.hasMore, ...(res.hasMore && cur !== page ? { nextPage: cur + 1 } : {}) }
+    }
+    cur++
+  }
+}
+
+/**
  * PR 목록. 라벨·담당자 필터가 없으면 pulls 엔드포인트(updated 내림차순, 브랜치·sha 포함)를 쓴다.
  * pulls 엔드포인트에는 라벨 필터가 없으므로 필터가 있으면 issues 엔드포인트(labels·assignee 파라미터)에서
  * pull_request 항목만 고른다. 검색 API 의 쿼리 언어를 쓰지 않으므로 라벨 이름에 든 따옴표 등으로
  * 다른 한정자(repo:… 등)를 끼워 넣는 인젝션이 원천적으로 없다. 결과가 issue 모양이라 브랜치·sha 가 없어
- * 리뷰·체크 보강은 하지 않는다(요약만). 필터된 페이지는 PR 이 아닌 항목을 빼서 짧을 수 있다(hasMore 는 Link 기준).
+ * 리뷰·체크 보강은 하지 않는다(요약만). 필터된 페이지는 PR 이 아닌 항목을 빼서 짧거나 비어 있을 수 있어 항목이 나올 때까지 다음 쪽을 이어 읽는다(hasMore 는 Link 기준, 읽은 쪽은 nextPage).
  * 로그인했다면 pulls 결과에만 리뷰·체크 요약을 동시 6개씩 보강한다(ETag 캐시로 재조회는 304).
  */
 export async function listPulls(c: GitHubClient, r: Slug, q: GhListQuery, signal?: AbortSignal): Promise<GhListResult<GhPullSummary>> {
   const page = q.page ?? 1
   const o = signal ? { signal } : {}
   if (q.label || q.assignee) {
-    const res = await c.get<RawIssue[]>(`${repoPath(r)}/issues`, {
-      query: {
+    return fetchFiltered<RawIssue, GhPullSummary>(
+      c,
+      `${repoPath(r)}/issues`,
+      {
         state: q.state,
         ...(q.label ? { labels: q.label } : {}),
         ...(q.assignee ? { assignee: q.assignee } : {}),
         per_page: PAGE_SIZE,
-        page,
         sort: 'updated',
         direction: 'desc'
       },
-      ...o
-    })
-    return { items: res.data.filter((i) => i.pull_request).map(mapSearchPull), hasMore: res.hasMore }
+      page,
+      (i) => (i.pull_request ? mapSearchPull(i) : null),
+      signal
+    )
   }
 
   const res = await c.get<RawPull[]>(`${repoPath(r)}/pulls`, {
@@ -439,14 +472,18 @@ export async function getPullCommits(c: GitHubClient, r: Slug, n: number, signal
 
 /**
  * 이슈 목록. issues 엔드포인트는 PR 도 섞어 돌려주므로 pull_request 가 있는 항목은 버린다.
- * 그래서 한 쪽이 30개보다 짧을 수 있으니 hasMore 는 항목 수가 아니라 Link 헤더로 판단한다.
+ * 그래서 한 쪽이 30개보다 짧을 수 있으니 hasMore 는 항목 수가 아니라 Link 헤더로 판단하고,
+ * 빈 쪽이면 항목이 나올 때까지 다음 쪽을 이어 읽는다(읽은 쪽은 nextPage).
  */
 export async function listIssues(c: GitHubClient, r: Slug, q: GhListQuery, signal?: AbortSignal): Promise<GhListResult<GhIssueSummary>> {
-  const res = await c.get<RawIssue[]>(`${repoPath(r)}/issues`, {
-    query: { state: q.state, labels: q.label, assignee: q.assignee, per_page: PAGE_SIZE, page: q.page ?? 1, sort: 'updated', direction: 'desc' },
-    ...(signal ? { signal } : {})
-  })
-  return { items: res.data.filter((i) => !i.pull_request).map(mapIssue), hasMore: res.hasMore }
+  return fetchFiltered<RawIssue, GhIssueSummary>(
+    c,
+    `${repoPath(r)}/issues`,
+    { state: q.state, labels: q.label, assignee: q.assignee, per_page: PAGE_SIZE, sort: 'updated', direction: 'desc' },
+    q.page ?? 1,
+    (i) => (i.pull_request ? null : mapIssue(i)),
+    signal
+  )
 }
 
 export async function getIssue(c: GitHubClient, r: Slug, n: number, signal?: AbortSignal): Promise<GhIssueDetail> {

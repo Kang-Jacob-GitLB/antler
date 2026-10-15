@@ -40,6 +40,8 @@ export class GitHubService {
   private validating: Promise<void> | null = null
   private device: DeviceSession | null = null
   private readonly requests = new Map<string, AbortController>()
+  /** 토큰이 바뀌거나 로그아웃하면 중단되는 조회 세대. 데이터 호출은 이 신호를 자기 신호와 합친다 */
+  private epoch = new AbortController()
   private readonly flow: DeviceFlow
   private readonly client: GitHubClient
 
@@ -98,7 +100,14 @@ export class GitHubService {
     }
   }
 
+  /** 진행 중인 조회(목록 보강 등)를 모두 멈추고 새 세대를 연다 */
+  private newEpoch(): void {
+    this.epoch.abort()
+    this.epoch = new AbortController()
+  }
+
   private signIn(token: string, method: TokenMethod, user: GhUser): GhAuthState {
+    this.newEpoch()
     this.deps.store.save(token, method)
     this.token = token
     this.method = method
@@ -107,6 +116,7 @@ export class GitHubService {
   }
 
   private dropToken(): void {
+    this.newEpoch()
     this.deps.store.clear()
     this.token = null
     this.method = undefined
@@ -169,36 +179,51 @@ export class GitHubService {
     return { owner: ref.owner, repo: ref.repo }
   }
 
-  async pulls(repoId: string, query: GhListQuery): Promise<GhListResult<GhPullSummary>> {
-    return api.listPulls(this.client, await this.slug(repoId), query)
+  /**
+   * 데이터 호출 공통 처리: 현재 세대의 신호를 싣고, 토큰이 있는데 401(GH_AUTH)이면
+   * GET /user 로 한 번 다시 확인해 그것도 거부되면 토큰을 버린다(세션 중 폐기된 토큰). 원래 에러는 그대로 던진다.
+   */
+  private async data<T>(repoId: string, fn: (slug: api.Slug, signal: AbortSignal) => Promise<T>): Promise<T> {
+    const tok = this.token
+    const signal = this.epoch.signal
+    try {
+      return await fn(await this.slug(repoId), signal)
+    } catch (err) {
+      if (tok && this.token === tok && err instanceof GitHubApiError && err.code === 'GH_AUTH') await this.validate()
+      throw err
+    }
   }
 
-  async pull(repoId: string, n: number): Promise<GhPullDetail> {
-    return api.getPull(this.client, await this.slug(repoId), n)
+  pulls(repoId: string, query: GhListQuery): Promise<GhListResult<GhPullSummary>> {
+    return this.data(repoId, (slug, signal) => api.listPulls(this.client, slug, query, signal))
   }
 
-  async pullFiles(repoId: string, n: number): Promise<GhPullFile[]> {
-    return api.getPullFiles(this.client, await this.slug(repoId), n)
+  pull(repoId: string, n: number): Promise<GhPullDetail> {
+    return this.data(repoId, (slug, signal) => api.getPull(this.client, slug, n, signal))
   }
 
-  async pullCommits(repoId: string, n: number): Promise<GhCommitSummary[]> {
-    return api.getPullCommits(this.client, await this.slug(repoId), n)
+  pullFiles(repoId: string, n: number): Promise<GhPullFile[]> {
+    return this.data(repoId, (slug, signal) => api.getPullFiles(this.client, slug, n, signal))
   }
 
-  async issues(repoId: string, query: GhListQuery): Promise<GhListResult<GhIssueSummary>> {
-    return api.listIssues(this.client, await this.slug(repoId), query)
+  pullCommits(repoId: string, n: number): Promise<GhCommitSummary[]> {
+    return this.data(repoId, (slug, signal) => api.getPullCommits(this.client, slug, n, signal))
   }
 
-  async issue(repoId: string, n: number): Promise<GhIssueDetail> {
-    return api.getIssue(this.client, await this.slug(repoId), n)
+  issues(repoId: string, query: GhListQuery): Promise<GhListResult<GhIssueSummary>> {
+    return this.data(repoId, (slug, signal) => api.listIssues(this.client, slug, query, signal))
   }
 
-  async comments(repoId: string, n: number): Promise<GhComment[]> {
-    return api.getComments(this.client, await this.slug(repoId), n)
+  issue(repoId: string, n: number): Promise<GhIssueDetail> {
+    return this.data(repoId, (slug, signal) => api.getIssue(this.client, slug, n, signal))
   }
 
-  async filters(repoId: string): Promise<{ labels: GhLabel[]; assignees: GhUser[] }> {
-    return api.getFilters(this.client, await this.slug(repoId))
+  comments(repoId: string, n: number): Promise<GhComment[]> {
+    return this.data(repoId, (slug, signal) => api.getComments(this.client, slug, n, signal))
+  }
+
+  filters(repoId: string): Promise<{ labels: GhLabel[]; assignees: GhUser[] }> {
+    return this.data(repoId, (slug, signal) => api.getFilters(this.client, slug, signal))
   }
 
   // ── 요청 취소 ───────────────────────────────────────
@@ -210,6 +235,7 @@ export class GitHubService {
   }
 
   dispose(): void {
+    this.epoch.abort()
     for (const ac of this.requests.values()) ac.abort()
     this.requests.clear()
   }

@@ -57,7 +57,17 @@ export function GhAuthButton(): React.JSX.Element {
   const resetMin = auth.rateReset ? Math.max(0, Math.ceil((auth.rateReset * 1000 - Date.now()) / 60000)) : null
 
   return (
-    <div className="gh-auth" ref={ref}>
+    <div
+      className="gh-auth"
+      ref={ref}
+      // 팝오버가 열려 있으면 Esc 는 팝오버만 닫는다(뒤의 GitHub 화면까지 닫히지 않게 전파를 막는다)
+      onKeyDown={(e) => {
+        if (open && e.key === 'Escape') {
+          e.stopPropagation()
+          setOpen(false)
+        }
+      }}
+    >
       <button
         className={`icon-btn gh-auth__btn${auth.signedIn ? ' is-on' : ''}`}
         title={auth.signedIn ? t('gh.auth.signedInAs', { login: auth.user?.login ?? '' }) : t('gh.auth.signIn')}

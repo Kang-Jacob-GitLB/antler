@@ -197,6 +197,65 @@ describe('GitHubService 인증', () => {
   })
 })
 
+describe('GitHubService 세션 중 토큰 폐기·로그아웃', () => {
+  const repos = { ghRepo: async () => ({ owner: 'octo', repo: 'hello', remote: 'origin' }) }
+  const config = { get: () => ({ ui: { githubClientId: undefined } }) }
+  const bad = () => json({ message: 'Bad credentials' }, { status: 401 })
+
+  it('데이터 호출이 401 이고 /user 도 401 이면 토큰을 버리고 원래 에러를 던진다', async () => {
+    const store = new TokenStore(dir, fakeSafe())
+    store.save('ghp_revoked', 'pat')
+    const { fetch, calls } = fakeFetch((req) => (req.url.endsWith('/user') && calls.length === 1 ? json({ login: 'me', avatar_url: 'x' }) : bad()))
+    const svc = new GitHubService({ config, repos, store, fetchImpl: fetch })
+    expect((await svc.auth()).signedIn).toBe(true)
+    const err = await svc.pulls('r', { state: 'open' }).catch((e) => e)
+    expect(err.code).toBe('GH_AUTH')
+    expect(calls.filter((c) => c.url.endsWith('/user'))).toHaveLength(2)
+    expect((await svc.auth()).signedIn).toBe(false)
+    expect(store.load()).toBeNull()
+  })
+
+  it('/user 는 통과하면(저장소 권한 문제 등) 토큰을 유지한다', async () => {
+    const store = new TokenStore(dir, fakeSafe())
+    store.save('ghp_ok', 'pat')
+    const { fetch } = fakeFetch((req) => (req.url.endsWith('/user') ? json({ login: 'me', avatar_url: 'x' }) : bad()))
+    const svc = new GitHubService({ config, repos, store, fetchImpl: fetch })
+    await expect(svc.issue('r', 1)).rejects.toMatchObject({ code: 'GH_AUTH' })
+    expect((await svc.auth()).signedIn).toBe(true)
+    expect(store.load()).not.toBeNull()
+  })
+
+  it('토큰이 없을 때의 401 은 재검증하지 않는다', async () => {
+    const { fetch, calls } = fakeFetch(() => bad())
+    const svc = new GitHubService({ config, repos, store: new TokenStore(dir, fakeSafe()), fetchImpl: fetch })
+    await expect(svc.issue('r', 1)).rejects.toMatchObject({ code: 'GH_AUTH' })
+    expect(calls).toHaveLength(1)
+  })
+
+  it('로그아웃하면 진행 중이던 목록 보강 요청이 멈춘다', async () => {
+    const store = new TokenStore(dir, fakeSafe())
+    store.save('ghp_x', 'pat')
+    let svc!: GitHubService
+    let enrich = 0
+    const { fetch } = fakeFetch(async (req) => {
+      const p = new URL(req.url).pathname
+      if (p.endsWith('/pulls')) return json(Array.from({ length: 12 }, (_, i) => ({ number: i + 1, head: { sha: `s${i}` } })))
+      enrich++
+      if (enrich === 1) svc.logout()
+      await new Promise((r) => setTimeout(r, 1))
+      return json([])
+    })
+    svc = new GitHubService({ config, repos, store, fetchImpl: fetch })
+    const err = await svc.pulls('r', { state: 'open' }).catch((e) => e)
+    expect(err.name).toBe('AbortError')
+    // 로그아웃 시점에 이미 나간 동시 요청(최대 6 PR × 3)만 있고 그 뒤로는 새 요청이 없다
+    const after = enrich
+    await new Promise((r) => setTimeout(r, 20))
+    expect(enrich).toBe(after)
+    expect(after).toBeLessThanOrEqual(18)
+  })
+})
+
 describe('openExternal 허용 목록', () => {
   it('github.com https 만 통과', () => {
     expect(allowedExternalUrl('https://github.com/octo/hello/pull/1')).toBe('https://github.com/octo/hello/pull/1')

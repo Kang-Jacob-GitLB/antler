@@ -193,8 +193,10 @@ function DetailHead({ title, number, url, state, kind, back }: { title: string; 
   )
 }
 
-function Comments({ items }: { items: GhComment[] | null }): React.JSX.Element | null {
+function Comments({ items, error }: { items: GhComment[] | null; error?: string | null }): React.JSX.Element | null {
   const rel = useRelative()
+  // 댓글만 실패해도 본문은 이미 보이고 있다 — 실패 사실만 알린다
+  if (error) return <div className="gh-notice is-error">{error}</div>
   if (!items) return null
   return (
     <>
@@ -221,7 +223,7 @@ function PullView({ view }: { view: Extract<GhView, { kind: 'pull' }> }): React.
   const d = pull?.number === view.number ? pull.detail : null
   const files = pull?.number === view.number ? pull.files : null
   const file = files?.find((f) => f.path === pullFile) ?? null
-  const fileDiff = useMemo(() => (file ? fileDiffFromPatch(file.path, file.patch, file.oldPath) : null), [file])
+  const fileDiff = useMemo(() => (file ? fileDiffFromPatch(file.path, file.patch, file.oldPath, file) : null), [file])
 
   return (
     <>
@@ -294,7 +296,7 @@ function PullView({ view }: { view: Extract<GhView, { kind: 'pull' }> }): React.
                   ))}
                 </div>
               )}
-              <Comments items={pull?.comments ?? null} />
+              <Comments items={pull?.comments ?? null} error={pull?.commentsError} />
             </>
           )}
         </div>
@@ -340,7 +342,12 @@ function PullView({ view }: { view: Extract<GhView, { kind: 'pull' }> }): React.
           </nav>
           <div className="gh-files__diff">
             {file && <div className="diff-meta mono">{file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}</div>}
-            <DiffBody diff={fileDiff} loading={!files} resetKey={pullFile} />
+            {/* GitHub 가 diff 를 주지 않은 파일(대형·이름만 변경)은 안내만 보인다 */}
+            {fileDiff?.meta[0] ? (
+              <div className="gh-notice">{t(fileDiff.meta[0] === 'rename-only' ? 'gh.patch.renameOnly' : 'gh.patch.tooLarge')}</div>
+            ) : (
+              <DiffBody diff={fileDiff} loading={!files} resetKey={pullFile} />
+            )}
           </div>
         </div>
       )}
@@ -386,7 +393,7 @@ function IssueView({ number }: { number: number }): React.JSX.Element {
               </header>
               {d.bodyHtml ? <HtmlBody html={d.bodyHtml} /> : <p className="gh-muted">{t('gh.noDescription')}</p>}
             </article>
-            <Comments items={issue?.comments ?? null} />
+            <Comments items={issue?.comments ?? null} error={issue?.commentsError} />
           </>
         )}
       </div>

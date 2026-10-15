@@ -66,6 +66,33 @@ describe('DeviceFlow.poll', () => {
     expect(calls).toHaveLength(2)
   })
 
+  it('일시 오류(네트워크·5xx·JSON 아님)는 재시도하고 간격에 backoff 를 더한다', async () => {
+    const steps: (() => Response)[] = [
+      () => {
+        throw new TypeError('fetch failed')
+      },
+      () => json({ message: 'bad gateway' }, { status: 502 }),
+      () => new Response('<html>oops</html>', { status: 200 }),
+      () => json({ error: 'authorization_pending' }),
+      () => json({ access_token: 'gho_ok' })
+    ]
+    const { fetch, calls } = fakeFetch((_r, n) => steps[n - 1]!())
+    const { sleep, waits } = sleeper()
+    const token = await new DeviceFlow(fetch, sleep).poll('cid', session())
+    expect(token).toBe('gho_ok')
+    expect(calls).toHaveLength(5)
+    // 연속 실패마다 +2초, 정상 응답이 오면 초기화
+    expect(waits).toEqual([5000, 7000, 9000, 11_000, 5000])
+  })
+
+  it('일시 오류만 이어지면 세션 만료로 끝난다', async () => {
+    const { fetch, calls } = fakeFetch(() => json({}, { status: 503 }))
+    let now = 0
+    const flow = new DeviceFlow(fetch, async (ms) => void (now += ms), () => now)
+    await expect(flow.poll('cid', { deviceCode: 'dc', interval: 5, expiresAt: 30_000 })).rejects.toThrow('만료')
+    expect(calls.length).toBeGreaterThan(1)
+  })
+
   it('취소하면 AbortError', async () => {
     const ac = new AbortController()
     const { fetch, calls } = fakeFetch(() => json({ error: 'authorization_pending' }))

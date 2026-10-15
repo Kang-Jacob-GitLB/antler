@@ -39,17 +39,26 @@ export function parsePatch(patch: string): DiffHunk[] {
   return hunks
 }
 
-/** PR 파일 하나를 diff 뷰어가 받는 FileDiff 모양으로 */
-export function fileDiffFromPatch(path: string, patch: string | undefined, oldPath?: string): FileDiff {
+/**
+ * PR 파일 하나를 diff 뷰어가 받는 FileDiff 모양으로.
+ * GitHub 는 바이너리뿐 아니라 너무 큰 텍스트 diff·내용 없는 이름 변경에도 patch 를 주지 않으므로,
+ * patch 가 없다고 모두 바이너리로 보지 않는다 — 줄 수 변화가 있거나 이름 변경이면 "diff 없음" 안내로 둔다.
+ */
+export function fileDiffFromPatch(
+  path: string,
+  patch: string | undefined,
+  oldPath?: string,
+  stats?: { additions: number; deletions: number; status: string }
+): FileDiff {
   const hunks = patch ? parsePatch(patch) : []
+  const noPatchText = patch === undefined && !!stats && (stats.additions + stats.deletions > 0 || stats.status === 'renamed')
   return {
     path,
     ...(oldPath ? { oldPath } : {}),
-    // GitHub 는 바이너리·너무 큰 파일에 patch 를 주지 않는다
-    binary: patch === undefined,
+    binary: patch === undefined && !noPatchText,
     hunks,
     truncated: false,
     totalLines: hunks.reduce((s, h) => s + h.lines.length, 0),
-    meta: []
+    meta: noPatchText ? [stats!.status === 'renamed' && stats!.additions + stats!.deletions === 0 ? 'rename-only' : 'too-large'] : []
   }
 }

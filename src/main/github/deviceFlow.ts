@@ -7,6 +7,9 @@ const DEVICE_CODE_URL = 'https://github.com/login/device/code'
 const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token'
 const SCOPE = 'repo read:org'
 const REQUEST_TIMEOUT_MS = 15_000
+/** 일시 오류 뒤 다음 시도까지 간격에 더하는 대기(회당 늘리고 상한을 둔다) */
+const TRANSIENT_BACKOFF_STEP_MS = 2000
+const TRANSIENT_BACKOFF_MAX_MS = 20_000
 /** slow_down 응답을 받으면 간격에 더하는 초 */
 const SLOW_DOWN_STEP_S = 5
 
@@ -39,6 +42,9 @@ export const abortableSleep: SleepFn = (ms, signal) =>
     }, ms)
     signal?.addEventListener('abort', onAbort, { once: true })
   })
+
+/** 재시도할 만한 일시 오류(네트워크·시간 초과·5xx·JSON 이 아닌 본문) */
+class TransientError extends Error {}
 
 interface TokenResponse {
   access_token?: string
@@ -82,17 +88,28 @@ export class DeviceFlow {
   /**
    * 승인될 때까지 폴링해 access token 을 돌려준다. 간격을 지키고(첫 요청도 interval 뒤),
    * authorization_pending 은 계속, slow_down 은 간격 +5초, 만료·거부는 한국어 에러로 끝낸다.
+   * 일시 오류(네트워크·시간 초과·5xx·JSON 아닌 본문)는 세션이 만료될 때까지 조금씩 늘려 가며 다시 시도한다.
    */
   async poll(clientId: string, session: DeviceSession, signal?: AbortSignal): Promise<string> {
     let interval = session.interval
+    let failures = 0
     for (;;) {
-      await this.sleep(interval * 1000, signal)
+      const backoff = Math.min(failures * TRANSIENT_BACKOFF_STEP_MS, TRANSIENT_BACKOFF_MAX_MS)
+      await this.sleep(interval * 1000 + backoff, signal)
       if (this.now() >= session.expiresAt) throw new Error('인증 시간이 만료되었습니다. 다시 시도하세요')
-      const body = await this.post<TokenResponse>(
-        ACCESS_TOKEN_URL,
-        { client_id: clientId, device_code: session.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' },
-        signal
-      )
+      let body: TokenResponse
+      try {
+        body = await this.post<TokenResponse>(
+          ACCESS_TOKEN_URL,
+          { client_id: clientId, device_code: session.deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' },
+          signal
+        )
+      } catch (err) {
+        if (!(err instanceof TransientError)) throw err
+        failures++
+        continue
+      }
+      failures = 0
       if (body.access_token) return body.access_token
       switch (body.error) {
         case 'authorization_pending':
@@ -119,12 +136,19 @@ export class DeviceFlow {
         body: JSON.stringify(payload),
         signal: signal ? AbortSignal.any([timeout, signal]) : timeout
       })
-      // 오류(error 필드)도 200 으로 오므로 상태 코드가 아니라 본문으로 판단한다
-      return (await res.json()) as T
+      // 오류(error 필드)도 200 으로 오므로 상태 코드가 아니라 본문으로 판단한다. 5xx·JSON 아닌 본문은 일시 오류다
+      if (res.status >= 500) throw new TransientError(`GitHub 서버 오류(${res.status})`)
+      try {
+        return (await res.json()) as T
+      } catch (err) {
+        if (signal?.aborted || timeout.aborted) throw err
+        throw new TransientError('GitHub 응답을 해석할 수 없습니다')
+      }
     } catch (err) {
       if (signal?.aborted) throw new AbortError()
-      if (timeout.aborted) throw new Error('GitHub 응답이 없습니다(시간 초과)')
-      throw new Error(`GitHub 에 연결할 수 없습니다${err instanceof Error ? `(${err.message})` : ''}`)
+      if (timeout.aborted) throw new TransientError('GitHub 응답이 없습니다(시간 초과)')
+      if (err instanceof TransientError) throw err
+      throw new TransientError(`GitHub 에 연결할 수 없습니다${err instanceof Error ? `(${err.message})` : ''}`)
     }
   }
 }

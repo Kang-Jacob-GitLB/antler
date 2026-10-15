@@ -118,7 +118,7 @@ export class GitHubClient {
       if (!cached) throw new GitHubApiError('GitHub 가 예상치 못한 304 응답을 보냈습니다', 'GH_HTTP', 304)
       return { data: cached.data as T, hasMore: cached.hasMore }
     }
-    const text = await readText(res, opts.signal)
+    const text = await readText(res, opts.signal, timeout)
     if (!res.ok) throw httpError(res, text, token !== null)
 
     let data: unknown
@@ -144,11 +144,12 @@ export class GitHubClient {
   }
 }
 
-async function readText(res: Response, signal?: AbortSignal): Promise<string> {
+async function readText(res: Response, signal: AbortSignal | undefined, timeout: AbortSignal): Promise<string> {
   try {
     return await res.text()
-  } catch (err) {
+  } catch {
     if (signal?.aborted) throw new AbortError()
+    if (timeout.aborted) throw new GitHubApiError(`GitHub 응답이 ${REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다`, 'GH_TIMEOUT')
     throw new GitHubApiError('GitHub 응답을 읽는 중 연결이 끊겼습니다', 'GH_NETWORK', res.status)
   }
 }

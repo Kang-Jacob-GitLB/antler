@@ -25,8 +25,15 @@ describe('parsePatch (GitHub PR 파일 patch)', () => {
     ])
   })
 
-  it('patch 가 없으면(바이너리·대형) binary 로 표시', () => {
-    expect(fileDiffFromPatch('a.png', undefined)).toMatchObject({ binary: true, hunks: [] })
+  it('patch 가 없으면 바이너리·대형·이름만 변경을 구분한다', () => {
+    // 줄 수 변화가 없는 수정 = 바이너리
+    expect(fileDiffFromPatch('a.png', undefined, undefined, { additions: 0, deletions: 0, status: 'modified' })).toMatchObject({ binary: true, meta: [] })
+    // 줄 수 변화가 있는데 patch 가 없음 = 너무 큰 텍스트 diff
+    expect(fileDiffFromPatch('big.json', undefined, undefined, { additions: 9000, deletions: 3, status: 'modified' })).toMatchObject({ binary: false, meta: ['too-large'] })
+    // 내용 없는 이름 변경
+    expect(fileDiffFromPatch('b.ts', undefined, 'a.ts', { additions: 0, deletions: 0, status: 'renamed' })).toMatchObject({ binary: false, meta: ['rename-only'] })
+    // 통계를 모르면 예전처럼 바이너리로 본다
+    expect(fileDiffFromPatch('x', undefined)).toMatchObject({ binary: true })
     expect(fileDiffFromPatch('a.ts', '@@ -0,0 +1 @@\n+x', 'old.ts')).toMatchObject({ binary: false, oldPath: 'old.ts', totalLines: 1 })
   })
 })

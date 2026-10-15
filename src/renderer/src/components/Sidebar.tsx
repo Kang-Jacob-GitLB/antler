@@ -216,8 +216,8 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const [menuFor, setMenuFor] = useState<string | null>(null)
   // GitHub: remote 가 GitHub 저장소일 때만 PR·이슈 섹션을 보인다
   const ghRef = useGithubStore((s) => s.ref)
-  const ghPulls = useGithubStore((s) => s.pulls)
-  const ghIssues = useGithubStore((s) => s.issues)
+  const ghPulls = useGithubStore((s) => s.sidePulls)
+  const ghIssues = useGithubStore((s) => s.sideIssues)
   const ghView = useGithubStore((s) => s.view)
   const ghShow = useGithubStore((s) => s.show)
   const allGroups = useMemo(

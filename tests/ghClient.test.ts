@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { AbortError } from '../src/main/executors/GitExecutor'
 import { GitHubApiError, GitHubClient } from '../src/main/github/client'
 import { fakeFetch, json } from './ghFake'
@@ -139,6 +139,28 @@ describe('속도 제한·오류', () => {
     const err = await new GitHubClient(fetch, () => 'secret-token').get('/x').catch((e) => e)
     expect(err.code).toBe('GH_NETWORK')
     expect(JSON.stringify(err.message)).not.toContain('secret-token')
+  })
+
+  it('본문을 읽다가 시간 초과면 GH_TIMEOUT', async () => {
+    const timer = new AbortController()
+    const spy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timer.signal)
+    try {
+      const fetch = (async () =>
+        new Response(
+          new ReadableStream({
+            pull(ctrl) {
+              timer.abort()
+              ctrl.error(new TypeError('terminated'))
+            }
+          }),
+          { status: 200 }
+        )) as unknown as typeof globalThis.fetch
+      const err = await new GitHubClient(fetch).get('/x').catch((e) => e)
+      expect(err).toBeInstanceOf(GitHubApiError)
+      expect(err.code).toBe('GH_TIMEOUT')
+    } finally {
+      spy.mockRestore()
+    }
   })
 
   it('호출자가 취소하면 AbortError', async () => {

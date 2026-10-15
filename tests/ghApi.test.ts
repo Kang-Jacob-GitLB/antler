@@ -167,6 +167,16 @@ describe('listPulls', () => {
     expect(res.items[0]).toMatchObject({ number: 7, state: 'merged', comments: 3, headSha: '' })
   })
 
+  it('필터된 목록도 PR 이 없는 쪽은 건너뛰고 nextPage 를 알린다', async () => {
+    const raw = (n: number, pr: boolean) => ({ number: n, title: 't', state: 'open', user: user('a'), labels: [], assignees: [], updated_at: '2026-01-02T00:00:00Z', created_at: '2026-01-01T00:00:00Z', html_url: 'u', ...(pr ? { pull_request: {} } : {}) })
+    const { fetch, calls } = fakeFetch((req) => json([raw(Number(query(req)['page']), query(req)['page'] === '3')], { headers: query(req)['page'] === '3' ? {} : { link: '<x>; rel="next"' } }))
+    const res = await listPulls(new GitHubClient(fetch), slug, { state: 'open', label: 'bug', page: 1 })
+    expect(calls.map((r) => query(r)['page'])).toEqual(['1', '2', '3'])
+    expect(res.items.map((p) => p.number)).toEqual([3])
+    expect(res.hasMore).toBe(false)
+    expect(res.nextPage).toBeUndefined()
+  })
+
   it('라벨 이름에 검색 한정자를 넣어도 쿼리 언어로 해석되지 않는다(검색 API 를 쓰지 않음)', async () => {
     const { fetch, calls } = fakeFetch(() => json([]))
     await listPulls(new GitHubClient(fetch), slug, { state: 'all', label: 'x" repo:other/repo' })
@@ -195,6 +205,18 @@ describe('getPull', () => {
       { name: 'lint', state: 'pending' }
     ])
     expect(d.requestedReviewers).toEqual([{ login: 'rev', avatarUrl: 'https://a/rev.png' }])
+  })
+
+  it('상세의 리뷰 목록은 DISMISSED 를 dismissed 로 보이고 집계는 판정을 취소한다', async () => {
+    const { fetch } = fakeFetch((req) => {
+      const p = path(req)
+      if (p.endsWith('/pulls/6')) return json(pull(6))
+      if (p.endsWith('/reviews')) return json([{ user: user('x'), state: 'CHANGES_REQUESTED', submitted_at: '2026-01-01T00:00:00Z' }, { user: user('x'), state: 'DISMISSED', submitted_at: '2026-01-02T00:00:00Z' }])
+      return json({ check_runs: [], statuses: [] })
+    })
+    const d = await getPull(new GitHubClient(fetch), slug, 6)
+    expect(d.reviews.map((r) => r.state)).toEqual(['changes_requested', 'dismissed'])
+    expect(d.review).toBe('commented')
   })
 })
 
@@ -266,6 +288,27 @@ describe('이슈', () => {
     const { fetch } = fakeFetch(() => json([issue(1, { pull_request: {} })]))
     const res = await listIssues(new GitHubClient(fetch), slug, { state: 'open' })
     expect(res).toEqual({ items: [], hasMore: false })
+  })
+
+  it('PR 만 있는 쪽이 비면 항목이 나올 때까지 다음 쪽을 읽고 nextPage 를 알린다', async () => {
+    const next = { link: '<x>; rel="next"' }
+    const { fetch, calls } = fakeFetch((req) => {
+      const page = Number(query(req)['page'])
+      if (page < 4) return json([issue(page, { pull_request: {} })], { headers: next })
+      return json([issue(9)], { headers: next })
+    })
+    const res = await listIssues(new GitHubClient(fetch), slug, { state: 'open', page: 2 })
+    expect(calls.map((r) => query(r)['page'])).toEqual(['2', '3', '4'])
+    expect(res.items.map((i) => i.number)).toEqual([9])
+    expect(res.hasMore).toBe(true)
+    expect(res.nextPage).toBe(5)
+  })
+
+  it('계속 비어 있어도 추가 5쪽에서 멈춘다', async () => {
+    const { fetch, calls } = fakeFetch(() => json([issue(1, { pull_request: {} })], { headers: { link: '<x>; rel="next"' } }))
+    const res = await listIssues(new GitHubClient(fetch), slug, { state: 'open' })
+    expect(calls).toHaveLength(6)
+    expect(res).toEqual({ items: [], hasMore: true, nextPage: 7 })
   })
 
   it('상세는 html 본문과 closedAt', async () => {

@@ -209,7 +209,7 @@ export interface GhDeviceCode {
 }
 
 export type GhCheckState = 'success' | 'failure' | 'pending' | 'neutral' | 'none'
-export type GhReviewState = 'approved' | 'changes_requested' | 'commented' | 'pending' | 'none'
+export type GhReviewState = 'approved' | 'changes_requested' | 'commented' | 'pending' | 'dismissed' | 'none'
 
 export interface GhPullSummary {
   number: number
@@ -313,6 +313,11 @@ export interface GhListQuery {
 export interface GhListResult<T> {
   items: T[]
   hasMore: boolean
+  /**
+   * 필터링으로 빈 쪽을 건너뛰며 여러 쪽을 읽었을 때만 있다. 있으면 "더 보기"에서 이 쪽을 요청하고,
+   * 없으면 요청한 page + 1 을 요청한다
+   */
+  nextPage?: number
 }
 
 // ── M4: 원격 환경 ─────────────────────────────────────
