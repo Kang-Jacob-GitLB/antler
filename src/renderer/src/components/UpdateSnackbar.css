@@ -1,0 +1,98 @@
+/* 업데이트 스낵바 — 평면 카드(bg-elevated + 팝오버 그림자), 아래 가운데.
+   아래 24px 는 커밋 목록 푸터 높이라 그 위로 띄운다. 모달 배경막보다 아래, 일반 팝오버보다 위. */
+.update-live {
+  position: fixed;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  bottom: 40px;
+  z-index: 48;
+  width: min(440px, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+}
+.update-snack {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  pointer-events: auto;
+  animation: update-snack-in var(--dur-med) var(--ease);
+}
+.update-snack.is-error {
+  border-left-color: var(--removed);
+}
+.update-snack__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.update-snack__msg {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.update-snack__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.update-snack__x {
+  flex-shrink: 0;
+}
+.update-snack__link {
+  height: 24px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.update-snack__link:hover {
+  color: var(--text-primary);
+}
+.update-snack__link:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+.update-snack__file {
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+.update-snack__bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+.update-snack__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--dur-med) var(--ease);
+}
+@keyframes update-snack-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-snack {
+    animation: none;
+  }
+  .update-snack__fill {
+    transition: none;
+  }
+}

@@ -12,6 +12,7 @@ import { GitHubApiError } from '../github/client'
 import type { GitHubService } from '../github/service'
 import { registerGithubIpc } from './github'
 import { applyTitleBarTheme } from '../titleBar'
+import type { UpdateService } from '../update/UpdateService'
 
 type Handler<C extends IpcChannel> = (e: IpcMainInvokeEvent, ...args: IpcArgs<C>) => Promise<IpcResult<C>> | IpcResult<C>
 
@@ -87,7 +88,19 @@ async function checkEnvInput(e: IpcMainInvokeEvent, input: unknown, withPath: bo
   }
 }
 
-export function registerIpc(config: ConfigStore, repos: RepoService, watcher: RepoWatcher, gh: GitHubService): void {
+export function registerIpc(
+  config: ConfigStore,
+  repos: RepoService,
+  watcher: RepoWatcher,
+  gh: GitHubService,
+  updates: UpdateService
+): void {
+  handle('update:get', () => updates.get())
+  handle('update:check', () => updates.check(true))
+  handle('update:download', () => updates.download())
+  handle('update:cancel', () => updates.cancel())
+  handle('update:install', () => updates.install())
+  handle('update:dismiss', (_e, action, version) => updates.dismiss(action, version))
   handle('config:get', () => config.get())
   handle('config:setUi', (_e, patch) => config.setUi(patch))
 
