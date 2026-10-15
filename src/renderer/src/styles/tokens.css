@@ -102,10 +102,11 @@
   --syn-meta: #A89F91;
 
   /* ── 타이포·간격·모션 (테마 무관) ─────────────── */
-  /* 번들 폰트(styles/fonts.css): UI = Pretendard, 코드 = Jetendard. 뒤는 로드 실패 시 대체 */
+  /* UI = 번들 Pretendard(styles/fonts.css). 코드 = GitHub 과 같은 시스템 고정폭 스택
+     (macOS SF Mono · Windows Consolas · Linux Liberation Mono, 한글은 OS 기본 글꼴로 대체) */
   --font-ui: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo',
     'Malgun Gothic', 'Noto Sans KR', sans-serif;
-  --font-mono: 'Jetendard', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-md: 13px;
