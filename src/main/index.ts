@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, safeStorage, session, shell } from 'electron'
 import { AVATAR_CACHE_FILE } from './github/avatars'
@@ -8,6 +9,8 @@ import { allowedExternalUrl } from './github/validate'
 import { ConfigStore } from './services/ConfigStore'
 import { RepoService } from './services/RepoService'
 import { RepoWatcher } from './services/RepoWatcher'
+import { createAutoBackend } from './update/autoBackend'
+import { UpdateService } from './update/UpdateService'
 import { TOOLBAR_HEIGHT, titleBarOverlay } from './titleBar'
 
 app.setName('Antler')
@@ -27,6 +30,7 @@ let config: ConfigStore
 let repos: RepoService
 let gh: GitHubService
 let watcher: RepoWatcher | undefined
+let updates: UpdateService | undefined
 
 /**
  * 창 아이콘. 패키지된 Windows·macOS 는 실행 파일·번들 아이콘을 쓰므로 지정하지 않는다.
@@ -97,7 +101,30 @@ app.whenReady().then(() => {
     store: new TokenStore(app.getPath('userData'), safeStorage),
     avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE)
   })
-  registerIpc(config, repos, watcher, gh)
+  updates = new UpdateService({
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    env: process.env,
+    isPackaged: app.isPackaged,
+    probe: { execPath: process.execPath, ...packageTypeProbe() },
+    getSkipped: () => config.get().ui.skippedUpdateVersion,
+    setSkipped: (v) => void config.setSkippedUpdateVersion(v),
+    send: (s) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('update:state', s)
+    },
+    createAutoBackend: () =>
+      createAutoBackend({
+        currentVersion: app.getVersion(),
+        packaged: app.isPackaged,
+        ...(process.env['ANTLER_UPDATE_FEED'] ? { feedUrl: process.env['ANTLER_UPDATE_FEED'] } : {})
+      }),
+    downloadsDir: () => join(app.getPath('userData'), 'updates'),
+    openPath: (p) => shell.openPath(p),
+    showItem: (p) => shell.showItemInFolder(p)
+  })
+  registerIpc(config, repos, watcher, gh, updates)
+  updates.start()
 
   // 카메라·마이크 등 어떤 권한도 주지 않는다
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
@@ -121,5 +148,16 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   watcher?.dispose()
   gh?.dispose()
+  updates?.dispose()
   void repos?.dispose()
 })
+
+/** resources/package-type(deb·rpm·pacman 패키지에만 있다)을 읽는다. 없으면 빈 객체 */
+function packageTypeProbe(): { packageType?: string } {
+  if (process.platform !== "linux" || !app.isPackaged) return {}
+  try {
+    return { packageType: readFileSync(join(process.resourcesPath, "package-type"), "utf8") }
+  } catch {
+    return {}
+  }
+}

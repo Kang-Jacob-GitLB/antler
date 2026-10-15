@@ -49,7 +49,15 @@ export class ConfigStore {
     if (cid !== undefined && (typeof cid !== 'string' || !/^[A-Za-z0-9._-]{1,100}$/.test(cid))) {
       throw new Error('잘못된 OAuth App client ID 입니다(영문·숫자·._- 100자 이내)')
     }
+    // 건너뛴 업데이트 버전은 main(UpdateService)만 쓴다 — renderer 가 알림을 영구히 끄지 못하게 막는다
+    if ('skippedUpdateVersion' in patch) throw new Error('이 설정은 직접 바꿀 수 없습니다')
     return this.update({ ...this.config, ui: { ...this.config.ui, ...patch } })
+  }
+
+  /** main 전용: 사용자가 '이 버전 건너뛰기'를 고른 업데이트 버전(IPC 로 노출하지 않는다) */
+  setSkippedUpdateVersion(version: string): AppConfig {
+    if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]{1,40})?$/.test(version)) throw new Error('잘못된 버전입니다')
+    return this.update({ ...this.config, ui: { ...this.config.ui, skippedUpdateVersion: version } })
   }
 
   /**

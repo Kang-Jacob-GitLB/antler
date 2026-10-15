@@ -92,6 +92,13 @@ export const IconGlobe = (p: P) => (
     <path d="M2.2 8h11.6M8 2.2c1.8 1.7 2.6 3.6 2.6 5.8S9.8 12.1 8 13.8C6.2 12.1 5.4 10.2 5.4 8S6.2 3.9 8 2.2z" />
   </Svg>
 )
+export const IconInfo = (p: P) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5.8" />
+    <path d="M8 7.4v3.6" />
+    <circle cx="8" cy="5.1" r="0.5" fill="currentColor" />
+  </Svg>
+)
 export const IconChevronDown = (p: P) => (
   <Svg {...p}>
     <path d="M4.5 6.5L8 10l3.5-3.5" />

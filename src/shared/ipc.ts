@@ -31,6 +31,8 @@ import type {
   Repo,
   SearchResult,
   UiPrefs,
+  UpdateDismissAction,
+  UpdateState,
   WipDiffRequest,
   WipStatus
 } from './types'
@@ -98,6 +100,17 @@ export interface IpcContract {
   'git:wipDiff': { args: [repoId: string, req: WipDiffRequest, requestId?: string]; result: FileDiff }
   /** 진행 중인 요청 취소 */
   'req:cancel': { args: [requestId: string]; result: void }
+  /** 앱 업데이트. 상태 변화는 'update:state' 이벤트로도 온다 */
+  'update:get': { args: []; result: UpdateState }
+  /** 새 버전 확인(수동 확인 — 나중에·건너뛰기 설정과 무관하게 결과를 돌려준다) */
+  'update:check': { args: []; result: UpdateState }
+  /** 알려진 새 버전 내려받기 시작(진행은 update:state 이벤트). 설치 방식은 OS·설치 형태에 따라 다르다 */
+  'update:download': { args: []; result: UpdateState }
+  /** 내려받기 취소 */
+  'update:cancel': { args: []; result: void }
+  /** 내려받은 업데이트 설치(auto: 앱 재시작 후 설치, manual: 설치 파일을 다시 열기) */
+  'update:install': { args: []; result: void }
+  'update:dismiss': { args: [action: UpdateDismissAction, version: string]; result: UpdateState }
   /** 제목 표시줄 오버레이(Windows·Linux 창 컨트롤) 색을 현재 테마에 맞춘다. macOS 는 no-op */
   /** dim: 모달 배경막이 떠 있음(창 컨트롤도 같은 정도로 어둡게) */
   'win:setTitleBarTheme': { args: [theme: { dark: boolean; dim?: boolean }]; result: void }
@@ -111,6 +124,7 @@ export type IpcResult<C extends IpcChannel> = IpcContract[C]['result']
 export interface IpcEvents {
   'repo:changed': { repoId: string }
   'theme:system': { dark: boolean }
+  'update:state': UpdateState
 }
 export type IpcEvent = keyof IpcEvents
 
@@ -152,10 +166,16 @@ export const IPC_CHANNELS = [
   'git:wipStatus',
   'git:wipDiff',
   'req:cancel',
+  'update:get',
+  'update:check',
+  'update:download',
+  'update:cancel',
+  'update:install',
+  'update:dismiss',
   'win:setTitleBarTheme'
 ] as const satisfies readonly IpcChannel[]
 
-export const IPC_EVENTS = ['repo:changed', 'theme:system'] as const satisfies readonly IpcEvent[]
+export const IPC_EVENTS = ['repo:changed', 'theme:system', 'update:state'] as const satisfies readonly IpcEvent[]
 
 /** invoke 결과 래퍼. Electron 기본 에러 문자열("Error invoking remote method…")을 피하려고 쓴다. */
 export type IpcEnvelope<T> = { ok: true; data: T } | { ok: false; error: string; code?: string }

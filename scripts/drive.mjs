@@ -35,6 +35,10 @@ const wipScenario = args.includes('--wip') && args.splice(args.indexOf('--wip'),
 const electronArgs = opt('electron-args', '').split(' ').filter(Boolean)
 // --idle-only: 첫 화면만 띄우고 조작 없이 N초 쉰 뒤 메모리를 잰다(유휴 메모리 측정)
 const idleOnly = Number(opt('idle-only', '0'))
+// --update-fake available|downloading|downloaded|error: 업데이트 스낵바 상태를 가짜로 띄워 update-<상태>-<테마>.png 만 남기고 끝낸다
+//   (--update-mode manual-dmg|manual-file 로 수동 설치 모드 문구 확인)
+const updateFake = opt('update-fake', '')
+const updateMode = opt('update-mode', '')
 // --exe <경로>: 패키지된 실행 파일(dist/win-unpacked/Antler.exe 등)을 띄운다
 const exePath = opt('exe', '') || undefined
 // 저장소 지정: 로컬 경로 또는 'wsl:<배포판>:<리눅스 경로>' / 'ssh:<호스트>:<경로>'
@@ -68,7 +72,11 @@ const app = await electron.launch({
   executablePath: exePath ?? createRequire(import.meta.url)('electron'),
   // 패키지된 앱(--exe)은 앱 경로 인자 없이 실행한다(app.asar 를 스스로 읽는다)
   args: exePath ? electronArgs : [...electronArgs, APP_DIR],
-  env: { ...process.env, ANTLER_USER_DATA: userData },
+  env: {
+    ...process.env,
+    ANTLER_USER_DATA: userData,
+    ...(updateFake ? { ANTLER_UPDATE_FAKE: updateFake, ...(updateMode ? { ANTLER_UPDATE_FAKE_MODE: updateMode } : {}) } : {})
+  },
   timeout: 30_000
 })
 // ANTLER_DRIVE_DEBUG=1 이면 main 프로세스 출력을 함께 보여 준다
@@ -97,6 +105,14 @@ try {
     console.log(`cold start → first commit row: ${Date.now() - t0} ms (app process uptime ${appUptime} ms)`)
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
+    if (updateFake) {
+      await page.waitForSelector('.update-snack', { timeout: 5_000 })
+      await page.waitForTimeout(400)
+      const label = updateFake + (updateMode ? '-' + updateMode : '')
+      console.log(`update snackbar [${label}]: "${(await page.textContent('.update-snack__msg'))?.trim()}" | buttons: ${(await page.$$eval('.update-snack button', (e) => e.map((x) => x.getAttribute('aria-label') || x.textContent?.trim()))).join(' / ')}`)
+      console.log('update snackbar box:', JSON.stringify(await page.$eval('.update-snack', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } })))
+      await shot(`update-${label}-${theme}`)
+    }
     if (wipScenario) {
       // WIP 행 → 변경 패널 → 파일 diff(스테이지 안 됨 · 추적 안 됨 · 스테이지됨) → ↑↓ 키보드 이동
       const wipRow = await page.waitForSelector('.commit-row--wip', { timeout: 10_000 }).catch(() => null)
@@ -145,7 +161,7 @@ try {
   if (repos.length && idleOnly > 0) {
     // 유휴 측정: 첫 화면 그대로 두고 기다린 뒤 아래 메모리 측정으로 넘어간다
     await page.waitForTimeout(idleOnly * 1000)
-  } else if (repos.length) {
+  } else if (repos.length && !updateFake) {
 
     // 번들 폰트가 실제로 로드·적용됐는지
     const fonts = await page.evaluate(async () => {

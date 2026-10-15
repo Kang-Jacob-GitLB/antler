@@ -15,6 +15,7 @@ import { useSearchStore } from './stores/searchStore'
 import { refreshWip, useWipSync } from './stores/wipActions'
 import { useGithubStore } from './stores/githubStore'
 import { GitHubView } from './components/github/GitHubView'
+import { UpdateSnackbar } from './components/UpdateSnackbar'
 import './App.css'
 
 type Widths = [sidebar: number, detail: number]
@@ -178,6 +179,7 @@ export function App(): React.JSX.Element | null {
       )}
       <RepoSwitcher />
       <AddRepoDialog />
+      <UpdateSnackbar />
     </div>
   )
 }

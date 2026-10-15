@@ -41,7 +41,33 @@ export interface UiPrefs {
   minimapCollapsed?: boolean
   /** 그래프 노드에 작성자 이니셜을 그릴지(없으면 켜짐) */
   graphInitials?: boolean
+  /** 사용자가 '이 버전 건너뛰기'를 고른 업데이트 버전(그 버전은 자동 알림에서 제외, 더 새 버전은 알림) */
+  skippedUpdateVersion?: string
 }
+
+/**
+ * 앱 업데이트 상태(main → renderer).
+ * mode: auto = 앱 안에서 내려받아 설치, manual-dmg = macOS 설치 이미지(dmg)를 열어 줌, manual-file = portable·deb 파일을 열어/보여 줌
+ */
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error' | 'not-available'
+export type UpdateMode = 'auto' | 'manual-dmg' | 'manual-file'
+export interface UpdateState {
+  status: UpdateStatus
+  mode: UpdateMode
+  currentVersion: string
+  /** 새 버전(available·downloading·downloaded) */
+  version?: string
+  /** 릴리스 노트 페이지(https://github.com/… 만) */
+  notesUrl?: string
+  /** downloading 중 0~100 */
+  progress?: number
+  /** error 메시지(토큰·경로 등 민감 정보 없음) */
+  error?: string
+  /** manual 모드에서 열어 준 파일 이름 */
+  fileName?: string
+}
+/** later = 앱을 다시 시작할 때까지 이 버전 알림 숨김, skip = 이 버전 건너뛰기(설정에 저장) */
+export type UpdateDismissAction = 'later' | 'skip'
 
 /** 커밋 활동 미니맵 데이터: 시간 구간별 커밋 수 */
 export interface CommitActivity {

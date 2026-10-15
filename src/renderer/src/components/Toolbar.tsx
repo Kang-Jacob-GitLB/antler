@@ -7,12 +7,14 @@ import { GhAuthButton } from './github/GhAuthButton'
 import { AntlerMark } from './brand'
 import { EnvBadge } from './EnvBadge'
 import { MenuButton } from './MenuButton'
+import { useUpdateStore } from '../stores/updateStore'
 import {
   IconBranch,
   IconChevronDown,
   IconClose,
   IconFunnel,
   IconGlobe,
+  IconInfo,
   IconMonitor,
   IconMoon,
   IconRefresh,
@@ -20,6 +22,8 @@ import {
   IconSun
 } from './icons'
 import './Toolbar.css'
+
+const RELEASES_URL = 'https://github.com/Kang-Jacob-GitLB/antler/releases'
 
 export function Toolbar(): React.JSX.Element {
   const t = useT()
@@ -33,6 +37,7 @@ export function Toolbar(): React.JSX.Element {
   const filter = useLogStore((s) => s.filter)
   const setFilter = useLogStore((s) => s.setFilter)
 
+  const appVersion = useUpdateStore((s) => s.state?.currentVersion ?? '')
   const ThemeIcon = theme === 'system' ? IconMonitor : theme === 'dark' ? IconMoon : IconSun
   const mod = window.antler.platform === 'darwin' ? '⌘' : 'Ctrl+'
 
@@ -101,6 +106,20 @@ export function Toolbar(): React.JSX.Element {
           ]}
         >
           <ThemeIcon />
+        </MenuButton>
+        <MenuButton<'check' | 'releases' | ''>
+          label={`${t('update.menu')} · v${appVersion}`}
+          value=""
+          onChange={(v) => {
+            if (v === 'check') void useUpdateStore.getState().check()
+            else if (v === 'releases') void window.antler.invoke('gh:openExternal', RELEASES_URL).catch(() => {})
+          }}
+          options={[
+            { value: 'check', label: t('update.check'), icon: <IconRefresh size={14} /> },
+            { value: 'releases', label: t('update.notes'), icon: <IconGlobe size={14} /> }
+          ]}
+        >
+          <IconInfo />
         </MenuButton>
         <MenuButton<Locale>
           label={t('toolbar.localeMenu')}
