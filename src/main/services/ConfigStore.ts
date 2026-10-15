@@ -51,6 +51,8 @@ export class ConfigStore {
     }
     // 건너뛴 업데이트 버전은 main(UpdateService)만 쓴다 — renderer 가 알림을 영구히 끄지 못하게 막는다
     if ('skippedUpdateVersion' in patch) throw new Error('이 설정은 직접 바꿀 수 없습니다')
+    const af = patch.autoFetchMinutes
+    if (af !== undefined && (!Number.isInteger(af) || af < 0 || af > 1440)) throw new Error('잘못된 자동 fetch 주기입니다(0~1440분)')
     return this.update({ ...this.config, ui: { ...this.config.ui, ...patch } })
   }
 
@@ -94,7 +96,19 @@ export class ConfigStore {
     const repos = this.config.repos.filter((r) => r.id !== id)
     const used = new Set(repos.map((r) => r.sourceId))
     const sources = this.config.sources.filter((s) => s.id === LOCAL_SOURCE_ID || used.has(s.id))
-    return this.update({ ...this.config, ui, repos, sources })
+    const { [id]: _gone, ...fetchApprovals } = this.config.fetchApprovals ?? {}
+    return this.update({ ...this.config, ui, repos, sources, fetchApprovals })
+  }
+
+  fetchApproval(repoId: string): string | undefined {
+    return this.config.fetchApprovals?.[repoId]
+  }
+
+  /** 수동 fetch 가 성공한 remote 지문을 기록한다(null 이면 지운다). main 에서만 호출한다 */
+  setFetchApproval(repoId: string, fingerprint: string | null): void {
+    if (this.config.fetchApprovals?.[repoId] === (fingerprint ?? undefined)) return
+    const { [repoId]: _old, ...rest } = this.config.fetchApprovals ?? {}
+    this.update({ ...this.config, fetchApprovals: fingerprint ? { ...rest, [repoId]: fingerprint } : rest })
   }
 
   /** 디스크에 먼저 쓰고, 성공했을 때만 메모리 상태를 바꾼다 */
@@ -116,7 +130,7 @@ export class ConfigStore {
       const raw = JSON.parse(text) as Partial<AppConfig>
       const sources = raw.sources?.length ? raw.sources : base.sources
       if (!sources.some((s) => s.id === LOCAL_SOURCE_ID)) sources.unshift(base.sources[0]!)
-      return { version: 1, sources, repos: raw.repos ?? [], ui: { ...base.ui, ...raw.ui } }
+      return { version: 1, sources, repos: raw.repos ?? [], ui: { ...base.ui, ...raw.ui }, ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {}) }
     } catch {
       // 손상된 설정은 덮어쓰기 전에 보존해 둔다(사용자가 저장소 목록을 복구할 수 있게)
       try {

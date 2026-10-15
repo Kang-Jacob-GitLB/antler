@@ -19,12 +19,13 @@ export class WslExecutor implements GitExecutor {
 
   constructor(private readonly distro: string) {}
 
-  private spec(repoPath: string, args: string[]): SpawnSpec {
-    return { command: 'wsl.exe', argv: wslArgv(this.distro, repoPath, args), env: WSL_SPAWN_ENV, gitArgs: args }
+  private spec(repoPath: string, args: string[], extraEnv?: Record<string, string>): SpawnSpec {
+    return { command: 'wsl.exe', argv: wslArgv(this.distro, repoPath, args, extraEnv), env: WSL_SPAWN_ENV, gitArgs: args }
   }
 
   async run(repoPath: string, args: string[], opts?: RunOpts): Promise<RunResult> {
-    const r = await runProcess(this.spec(repoPath, args), opts)
+    // opts.env 는 리눅스 쪽 git 에 `env` 로 전달한다(wsl.exe 프로세스 환경은 WSLENV 없이는 넘어가지 않는다)
+    const r = await runProcess(this.spec(repoPath, args, opts?.env), opts)
     // wsl.exe 자체가 실패하면(배포판 없음·WSL 서비스 중지) 메시지를 stdout 으로 내고 stderr 는 비어 있다
     if (isWslFailure(r.code) && !r.stderr.trim()) {
       return { stdout: Buffer.alloc(0), stderr: wslMessage(r.stdout), code: r.code }
@@ -36,7 +37,7 @@ export class WslExecutor implements GitExecutor {
     // 실패했을 때 보여 줄 수 있게 앞부분만 기억해 둔다
     let head = Buffer.alloc(0)
     try {
-      for await (const chunk of streamProcess(this.spec(repoPath, args), opts)) {
+      for await (const chunk of streamProcess(this.spec(repoPath, args, opts?.env), opts)) {
         if (head.length < 4096) head = Buffer.concat([head, chunk]).subarray(0, 4096)
         yield chunk
       }
@@ -53,7 +54,7 @@ export class WslExecutor implements GitExecutor {
 }
 
 /** wsl.exe 에 넘길 argv (테스트용으로 분리) */
-export function wslArgv(distro: string, repoPath: string, args: string[]): string[] {
+export function wslArgv(distro: string, repoPath: string, args: string[], extraEnv: Record<string, string> = {}): string[] {
   return [
     '-d',
     distro,
@@ -61,7 +62,7 @@ export function wslArgv(distro: string, repoPath: string, args: string[]): strin
     '~',
     '--exec',
     'env',
-    ...Object.entries(GIT_ENV).map(([k, v]) => `${k}=${v}`),
+    ...Object.entries({ ...GIT_ENV, ...extraEnv }).map(([k, v]) => `${k}=${v}`),
     'git',
     ...buildGitArgs(repoPath, args)
   ]

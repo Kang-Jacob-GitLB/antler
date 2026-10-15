@@ -10,6 +10,23 @@ export interface SpawnSpec {
   gitArgs: string[]
 }
 
+/** stderr 는 앞부분만 4MB 까지 담는다(악성 저장소·서버가 끝없이 써서 메모리를 채우지 못하게). 파이프는 계속 비운다 */
+export const MAX_STDERR = 4 * 1024 * 1024
+
+export function stderrCollector(): { push(chunk: Buffer): void; text(): string } {
+  const parts: Buffer[] = []
+  let size = 0
+  return {
+    push(chunk) {
+      const room = MAX_STDERR - size
+      if (room <= 0) return
+      parts.push(chunk.length > room ? chunk.subarray(0, room) : chunk)
+      size += Math.min(chunk.length, room)
+    },
+    text: () => Buffer.concat(parts).toString('utf8')
+  }
+}
+
 function launch(spec: SpawnSpec, opts: RunOpts): ChildProcess {
   return spawn(spec.command, spec.argv, {
     env: { ...process.env, ...spec.env, ...opts.env },
@@ -38,7 +55,7 @@ export function runProcess(spec: SpawnSpec, opts: RunOpts = {}): Promise<RunResu
     const child = launch(spec, opts)
     const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER
     const out: Buffer[] = []
-    const err: Buffer[] = []
+    const err = stderrCollector()
     let size = 0
     let settled = false
 
@@ -67,7 +84,7 @@ export function runProcess(spec: SpawnSpec, opts: RunOpts = {}): Promise<RunResu
     child.on('error', (e) => finish(() => reject(e)))
     child.on('close', (code) => {
       finish(() =>
-        resolve({ stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8'), code: code ?? -1 })
+        resolve({ stdout: Buffer.concat(out), stderr: err.text(), code: code ?? -1 })
       )
     })
   })
@@ -76,7 +93,7 @@ export function runProcess(spec: SpawnSpec, opts: RunOpts = {}): Promise<RunResu
 export async function* streamProcess(spec: SpawnSpec, opts: RunOpts = {}): AsyncIterable<Buffer> {
   if (opts.signal?.aborted) throw new AbortError()
   const child = launch(spec, opts)
-  const err: Buffer[] = []
+  const err = stderrCollector()
   child.stderr!.on('data', (chunk: Buffer) => err.push(chunk))
   const exit = new Promise<number>((resolve, reject) => {
     child.on('error', reject)
@@ -92,7 +109,7 @@ export async function* streamProcess(spec: SpawnSpec, opts: RunOpts = {}): Async
     const code = await exit
     if (opts.signal?.aborted) throw new AbortError()
     if (code !== 0) {
-      const stderr = Buffer.concat(err).toString('utf8')
+      const stderr = err.text()
       throw new GitError(stderr.trim() || `git exited with ${code}`, code, stderr, spec.gitArgs)
     }
   } finally {

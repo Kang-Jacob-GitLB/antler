@@ -76,6 +76,8 @@ export const GIT_ENV: Record<string, string> = {
   // renderer 가 보낸 경로가 pathspec magic(:(top), *, :! 등)으로 해석되지 않게 한다
   GIT_LITERAL_PATHSPECS: '1',
   GIT_NO_LAZY_FETCH: '1',
+  // refs/replace 로 이력을 위조해 보여 주지 못하게 한다(fetch 가 아니어도 저장소에 심어 둘 수 있다)
+  GIT_NO_REPLACE_OBJECTS: '1',
   GIT_ALLOW_PROTOCOL: 'none',
   GIT_PAGER: 'cat',
   LANG: 'C.UTF-8',

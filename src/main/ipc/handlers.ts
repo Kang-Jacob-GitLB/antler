@@ -6,6 +6,8 @@ import { AbortError, GitError } from '../executors/GitExecutor'
 import { listSshHosts } from '../executors/SshExecutor'
 import { listWslDistros } from '../executors/WslExecutor'
 import type { ConfigStore } from '../services/ConfigStore'
+import type { FetchService } from '../services/FetchService'
+import { display, formatItem, MAX_CONFIRM_ITEMS } from './confirmText'
 import { StaleLogError, type RepoService } from '../services/RepoService'
 import type { RepoWatcher } from '../services/RepoWatcher'
 import { GitHubApiError } from '../github/client'
@@ -88,11 +90,50 @@ async function checkEnvInput(e: IpcMainInvokeEvent, input: unknown, withPath: bo
   }
 }
 
+/**
+ * 저장소 설정에 외부 명령을 실행할 수 있는 항목이 있을 때 수동 fetch 전에 묻는다. 허용은 이번 세션의 같은 설정에만 유효하다.
+ * 기본 선택은 취소다.
+ */
+async function confirmDangerousConfig(e: IpcMainInvokeEvent, name: string, items: { key: string; value: string }[]): Promise<boolean> {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
+    win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)
+  // 저장소가 정한 문자열(이름·키·값)은 따옴표·이스케이프로 표시한다 — 문구를 꾸며 사용자를 속이지 못하게
+  const title = `${display(name)} 저장소의 설정에 fetch 때 외부 프로그램을 실행하거나 연결을 가로챌 수 있는 항목이 있습니다.`
+  if (items.length > MAX_CONFIRM_ITEMS) {
+    // 전부 보여 줄 수 없으면 허용 여부를 물을 수 없다
+    await show({
+      type: 'warning',
+      buttons: ['닫기'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'fetch 차단',
+      message: title,
+      detail: `항목이 ${items.length}개로 너무 많아 모두 확인할 수 없어 fetch 하지 않습니다. 저장소의 .git/config 를 직접 확인하세요.\n\n${items
+        .slice(0, MAX_CONFIRM_ITEMS)
+        .map((i) => formatItem(i.key, i.value))
+        .join('\n')}\n… 외 ${items.length - MAX_CONFIRM_ITEMS}개`
+    })
+    return false
+  }
+  const res = await show({
+    type: 'warning',
+    buttons: ['이번만 fetch', '취소'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'fetch 확인',
+    message: title,
+    detail: `${items.map((i) => formatItem(i.key, i.value)).join('\n')}\n\n직접 만든 설정이거나 신뢰하는 저장소일 때만 허용하세요. 허용은 이번 실행 동안 같은 설정에만 적용됩니다.`
+  })
+  return res.response === 0
+}
+
 export function registerIpc(
   config: ConfigStore,
   repos: RepoService,
   watcher: RepoWatcher,
   gh: GitHubService,
+  fetcher: FetchService,
   updates: UpdateService
 ): void {
   handle('update:get', () => updates.get())
@@ -102,7 +143,11 @@ export function registerIpc(
   handle('update:install', () => updates.install())
   handle('update:dismiss', (_e, action, version) => updates.dismiss(action, version))
   handle('config:get', () => config.get())
-  handle('config:setUi', (_e, patch) => config.setUi(patch))
+  handle('config:setUi', (_e, patch) => {
+    const next = config.setUi(patch)
+    if (patch.autoFetchMinutes !== undefined) fetcher.onPrefsChanged()
+    return next
+  })
 
   handle('dialog:pickFolder', async (e, defaultPath) => {
     const win = BrowserWindow.fromWebContents(e.sender)
@@ -124,11 +169,15 @@ export function registerIpc(
   handle('repos:update', (_e, repoId, patch) => config.updateRepo(repoId, patch))
   handle('repos:remove', async (_e, repoId) => {
     const next = config.removeRepo(repoId)
+    fetcher.forget(repoId)
     if (watcher.current === repoId) void watcher.watch(null)
     await repos.releaseUnused()
     return next
   })
-  handle('repos:watch', (_e, repoId) => watcher.watch(repoId))
+  handle('repos:watch', (_e, repoId) => {
+    fetcher.setActive(repoId && config.repo(repoId) ? repoId : null)
+    return watcher.watch(repoId)
+  })
 
   handle('env:wslDistros', () => listWslDistros())
   handle('env:sshHosts', () => listSshHosts())
@@ -153,6 +202,14 @@ export function registerIpc(
   handle('git:fileDiff', (_e, repoId, req, requestId) => repos.fileDiff(repoId, req, requestId))
   handle('git:wipStatus', (_e, repoId, requestId) => repos.wipStatus(repoId, requestId))
   handle('git:wipDiff', (_e, repoId, req, requestId) => repos.wipDiff(repoId, req, requestId))
+  // manual 은 renderer 가 주장하는 값이다. 침해된 renderer 는 manual=true 로 수동 fetch 를 요청할 수 있지만(자동 fetch 의 자격 증명 도우미 제한·file 전송 제한을 피함),
+  // 허용 목록 밖의 저장소 설정·userinfo URL 은 어느 쪽이든 main 의 확인 창에서 사용자가 직접 허용해야 하고 remote URL 거부는 확인 없이 적용된다.
+  handle('git:fetch', (e, repoId, manual) =>
+    fetcher.fetch(repoId, {
+      manual: manual === true,
+      confirm: (id, items) => confirmDangerousConfig(e, config.repo(id)?.name ?? id, items)
+    })
+  )
   registerGithubIpc(handle, gh, repos)
   handle('req:cancel', (_e, requestId) => {
     repos.cancel(requestId)
