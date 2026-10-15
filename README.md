@@ -86,6 +86,8 @@ tests/           vitest + fixtures/
 | vitest | 파서·executor 단위 테스트 |
 | playwright-core (dev) | 빌드된 앱을 실제로 띄워 측정·스크린샷(`scripts/drive.mjs`) — 브라우저 다운로드 없는 core 판 |
 | highlight.js | diff syntax highlight — core 와 필요한 언어만 diff 를 열 때 지연 로드(언어별 청크) |
+| pretendard (dev) | UI 폰트 Pretendard Variable(OFL 1.1). woff2 하나만 renderer 자산으로 번들 |
+| d2coding (dev) | 코드 폰트 D2Coding Regular/Bold 전체 한글 글리프(OFL 1.1). woff2 만 번들 |
 
 ## 마일스톤
 

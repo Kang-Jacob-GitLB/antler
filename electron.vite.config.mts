@@ -36,7 +36,15 @@ export default defineConfig({
   main: { resolve: { alias: shared } },
   preload: { resolve: { alias: shared } },
   renderer: {
-    resolve: { alias: { ...shared, '@renderer': resolve('src/renderer/src') } },
+    resolve: {
+      alias: {
+        ...shared,
+        '@renderer': resolve('src/renderer/src'),
+        // 폰트는 npm 패키지의 woff2 를 그대로 번들한다(오프라인 앱 + CSP font-src 'self')
+        '@font-pretendard': resolve('node_modules/pretendard/dist/web/variable/woff2'),
+        '@font-d2coding': resolve('node_modules/d2coding/fonts')
+      }
+    },
     plugins: [react(), cspPlugin()],
     worker: { format: 'es' },
     // 파싱 시간을 줄여 콜드 스타트를 앞당긴다

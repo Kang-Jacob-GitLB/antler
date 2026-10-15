@@ -63,6 +63,14 @@ try {
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
 
+    // 번들 폰트가 실제로 로드·적용됐는지
+    const fonts = await page.evaluate(async () => {
+      await document.fonts.ready
+      const loaded = [...document.fonts].filter((f) => f.status === 'loaded').map((f) => `${f.family} ${f.weight}`)
+      return { loaded, ui: getComputedStyle(document.body).fontFamily.split(',')[0] }
+    })
+    console.log(`fonts loaded: ${fonts.loaded.join(', ') || '(none)'} — body: ${fonts.ui}`)
+
     // 사이드바 ref 섹션이 채워질 때까지
     const tRefs = Date.now()
     await page.waitForSelector('.side-section:nth-of-type(2)', { timeout: 20_000 }).catch(() => {})
