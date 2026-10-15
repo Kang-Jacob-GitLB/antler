@@ -103,7 +103,7 @@ tests/           vitest + fixtures/
 | ssh2 | SSH 연결 유지·exec 채널 — Windows OpenSSH 는 ControlMaster 미지원 |
 | highlight.js | diff syntax highlight — core 와 필요한 언어만 diff 를 열 때 지연 로드(언어별 청크) |
 | pretendard (dev) | UI 폰트 Pretendard Variable(OFL 1.1). woff2 하나만 renderer 자산으로 번들 |
-| d2coding (dev) | 코드 폰트 D2Coding Regular/Bold 전체 한글 글리프(OFL 1.1). woff2 만 번들 |
+| (번들) Jetendard | 코드 폰트 — JetBrains Mono + Pretendard 한글(OFL 1.1). npm 패키지가 없어 v0.1.0 릴리스의 woff2 Regular·Bold 와 LICENSE 를 `src/renderer/src/assets/fonts/jetendard/` 에 둔다 |
 | happy-dom (dev) | renderer 의 HTML 정화(sanitize) 테스트에 쓰는 가벼운 DOM 구현 — 테스트 전용 |
 
 ## 마일스톤

@@ -42,8 +42,7 @@ export default defineConfig({
         ...shared,
         '@renderer': resolve('src/renderer/src'),
         // 폰트는 npm 패키지의 woff2 를 그대로 번들한다(오프라인 앱 + CSP font-src 'self')
-        '@font-pretendard': resolve('node_modules/pretendard/dist/web/variable/woff2'),
-        '@font-d2coding': resolve('node_modules/d2coding/fonts')
+        '@font-pretendard': resolve('node_modules/pretendard/dist/web/variable/woff2')
       }
     },
     plugins: [react(), cspPlugin()],

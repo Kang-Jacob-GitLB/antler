@@ -42,9 +42,6 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^6.1.2
         version: 6.1.2(vite@8.3.4(@types/node@26.6.5))
-      d2coding:
-        specifier: ^1.3.2
-        version: 1.3.2
       electron:
         specifier: ^44.7.2
         version: 44.7.2
@@ -517,9 +514,6 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
-
-  d2coding@1.3.2:
-    resolution: {integrity: sha512-g+Dgy1ZSAKTgWIl2jhpr6K3keFic8aapOFlVh74eoBYPbjGq5lMdEzANG5w6hFX1fzQBsaAzhuTYICRjyt4OcA==}
 
   debug@4.4.3:
     resolution: {integrity: sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==}
@@ -1305,8 +1299,6 @@ snapshots:
     optional: true
 
   csstype@3.2.3: {}
-
-  d2coding@1.3.2: {}
 
   debug@4.4.3:
     dependencies:

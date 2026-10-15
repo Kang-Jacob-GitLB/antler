@@ -1,7 +1,8 @@
 /*
- * 번들 폰트. 두 폰트 모두 SIL Open Font License 1.1.
- *   UI   — Pretendard Variable (가변 굵기 45~920)
- *   코드 — D2Coding (Regular / Bold, 전체 한글 글리프)
+ * 번들 폰트. 모두 SIL Open Font License 1.1.
+ *   UI   — Pretendard Variable (가변 굵기 45~920, npm pretendard)
+ *   코드 — Jetendard (JetBrains Mono Nerd Font Mono + Pretendard 한글 1.15배, Regular / Bold)
+ *          https://github.com/kuskhan/jetendard v0.1.0 — 라이선스: assets/fonts/jetendard/LICENSE.txt
  * 로컬 자산이라 금방 로드되므로 font-display: block 으로 대체 폰트 깜빡임(FOUT)을 피한다.
  */
 @font-face {
@@ -13,17 +14,17 @@
 }
 
 @font-face {
-  font-family: 'D2Coding';
+  font-family: 'Jetendard';
   font-weight: 400;
   font-style: normal;
   font-display: block;
-  src: url('@font-d2coding/d2coding-full.woff2') format('woff2');
+  src: url('../assets/fonts/jetendard/Jetendard-Regular.woff2') format('woff2');
 }
 
 @font-face {
-  font-family: 'D2Coding';
+  font-family: 'Jetendard';
   font-weight: 700;
   font-style: normal;
   font-display: block;
-  src: url('@font-d2coding/d2coding-bold-full.woff2') format('woff2');
+  src: url('../assets/fonts/jetendard/Jetendard-Bold.woff2') format('woff2');
 }
