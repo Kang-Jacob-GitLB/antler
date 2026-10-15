@@ -4,6 +4,7 @@ import type { GhCheckState, GhLabel, GhReviewState, GhUser } from '@shared/types
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
 import { sanitizeHtml } from '../../lib/sanitize'
+import './GitHubView.css' // HtmlBody 의 .gh-body 스타일(GitHubView 밖에서도 쓰이므로 여기서도 가져온다)
 
 type PrState = 'open' | 'closed' | 'merged' | 'draft'
 
