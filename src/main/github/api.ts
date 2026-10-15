@@ -312,31 +312,31 @@ async function fetchChecks(c: GitHubClient, r: Slug, sha: string, signal?: Abort
   return out
 }
 
-/** GitHub 검색 질의의 따옴표 값. 따옴표·역슬래시를 이스케이프해 다른 한정자가 끼어들지 못하게 한다 */
-function quoteSearch(v: string): string {
-  return `"${v.replace(/["\\]/g, '\\$&')}"`
-}
-
 /**
  * PR 목록. 라벨·담당자 필터가 없으면 pulls 엔드포인트(updated 내림차순, 브랜치·sha 포함)를 쓴다.
- * pulls 엔드포인트에는 라벨 필터가 없으므로 필터가 있으면 검색 API(`/search/issues`, is:pr)로 바꾼다.
- * 검색은 별도 한도(인증 30회/분)라 자주 호출하면 막힐 수 있고, 결과가 issue 모양이라 브랜치·sha 가 없어
- * 리뷰·체크 보강도 하지 않는다(요약만).
+ * pulls 엔드포인트에는 라벨 필터가 없으므로 필터가 있으면 issues 엔드포인트(labels·assignee 파라미터)에서
+ * pull_request 항목만 고른다. 검색 API 의 쿼리 언어를 쓰지 않으므로 라벨 이름에 든 따옴표 등으로
+ * 다른 한정자(repo:… 등)를 끼워 넣는 인젝션이 원천적으로 없다. 결과가 issue 모양이라 브랜치·sha 가 없어
+ * 리뷰·체크 보강은 하지 않는다(요약만). 필터된 페이지는 PR 이 아닌 항목을 빼서 짧을 수 있다(hasMore 는 Link 기준).
  * 로그인했다면 pulls 결과에만 리뷰·체크 요약을 동시 6개씩 보강한다(ETag 캐시로 재조회는 304).
  */
 export async function listPulls(c: GitHubClient, r: Slug, q: GhListQuery, signal?: AbortSignal): Promise<GhListResult<GhPullSummary>> {
   const page = q.page ?? 1
   const o = signal ? { signal } : {}
   if (q.label || q.assignee) {
-    const parts = [`repo:${r.owner}/${r.repo}`, 'is:pr']
-    if (q.state !== 'all') parts.push(`is:${q.state}`)
-    if (q.label) parts.push(`label:${quoteSearch(q.label)}`)
-    if (q.assignee) parts.push(q.assignee === 'none' ? 'no:assignee' : `assignee:${quoteSearch(q.assignee)}`)
-    const res = await c.get<{ items?: RawIssue[] }>('/search/issues', {
-      query: { q: parts.join(' '), per_page: PAGE_SIZE, page, sort: 'updated', order: 'desc' },
+    const res = await c.get<RawIssue[]>(`${repoPath(r)}/issues`, {
+      query: {
+        state: q.state,
+        ...(q.label ? { labels: q.label } : {}),
+        ...(q.assignee ? { assignee: q.assignee } : {}),
+        per_page: PAGE_SIZE,
+        page,
+        sort: 'updated',
+        direction: 'desc'
+      },
       ...o
     })
-    return { items: (res.data.items ?? []).map(mapSearchPull), hasMore: res.hasMore }
+    return { items: res.data.filter((i) => i.pull_request).map(mapSearchPull), hasMore: res.hasMore }
   }
 
   const res = await c.get<RawPull[]>(`${repoPath(r)}/pulls`, {

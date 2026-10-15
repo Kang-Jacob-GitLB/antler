@@ -47,6 +47,17 @@ describe('TokenStore', () => {
     expect(new TokenStore(dir, fakeSafe(false)).load()).toBeNull()
   })
 
+  it('키링 없는 Linux(basic_text)는 암호화가 "가능"해도 디스크에 두지 않는다', () => {
+    const safe = { ...fakeSafe(), getSelectedStorageBackend: () => 'basic_text' }
+    const linux = new TokenStore(dir, safe, 'linux')
+    expect(linux.storageUnavailable).toBe(true)
+    expect(linux.save('ghp_secret', 'pat')).toBe(false)
+    expect(readdirSync(dir)).toEqual([])
+    // 키링이 있는 Linux 와 다른 OS 는 저장한다
+    expect(new TokenStore(dir, { ...fakeSafe(), getSelectedStorageBackend: () => 'gnome_libsecret' }, 'linux').storageUnavailable).toBe(false)
+    expect(new TokenStore(dir, safe, 'win32').storageUnavailable).toBe(false)
+  })
+
   it('logout(clear)은 파일과 메모리를 지운다', () => {
     const store = new TokenStore(dir, fakeSafe())
     store.save('t', 'pat')

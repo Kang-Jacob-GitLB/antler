@@ -152,26 +152,27 @@ describe('listPulls', () => {
     expect(res.items[0]!.review).toBeUndefined()
   })
 
-  it('라벨 필터가 있으면 검색 API 를 쓰고 보강하지 않는다', async () => {
+  it('라벨·담당자 필터가 있으면 issues 엔드포인트 파라미터로 거르고 PR 만 남긴다(보강 없음)', async () => {
     const { fetch, calls } = fakeFetch(() =>
-      json({
-        items: [
-          { number: 7, title: 'S', state: 'closed', draft: false, user: user('a'), labels: [{ name: 'bug', color: 'f00' }], assignees: [], comments: 3, updated_at: '2026-01-02T00:00:00Z', created_at: '2026-01-01T00:00:00Z', html_url: 'u', pull_request: { merged_at: '2026-01-02T00:00:00Z' } }
-        ]
-      })
+      json([
+        { number: 7, title: 'S', state: 'closed', draft: false, user: user('a'), labels: [{ name: 'bug', color: 'f00' }], assignees: [], comments: 3, updated_at: '2026-01-02T00:00:00Z', created_at: '2026-01-01T00:00:00Z', html_url: 'u', pull_request: { merged_at: '2026-01-02T00:00:00Z' } },
+        { number: 8, title: '그냥 이슈', state: 'closed', user: user('a'), labels: [], assignees: [], comments: 0, updated_at: '2026-01-02T00:00:00Z', created_at: '2026-01-01T00:00:00Z', html_url: 'u' }
+      ])
     )
     const res = await listPulls(new GitHubClient(fetch, () => 'tok'), slug, { state: 'closed', label: 'good "first"', assignee: 'none', page: 3 })
     expect(calls).toHaveLength(1)
-    expect(path(calls[0]!)).toBe('/search/issues')
-    expect(query(calls[0]!)).toMatchObject({ per_page: '30', page: '3', sort: 'updated', order: 'desc' })
-    expect(query(calls[0]!)['q']).toBe('repo:octo/hello is:pr is:closed label:"good \\"first\\"" no:assignee')
+    expect(path(calls[0]!)).toBe('/repos/octo/hello/issues')
+    expect(query(calls[0]!)).toMatchObject({ state: 'closed', labels: 'good "first"', assignee: 'none', per_page: '30', page: '3', sort: 'updated', direction: 'desc' })
+    expect(res.items.map((i) => i.number)).toEqual([7])
     expect(res.items[0]).toMatchObject({ number: 7, state: 'merged', comments: 3, headSha: '' })
   })
 
-  it('담당자 필터는 따옴표로 감싸 다른 한정자가 끼어들지 못한다', async () => {
-    const { fetch, calls } = fakeFetch(() => json({ items: [] }))
-    await listPulls(new GitHubClient(fetch), slug, { state: 'all', assignee: 'bob label:secret' })
-    expect(query(calls[0]!)['q']).toBe('repo:octo/hello is:pr assignee:"bob label:secret"')
+  it('라벨 이름에 검색 한정자를 넣어도 쿼리 언어로 해석되지 않는다(검색 API 를 쓰지 않음)', async () => {
+    const { fetch, calls } = fakeFetch(() => json([]))
+    await listPulls(new GitHubClient(fetch), slug, { state: 'all', label: 'x" repo:other/repo' })
+    expect(path(calls[0]!)).toBe('/repos/octo/hello/issues')
+    expect(query(calls[0]!)['labels']).toBe('x" repo:other/repo')
+    expect(calls.some((c) => path(c) === '/search/issues')).toBe(false)
   })
 })
 

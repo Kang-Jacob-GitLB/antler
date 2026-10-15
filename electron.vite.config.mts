@@ -11,7 +11,7 @@ const CSP = [
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
   // 아바타·PR 본문 이미지(GitHub 사용자 콘텐츠 도메인)만 허용. 다른 외부 이미지는 막는다
-  "img-src 'self' data: https://*.githubusercontent.com",
+  "img-src 'self' data: https://avatars.githubusercontent.com https://camo.githubusercontent.com https://user-images.githubusercontent.com https://private-user-images.githubusercontent.com",
   "font-src 'self' data:",
   "worker-src 'self' blob:",
   "connect-src 'self'",

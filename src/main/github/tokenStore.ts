@@ -9,6 +9,8 @@ export interface SafeStorageLike {
   isEncryptionAvailable(): boolean
   encryptString(plain: string): Buffer
   decryptString(encrypted: Buffer): string
+  /** Linux 전용(Electron): 'basic_text' 면 하드코딩 키라 사실상 평문이다 */
+  getSelectedStorageBackend?(): string
 }
 
 export type TokenMethod = 'pat' | 'device'
@@ -29,7 +31,9 @@ export class TokenStore {
 
   constructor(
     private readonly dir: string,
-    private readonly safe: SafeStorageLike
+    private readonly safe: SafeStorageLike,
+    /** 테스트에서 바꿀 수 있게 주입한다 */
+    private readonly platform: NodeJS.Platform = process.platform
   ) {
     this.tokenPath = join(dir, TOKEN_FILE)
     this.metaPath = join(dir, META_FILE)
@@ -37,7 +41,10 @@ export class TokenStore {
 
   /** 지금 safeStorage 를 쓸 수 없어 토큰이 디스크에 남지 않는 상태인지(호출 시점에 평가) */
   get storageUnavailable(): boolean {
-    return !this.safe.isEncryptionAvailable()
+    if (!this.safe.isEncryptionAvailable()) return true
+    // 키링 없는 Linux 에서 Chromium 은 하드코딩 키(basic_text)로 "암호화"한다 — 디스크에 두면 평문과 같으므로
+    // 이때도 저장하지 않고 메모리에만 둔다(앱을 끄면 다시 로그인)
+    return this.platform === 'linux' && this.safe.getSelectedStorageBackend?.() === 'basic_text'
   }
 
   /** 저장된(또는 메모리의) 토큰. 없거나 복호화할 수 없으면 null */
