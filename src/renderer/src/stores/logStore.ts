@@ -3,6 +3,7 @@ import type { Commit } from '@shared/types'
 import { graphEngine } from '../graph/graphEngine'
 import { api, errorMessage, isAbort, isStale, newRequestId } from '../lib/api'
 import { useAppStore } from './appStore'
+import { useDetailStore } from './detailStore'
 
 /** 한 번에 가져오는 커밋 수. 보이는 영역 끝에서 PREFETCH 행 전에 다음 페이지를 요청한다. */
 export const PAGE_SIZE = 1000
@@ -131,6 +132,8 @@ export const useLogStore = create<LogState>((set, get) => ({
   },
 
   async reveal(hash) {
+    // 그래프에서 찾아가는 것이므로 diff 를 보고 있었다면 그래프로 돌아온다(숨겨진 목록을 스크롤하지 않게)
+    useDetailStore.getState().closeFile()
     const generation = get().generation
     // 더 나중에 요청된 reveal 이 있으면 이 루프는 물러난다(먼 커밋을 찾는 동안 다른 항목을 클릭한 경우)
     const token = ++revealToken

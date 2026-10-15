@@ -92,6 +92,8 @@ export function App(): React.JSX.Element | null {
         useAppStore.getState().setSwitcherOpen(true)
       } else if (key === 'f' && useAppStore.getState().activeRepoId) {
         e.preventDefault()
+        // 검색 바는 커밋 그래프 쪽에 있으므로 diff 를 보고 있었다면 닫고 연다
+        useDetailStore.getState().closeFile()
         useSearchStore.getState().show()
       }
     }

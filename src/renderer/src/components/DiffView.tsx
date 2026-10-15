@@ -20,8 +20,18 @@ interface Hl {
   lang: string
 }
 
+/**
+ * 이보다 긴 줄(번들·minified 파일 등)은 강조하지 않고 앞부분만 그린다.
+ * 수 MB 짜리 한 줄을 렌더 중에 동기로 강조하면 UI 가 몇 초씩 멈춘다.
+ */
+const LONG_LINE = 4000
+const TOOLTIP_MAX = 500
+
 /** 줄 HTML: 언어 강조 + 줄 안 바뀐 구간 <mark>. highlight.js 와 escapeHtml 모두 이스케이프한 결과만 넣는다 */
 function codeHtml(text: string, span: Span | undefined, hl: Hl | null): string {
+  if (text.length > LONG_LINE) {
+    return `${escapeHtml(text.slice(0, LONG_LINE))}<span class="diff-long">… (+${(text.length - LONG_LINE).toLocaleString()})</span>`
+  }
   const render = (s: string): string => (s ? (hl ? highlightLine(hl.hljs, hl.lang, s) : escapeHtml(s)) : '')
   if (!span || span[0] === span[1]) return render(text)
   return `${render(text.slice(0, span[0]))}<mark class="diff-emph">${render(text.slice(span[0], span[1]))}</mark>${render(text.slice(span[1]))}`
@@ -38,7 +48,13 @@ const Code = ({ line, span, hl, clip }: { line: DiffLine; span?: Span; hl: Hl | 
   ) : (
     <span
       className="diff-code"
-      title={clip && line.text.length > TOOLTIP_MIN ? line.text : undefined}
+      title={
+        clip && line.text.length > TOOLTIP_MIN
+          ? line.text.length > TOOLTIP_MAX
+            ? `${line.text.slice(0, TOOLTIP_MAX)}…`
+            : line.text
+          : undefined
+      }
       dangerouslySetInnerHTML={{ __html: codeHtml(line.text, span, hl) }}
     />
   )
@@ -96,8 +112,10 @@ function widestLine(diff: FileDiff): number {
   for (const h of diff.hunks) {
     for (const l of h.lines) {
       if (l.text.length * 2 <= max) continue
+      // 긴 줄은 앞 LONG_LINE 자만 그리므로 폭도 그만큼(+ 생략 표시)만 잡는다
+      const text = l.text.length > LONG_LINE ? l.text.slice(0, LONG_LINE + 16) : l.text
       let w = 0
-      for (const ch of l.text) w += ch === '\t' ? 4 : /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1
+      for (const ch of text) w += ch === '\t' ? 4 : /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/.test(ch) ? 2 : 1
       if (w > max) max = w
     }
   }
@@ -123,7 +141,7 @@ function useHighlighter(path: string | undefined, lines: number): Hl | null {
 
 export function DiffView(): React.JSX.Element | null {
   const t = useT()
-  const { file, diff, diffLoading, diffError, detail } = useDetailStore()
+  const { file, diff, diffLoading, diffError, detail, diffFull, fullError } = useDetailStore()
   const { closeFile, stepFile, openFile } = useDetailStore.getState()
   const mode = useAppStore((s) => s.config?.ui.diffMode ?? 'unified')
   const setUi = useAppStore((s) => s.setUi)
@@ -227,10 +245,21 @@ export function DiffView(): React.JSX.Element | null {
 
       {current?.truncated && (
         <footer className="diff-trunc">
-          <span>{t('diff.truncated', { shown: lineCount.toLocaleString(), total: current.totalLines.toLocaleString() })}</span>
-          <button className="btn" disabled={diffLoading} onClick={() => void openFile(file, true)}>
-            {diffLoading ? t('list.loading') : t('diff.loadFull')}
-          </button>
+          <span>
+            {t('diff.truncated', {
+              shown: lineCount.toLocaleString(),
+              total: `${current.totalLines.toLocaleString()}${current.totalIsLowerBound ? '+' : ''}`
+            })}
+            {fullError && <span className="diff-trunc__err"> — {t('error.generic', { msg: fullError })}</span>}
+          </span>
+          {/* 전체 요청으로 받았는데도 잘렸으면 더 받을 수 없다(크기 상한) — 같은 요청을 반복하지 않는다 */}
+          {diffFull ? (
+            <span className="diff-trunc__max">{t('diff.tooLarge')}</span>
+          ) : (
+            <button className="btn" disabled={diffLoading} onClick={() => void openFile(file, true)}>
+              {diffLoading ? t('list.loading') : t('diff.loadFull')}
+            </button>
+          )}
         </footer>
       )}
     </section>

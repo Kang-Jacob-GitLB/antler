@@ -89,6 +89,8 @@ function FileList({ detail }: { detail: CommitDetail }): React.JSX.Element {
   }, [detail.hash])
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
+    // 수정 키 조합(Alt+↑↓ 등)은 앱 전역 단축키 몫이라 여기서 처리하지 않는다 — 두 번 이동하는 것을 막는다
+    if (e.altKey || e.ctrlKey || e.metaKey) return
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
     e.preventDefault()
     const i = active ? detail.files.indexOf(active) : -1

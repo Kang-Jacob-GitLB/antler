@@ -12,6 +12,8 @@ export interface DiffParseOpts {
   maxBytes?: number
   /** 상한 이후 줄 수를 세는 한계(기본 20만). 넘으면 더 읽지 않는다 */
   countLimit?: number
+  /** 상한 이후 줄을 세며 읽는 바이트 한계(기본 64MB). 넘으면 더 읽지 않는다 */
+  countBytes?: number
 }
 
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/
@@ -30,19 +32,28 @@ const META_PREFIXES = [
   'copy to '
 ]
 
+/** 상한 이후 줄을 세느라 읽는 바이트의 한계. 넘으면 더 읽지 않고 줄 수는 하한값이 된다 */
+export const DEFAULT_COUNT_BYTES = 64 * 1024 * 1024
+
 /** 상한 이후의 줄을 객체 없이 바이트로만 센다. '@' 로 시작하는 줄은 hunk 헤더라 diff 줄에서 뺀다 */
 class LineCounter {
   lines = 0
   headers = 0
+  private bytes = 0
   private atStart = true
 
-  constructor(private readonly limit: number) {}
+  constructor(
+    private readonly limit: number,
+    private readonly byteLimit: number
+  ) {}
 
+  /** 줄 수나 읽은 바이트가 한계에 닿았다 — 이후 줄 수는 하한값이다 */
   get exhausted(): boolean {
-    return this.lines >= this.limit
+    return this.lines >= this.limit || this.bytes >= this.byteLimit
   }
 
   feed(buf: Buffer): void {
+    this.bytes += buf.length
     let i = 0
     while (i < buf.length && !this.exhausted) {
       if (this.atStart) {
@@ -72,9 +83,6 @@ export class DiffParser {
   private pendingLen = 0
   private bytes = 0
   private counting = false
-  private overflow = false
-  private ended = false
-  private seenDiffHeader = false
 
   private binary = false
   private readonly meta: string[] = []
@@ -92,7 +100,7 @@ export class DiffParser {
   ) {
     this.maxLines = opts.maxLines ?? DEFAULT_MAX_DIFF_LINES
     this.maxBytes = opts.maxBytes ?? Infinity
-    this.counter = new LineCounter(opts.countLimit ?? DEFAULT_COUNT_LIMIT)
+    this.counter = new LineCounter(opts.countLimit ?? DEFAULT_COUNT_LIMIT, opts.countBytes ?? DEFAULT_COUNT_BYTES)
   }
 
   /** @returns 더 읽어야 하면 true */
@@ -119,7 +127,6 @@ export class DiffParser {
     }
     // 입력이 너무 크면(줄 하나가 거대한 경우 포함) 여기까지만 담는다
     if (this.bytes > this.maxBytes || this.pendingLen > this.maxBytes) {
-      this.overflow = true
       this.startCounting(Buffer.alloc(0), this.pendingLen > 0)
     }
     return !this.counter.exhausted
@@ -134,7 +141,8 @@ export class DiffParser {
       this.feedLine(line)
     }
     const counted = this.counter.lines
-    const truncated = this.overflow || counted > 0 || this.counter.headers > 0
+    // 상한에 걸렸어도 실제로 남은 줄이 없으면(입력이 상한 직후 끝남) 잘린 것이 아니다
+    const truncated = counted > 0 || this.counter.headers > 0
     return {
       path: this.path,
       ...(this.oldPath !== undefined ? { oldPath: this.oldPath } : {}),
@@ -142,6 +150,7 @@ export class DiffParser {
       hunks: this.hunks,
       truncated,
       totalLines: this.parsedLines + counted,
+      ...(truncated && this.counter.exhausted ? { totalIsLowerBound: true } : {}),
       meta: this.meta
     }
   }
@@ -169,7 +178,6 @@ export class DiffParser {
   }
 
   private feedLine(raw: string): void {
-    if (this.ended) return
     if (!this.inHunks) {
       if (raw.startsWith('@@')) {
         this.inHunks = true
@@ -195,9 +203,12 @@ export class DiffParser {
       this.hunks.push(this.hunk)
       return
     }
-    // 내용 줄은 항상 접두 문자(' ', '+', '-', '\\')가 있으므로 "diff " 로 시작하면 다음 파일 섹션이다
+    // 내용 줄은 항상 접두 문자(' ', '+', '-', '\\')가 있으므로 "diff " 로 시작하면 다음 섹션이다.
+    // 같은 경로의 종류 변경(파일↔심볼릭 링크·서브모듈)은 git 이 삭제 + 생성 두 섹션으로 나눠 내보내므로
+    // 끝내지 않고 새 섹션의 헤더부터 다시 읽는다(경로 필터로 요청한 파일만 나온다)
     if (raw.startsWith('diff ')) {
-      this.ended = true
+      this.inHunks = false
+      this.hunk = null
       return
     }
     const hunk = this.hunk
@@ -215,12 +226,7 @@ export class DiffParser {
   }
 
   private feedHeader(raw: string): void {
-    if (raw.startsWith('diff ')) {
-      // 두 번째 파일 섹션이 나오면 무시한다(경로 필터로 한 파일만 요청하므로 정상 흐름이 아니다)
-      if (this.seenDiffHeader) this.ended = true
-      this.seenDiffHeader = true
-      return
-    }
+    if (raw.startsWith('diff ')) return
     if (raw.startsWith('Binary files ') || raw.startsWith('GIT binary patch')) {
       this.binary = true
       return

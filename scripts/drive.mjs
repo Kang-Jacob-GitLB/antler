@@ -22,6 +22,8 @@ const outDir = resolve(opt('out', join(tmpdir(), 'antler-shots')))
 const theme = opt('theme', 'dark')
 const locale = opt('locale', 'ko')
 const searchQuery = opt('search', 'Merge branch')
+// 실험용: 이 CSS 를 페이지에 주입한 상태로 측정한다(예: --inject-css '* { box-shadow: none !important }')
+const injectCss = opt('inject-css', '')
 const repos = args.map((p) => resolve(p))
 mkdirSync(outDir, { recursive: true })
 
@@ -53,6 +55,7 @@ const shot = async (name) => {
 
 try {
   await page.setViewportSize({ width: 1440, height: 860 }).catch(() => {})
+  if (injectCss) await page.addStyleTag({ content: injectCss })
   if (!repos.length) {
     await page.waitForSelector('.empty-state', { timeout: 15_000 })
     console.log(`cold start → empty state: ${Date.now() - t0} ms`)

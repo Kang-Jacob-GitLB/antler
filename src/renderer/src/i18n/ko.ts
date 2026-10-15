@@ -68,6 +68,7 @@ export const ko = {
   'diff.noContent': '내용 변경 없음(모드·이름만 바뀜)',
   'diff.truncated': '전체 {total}줄 중 {shown}줄만 표시했습니다',
   'diff.loadFull': '전체 불러오기',
+  'diff.tooLarge': '파일이 너무 커서 더 불러올 수 없습니다',
   'empty.title': '갈래를 펼칠 저장소가 아직 없습니다',
   'empty.body': 'Windows · WSL · SSH 의 git 저장소를 한 화면에서 살펴보세요.',
   'empty.cta': '로컬 저장소 추가',

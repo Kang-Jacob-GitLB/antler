@@ -241,6 +241,8 @@ export interface FileDiff {
   truncated: boolean
   /** 전체 diff 줄 수(잘렸을 때 안내용, 모르면 담긴 줄 수) */
   totalLines: number
+  /** 세기 한계에 걸려 totalLines 가 하한값인지("N+ 줄") */
+  totalIsLowerBound?: boolean
   /** 모드 변경 등 내용 외 변경 안내("new file mode 100755" 등) */
   meta: string[]
 }

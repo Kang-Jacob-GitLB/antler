@@ -1,3 +1,15 @@
+/* 긴 줄 생략 표시, 잘린 diff 안내 */
+.diff-long {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.diff-trunc__err {
+  color: var(--removed-text);
+}
+.diff-trunc__max {
+  color: var(--text-muted);
+}
+
 .diff-view {
   display: flex;
   flex-direction: column;

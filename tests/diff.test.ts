@@ -105,10 +105,49 @@ describe('parseDiff', () => {
     expect(d.hunks[0]!.lines[1]!.text).toBe('안녕하세요 🙂')
   })
 
-  it('두 번째 파일 섹션은 무시한다', () => {
-    const d = parseDiff(buf('diff --git a/a b/a\n@@ -1 +1 @@\n-1\n+2\ndiff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-x\n+y\n'), 'a')
-    expect(d.hunks).toHaveLength(1)
+  it('종류 변경(파일→심볼릭 링크)은 삭제·생성 두 섹션을 모두 담는다', () => {
+    // git 은 같은 경로의 종류 변경을 deleted file + new file 두 섹션으로 나눠 내보낸다(diff.c run_diff)
+    const text = [
+      'diff --git a/a b/a',
+      'deleted file mode 100644',
+      'index 1111111..0000000',
+      '--- a/a',
+      '+++ /dev/null',
+      '@@ -1,2 +0,0 @@',
+      '-line 1',
+      '-line 2',
+      'diff --git a/a b/a',
+      'new file mode 120000',
+      'index 0000000..2222222',
+      '--- /dev/null',
+      '+++ b/a',
+      '@@ -0,0 +1 @@',
+      '+target/path',
+      '\\ No newline at end of file',
+      ''
+    ].join('\n')
+    const d = parseDiff(buf(text), 'a')
+    expect(d.hunks).toHaveLength(2)
+    expect(d.hunks[0]!.lines.map((l) => l.t)).toEqual(['-', '-'])
+    expect(d.hunks[1]!.lines.map((l) => l.t)).toEqual(['+', '\\'])
+    expect(d.meta).toEqual(['deleted file mode 100644', 'new file mode 120000'])
+    expect(d.truncated).toBe(false)
+  })
+
+  it('입력 상한 직후에 끝나 남은 줄이 없으면 잘린 것으로 보지 않는다', () => {
+    const text = '@@ -0,0 +1,2 @@\n+a\n+b\n'
+    const d = parseDiff(buf(text), 'x', undefined, { maxBytes: text.length - 1 })
+    expect(d.truncated).toBe(false)
     expect(d.totalLines).toBe(2)
+  })
+
+  it('세기 한계에 걸리면 totalIsLowerBound', () => {
+    const n = 50
+    const text = '@@ -0,0 +1,' + n + ' @@\n' + Array.from({ length: n }, (_, i) => `+${i}`).join('\n') + '\n'
+    const d = parseDiff(buf(text), 'x', undefined, { maxLines: 5, countLimit: 10 })
+    expect(d.truncated).toBe(true)
+    expect(d.totalIsLowerBound).toBe(true)
+    expect(parseDiff(buf(text), 'x', undefined, { maxLines: 5 }).totalIsLowerBound).toBeUndefined()
   })
 
   it('개행 없이 끝난 마지막 줄도 담는다', () => {

@@ -70,6 +70,7 @@ export const en: Messages = {
   'diff.noContent': 'No content changes (mode or name only)',
   'diff.truncated': 'Showing {shown} of {total} lines',
   'diff.loadFull': 'Load all',
+  'diff.tooLarge': 'Too large to load further',
   'empty.title': 'No repositories to branch out from yet',
   'empty.body': 'Browse git repositories from Windows, WSL and SSH in one place.',
   'empty.cta': 'Add local repository',

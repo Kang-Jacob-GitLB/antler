@@ -27,8 +27,9 @@ const CONCURRENCY: Record<SourceKind, number> = { local: 6, wsl: 4, ssh: 4 }
  */
 const CURSOR_IDLE_MS = 5_000
 const CURSOR_SWEEP_MS = 2_500
-/** 커밋 상세 캐시 항목 수 */
+/** 커밋 상세 캐시 항목 수와 총 크기(추정 바이트). 파일이 수천 개인 merge 가 많아도 메모리가 묶이도록 둘 다 건다 */
 const COMMIT_CACHE_ENTRIES = 300
+const COMMIT_CACHE_BYTES = 24 * 1024 * 1024
 /** diff 캐시 총 크기(추정 바이트) */
 const DIFF_CACHE_BYTES = 32 * 1024 * 1024
 const DIFF_CACHE_ENTRIES = 500
@@ -48,6 +49,13 @@ export function estimateDiffBytes(d: FileDiff): number {
     n += 96 + h.header.length * 2
     for (const l of h.lines) n += 48 + l.text.length * 2
   }
+  return n
+}
+
+/** 커밋 상세가 차지하는 메모리 추정치(바이트) */
+export function estimateCommitBytes(d: CommitDetail): number {
+  let n = 512 + (d.subject.length + d.body.length + d.authorName.length + d.committerName.length) * 2
+  for (const f of d.files) n += 96 + (f.path.length + (f.oldPath?.length ?? 0)) * 2
   return n
 }
 
@@ -76,7 +84,7 @@ export class RepoService {
   /** 닫힌 커서의 마지막 위치. 다음 페이지가 이어지는지 검증하는 데 쓴다 */
   private readonly anchors = new Map<string, { position: number; hash: string }>()
   /** 커밋 해시 기준이라 불변이다 — 무효화하지 않는다 */
-  private readonly commitCache = new LruCache<string, CommitDetail>(COMMIT_CACHE_ENTRIES)
+  private readonly commitCache = new LruCache<string, CommitDetail>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
   private readonly diffCache = new LruCache<string, FileDiff>(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES)
   private readonly inflight = new Map<string, Inflight<unknown>>()
   private readonly sweeper = setInterval(() => this.sweepIdleCursors(), CURSOR_SWEEP_MS)
@@ -117,7 +125,7 @@ export class RepoService {
     if (cached) return Promise.resolve(cached)
     return this.shared(key, requestId, async (signal) => {
       const detail = await rt.queue.run(() => git.commitDetail(rt.exec, repo.path, hash, { signal }), { signal })
-      this.commitCache.set(key, detail)
+      this.commitCache.set(key, detail, estimateCommitBytes(detail))
       return detail
     })
   }
