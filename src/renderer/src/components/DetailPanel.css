@@ -268,3 +268,56 @@
 .status-icon--renamed {
   color: var(--renamed);
 }
+
+/* ── 작업 트리(WIP) 패널 ── */
+.wip-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.wip-meta__conflict {
+  padding: 0 7px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--removed) 22%, var(--bg-elevated));
+  color: var(--removed-text);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+.wip-meta__note {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+/* 영역 제목 줄(스테이지 안 된 파일 / 스테이지된 파일) */
+.wip-head {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  padding: 0 var(--space-2) 6px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.wip-note {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+/* 추적 안 됨 같은 파일 행 표지 */
+.file-row__tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 9px;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}

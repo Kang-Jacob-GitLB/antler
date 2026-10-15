@@ -11,7 +11,9 @@ import type {
   Repo,
   SearchResult,
   Source,
-  SourceKind
+  SourceKind,
+  WipDiffRequest,
+  WipStatus
 } from '@shared/types'
 import { AbortError, type GitExecutor } from '../executors/GitExecutor'
 import { LocalExecutor } from '../executors/LocalExecutor'
@@ -21,6 +23,7 @@ import { WslExecutor } from '../executors/WslExecutor'
 import { wslFromUnc } from '../executors/wslPaths'
 import * as git from '../git/commands'
 import { LogCursor } from '../git/logCursor'
+import * as wip from '../git/wip'
 import { pickGithubRemote } from '../github/remoteUrl'
 import { LOCAL_SOURCE_ID, sourceFor, type ConfigStore } from './ConfigStore'
 import { LruCache } from './lru'
@@ -288,6 +291,25 @@ export class RepoService {
       this.diffCache.set(key, diff, estimateDiffBytes(diff))
       return diff
     })
+  }
+
+  /**
+   * 작업 트리 상태(WIP). 파일 저장만으로 바뀌므로 캐시하지 않고, 같은 저장소의 진행 중 요청은 하나로 합친다
+   * (shared 는 구독자가 모두 취소했을 때만 git 을 끊는다 — ProcessQueue 의 key 합치기는 signal 을 버려 쓰지 않는다).
+   */
+  wipStatus(repoId: string, requestId?: string): Promise<WipStatus> {
+    const { repo, rt } = this.resolve(repoId)
+    return this.shared(`wip\0${repoId}`, requestId, (signal) =>
+      rt.queue.run(() => wip.wipStatus(rt.exec, repo.path, { signal }), { signal })
+    )
+  }
+
+  /** 작업 트리 파일 하나의 diff. 파일이 계속 바뀔 수 있어 캐시하지 않는다 */
+  wipDiff(repoId: string, req: WipDiffRequest, requestId?: string): Promise<FileDiff> {
+    const { repo, rt } = this.resolve(repoId)
+    return this.withSignal(requestId, (signal) =>
+      rt.queue.run(() => wip.wipFileDiff(rt.exec, repo.path, req, signal ? { signal } : {}), signal ? { signal } : {})
+    )
   }
 
   /**

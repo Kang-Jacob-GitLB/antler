@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import type { CommitDetail, FileChange, FileDiff } from '@shared/types'
+import type { CommitDetail, FileChange, FileDiff, WipArea } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { useWipStore, wipEntries } from './wipStore'
 
 /** renderer 쪽 커밋 상세 캐시(커밋은 불변이라 해시만으로 충분하다). ↑↓ 로 오갈 때 즉시 보이게 한다 */
 const detailCache = new Map<string, CommitDetail>()
@@ -32,6 +33,8 @@ interface DetailState {
   error: string | null
   /** diff 를 보고 있는 파일(null 이면 중앙에 커밋 그래프) */
   file: FileChange | null
+  /** file 이 작업 트리(WIP) 변경이면 그 영역. null 이면 커밋의 파일 */
+  wipArea: WipArea | null
   diff: FileDiff | null
   diffLoading: boolean
   diffError: string | null
@@ -44,6 +47,8 @@ interface DetailState {
 
   load(repoId: string | null, hash: string | null): Promise<void>
   openFile(file: FileChange, full?: boolean): Promise<void>
+  /** 작업 트리(WIP) 파일의 diff 를 연다. area: 스테이지됨 · 스테이지 안 됨 · 추적 안 됨 */
+  openWipFile(file: FileChange, area: WipArea, full?: boolean): Promise<void>
   /** 목록에서 앞/뒤 파일로 */
   stepFile(dir: 1 | -1): void
   closeFile(): void
@@ -61,6 +66,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   loading: false,
   error: null,
   file: null,
+  wipArea: null,
   diff: null,
   diffLoading: false,
   diffError: null,
@@ -75,7 +81,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     cancel(s.pendingDetail)
     cancel(s.pendingDiff)
     // 다른 커밋으로 옮기면 열려 있던 diff 는 닫는다(그 커밋에 같은 파일이 없을 수 있다)
-    set({ repoId, hash, file: null, diff: null, diffLoading: false, diffError: null, diffFull: false, fullError: null, pendingDiff: null })
+    set({ repoId, hash, file: null, wipArea: null, diff: null, diffLoading: false, diffError: null, diffFull: false, fullError: null, pendingDiff: null })
     if (!repoId || !hash) {
       set({ detail: null, loading: false, error: null, pendingDetail: null })
       return
@@ -105,7 +111,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     cancel(pendingDiff)
     const requestId = newRequestId('diff')
     // "전체 불러오기"는 받는 동안 이미 보이던 부분 diff 를 그대로 둔다
-    set({ file, diffLoading: true, diffError: null, fullError: null, pendingDiff: requestId, ...(full ? {} : { diff: null, diffFull: false }) })
+    set({ file, wipArea: null, diffLoading: true, diffError: null, fullError: null, pendingDiff: requestId, ...(full ? {} : { diff: null, diffFull: false }) })
     try {
       const diff = await api.invoke(
         'git:fileDiff',
@@ -130,9 +136,40 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     }
   },
 
+  async openWipFile(file, area, full = false) {
+    const { repoId, pendingDiff } = get()
+    if (!repoId) return
+    cancel(pendingDiff)
+    const requestId = newRequestId('diff')
+    set({ file, wipArea: area, diffLoading: true, diffError: null, fullError: null, pendingDiff: requestId, ...(full ? {} : { diff: null, diffFull: false }) })
+    try {
+      const diff = await api.invoke(
+        'git:wipDiff',
+        repoId,
+        { area, path: file.path, ...(file.oldPath ? { oldPath: file.oldPath } : {}), full },
+        requestId
+      )
+      if (get().pendingDiff !== requestId) return
+      set({ diff, diffFull: full, diffLoading: false, pendingDiff: null })
+    } catch (err) {
+      if (get().pendingDiff !== requestId || isAbort(err)) return
+      if (full && get().diff) set({ diffLoading: false, fullError: errorMessage(err), pendingDiff: null })
+      else set({ diffLoading: false, diffError: errorMessage(err), pendingDiff: null })
+    }
+  },
+
   stepFile(dir) {
-    const { detail, file } = get()
-    if (!detail || !file) return
+    const { detail, file, wipArea } = get()
+    if (!file) return
+    if (wipArea) {
+      // WIP 는 패널에 보이는 순서(스테이지 안 됨 → 추적 안 됨 → 스테이지됨)로 넘긴다
+      const list = wipEntries(useWipStore.getState().status)
+      const i = list.findIndex((e) => e.area === wipArea && e.file.path === file.path)
+      const next = list[i + dir]
+      if (i >= 0 && next) void get().openWipFile(next.file, next.area)
+      return
+    }
+    if (!detail) return
     const i = detail.files.indexOf(file)
     const next = detail.files[i + dir]
     if (next) void get().openFile(next)
@@ -140,7 +177,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 
   closeFile() {
     cancel(get().pendingDiff)
-    set({ file: null, diff: null, diffLoading: false, diffError: null, diffFull: false, fullError: null, pendingDiff: null })
+    set({ file: null, wipArea: null, diff: null, diffLoading: false, diffError: null, diffFull: false, fullError: null, pendingDiff: null })
   },
 
   reset() {
@@ -153,6 +190,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       loading: false,
       error: null,
       file: null,
+      wipArea: null,
       diff: null,
       diffLoading: false,
       diffError: null,

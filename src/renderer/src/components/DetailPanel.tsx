@@ -1,16 +1,18 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { Commit, CommitDetail, FileChange } from '@shared/types'
+import type { Commit, CommitDetail } from '@shared/types'
 import { useT } from '../i18n'
 import { formatAbsolute, initials } from '../lib/format'
 import { fnv1a, LANE_COUNT, laneVar } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
 import { useLogStore } from '../stores/logStore'
-import { FileStatusIcon } from './FileStatusIcon'
-import { IconCopy } from './icons'
+import { useWipStore, wipDirty } from '../stores/wipStore'
+import { FileRow } from './FileRow'
+import { WipPanel } from './WipPanel'
 import { markdownToHtml } from '../lib/markdown'
 import { HtmlBody } from './github/GhBits'
+import { IconCopy } from './icons'
 import './DetailPanel.css'
 
 const FILE_ROW_H = 26
@@ -20,12 +22,6 @@ const CommitBody = memo(function CommitBody({ body }: { body: string }) {
   const html = useMemo(() => markdownToHtml(body), [body])
   return <HtmlBody html={html} className="detail__body" />
 })
-
-/** 경로를 (디렉터리, 파일 이름)으로 나눈다 */
-function splitPath(path: string): [dir: string, base: string] {
-  const i = path.lastIndexOf('/')
-  return i < 0 ? ['', path] : [path.slice(0, i + 1), path.slice(i + 1)]
-}
 
 /** +/- 비율 막대(GitKraken 의 변경량 표시) */
 function ChangeBar({ add, del }: { add: number; del: number }): React.JSX.Element {
@@ -41,43 +37,6 @@ function ChangeBar({ add, del }: { add: number; del: number }): React.JSX.Elemen
     </span>
   )
 }
-
-const FileRow = memo(function FileRow({
-  file,
-  active,
-  onOpen
-}: {
-  file: FileChange
-  active: boolean
-  onOpen(f: FileChange): void
-}) {
-  const t = useT()
-  const [dir, base] = splitPath(file.path)
-  return (
-    <div
-      role="button"
-      tabIndex={-1}
-      className={`file-row${active ? ' is-active' : ''}`}
-      title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
-      onClick={() => onOpen(file)}
-    >
-      <FileStatusIcon status={file.status} />
-      <span className="file-row__name">
-        <span className="file-row__base">{base}</span>
-        {dir && <span className="file-row__dir">{dir}</span>}
-        {file.oldPath && <span className="file-row__from">← {splitPath(file.oldPath)[1]}</span>}
-      </span>
-      {file.binary ? (
-        <span className="file-row__bin">{t('detail.binary')}</span>
-      ) : (
-        <span className="file-row__stat">
-          {!!file.additions && <span className="is-add">+{file.additions}</span>}
-          {!!file.deletions && <span className="is-del">−{file.deletions}</span>}
-        </span>
-      )}
-    </div>
-  )
-})
 
 function FileList({ detail }: { detail: CommitDetail }): React.JSX.Element {
   const t = useT()
@@ -147,8 +106,12 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
   const reveal = useLogStore((s) => s.reveal)
   const { detail, loading, error } = useDetailStore()
   const [copied, setCopied] = useState(false)
+  const wipSelected = useWipStore((s) => s.selected && wipDirty(s.status))
 
   useEffect(() => setCopied(false), [commit?.hash])
+
+  // 목록에서 WIP 행을 고르면 커밋 상세 대신 작업 트리 변경 패널을 보여 준다
+  if (wipSelected) return <WipPanel width={width} />
 
   if (!commit) {
     return (

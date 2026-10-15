@@ -27,7 +27,9 @@ import type {
   RefsSnapshot,
   Repo,
   SearchResult,
-  UiPrefs
+  UiPrefs,
+  WipDiffRequest,
+  WipStatus
 } from './types'
 
 export interface IpcContract {
@@ -83,6 +85,10 @@ export interface IpcContract {
   'git:commit': { args: [repoId: string, hash: string, requestId?: string]; result: CommitDetail }
   /** 파일 하나의 diff. 크기 상한을 넘으면 앞부분만 담고 truncated=true(req.full 로 전체) */
   'git:fileDiff': { args: [repoId: string, req: FileDiffRequest, requestId?: string]; result: FileDiff }
+  /** 작업 트리 상태(WIP): 스테이지됨·변경됨·추적 안 됨 파일. 읽기 전용이며 캐시하지 않는다 */
+  'git:wipStatus': { args: [repoId: string, requestId?: string]; result: WipStatus }
+  /** 작업 트리 파일 하나의 diff(스테이지/작업 트리/추적 안 됨). 결과 형식은 git:fileDiff 와 같다 */
+  'git:wipDiff': { args: [repoId: string, req: WipDiffRequest, requestId?: string]; result: FileDiff }
   /** 진행 중인 요청 취소 */
   'req:cancel': { args: [requestId: string]; result: void }
   /** 제목 표시줄 오버레이(Windows·Linux 창 컨트롤) 색을 현재 테마에 맞춘다. macOS 는 no-op */
@@ -134,6 +140,8 @@ export const IPC_CHANNELS = [
   'git:log',
   'git:commit',
   'git:fileDiff',
+  'git:wipStatus',
+  'git:wipDiff',
   'req:cancel',
   'win:setTitleBarTheme'
 ] as const satisfies readonly IpcChannel[]

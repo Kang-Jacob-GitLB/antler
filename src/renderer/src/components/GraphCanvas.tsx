@@ -51,13 +51,15 @@ interface Props {
   left: number
   width: number
   commits: Commit[]
+  /** 스크롤 영역 맨 위의 커밋 행이 아닌 줄(WIP 행)의 높이(px). 커밋 행은 이만큼 아래에서 시작한다 */
+  topOffset?: number
 }
 
 /**
  * 보이는 행만 그리는 Canvas 레인 그래프. 스크롤 컨테이너 안에 sticky 로 고정되어
  * 스크롤할 때마다 현재 화면 범위를 다시 그린다. 색은 --lane-N 토큰에서 읽는다.
  */
-export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props): React.JSX.Element {
+export function GraphCanvas({ scrollEl, rowHeight, left, width, commits, topOffset = 0 }: Props): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const palette = useRef<Palette | null>(null)
   const frame = useRef(0)
@@ -83,8 +85,8 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
     ctx.clearRect(0, 0, width, h)
 
     const top = scrollEl.scrollTop
-    const first = Math.max(0, Math.floor(top / rowHeight))
-    const last = Math.min(graphEngine.count - 1, Math.ceil((top + h) / rowHeight))
+    const first = Math.max(0, Math.floor((top - topOffset) / rowHeight))
+    const last = Math.min(graphEngine.count - 1, Math.ceil((top + h - topOffset) / rowHeight))
     const lw = laneWidth(graphEngine.maxWidth)
     // 레인 간격이 좁아지면 노드·선도 함께 줄인다
     const r = Math.min(NODE_R, lw / 2 - 0.5)
@@ -96,7 +98,7 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
     for (let i = first; i <= last; i++) {
       const row = graphEngine.row(i)
       if (!row) continue
-      const y0 = i * rowHeight - top
+      const y0 = topOffset + i * rowHeight - top
       const ym = y0 + rowHeight / 2
       const y1 = y0 + rowHeight
       const s = row.segs
@@ -128,7 +130,7 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
       const row = graphEngine.row(i)
       if (!row) continue
       const cx = x(row.lane)
-      const cy = i * rowHeight - top + rowHeight / 2
+      const cy = topOffset + i * rowHeight - top + rowHeight / 2
       const color = pal.lanes[row.color % LANE_COUNT]!
       ctx.beginPath()
       ctx.arc(cx, cy, r, 0, Math.PI * 2)
@@ -203,7 +205,7 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
   }, [])
 
   // 데이터·폭·커밋 목록 변화
-  useEffect(schedule, [version, width, commits])
+  useEffect(schedule, [version, width, commits, topOffset])
 
   return <canvas ref={canvasRef} className="graph-canvas" style={{ left }} aria-hidden="true" />
 }
