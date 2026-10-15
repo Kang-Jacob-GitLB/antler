@@ -13,6 +13,11 @@ app.setName('Antler')
 if (process.env['ANTLER_USER_DATA']) app.setPath('userData', process.env['ANTLER_USER_DATA'])
 if (process.platform === 'win32') app.setAppUserModelId('com.antler.app')
 
+// 하드웨어 가속은 기본으로 끈다. 이 앱은 Canvas 2D·텍스트 위주라 GPU 합성 이득이 없고, GPU 프로세스가
+// 메모리를 크게 쓴다(10만 커밋 저장소 실측: private 506MB → 280MB, 스크롤 p95 16.8ms → 13.4ms).
+// 드라이버 문제 등으로 비교가 필요하면 ANTLER_GPU=1 로 켤 수 있다.
+if (process.env['ANTLER_GPU'] !== '1') app.disableHardwareAcceleration()
+
 // 토큰 --bg-base 와 같은 값. 첫 페인트 전 흰 화면 깜빡임을 막는다.
 const BG = { dark: '#14110F', light: '#F6F1E7' }
 

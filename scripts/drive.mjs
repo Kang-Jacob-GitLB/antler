@@ -87,7 +87,9 @@ try {
     await shot(`empty-${theme}`)
   } else {
     await page.waitForSelector('.commit-subject', { timeout: 15_000 })
-    console.log(`cold start → first commit row: ${Date.now() - t0} ms`)
+    // 앱 기준 콜드 스타트: main 프로세스가 시작된 뒤 첫 커밋 행이 보일 때까지(Playwright 가 붙는 시간 제외)
+    const appUptime = Math.round((await app.evaluate(() => process.uptime())) * 1000)
+    console.log(`cold start → first commit row: ${Date.now() - t0} ms (app process uptime ${appUptime} ms)`)
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
   }
