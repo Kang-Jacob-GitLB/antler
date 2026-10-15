@@ -152,6 +152,14 @@ samp,
   font-variant-ligatures: none;
 }
 
+/* 비활성 버튼은 눈에 띄게 흐리게(눌러도 반응이 없는 이유가 보이도록) */
+.btn:disabled,
+.icon-btn:disabled,
+.seg__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* 눌린(토글 켜짐) 아이콘 버튼 — 팝오버가 열린 툴바 버튼 등 */
 .icon-btn[aria-pressed='true'] {
   background: var(--bg-elevated);

@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n'
+import { api } from '../../lib/api'
 import { useAppStore } from '../../stores/appStore'
 import { useGithubStore } from '../../stores/githubStore'
 import { Avatar } from './GhBits'
 import './GhAuthButton.css'
+
+/** OAuth App 등록 화면(Device Flow 용 client ID 를 만드는 곳) */
+const NEW_OAUTH_APP_URL = 'https://github.com/settings/applications/new'
 
 /** GitHub 마크(단색, currentColor) */
 const GhMark = ({ size = 16 }: { size?: number }): React.JSX.Element => (
@@ -25,12 +29,31 @@ export function GhAuthButton(): React.JSX.Element {
   const [pat, setPat] = useState('')
   const [busy, setBusy] = useState(false)
   const [cid, setCid] = useState(clientId)
+  // 고급(client ID) 접힘 상태. client ID 없이 '브라우저로 로그인'을 누르면 펼쳐서 안내한다
+  const [advOpen, setAdvOpen] = useState(false)
+  const [needCid, setNeedCid] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const cidRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     void refreshAuth()
   }, [refreshAuth])
   useEffect(() => setCid(clientId), [clientId])
+  useEffect(() => {
+    if (clientId) setNeedCid(false)
+  }, [clientId])
+
+  // client ID 가 없을 때 버튼을 비활성으로 두면 눌러도 반응이 없어 보인다 — 대신 설정 칸을 펼쳐 안내한다
+  const onDevice = (): void => {
+    if (clientId) {
+      void startDevice()
+      return
+    }
+    setNeedCid(true)
+    setAdvOpen(true)
+    requestAnimationFrame(() => cidRef.current?.focus())
+  }
+  const saveCid = (): void => void setUi({ githubClientId: cid.trim() || undefined })
 
   useEffect(() => {
     if (!open) return
@@ -136,21 +159,38 @@ export function GhAuthButton(): React.JSX.Element {
               </div>
               <div className="gh-auth__sub">{t('gh.auth.patHint')}</div>
               <div className="gh-auth__sep" />
-              <button className="btn btn--sm" disabled={!clientId || !!devicePending} onClick={() => void startDevice()} title={clientId ? '' : t('gh.auth.needClientId')}>
+              <button className="btn btn--sm" disabled={!!devicePending} aria-describedby={needCid ? 'gh-need-cid' : undefined} onClick={onDevice}>
                 {t('gh.auth.device')}
               </button>
-              <details className="gh-auth__adv">
+              {needCid && (
+                <div id="gh-need-cid" className="gh-auth__warn" role="status">
+                  {t('gh.auth.needClientId')}
+                </div>
+              )}
+              <details className="gh-auth__adv" open={advOpen} onToggle={(e) => setAdvOpen(e.currentTarget.open)}>
                 <summary>{t('gh.auth.advanced')}</summary>
                 <label className="gh-auth__label" htmlFor="gh-cid">
                   OAuth App client ID
                 </label>
                 <div className="gh-auth__row">
-                  <input id="gh-cid" className="gh-auth__input mono" value={cid} spellCheck={false} onChange={(e) => setCid(e.target.value)} />
-                  <button className="btn btn--sm" onClick={() => void setUi({ githubClientId: cid.trim() || undefined })}>
+                  <input
+                    id="gh-cid"
+                    ref={cidRef}
+                    className="gh-auth__input mono"
+                    value={cid}
+                    spellCheck={false}
+                    placeholder="Ov23li…"
+                    onChange={(e) => setCid(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && saveCid()}
+                  />
+                  <button className="btn btn--sm" onClick={saveCid}>
                     {t('repoMenu.save')}
                   </button>
                 </div>
                 <div className="gh-auth__sub">{t('gh.auth.clientIdHint')}</div>
+                <button className="btn btn--sm" onClick={() => void api.invoke('gh:openExternal', NEW_OAUTH_APP_URL)}>
+                  {t('gh.auth.createApp')}
+                </button>
               </details>
             </>
           )}
