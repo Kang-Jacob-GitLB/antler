@@ -33,6 +33,8 @@ beforeAll(() => {
   git(work, 'push', '-q', 'origin', 'main')
   git(work, 'switch', '-q', '-c', 'feature')
   localOnly = commitAs('Dev', 'dev+x@corp.io', 'local only')
+  // [진단] CI 차이 확인용 — 원인을 찾으면 지운다
+  console.log('[diag]', git(work, 'version'), '|', git(work, 'log', '--remotes', '--format=%H %ae'), '|', git(work, 'for-each-ref', '--format=%(refname)'))
   const config = new ConfigStore(join(mkdtempSync(join(root, 'cfg-')), 'antler.config.json'))
   repoId = config.addRepo({ sourceId: 'local', path: work, name: 'work' }).id
   svc = new RepoService(config)

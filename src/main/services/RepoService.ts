@@ -391,7 +391,10 @@ export class RepoService {
       () => rt.exec.run(repo.path, ['log', '--remotes', `--max-count=${limit}`, '--format=%H', '-F', '-i', `--author=<${email}>`], { signal }),
       { signal }
     )
-    if (r.code !== 0) return []
+    if (r.code !== 0) {
+      if (process.env['VITEST']) console.log('[diag] pushedShas', r.code, r.stderr) // [진단] 지울 것
+      return []
+    }
     return r.stdout
       .toString('utf8')
       .split('\n')
