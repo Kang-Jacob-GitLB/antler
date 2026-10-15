@@ -15,6 +15,9 @@ importers:
         specifier: ^1.17.0
         version: 1.17.0
     devDependencies:
+      '@fontsource/nanum-gothic-coding':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@resvg/resvg-js':
         specifier: ^2.6.2
         version: 2.6.2
@@ -204,6 +207,9 @@ packages:
     resolution: {integrity: sha512-dfZeox66AvdPtb2lD8OsIIQh12Tp0GNCRUDfBHIKGpbmopZto2/A8nSpYYLoedPIHpqkeblZ/k8OV0Gy7PYuyQ==}
     engines: {node: '>=14.14'}
     hasBin: true
+
+  '@fontsource/nanum-gothic-coding@5.3.0':
+    resolution: {integrity: sha512-1xUOE+ro+F1J5lYw+0WwMbhesK85JCjbAP3/rOGHB3DbZI2/s0dR4WHSuTcag1uJAfT8ozH9B50L88tMn4eFkw==}
 
   '@isaacs/fs-minipass@4.0.1':
     resolution: {integrity: sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w==}
@@ -2192,6 +2198,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
     optional: true
+
+  '@fontsource/nanum-gothic-coding@5.3.0': {}
 
   '@isaacs/fs-minipass@4.0.1':
     dependencies:

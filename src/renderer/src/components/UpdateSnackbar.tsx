@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useT } from '../i18n'
 import { api } from '../lib/api'
 import { useUpdateStore } from '../stores/updateStore'
@@ -8,7 +8,7 @@ import './UpdateSnackbar.css'
 const NOT_AVAILABLE_MS = 4000
 
 /**
- * 앱 업데이트 스낵바(화면 아래 가운데 떠 있는 평면 카드).
+ * 앱 업데이트 스낵바(화면 오른쪽 아래, 상태 표시줄 위에 떠 있는 평면 카드).
  * 바깥 role="status" 영역은 항상 마운트해 두어, 안의 문구가 바뀔 때 스크린 리더가 정중하게(polite) 읽는다.
  */
 export function UpdateSnackbar(): React.JSX.Element {
@@ -16,6 +16,25 @@ export function UpdateSnackbar(): React.JSX.Element {
   const state = useUpdateStore((x) => x.state)
   const hiddenKey = useUpdateStore((x) => x.hiddenKey)
   const manual = useUpdateStore((x) => x.manual)
+  const liveRef = useRef<HTMLDivElement>(null)
+
+  // 같은 오른쪽 아래에 뜨는 오류 토스트가 스낵바와 겹치지 않도록, 스낵바가 차지하는 높이를 CSS 변수로 알려 준다
+  useEffect(() => {
+    const el = liveRef.current
+    if (!el) return
+    const root = document.documentElement
+    const sync = (): void => {
+      const h = el.getBoundingClientRect().height
+      root.style.setProperty('--snack-stack', h > 0 ? `${Math.ceil(h) + 12}px` : '0px')
+    }
+    const ro = new ResizeObserver(sync)
+    ro.observe(el)
+    sync()
+    return () => {
+      ro.disconnect()
+      root.style.removeProperty('--snack-stack')
+    }
+  }, [])
 
   useEffect(() => useUpdateStore.getState().init(), [])
   // 수동 확인 결과 '최신 버전'은 잠깐만 보여 준다
@@ -113,28 +132,28 @@ export function UpdateSnackbar(): React.JSX.Element {
   }
 
   return (
-    <div className="update-live" role="status" aria-live="polite">
+    <div className="update-live" ref={liveRef} role="status" aria-live="polite">
       {visible && s && (
         <div className={`update-snack${s.status === 'error' ? ' is-error' : ''}`}>
-          <div className="update-snack__body">
+          <div className="update-snack__head">
             <p className="update-snack__msg">{msg}</p>
-            {progress !== null && (
-              <div
-                className="update-snack__bar"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={progress}
-                aria-label={t('update.downloading', { v, p: progress })}
-              >
-                <div className="update-snack__fill" style={{ width: `${progress}%` }} />
-              </div>
-            )}
-            {actions && <div className="update-snack__actions">{actions}</div>}
+            <button className="icon-btn update-snack__x" title={t('update.close')} aria-label={t('update.close')} onClick={hide}>
+              <IconClose size={14} />
+            </button>
           </div>
-          <button className="icon-btn update-snack__x" title={t('update.close')} aria-label={t('update.close')} onClick={hide}>
-            <IconClose size={14} />
-          </button>
+          {progress !== null && (
+            <div
+              className="update-snack__bar"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress}
+              aria-label={t('update.downloading', { v, p: progress })}
+            >
+              <div className="update-snack__fill" style={{ width: `${progress}%` }} />
+            </div>
+          )}
+          {actions && <div className="update-snack__actions">{actions}</div>}
         </div>
       )}
     </div>

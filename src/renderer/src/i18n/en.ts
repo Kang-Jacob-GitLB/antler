@@ -132,6 +132,7 @@ export const en: Messages = {
   'search.next': 'Next match',
   'search.close': 'Close',
   'toolbar.refresh': 'Refresh',
+  'status.bar': 'Status bar',
   'fetch.fetching': 'Fetching from remotes…',
   'fetch.last': 'Last fetch: {ago}',
   'fetch.never': 'Not fetched yet',

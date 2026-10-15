@@ -150,18 +150,21 @@ function Section({
   title,
   count,
   children,
-  extra
+  extra,
+  card
 }: {
   id: string
   title: string
   count?: number
   children: ReactNode
   extra?: ReactNode
+  /** 카드로 감싸 다른 섹션과 구분한다(저장소 목록) */
+  card?: boolean
 }): React.JSX.Element {
   const { isOpen, toggle } = useCollapse()
   const open = isOpen(`sec:${id}`)
   return (
-    <section className="side-section">
+    <section className={`side-section${card ? ' side-section--card' : ''}`}>
       <div className="side-section__head" role="button" tabIndex={0} onClick={() => toggle(`sec:${id}`)}>
         <IconChevronRight size={12} className={`side-chev${open ? ' is-open' : ''}`} />
         <span className="side-section__title">{title}</span>
@@ -337,6 +340,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
       <div className="sidebar__scroll">
         <Section
           id="repos"
+          card
           title={t('sidebar.repos')}
           count={config?.repos.length}
           extra={

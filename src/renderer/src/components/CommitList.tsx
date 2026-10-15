@@ -390,10 +390,6 @@ export function CommitList(): React.JSX.Element {
           })}
         </div>
       </div>
-
-      <footer className="commit-list__foot">
-        {t('list.count', { n: commits.length.toLocaleString(locale), more: hasMore ? '+' : '' })}
-      </footer>
     </section>
   )
 }

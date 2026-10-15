@@ -5,6 +5,7 @@
   height: var(--toolbar-h);
   padding: 0 var(--space-3);
   background: var(--toolbar-bg);
+  /* 이 1px 경계선 위치(맨 아래)는 OS 창 컨트롤 오버레이가 덮지 않게 오버레이 높이를 toolbar-h - 1 로 둔다(src/main/titleBar.ts) */
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   /* 툴바가 제목 표시줄: 빈 곳을 잡아 끌면 창이 움직인다. 상호작용 요소만 no-drag */
@@ -95,17 +96,6 @@ button.crumb:hover {
   align-items: center;
   gap: 2px;
 }
-/* base.css 의 .icon-btn(inline-grid)과 우선순위가 같으면 로드 순서에 따라 글자가 아이콘 아래로 떨어진다 */
-.icon-btn.icon-btn--text {
-  display: inline-flex;
-  align-items: center;
-  width: auto;
-  padding: 0 6px;
-  gap: 4px;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-}
-
 /* 그래프 ref 필터 표시 */
 .filter-chip {
   display: inline-flex;
@@ -153,15 +143,4 @@ button.crumb:hover {
   .icon-btn.is-spinning svg {
     animation-duration: 2.7s;
   }
-}
-/* fetch 실패·차단 표시 */
-.fetch-note {
-  max-width: 120px;
-  margin-right: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--removed);
 }

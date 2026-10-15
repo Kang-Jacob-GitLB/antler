@@ -1,5 +1,5 @@
 Antler 에 포함된 서드파티 소프트웨어의 라이선스 고지입니다.
-폰트 라이선스는 같은 폴더의 Pretendard-LICENSE.txt 를 보세요.
+폰트 라이선스는 같은 폴더의 Pretendard-LICENSE.txt, NanumGothicCoding-LICENSE.txt 를 보세요.
 
 ========================================================================
 react@19.3.1 — MIT
