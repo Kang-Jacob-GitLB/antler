@@ -15,8 +15,11 @@ let svc: RepoService
 let repoId: string
 
 const git = (cwd: string, ...a: string[]): string => execFileSync('git', ['-C', cwd, '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8' }).trim()
+// 작성자는 환경 변수로 준다 — CI 가 GIT_AUTHOR_* 를 설정해 두면 -c user.email 보다 그쪽이 이긴다
 const commitAs = (name: string, email: string, msg: string): string => {
-  execFileSync('git', ['-C', work, '-c', `user.name=${name}`, '-c', `user.email=${email}`, 'commit', '-q', '--allow-empty', '-m', msg])
+  execFileSync('git', ['-C', work, 'commit', '-q', '--allow-empty', '-m', msg], {
+    env: { ...process.env, GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email }
+  })
   return git(work, 'rev-parse', 'HEAD')
 }
 
@@ -33,8 +36,6 @@ beforeAll(() => {
   git(work, 'push', '-q', 'origin', 'main')
   git(work, 'switch', '-q', '-c', 'feature')
   localOnly = commitAs('Dev', 'dev+x@corp.io', 'local only')
-  // [진단] CI 차이 확인용 — 원인을 찾으면 지운다
-  console.log('[diag]', git(work, 'version'), '|', git(work, 'log', '--remotes', '--format=%H %ae'), '|', git(work, 'for-each-ref', '--format=%(refname)'))
   const config = new ConfigStore(join(mkdtempSync(join(root, 'cfg-')), 'antler.config.json'))
   repoId = config.addRepo({ sourceId: 'local', path: work, name: 'work' }).id
   svc = new RepoService(config)
