@@ -12,7 +12,7 @@ body,
 }
 
 body {
-  background: var(--bg-base);
+  background: var(--neu-bg);
   color: var(--text-primary);
   font-family: var(--font-ui);
   font-size: var(--fs-md);
@@ -79,17 +79,26 @@ input {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-raised-sm);
   color: var(--text-secondary);
   transition:
-    background var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease);
 }
 .icon-btn:hover {
-  background: var(--bg-elevated);
+  color: var(--accent-text);
+}
+.icon-btn:active,
+.icon-btn[aria-pressed='true'] {
+  box-shadow: var(--neu-pressed);
   color: var(--text-primary);
 }
-.icon-btn:active {
-  transform: translateY(0.5px);
+.icon-btn:focus-visible {
+  box-shadow: var(--neu-raised-sm), var(--focus-ring);
+}
+.icon-btn:disabled {
+  box-shadow: none;
 }
 
 .btn {
@@ -99,23 +108,39 @@ input {
   height: 30px;
   padding: 0 var(--space-3);
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong);
-  background: var(--bg-elevated);
+  border: 0;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-raised-sm);
   color: var(--text-primary);
   font-size: var(--fs-md);
-  transition: border-color var(--dur-fast) var(--ease);
+  transition:
+    box-shadow var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
 }
 .btn:hover {
-  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.btn:active {
+  box-shadow: var(--neu-pressed);
+}
+.btn:focus-visible {
+  box-shadow: var(--neu-raised-sm), var(--focus-ring);
 }
 .btn--primary {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--accent-contrast);
   font-weight: 600;
 }
 .btn--primary:hover {
+  color: var(--accent-contrast);
   filter: brightness(1.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn,
+  .btn {
+    transition: none;
+  }
 }
 
 /* 환경 배지 */

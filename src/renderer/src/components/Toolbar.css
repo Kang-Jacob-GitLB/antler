@@ -4,8 +4,8 @@
   gap: var(--space-3);
   height: var(--toolbar-h);
   padding: 0 var(--space-3);
+  padding-top: 2px;
   background: var(--toolbar-bg);
-  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -13,8 +13,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding-right: var(--space-3);
-  border-right: 1px solid var(--border);
+  padding-right: var(--space-2);
   height: 24px;
 }
 .toolbar__name {
@@ -43,10 +42,13 @@
   border-radius: var(--radius-md);
   min-width: 0;
   max-width: 320px;
-  transition: background var(--dur-fast) var(--ease);
+  transition: box-shadow var(--dur-fast) var(--ease);
 }
 button.crumb:hover {
-  background: var(--bg-elevated);
+  box-shadow: var(--neu-raised-sm);
+}
+button.crumb:active {
+  box-shadow: var(--neu-pressed);
 }
 .crumb__label {
   font-weight: 600;
@@ -74,7 +76,7 @@ button.crumb:hover {
 .toolbar__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
 }
 .icon-btn--text {
   display: inline-flex;
@@ -95,6 +97,7 @@ button.crumb:hover {
   padding: 0 8px;
   border-radius: 12px;
   background: var(--accent-soft);
+  box-shadow: var(--neu-inset-sm);
   color: var(--accent-text);
   font-size: var(--fs-sm);
   font-weight: 600;

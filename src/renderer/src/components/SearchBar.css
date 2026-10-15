@@ -5,7 +5,7 @@
   height: 38px;
   padding: 0 var(--space-2) 0 var(--space-3);
   border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  background: var(--neu-bg);
   flex-shrink: 0;
   animation: search-in var(--dur-med) var(--ease);
 }
@@ -16,14 +16,18 @@
 .search-bar__input {
   flex: 1;
   min-width: 0;
-  height: 100%;
-  padding: 0 var(--space-2);
+  height: 26px;
+  margin: 0 var(--space-1);
+  padding: 0 var(--space-3);
   border: 0;
+  border-radius: var(--radius-md);
   outline: none;
-  background: transparent;
+  background: var(--neu-bg);
+  box-shadow: var(--neu-inset-sm);
 }
 .search-bar__input:focus-visible {
-  box-shadow: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--neu-inset-sm), var(--focus-ring);
 }
 .search-bar__input::placeholder {
   color: var(--text-muted);
