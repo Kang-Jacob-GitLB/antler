@@ -12,6 +12,7 @@ import { useAppStore } from './stores/appStore'
 import { useDetailStore } from './stores/detailStore'
 import { useLogStore } from './stores/logStore'
 import { useSearchStore } from './stores/searchStore'
+import { refreshWip, useWipSync } from './stores/wipActions'
 import { useGithubStore } from './stores/githubStore'
 import { GitHubView } from './components/github/GitHubView'
 import './App.css'
@@ -43,8 +44,12 @@ export function App(): React.JSX.Element | null {
       if (repoId !== useAppStore.getState().activeRepoId) return
       void useAppStore.getState().refreshRefs()
       void useLogStore.getState().softReload()
+      refreshWip()
     })
   }, [])
+
+  // 작업 트리(WIP) 변경 상태: 저장소 선택·창 포커스·주기 폴링으로 최신으로 유지한다
+  useWipSync()
 
   // 저장된 패널 폭은 설정을 처음 받았을 때 한 번만 반영한다
   useEffect(() => {

@@ -8,9 +8,12 @@ import { branchKey, fnv1a, laneIndexFor, laneVar, LANE_COUNT } from '../lib/lane
 import { useAppStore } from '../stores/appStore'
 import { PREFETCH, useLogStore } from '../stores/logStore'
 import { useSearchStore } from '../stores/searchStore'
+import { selectWip } from '../stores/wipActions'
+import { useWipStore, wipDirty } from '../stores/wipStore'
 import { GraphCanvas, graphWidth, useGraphVersion } from './GraphCanvas'
 import { IconCloud, IconMonitor, IconTag } from './icons'
 import { SearchBar } from './SearchBar'
+import { WipGraph } from './WipGraph'
 import './CommitList.css'
 
 const ROW_H = 28
@@ -128,12 +131,68 @@ const Row = memo(function Row({
   )
 })
 
+/** 커밋 행 선택: WIP 선택을 풀고 그 커밋을 고른다 */
+function selectCommit(i: number): void {
+  selectWip(false)
+  useLogStore.getState().select(i)
+}
+
+/** 맨 위 "// WIP" 행 — 커밋하지 않은 작업 트리 변경(수정 ✎ n · 추가 + n). 그래프의 점선 노드는 WipGraph 가 그린다 */
+function WipRow({ selected }: { selected: boolean }): React.JSX.Element | null {
+  const t = useT()
+  const counts = useWipStore((s) => s.status?.counts)
+  const conflicted = useWipStore((s) => s.status?.conflicted ?? 0)
+  if (!counts) return null
+  const total = counts.staged + counts.unstaged + counts.untracked
+  return (
+    <div
+      className={`commit-row commit-row--wip${selected ? ' is-selected' : ''}`}
+      onMouseDown={() => selectWip(true)}
+      role="row"
+      aria-selected={selected}
+      title={t('wip.rowTitle', { n: total.toLocaleString() })}
+    >
+      <div className="cell cell--refs" />
+      <div className="cell cell--graph" />
+      <div className="cell cell--message">
+        <span className="wip-label">{t('wip.label')}</span>
+        {counts.modified > 0 && (
+          <span className="wip-badge wip-badge--mod" title={t('wip.badgeModified', { n: counts.modified.toLocaleString() })}>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M2 10l.6-2.6L8.2 1.8a1.1 1.1 0 0 1 1.6 0l.4.4a1.1 1.1 0 0 1 0 1.6L4.6 9.4 2 10z" />
+            </svg>
+            {counts.modified.toLocaleString()}
+          </span>
+        )}
+        {counts.added > 0 && (
+          <span className="wip-badge wip-badge--add" title={t('wip.badgeAdded', { n: counts.added.toLocaleString() })}>
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+              <path d="M6 2.5v7M2.5 6h7" />
+            </svg>
+            {counts.added.toLocaleString()}
+          </span>
+        )}
+        {conflicted > 0 && <span className="wip-badge wip-badge--conflict">{t('wip.conflicts', { n: conflicted })}</span>}
+      </div>
+      <div className="cell cell--author" />
+      <div className="cell cell--date" />
+      <div className="cell cell--sha" />
+    </div>
+  )
+}
+
 export function CommitList(): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
-  const { commits, hasMore, loading, error, selected, scrollRequest } = useLogStore()
-  const { loadMore, select } = useLogStore.getState()
+  const { commits, hasMore, loading, error, selected, scrollRequest, filter } = useLogStore()
+  const { loadMore } = useLogStore.getState()
   const search = useSearchStore()
+  // WIP 행: 변경이 있고 전체 그래프(ref 필터 없음)를 볼 때 맨 위에 둔다. 커밋 행은 그만큼 아래로 밀린다
+  const wipDirtyNow = useWipStore((s) => wipDirty(s.status))
+  const wipSelected = useWipStore((s) => s.selected)
+  const showWip = wipDirtyNow && !filter && commits.length > 0
+  const wipOff = showWip ? ROW_H : 0
+  const wipOn = showWip && wipSelected
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
   const headGraphRef = useRef<HTMLDivElement>(null)
   const [graphBox, setGraphBox] = useState({ left: 0, width: 0 })
@@ -144,7 +203,9 @@ export function CommitList(): React.JSX.Element {
     count: commits.length + (hasMore ? 1 : 0),
     getScrollElement: () => scrollEl,
     estimateSize: () => ROW_H,
-    overscan: 20
+    overscan: 20,
+    // WIP 행이 가상 목록 위에 흐름대로 놓여 있어 목록의 시작이 그만큼 아래다
+    scrollMargin: wipOff
   })
   const items = virtualizer.getVirtualItems()
   const lastIndex = items.at(-1)?.index ?? 0
@@ -156,6 +217,11 @@ export function CommitList(): React.JSX.Element {
   useEffect(() => {
     if (selected >= 0) virtualizer.scrollToIndex(selected, { align: 'auto' })
   }, [selected, virtualizer])
+
+  // WIP 행을 고르면 맨 위로(키보드로 올라온 경우 보이게)
+  useEffect(() => {
+    if (wipOn) scrollEl?.scrollTo({ top: 0 })
+  }, [wipOn, scrollEl])
 
   // 사이드바·검색에서 찾아간 커밋은 화면 가운데로
   useEffect(() => {
@@ -183,18 +249,21 @@ export function CommitList(): React.JSX.Element {
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     const page = Math.max(1, Math.floor((scrollEl?.clientHeight ?? ROW_H * 10) / ROW_H) - 1)
+    // WIP 행은 커밋 0번 바로 위(-1)에 있는 것처럼 움직인다
+    const at = wipOn ? -1 : selected
     const moves: Record<string, number> = {
-      ArrowDown: selected + 1,
-      ArrowUp: selected - 1,
-      PageDown: selected + page,
-      PageUp: selected - page,
+      ArrowDown: at + 1,
+      ArrowUp: at - 1,
+      PageDown: at + page,
+      PageUp: at - page,
       Home: 0,
       End: commits.length - 1
     }
     const next = moves[e.key]
     if (next === undefined) return
     e.preventDefault()
-    select(next)
+    if (showWip && next < 0 && (e.key === 'ArrowUp' || e.key === 'PageUp')) selectWip(true)
+    else selectCommit(next)
   }
 
   const showEmpty = !loading && !hasMore && commits.length === 0
@@ -218,15 +287,22 @@ export function CommitList(): React.JSX.Element {
         className="commit-list__scroll"
         tabIndex={0}
         role="grid"
-        aria-rowcount={commits.length}
+        aria-rowcount={commits.length + (showWip ? 1 : 0)}
         onKeyDown={onKeyDown}
       >
         <div className="graph-layer">
-          <GraphCanvas scrollEl={scrollEl} rowHeight={ROW_H} left={graphBox.left} width={graphBox.width} commits={commits} />
+          {/* WIP 점선 노드·연결선이 아래, 레인 그래프(커밋 노드)가 위 */}
+          {showWip && <WipGraph scrollEl={scrollEl} rowHeight={ROW_H} left={graphBox.left} width={graphBox.width} topOffset={wipOff} />}
+          <GraphCanvas scrollEl={scrollEl} rowHeight={ROW_H} left={graphBox.left} width={graphBox.width} commits={commits} topOffset={wipOff} />
         </div>
         {(error || showEmpty) && (
           <div className={`commit-list__notice${error ? ' is-error' : ''}`}>
             {error ? t('error.generic', { msg: error }) : t('list.noCommits')}
+          </div>
+        )}
+        {showWip && (
+          <div className="commit-list__wip" style={{ height: ROW_H }}>
+            <WipRow selected={wipOn} />
           </div>
         )}
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -236,16 +312,16 @@ export function CommitList(): React.JSX.Element {
               <div
                 key={vi.key}
                 className="commit-list__slot"
-                style={{ transform: `translateY(${vi.start}px)`, height: ROW_H }}
+                style={{ transform: `translateY(${vi.start - wipOff}px)`, height: ROW_H }}
               >
                 {commit ? (
                   <Row
                     commit={commit}
                     index={vi.index}
-                    selected={vi.index === selected}
+                    selected={!wipOn && vi.index === selected}
                     locale={locale}
                     mark={markOf(commit)}
-                    onSelect={select}
+                    onSelect={selectCommit}
                   />
                 ) : (
                   <div className="commit-row commit-row--loading">{t('list.loading')}</div>

@@ -447,3 +447,40 @@ export interface FileDiff {
   /** 모드 변경 등 내용 외 변경 안내("new file mode 100755" 등) */
   meta: string[]
 }
+
+// ── WIP: 작업 트리 변경 ──────────────────────────────────
+
+/** WIP 파일이 속한 영역: 스테이지됨 · 스테이지 안 됨(추적 중인 파일의 작업 트리 변경) · 추적 안 됨 */
+export type WipArea = 'staged' | 'unstaged' | 'untracked'
+
+/** 작업 트리 상태(`git status`). 읽기 전용 — 스테이지·커밋은 하지 않는다 */
+export interface WipStatus {
+  /** 인덱스(스테이지) 변경. additions/deletions 는 계산하지 않아 null 이다 */
+  staged: FileChange[]
+  /** 작업 트리 변경(충돌 파일 포함, status 'U') */
+  unstaged: FileChange[]
+  /** 추적 안 되는 파일 경로(상한까지만 담는다) */
+  untracked: string[]
+  /** 상한 때문에 목록에 담지 못한 추적 안 되는 파일 수 */
+  untrackedMore: number
+  /** 충돌(병합 미해결) 파일 수 — unstaged 에도 'U' 로 들어 있다 */
+  conflicted: number
+  counts: {
+    /** 기존 파일의 변경(수정·삭제·이름 변경 등). 스테이지/작업 트리를 합쳐 경로 기준으로 중복을 뺀다 */
+    modified: number
+    /** 새 파일(스테이지된 추가 + 추적 안 됨, 상한 밖 포함) */
+    added: number
+    staged: number
+    unstaged: number
+    untracked: number
+  }
+}
+
+export interface WipDiffRequest {
+  area: WipArea
+  path: string
+  /** 스테이지된 이름 변경의 원래 경로 */
+  oldPath?: string
+  /** true 면 크기 상한을 무시하고 전체를 불러온다 */
+  full?: boolean
+}

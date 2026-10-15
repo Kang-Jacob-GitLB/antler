@@ -7,6 +7,7 @@ import { escapeHtml, highlightLine, languageFor, loadHighlighter } from '../diff
 import { useT } from '../i18n'
 import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
+import { useWipStore, wipEntries } from '../stores/wipStore'
 import { FileStatusIcon } from './FileStatusIcon'
 import { IconChevronDown, IconClose } from './icons'
 import './DiffView.css'
@@ -218,14 +219,18 @@ export function DiffBody({ diff, loading = false, error = null, resetKey }: Diff
 
 export function DiffView(): React.JSX.Element | null {
   const t = useT()
-  const { file, diff, diffLoading, diffError, detail, diffFull, fullError } = useDetailStore()
-  const { closeFile, stepFile, openFile } = useDetailStore.getState()
+  const { file, wipArea, diff, diffLoading, diffError, detail, diffFull, fullError } = useDetailStore()
+  const { closeFile, stepFile, openFile, openWipFile } = useDetailStore.getState()
+  const wipStatus = useWipStore((s) => s.status)
 
   const current = diff && file && diff.path === file.path ? diff : null
   const lineCount = useMemo(() => current?.hunks.reduce((n, h) => n + h.lines.length, 0) ?? 0, [current])
 
-  if (!file || !detail) return null
-  const index = detail.files.indexOf(file)
+  if (!file || (!detail && !wipArea)) return null
+  // 작업 트리(WIP) 파일이면 패널에 보이는 순서의 목록에서, 커밋 파일이면 커밋의 파일 목록에서 위치를 센다
+  const wipList = wipArea ? wipEntries(wipStatus) : null
+  const total = wipList ? wipList.length : detail!.files.length
+  const index = wipList ? wipList.findIndex((e) => e.area === wipArea && e.file.path === file.path) : detail!.files.indexOf(file)
   const slash = file.path.lastIndexOf('/')
   const dir = slash < 0 ? '' : file.path.slice(0, slash + 1)
   const base = file.path.slice(slash + 1)
@@ -239,7 +244,8 @@ export function DiffView(): React.JSX.Element | null {
           <span className="diff-head__dir">{dir}</span>
           <span className="diff-head__base">{base}</span>
         </div>
-        {!file.binary && (
+        {wipArea && <span className="diff-head__area">{t(`wip.area.${wipArea}`)}</span>}
+        {!file.binary && !wipArea && (
           <span className="diff-head__stat">
             <span className="is-add">+{file.additions ?? 0}</span>
             <span className="is-del">−{file.deletions ?? 0}</span>
@@ -247,7 +253,7 @@ export function DiffView(): React.JSX.Element | null {
         )}
         <DiffModeToggle />
         <span className="diff-head__pos">
-          {index + 1} / {detail.files.length}
+          {index + 1} / {total}
         </span>
         <button className="icon-btn icon-btn--sm" title={`${t('diff.prevFile')} (Alt+↑)`} disabled={index <= 0} onClick={() => stepFile(-1)}>
           <IconChevronDown size={14} style={{ transform: 'rotate(180deg)' }} />
@@ -255,7 +261,7 @@ export function DiffView(): React.JSX.Element | null {
         <button
           className="icon-btn icon-btn--sm"
           title={`${t('diff.nextFile')} (Alt+↓)`}
-          disabled={index >= detail.files.length - 1}
+          disabled={index >= total - 1}
           onClick={() => stepFile(1)}
         >
           <IconChevronDown size={14} />
@@ -282,7 +288,7 @@ export function DiffView(): React.JSX.Element | null {
           {diffFull ? (
             <span className="diff-trunc__max">{t('diff.tooLarge')}</span>
           ) : (
-            <button className="btn" disabled={diffLoading} onClick={() => void openFile(file, true)}>
+            <button className="btn" disabled={diffLoading} onClick={() => void (wipArea ? openWipFile(file, wipArea, true) : openFile(file, true))}>
               {diffLoading ? t('list.loading') : t('diff.loadFull')}
             </button>
           )}

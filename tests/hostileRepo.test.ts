@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
 import { commitDetail, logArgs, refs, refsSignature } from '../src/main/git/commands'
+import { wipStatus } from '../src/main/git/wip'
 
 let root: string
 let repo: string
@@ -62,6 +63,9 @@ describe('악성 저장소 설정', () => {
     await exec.run(repo, logArgs(undefined, 0)).catch(() => {})
     await commitDetail(exec, repo, MISSING).catch(() => {})
     await exec.run(repo, ['cat-file', '-t', MISSING]).catch(() => {})
+    // 작업 트리 조회(WIP)도 같은 설정을 읽는다
+    await wipStatus(exec, repo).catch(() => {})
     expect(existsSync(marker)).toBe(false)
-  })
+    // git 프로세스를 여러 번 순차로 띄우므로 전체 테스트가 동시에 돌 때는 기본 5초를 넘길 수 있다
+  }, 30_000)
 })

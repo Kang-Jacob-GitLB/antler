@@ -137,6 +137,8 @@ export function registerIpc(config: ConfigStore, repos: RepoService, watcher: Re
   handle('git:search', (_e, repoId, query, ref, requestId) => repos.search(repoId, query, ref, requestId))
   handle('git:commit', (_e, repoId, hash, requestId) => repos.commit(repoId, hash, requestId))
   handle('git:fileDiff', (_e, repoId, req, requestId) => repos.fileDiff(repoId, req, requestId))
+  handle('git:wipStatus', (_e, repoId, requestId) => repos.wipStatus(repoId, requestId))
+  handle('git:wipDiff', (_e, repoId, req, requestId) => repos.wipDiff(repoId, req, requestId))
   registerGithubIpc(handle, gh, repos)
   handle('req:cancel', (_e, requestId) => {
     repos.cancel(requestId)

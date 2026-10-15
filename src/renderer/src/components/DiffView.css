@@ -59,6 +59,16 @@
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
+/* 작업 트리(WIP) diff 의 영역 표시 */
+.diff-head__area {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
 .diff-head__pos {
   font-size: var(--fs-xs);
   color: var(--text-muted);

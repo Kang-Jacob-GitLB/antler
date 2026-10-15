@@ -29,6 +29,8 @@ const injectCss = opt('inject-css', '')
 const externalCommit = args.includes('--external-commit') && args.splice(args.indexOf('--external-commit'), 1) && true
 // 지정 시 GitHub PR 목록·상세·파일 탭 시나리오를 돈다(첫 저장소의 origin 이 GitHub 공개 저장소일 때, 로그인 없이 읽기만)
 const githubScenario = args.includes('--github') && args.splice(args.indexOf('--github'), 1) && true
+// 지정 시 작업 트리(WIP) 행 시나리오를 돈다: 첫 저장소가 더럽혀져 있어야 한다(임시 저장소에만 쓸 것). wip-*.png 를 남긴다
+const wipScenario = args.includes('--wip') && args.splice(args.indexOf('--wip'), 1) && true
 // 실험용 Chromium·Electron 스위치(예: --electron-args "--disable-gpu-rasterization")
 const electronArgs = opt('electron-args', '').split(' ').filter(Boolean)
 // --idle-only: 첫 화면만 띄우고 조작 없이 N초 쉰 뒤 메모리를 잰다(유휴 메모리 측정)
@@ -95,6 +97,50 @@ try {
     console.log(`cold start → first commit row: ${Date.now() - t0} ms (app process uptime ${appUptime} ms)`)
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
+    if (wipScenario) {
+      // WIP 행 → 변경 패널 → 파일 diff(스테이지 안 됨 · 추적 안 됨 · 스테이지됨) → ↑↓ 키보드 이동
+      const wipRow = await page.waitForSelector('.commit-row--wip', { timeout: 10_000 }).catch(() => null)
+      console.log(`wip row visible: ${!!wipRow} — "${(await page.textContent('.commit-row--wip').catch(() => ''))?.trim()}"`)
+      if (wipRow) {
+        await shot(`wip-list-${theme}`)
+        await page.click('.commit-row--wip')
+        await page.waitForSelector('.wip-head', { timeout: 5_000 })
+        await page.waitForTimeout(300)
+        console.log(`wip panel: ${(await page.$$eval('.wip-head', (e) => e.map((x) => x.textContent?.trim()))).join(' | ')}; file rows: ${await page.$$eval('.detail .file-row', (e) => e.length)}; tags: ${await page.$$eval('.detail .file-row__tag', (e) => e.length)}`)
+        await shot(`wip-${theme}`)
+        // 변경 패널을 연 채로 가만히 둘 때 렌더러가 CPU 를 쓰지 않는지(렌더 루프 회귀 감지) — 첫 호출은 기준점
+        const cpu = () => app.evaluate(({ app }) => app.getAppMetrics().filter((m) => m.type === 'Tab').map((m) => m.cpu.percentCPUUsage))
+        await cpu()
+        await page.waitForTimeout(2000)
+        console.log(`wip panel idle renderer CPU %: ${(await cpu()).map((x) => x.toFixed(1)).join(', ')}`)
+        await page.click('.detail .file-row >> nth=0')
+        await page.waitForSelector('.diff-row', { timeout: 10_000 }).catch(() => {})
+        await page.waitForTimeout(400)
+        console.log(`wip diff: "${await page.textContent('.diff-head__base').catch(() => '')}" [${await page.textContent('.diff-head__area').catch(() => '')}] ${await page.textContent('.diff-head__pos').catch(() => '')}, rows ${await page.$$eval('.diff-row', (e) => e.length)}`)
+        await shot(`wip-diff-${theme}`)
+        // 추적 안 됨 파일 diff(전부 추가)
+        await page.keyboard.press('Escape')
+        await page.waitForSelector('.diff-view', { state: 'detached' })
+        await page.click('.detail .file-row:has(.file-row__tag) >> nth=0')
+        await page.waitForSelector('.diff-row, .diff-notice', { timeout: 10_000 })
+        await page.waitForTimeout(400)
+        console.log(`wip untracked diff: "${await page.textContent('.diff-head__base').catch(() => '')}" [${await page.textContent('.diff-head__area').catch(() => '')}] added rows ${await page.$$eval('.diff-row.is-add', (e) => e.length)}`)
+        await page.keyboard.press('Alt+ArrowDown')
+        await page.waitForTimeout(400)
+        console.log(`wip Alt+↓ → "${await page.textContent('.diff-head__base').catch(() => '')}" [${await page.textContent('.diff-head__area').catch(() => '')}] ${await page.textContent('.diff-head__pos').catch(() => '')}`)
+        await page.keyboard.press('Escape')
+        await page.waitForSelector('.diff-view', { state: 'detached' })
+        // 키보드: 목록에서 ↓ 로 첫 커밋, ↑ 로 다시 WIP
+        await page.click('.commit-list__scroll', { position: { x: 5, y: 200 } })
+        await page.keyboard.press('Home')
+        await page.keyboard.press('ArrowUp')
+        await page.waitForTimeout(200)
+        console.log(`wip ↑ from first commit → wip selected: ${await page.isVisible('.commit-row--wip.is-selected')}, panel: ${await page.isVisible('.wip-head')}`)
+        await page.keyboard.press('ArrowDown')
+        await page.waitForTimeout(300)
+        console.log(`wip ↓ → commit selected: ${await page.isVisible('.commit-row.is-selected:not(.commit-row--wip)')}, wip panel gone: ${!(await page.isVisible('.wip-head'))}`)
+      }
+    }
   }
   if (repos.length && idleOnly > 0) {
     // 유휴 측정: 첫 화면 그대로 두고 기다린 뒤 아래 메모리 측정으로 넘어간다

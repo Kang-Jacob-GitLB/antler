@@ -250,3 +250,36 @@
   font-size: 9.5px;
   font-weight: 700;
 }
+
+/* ── WIP 행(커밋하지 않은 작업 트리 변경) ── */
+.commit-list__wip {
+  position: relative;
+}
+.wip-label {
+  color: var(--text-muted);
+  font-style: italic;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.wip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.wip-badge--mod {
+  color: var(--modified-text);
+}
+.wip-badge--add {
+  color: var(--added-text);
+}
+.wip-badge--conflict {
+  color: var(--removed-text);
+}
