@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SourceKind, SshHostInfo } from '@shared/types'
 import { useT } from '../i18n'
 import { api, errorMessage } from '../lib/api'
@@ -31,9 +31,13 @@ export function AddRepoDialog(): React.JSX.Element | null {
     [config]
   )
 
+  // 열 때마다 세션을 바꾼다. 창을 닫았다 다시 열면 이전 세션의 테스트·추가 결과는 새 창에 반영하지 않는다
+  const session = useRef(0)
+
   // 열 때마다 초기화하고 WSL 배포판·SSH 호스트 목록을 불러온다
   useEffect(() => {
     if (!open) return
+    session.current++
     setPath('')
     setGroup('')
     setError(null)
@@ -68,25 +72,33 @@ export function AddRepoDialog(): React.JSX.Element | null {
   }
 
   const test = async (): Promise<void> => {
+    const s = session.current
     setBusy('test')
     setError(null)
     try {
-      setTested(await api.invoke('env:test', { kind, ...target }))
+      const version = await api.invoke('env:test', { kind, ...target })
+      if (s !== session.current) return
+      setTested(version)
     } catch (err) {
+      if (s !== session.current) return
       setTested(null)
       setError(errorMessage(err))
     } finally {
-      setBusy(null)
+      if (s === session.current) setBusy(null)
     }
   }
 
   const submit = async (): Promise<void> => {
     if (!canSubmit) return
+    const s = session.current
     setBusy('add')
     setError(null)
     try {
       await addRepo({ kind, ...target, path: path.trim(), ...(group.trim() ? { group: group.trim() } : {}) })
+      // 추가는 끝까지 반영하되(저장소 선택), 그사이 창을 다시 열었다면 새 창은 닫지 않는다
+      if (s === session.current) close()
     } catch (err) {
+      if (s !== session.current) return
       setError(errorMessage(err))
       setBusy(null)
     }

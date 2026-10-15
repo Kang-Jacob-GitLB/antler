@@ -40,7 +40,7 @@ export function App(): React.JSX.Element | null {
     return window.antler.on('repo:changed', ({ repoId }) => {
       if (repoId !== useAppStore.getState().activeRepoId) return
       void useAppStore.getState().refreshRefs()
-      useLogStore.getState().reload(true)
+      void useLogStore.getState().softReload()
     })
   }, [])
 

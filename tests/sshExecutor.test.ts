@@ -152,6 +152,24 @@ describe('SshExecutor (in-process ssh2 server)', { timeout: 30_000 }, () => {
     await ex.dispose()
   })
 
+  it('stream 을 중간에 그만두거나 취소해도 채널 슬롯이 새지 않는다(슬롯 수보다 많이 반복)', async () => {
+    const ex = executor()
+    // 기본 동시 채널 상한(6)보다 많이 중간 종료·취소를 반복한다 — 새면 이후 호출이 영영 기다린다
+    for (let i = 0; i < 10; i++) {
+      const ac = new AbortController()
+      const it = ex.stream(repo, ['cat-file', 'blob', 'HEAD:big.bin'], { signal: ac.signal })[Symbol.asyncIterator]()
+      await it.next()
+      if (i % 2) ac.abort()
+      await it.return?.().catch(() => {})
+    }
+    const r = await Promise.race([
+      ex.run(repo, ['rev-parse', 'HEAD']),
+      new Promise<never>((_, rej) => setTimeout(() => rej(new Error('슬롯이 새어 요청이 멈췄다')), 8_000))
+    ])
+    expect(r.code).toBe(0)
+    await ex.dispose()
+  })
+
   it('끊어진 연결은 다음 호출에서 지연 재연결한다', async () => {
     const ex = executor()
     await ex.run(repo, ['rev-parse', 'HEAD'])

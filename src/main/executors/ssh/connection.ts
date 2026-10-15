@@ -38,9 +38,12 @@ export interface ExecChannel {
   release(): void
 }
 
-/** 원격 프로세스에 KILL 을 요청하고 채널을 닫는다. 응답 없는 서버를 위해 잠시 뒤 강제 파기한다. */
+/**
+ * 원격 프로세스에 KILL 을 요청하고 채널을 닫는다.
+ * ssh2 는 읽기 쪽을 끝까지 소비해야 채널 'close' 를 내보낸다(utils.js onChannelClose). 소비자가 중간에 그만둔
+ * 채널은 버퍼에 남은 데이터 때문에 close 가 영영 오지 않아 채널 슬롯이 새므로, 남은 출력을 버리며 흘려보낸다.
+ */
 export function killChannel(ch: ClientChannel): void {
-  if (ch.destroyed) return
   try {
     ch.signal('KILL')
   } catch {
@@ -51,9 +54,10 @@ export function killChannel(ch: ClientChannel): void {
   } catch {
     // 이미 닫힌 채널
   }
-  setTimeout(() => {
-    if (!ch.destroyed) ch.destroy()
-  }, 1000).unref()
+  ch.removeAllListeners('data')
+  ch.stderr.removeAllListeners('data')
+  ch.resume()
+  ch.stderr.resume()
 }
 
 const DEFAULT_KEY_NAMES = ['id_ed25519', 'id_ecdsa', 'id_rsa']
@@ -160,6 +164,11 @@ export class SshConnection {
 
   private withAbort<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
     if (!signal) return p
+    // 슬롯을 얻은 뒤 연결 전 사이에 이미 취소됐으면 연결(최대 15초)을 기다리지 않는다
+    if (signal.aborted) {
+      p.catch(() => {})
+      return Promise.reject(new AbortError())
+    }
     return new Promise<T>((resolve, reject) => {
       const onAbort = (): void => reject(new AbortError())
       signal.addEventListener('abort', onAbort, { once: true })
@@ -367,7 +376,12 @@ export class SshConnection {
       )
     }
     const readyTimeout = this.opts.readyTimeout ?? 15_000
-    const algs = knownHostKeyAlgorithms(readKnownHosts(this.opts.knownHostsPath), node.hostName, node.port)
+    // UserKnownHostsFile·HostKeyAlias 를 따른다(지정이 없으면 기본 known_hosts 와 HostName)
+    const khFiles = node.knownHostsFiles ?? this.opts.knownHostsPath
+    // OpenSSH 는 HostKeyAlias 를 쓸 때 [이름]:포트 가 아니라 별칭 그대로 조회한다(포트를 붙이지 않음)
+    const khName = node.hostKeyAlias ?? node.hostName
+    const khPort = node.hostKeyAlias ? 22 : node.port
+    const algs = knownHostKeyAlgorithms(readKnownHosts(khFiles), khName, khPort)
     let verdict: string | undefined
 
     return new Promise<Client>((resolve, reject) => {
@@ -407,7 +421,7 @@ export class SshConnection {
         keepaliveCountMax: 3,
         ...(algs.length ? { algorithms: { serverHostKey: algs as ServerHostKeyAlgorithm[] } } : {}),
         hostVerifier: (key: Buffer): boolean => {
-          const r = verifyHostKey(this.opts.knownHostsPath, node.hostName, node.port, key)
+          const r = verifyHostKey(khFiles, khName, khPort, key)
           if (!r.ok) verdict = r.message
           return r.ok
         }

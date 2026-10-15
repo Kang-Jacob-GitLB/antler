@@ -9,6 +9,8 @@ const FOCUS_SLOWDOWN = 4
 const DEBOUNCE_MS = 400
 /** 이벤트가 몰려도 시그니처 확인(git 실행) 사이에 두는 최소 간격 */
 const MIN_CHECK_INTERVAL_MS = 2_000
+/** 시그니처 확인 제한 시간(멈춘 wsl.exe·SSH 가 감시를 붙잡지 않게) */
+const CHECK_TIMEOUT_MS = 20_000
 /** 로컬에서도 watcher 가 놓친 변화(네트워크 드라이브 등)를 잡는 안전망 폴링 */
 const LOCAL_SAFETY_POLL_MS = 60_000
 
@@ -27,7 +29,8 @@ export class RepoWatcher {
   private debounce: ReturnType<typeof setTimeout> | null = null
   private lastSig: string | null = null
   private focused = true
-  private checking = false
+  /** 확인이 진행 중인 세대(없으면 null) */
+  private checkingGen: number | null = null
   private lastCheck = 0
   private pendingSince = 0
 
@@ -122,18 +125,19 @@ export class RepoWatcher {
 
   private async check(gen: number): Promise<void> {
     const repoId = this.repoId
-    if (!repoId || gen !== this.generation || this.checking) return
-    this.checking = true
+    // 진행 중 표시는 세대별이다 — 이전 저장소의 확인이 멈춰 있어도 새 저장소 감시를 막지 않는다
+    if (!repoId || gen !== this.generation || this.checkingGen === gen) return
+    this.checkingGen = gen
     this.lastCheck = Date.now()
     try {
-      const sig = await this.repos.signature(repoId)
+      const sig = await this.repos.signature(repoId, AbortSignal.timeout(CHECK_TIMEOUT_MS))
       if (gen !== this.generation) return
       if (this.lastSig !== null && sig !== this.lastSig) this.onChange(repoId)
       this.lastSig = sig
     } catch {
-      // 일시적인 실패(SSH 끊김·잠금 경합)는 다음 주기에 다시 본다
+      // 일시적인 실패(SSH 끊김·시간 초과·잠금 경합)는 다음 주기에 다시 본다
     } finally {
-      this.checking = false
+      if (this.checkingGen === gen) this.checkingGen = null
     }
   }
 

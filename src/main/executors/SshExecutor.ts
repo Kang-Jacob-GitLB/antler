@@ -150,9 +150,11 @@ export class SshExecutor implements GitExecutor {
         throw new GitError(stderr.trim() || `git exited with ${code}`, code, stderr, args)
       }
     } finally {
-      // 소비자가 중간에 break 해도 원격 프로세스를 남기지 않는다
+      // 소비자가 중간에 break 해도 원격 프로세스를 남기지 않는다. 슬롯은 close 를 기다리지 않고 바로 돌려준다
+      // (닫히는 중인 채널이 잠시 하나 더 열려 있을 수 있지만, 슬롯이 새어 모든 요청이 멈추는 것보다 낫다)
       opts.signal?.removeEventListener('abort', onAbort)
       killChannel(channel)
+      release()
     }
   }
 

@@ -105,7 +105,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     // 실패는 대화상자 안에서 보여 주도록 그대로 던진다
     const repo: Repo = await api.invoke('repos:add', input)
     const config = await api.invoke('config:get')
-    set({ config, addOpen: false })
+    set({ config })
     get().selectRepo(repo.id)
   },
 

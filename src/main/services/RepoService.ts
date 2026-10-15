@@ -84,6 +84,8 @@ interface Runtime {
  */
 export class RepoService {
   private readonly runtimes = new Map<string, Runtime>()
+  /** 아직 저장하지 않은 원격 환경 런타임의 참조 횟수(holdRuntime/dropRuntime) */
+  private readonly transient = new Map<string, number>()
   private readonly requests = new Map<string, AbortController>()
   private readonly cursors = new Map<string, LogCursor>()
   /** 닫힌 커서의 마지막 위치. 다음 페이지가 이어지는지 검증하는 데 쓴다 */
@@ -117,19 +119,20 @@ export class RepoService {
     }
     if (!path) throw new Error('경로를 입력하세요')
     const source = sourceFor(kind, target)
-    const isNewSource = !this.config.source(source.id)
-    const rt = this.runtime(source)
+    // 처음 써 보는 원격 환경이 실패하면 연결을 남기지 않는다(성공하면 소스가 저장돼 계속 쓴다)
+    const rt = this.holdRuntime(source)
     try {
       const top = await rt.queue.run(() => git.resolveTopLevel(rt.exec, remoteRelative(kind, path)))
       // Windows git 은 C:/a/b 형식으로 돌려주므로 사용자가 고른 표기(역슬래시)로 맞춘다
       const normalized = kind === 'local' && process.platform === 'win32' ? top.replace(/\//g, '\\') : top
       const name = normalized.split(/[\\/]/).filter(Boolean).pop() ?? normalized
       const group = input.group?.trim()
-      return this.config.addRepo({ sourceId: source.id, path: normalized, name, ...(group ? { group } : {}) }, source)
-    } catch (err) {
-      // 처음 써 본 원격 환경이 실패했으면 열어 둔 연결을 남기지 않는다
-      if (isNewSource) void this.releaseRuntime(source.id)
-      throw err
+      const repo = this.config.addRepo({ sourceId: source.id, path: normalized, name, ...(group ? { group } : {}) }, source)
+      // 이미 등록된 저장소를 다시 추가하면서 그룹을 골랐으면 그 그룹으로 옮긴다(조용히 버리지 않는다)
+      if (group && repo.group !== group) this.config.updateRepo(repo.id, { group })
+      return this.config.repo(repo.id) ?? repo
+    } finally {
+      this.dropRuntime(source.id)
     }
   }
 
@@ -137,21 +140,49 @@ export class RepoService {
   async testEnv(input: Omit<AddRepoInput, 'path' | 'group'>): Promise<string> {
     const target = input.kind === 'wsl' ? input.distro : input.kind === 'ssh' ? input.sshHost?.trim() : undefined
     const source = sourceFor(input.kind, target)
-    const isNewSource = !this.config.source(source.id)
-    const rt = this.runtime(source)
+    const rt = this.holdRuntime(source)
+    const timeout = AbortSignal.timeout(ENV_TEST_TIMEOUT_MS)
     try {
-      const r = await rt.queue.run(() => rt.exec.run('.', ['--version'], { signal: AbortSignal.timeout(ENV_TEST_TIMEOUT_MS) }))
+      const r = await rt.queue.run(() => rt.exec.run('.', ['--version'], { signal: timeout }))
       if (r.code !== 0) throw new Error(r.stderr.trim() || `git 실행 실패(${r.code})`)
       return r.stdout.toString('utf8').trim()
+    } catch (err) {
+      // 시간 초과는 "취소"가 아니라 응답이 없었던 것이다 — 그대로 보여 준다
+      if (timeout.aborted && err instanceof AbortError) {
+        throw new Error(`${ENV_TEST_TIMEOUT_MS / 1000}초 안에 응답이 없습니다(네트워크·방화벽·WSL 상태를 확인하세요)`)
+      }
+      throw err
     } finally {
-      if (isNewSource) void this.releaseRuntime(source.id)
+      this.dropRuntime(source.id)
     }
   }
 
+  /**
+   * 아직 저장하지 않은 원격 환경(연결 테스트·추가 중)의 런타임을 잡아 둔다. 여러 요청이 동시에 같은 새 환경을 쓰면
+   * 먼저 끝난 쪽이 연결을 닫아 다른 쪽을 끊지 않도록 참조 횟수로 관리한다.
+   */
+  private holdRuntime(source: Source): Runtime {
+    this.transient.set(source.id, (this.transient.get(source.id) ?? 0) + 1)
+    return this.runtime(source)
+  }
+
+  /** 잡아 둔 런타임을 놓는다. 마지막 참조이고 그사이 저장되지도 않았으면 연결을 닫는다 */
+  private dropRuntime(sourceId: string): void {
+    const n = (this.transient.get(sourceId) ?? 1) - 1
+    if (n > 0) {
+      this.transient.set(sourceId, n)
+      return
+    }
+    this.transient.delete(sourceId)
+    if (sourceId !== LOCAL_SOURCE_ID && !this.config.source(sourceId)) void this.releaseRuntime(sourceId)
+  }
+
   /** 변경 감지용 시그니처: HEAD 와 모든 ref 가 가리키는 해시를 요약한 값 */
-  signature(repoId: string): Promise<string> {
+  signature(repoId: string, signal?: AbortSignal): Promise<string> {
     const { repo, rt } = this.resolve(repoId)
-    return rt.queue.run(() => git.refsSignature(rt.exec, repo.path), { key: `sig:${repoId}` })
+    // 시간 제한(signal)을 걸 수 있어야 멈춘 원격이 감시를 붙잡지 않는다. 취소 가능한 요청이라 중복 합치기는 하지 않는다
+    const opts = signal ? { signal } : {}
+    return rt.queue.run(() => git.refsSignature(rt.exec, repo.path, opts), opts)
   }
 
   /** 로컬 저장소의 .git 디렉터리들(워크트리는 git-dir 과 공통 디렉터리가 다르다). 원격 환경이면 null */

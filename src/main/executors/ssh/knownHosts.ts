@@ -111,12 +111,17 @@ export function fingerprint(key: Buffer): string {
   return `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`
 }
 
-export function readKnownHosts(path: string): string {
-  try {
-    return readFileSync(path, 'utf8')
-  } catch {
-    return ''
-  }
+/** 여러 파일(UserKnownHostsFile 은 여러 개일 수 있다)을 이어 읽는다. 없는 파일은 건너뛴다 */
+export function readKnownHosts(paths: string | string[]): string {
+  return (Array.isArray(paths) ? paths : [paths])
+    .map((p) => {
+      try {
+        return readFileSync(p, 'utf8')
+      } catch {
+        return ''
+      }
+    })
+    .join('\n')
 }
 
 export type VerifyResult = { ok: true } | { ok: false; message: string }
@@ -125,7 +130,7 @@ export type VerifyResult = { ok: true } | { ok: false; message: string }
  * 연결 시점마다 파일을 다시 읽어 검증한다(사용자가 ssh CLI 로 키를 수락한 직후 재시도하면 바로 반영되도록).
  * 메시지에는 공개 지문만 싣는다.
  */
-export function verifyHostKey(knownHostsPath: string, host: string, port: number, key: Buffer): VerifyResult {
+export function verifyHostKey(knownHostsPath: string | string[], host: string, port: number, key: Buffer): VerifyResult {
   const label = knownHostsName(host, port)
   const r = checkHostKey(readKnownHosts(knownHostsPath), host, port, key)
   switch (r.status) {

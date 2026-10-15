@@ -41,7 +41,19 @@ export function RepoMenu({ repo, groups, onClose, onGroup, onRemove }: Props): R
   }
 
   return (
-    <div ref={ref} className="repo-menu" role="dialog" onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+    <div
+      ref={ref}
+      className="repo-menu"
+      role="dialog"
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      // 메뉴 안의 키 입력(Enter 저장 등)이 사이드바 행으로 올라가 저장소를 전환하지 않게 막는다.
+      // React 의 stopPropagation 은 document 리스너까지 막으므로 Esc 는 여기서 직접 처리한다
+      onKeyDown={(e) => {
+        e.stopPropagation()
+        if (e.key === 'Escape') onClose()
+      }}
+    >
       <label className="repo-menu__label" htmlFor={`${listId}-input`}>
         {t('repoMenu.group')}
       </label>

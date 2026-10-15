@@ -180,6 +180,16 @@ Host bastion
   })
 })
 
+describe('UserKnownHostsFile · HostKeyAlias', () => {
+  it('지정한 known_hosts 파일들과 별칭을 돌려준다', () => {
+    const cfg = parse('Host box\n  HostName 10.0.0.5\n  UserKnownHostsFile ~/.ssh/kh1 ~/.ssh/kh2\n  HostKeyAlias box-key\n')
+    const r = resolveHost(cfg, 'box', { localUser: 'me' })
+    expect(r.knownHostsFiles?.map((f) => f.replace(/\\/g, '/'))).toEqual([`${HOME}/.ssh/kh1`, `${HOME}/.ssh/kh2`].map((f) => f.replace(/\\/g, '/')))
+    expect(r.hostKeyAlias).toBe('box-key')
+    expect(resolveHost(parse('Host x\n  UserKnownHostsFile none\n'), 'x', { localUser: 'me' }).knownHostsFiles).toBeUndefined()
+  })
+})
+
 describe('지원하지 않는 설정은 조용히 무시하지 않는다', () => {
   const r = (t: string, h: string) => resolveHost(parse(t), h, { localUser: 'me' })
 

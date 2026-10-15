@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseWslList } from '../src/main/executors/WslExecutor'
+import { parseWslList, WslExecutor } from '../src/main/executors/WslExecutor'
 import { isWslUnc, uncFromWsl, wslFromUnc } from '../src/main/executors/wslPaths'
 
 describe('parseWslList', () => {
@@ -26,6 +26,23 @@ describe('parseWslList', () => {
   it('공백이 든 이름을 보존한다', () => {
     expect(parseWslList(utf16('My Distro\r\n'))).toEqual(['My Distro'])
   })
+
+  it('WSL_UTF8=1 일 때의 UTF-8 출력도 받아들인다', () => {
+    expect(parseWslList(Buffer.from('Ubuntu-24.04\r\nDebian\r\n', 'utf8'))).toEqual(['Ubuntu-24.04', 'Debian'])
+  })
+})
+
+describe.runIf(process.platform === 'win32')('WslExecutor 실패 메시지', () => {
+  it('없는 배포판이면 wsl.exe 의 안내를 읽을 수 있는 오류로 돌려준다', async () => {
+    const ex = new WslExecutor('antler-no-such-distro')
+    const r = await ex.run('.', ['--version'])
+    expect(r.code).not.toBe(0)
+    expect(r.stderr).toMatch(/^WSL/)
+    expect(r.stderr).not.toMatch(/\0/)
+    await expect(async () => {
+      for await (const _ of ex.stream('.', ['--version'])) void _
+    }).rejects.toThrow(/^WSL/)
+  }, 30_000)
 })
 
 describe('wslFromUnc', () => {

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { _electron as electron } from 'playwright-core'
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 
 const APP_DIR = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
@@ -24,6 +25,8 @@ const locale = opt('locale', 'ko')
 const searchQuery = opt('search', 'Merge branch')
 // 실험용: 이 CSS 를 페이지에 주입한 상태로 측정한다(예: --inject-css '* { box-shadow: none !important }')
 const injectCss = opt('inject-css', '')
+// 지정 시 diff 를 연 상태에서 첫 저장소에 빈 커밋을 만들어 자동 반영을 확인한다(임시 저장소에만 쓸 것)
+const externalCommit = args.includes('--external-commit') && args.splice(args.indexOf('--external-commit'), 1) && true
 // 저장소 지정: 로컬 경로 또는 'wsl:<배포판>:<리눅스 경로>' / 'ssh:<호스트>:<경로>'
 const repos = args.map((p) => {
   const m = /^(wsl|ssh):([^:]+):(.+)$/.exec(p)
@@ -57,6 +60,11 @@ const app = await electron.launch({
   env: { ...process.env, ANTLER_USER_DATA: userData },
   timeout: 30_000
 })
+// ANTLER_DRIVE_DEBUG=1 이면 main 프로세스 출력을 함께 보여 준다
+if (process.env['ANTLER_DRIVE_DEBUG']) {
+  app.process().stdout?.on('data', (d) => process.stdout.write(`[main] ${d}`))
+  app.process().stderr?.on('data', (d) => process.stdout.write(`[main!] ${d}`))
+}
 const page = await app.firstWindow()
 const shot = async (name) => {
   const f = join(outDir, `${name}.png`)
@@ -144,6 +152,25 @@ try {
       await page.keyboard.press('Alt+ArrowDown')
       await page.waitForTimeout(400)
       console.log(`Alt+↓ → "${await page.textContent('.diff-head__base')}" (${await page.textContent('.diff-head__pos')})`)
+
+      // --external-commit: diff 를 연 채로 첫 저장소(로컬)에 외부 커밋을 만들고, 자동 반영 후에도 diff·선택이 유지되는지
+      if (externalCommit && repos[0]?.kind === 'local') {
+        const before = await page.textContent('.detail__sha')
+        const file = await page.textContent('.diff-head__base')
+        execFileSync('git', ['-C', repos[0].path, '-c', 'user.name=drive', '-c', 'user.email=d@d', 'commit', '-q', '--allow-empty', '-m', 'external commit'])
+        // diff 를 보는 동안 그래프는 숨겨져(가상 스크롤이 행을 그리지 않음) 있으므로, 반영될 시간을 준 뒤
+        // diff·선택 유지 여부를 보고, diff 를 닫아 목록 맨 위에 새 커밋이 왔는지 확인한다
+        await page.waitForTimeout(4_000)
+        const diffStill = await page.isVisible('.diff-view')
+        const after = await page.textContent('.detail__sha')
+        console.log(`external commit → diff still open: ${diffStill} (${await page.textContent('.diff-head__base').catch(() => '-')} vs ${file}); selection kept: ${before === after}`)
+        await page.keyboard.press('Escape')
+        await page.waitForSelector('.diff-view', { state: 'detached' })
+        await page.waitForTimeout(300)
+        console.log(`external commit → top row after closing diff: "${await page.textContent('.commit-row .commit-subject')}"`)
+        await page.click('.file-row').catch(() => {})
+        await page.waitForSelector('.diff-view', { timeout: 5_000 }).catch(() => {})
+      }
       await page.keyboard.press('Escape')
       await page.waitForSelector('.diff-view', { state: 'detached' })
       console.log('Esc → diff closed, graph visible:', await page.isVisible('.commit-list'))

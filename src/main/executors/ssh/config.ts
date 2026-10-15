@@ -58,6 +58,10 @@ export interface ResolvedHost {
   identityAgent: string | null | undefined
   /** 지원하지 않아 무시할 수 없는 설정이 있으면 그 설명(ProxyCommand, 이 호스트에 해당할 수 있는 Match 블록) */
   unsupported?: string
+  /** UserKnownHostsFile 로 지정한 known_hosts 경로들(없으면 기본 ~/.ssh/known_hosts) */
+  knownHostsFiles?: string[]
+  /** HostKeyAlias — known_hosts 조회에 HostName 대신 쓸 이름 */
+  hostKeyAlias?: string
 }
 
 const MAX_INCLUDE_DEPTH = 16
@@ -315,6 +319,11 @@ export function resolveHost(config: SshConfig, spec: string, opts: { localUser?:
     }
   }
 
+  // UserKnownHostsFile 은 공백으로 여러 파일을 줄 수 있다. 'none' 이면 지정 없음으로 본다
+  const knownHostsFiles = (first.get('userknownhostsfile') ?? [])
+    .filter((f) => f.toLowerCase() !== 'none')
+    .map((f) => normalize(expandTilde(expandTokens(f, tokens), config.homeDir)))
+
   const pj = first.get('proxyjump')
   const agentRaw = first.get('identityagent')?.[0]
   let identityAgent: string | null | undefined
@@ -333,7 +342,9 @@ export function resolveHost(config: SshConfig, spec: string, opts: { localUser?:
     proxyJump: pj ? parseProxyJump(pj.join(' ')) : [],
     identitiesOnly: first.get('identitiesonly')?.[0]?.toLowerCase() === 'yes',
     identityAgent,
-    ...(problems.length ? { unsupported: problems.join(', ') } : {})
+    ...(problems.length ? { unsupported: problems.join(', ') } : {}),
+    ...(knownHostsFiles.length ? { knownHostsFiles } : {}),
+    ...(first.get('hostkeyalias')?.[0] ? { hostKeyAlias: first.get('hostkeyalias')![0]! } : {})
   }
 }
 
