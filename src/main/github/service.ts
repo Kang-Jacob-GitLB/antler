@@ -2,6 +2,8 @@
 // 토큰은 이 객체 밖으로 나가지 않는다 — 반환값은 GhAuthState(토큰 없음)와 API 응답을 변환한 공유 타입뿐이다.
 import type {
   GhAuthState,
+  GhAvatarQuery,
+  GhAvatarResult,
   GhComment,
   GhCommitSummary,
   GhDeviceCode,
@@ -18,6 +20,7 @@ import type {
 } from '@shared/types'
 import { AbortError } from '../executors/GitExecutor'
 import * as api from './api'
+import { AvatarResolver } from './avatars'
 import { GitHubApiError, GitHubClient } from './client'
 import { DeviceFlow, MISSING_CLIENT_ID_MESSAGE, type DeviceSession, type SleepFn } from './deviceFlow'
 import type { TokenMethod, TokenStore } from './tokenStore'
@@ -30,6 +33,8 @@ export interface GitHubServiceDeps {
   store: TokenStore
   fetchImpl?: typeof fetch
   sleep?: SleepFn
+  /** 작성자 아바타 캐시 파일 경로(없으면 메모리에만 둔다) */
+  avatarCacheFile?: string
 }
 
 export class GitHubService {
@@ -44,12 +49,14 @@ export class GitHubService {
   private epoch = new AbortController()
   private readonly flow: DeviceFlow
   private readonly client: GitHubClient
+  private readonly avatarResolver: AvatarResolver
 
   constructor(private readonly deps: GitHubServiceDeps) {
     const stored = deps.store.load()
     this.token = stored?.token ?? null
     this.method = stored?.method
     this.client = new GitHubClient(deps.fetchImpl, () => this.token)
+    this.avatarResolver = new AvatarResolver(this.client, deps.avatarCacheFile)
     this.flow = new DeviceFlow(deps.fetchImpl, deps.sleep)
   }
 
@@ -226,6 +233,20 @@ export class GitHubService {
     return this.data(repoId, (slug, signal) => api.getFilters(this.client, slug, signal))
   }
 
+  /**
+   * 작성자 아바타 해석. GitHub 저장소가 아니어도 noreply 이메일은 풀린다(그 경우 github:false).
+   * 사진은 보조 기능이라 어떤 실패(한도·네트워크·인증)도 던지지 않고 "지금은 모름"으로 돌려준다.
+   */
+  avatars(repoId: string, requestId: string, authors: GhAvatarQuery[]): Promise<GhAvatarResult> {
+    const epoch = this.epoch.signal
+    return this.withSignal(requestId, async (own) => {
+      const ref = await this.deps.repos.ghRepo(repoId).catch(() => null)
+      const slug = ref ? { owner: ref.owner, repo: ref.repo } : null
+      const avatars = await this.avatarResolver.resolve(slug, authors, AbortSignal.any([epoch, own]))
+      return { github: slug !== null, avatars }
+    })
+  }
+
   // ── 요청 취소 ───────────────────────────────────────
 
   /** req:cancel 에서 호출 — RepoService 와 requestId 공간을 공유하므로 없는 id 는 무시한다 */
@@ -235,6 +256,7 @@ export class GitHubService {
   }
 
   dispose(): void {
+    this.avatarResolver.flush()
     this.epoch.abort()
     for (const ac of this.requests.values()) ac.abort()
     this.requests.clear()

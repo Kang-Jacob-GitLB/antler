@@ -37,6 +37,23 @@ export interface UiPrefs {
   /** GitHub OAuth App client ID(Device Flow 로그인용). 비우면 PAT 로만 로그인 */
   githubClientId?: string
   lastRepoId?: string
+  /** 커밋 활동 미니맵을 접었는지 */
+  minimapCollapsed?: boolean
+  /** 그래프 노드에 작성자 이니셜을 그릴지(없으면 켜짐) */
+  graphInitials?: boolean
+}
+
+/** 커밋 활동 미니맵 데이터: 시간 구간별 커밋 수 */
+export interface CommitActivity {
+  /** 시간 오름차순, 구간 시작 시각(epoch 초)과 개수. 빈 구간도 0 으로 채운다 */
+  buckets: { t: number; count: number }[]
+  /** 가장 오래된·가장 최근 커밋 시각(epoch 초) */
+  first: number
+  last: number
+  /** 보기 범위의 전체 커밋 수 */
+  total: number
+  /** 구간 길이(초) */
+  bucketSec: number
 }
 
 export interface AppConfig {
@@ -153,6 +170,14 @@ export interface RefsSnapshot {
   tags: Tag[]
   worktrees: Worktree[]
   stashes: Stash[]
+  /** 저장소의 기본 브랜치와 그 tip(그래프에서 굵게 그릴 줄기). 정할 수 없으면 없음 */
+  defaultBranch?: DefaultBranch
+}
+
+export interface DefaultBranch {
+  /** 짧은 이름(origin/main, main, master) */
+  name: string
+  hash: string
 }
 
 export interface SearchResult {
@@ -175,6 +200,25 @@ export interface GhRepoRef {
 export interface GhUser {
   login: string
   avatarUrl: string
+}
+
+/** 작성자 아바타 조회 요청 한 건: 이메일은 GitHub 로 보내지 않고, 그 작성자의 커밋 sha 로만 조회한다 */
+export interface GhAvatarQuery {
+  email: string
+  sha: string
+}
+
+/** 해석된 작성자. url 은 크기(`s=`)를 붙이기 전의 avatars.githubusercontent.com 주소 */
+export interface GhAuthorAvatar {
+  login: string
+  url: string
+}
+
+export interface GhAvatarResult {
+  /** 이 저장소에 GitHub remote 가 있는지(없으면 renderer 가 더 묻지 않는다) */
+  github: boolean
+  /** 이메일(요청에 쓴 문자열) → 해석 결과. null=GitHub 계정과 연결되지 않음. 빠진 키=지금은 못 정함(한도·네트워크·미푸시), 나중에 다시 */
+  avatars: Record<string, GhAuthorAvatar | null>
 }
 
 export interface GhLabel {
@@ -333,19 +377,19 @@ export interface AddRepoInput {
   group?: string
 }
 
-/** 원격 폴더 탐색 결과(SSH 저장소 추가 창). path 는 원격의 절대 경로 */
-export interface RemoteDirListing {
-  path: string
-  /** 루트(/)면 null */
-  parent: string | null
-  /** 이 폴더 자체가 git 작업 트리인가(.git 이 있음) */
-  isRepo: boolean
-  /** 숨김 폴더를 뺀 하위 폴더. isRepo 는 앞쪽 일부만 확인한다(undefined = 확인 안 함) */
-  dirs: { name: string; isRepo?: boolean }[]
-  /** 항목이 너무 많아 일부만 실었다 */
-  truncated: boolean
-}
-
+/** 원격 폴더 탐색 결과(SSH 저장소 추가 창). path 는 원격의 절대 경로 */
+export interface RemoteDirListing {
+  path: string
+  /** 루트(/)면 null */
+  parent: string | null
+  /** 이 폴더 자체가 git 작업 트리인가(.git 이 있음) */
+  isRepo: boolean
+  /** 숨김 폴더를 뺀 하위 폴더. isRepo 는 앞쪽 일부만 확인한다(undefined = 확인 안 함) */
+  dirs: { name: string; isRepo?: boolean }[]
+  /** 항목이 너무 많아 일부만 실었다 */
+  truncated: boolean
+}
+
 /** ~/.ssh/config 에서 읽은 접속 대상(비밀번호는 다루지 않는다 — 키/agent 인증만) */
 export interface SshHostInfo {
   alias: string
@@ -447,40 +491,40 @@ export interface FileDiff {
   /** 모드 변경 등 내용 외 변경 안내("new file mode 100755" 등) */
   meta: string[]
 }
-
-// ── WIP: 작업 트리 변경 ──────────────────────────────────
-
-/** WIP 파일이 속한 영역: 스테이지됨 · 스테이지 안 됨(추적 중인 파일의 작업 트리 변경) · 추적 안 됨 */
-export type WipArea = 'staged' | 'unstaged' | 'untracked'
-
-/** 작업 트리 상태(`git status`). 읽기 전용 — 스테이지·커밋은 하지 않는다 */
-export interface WipStatus {
-  /** 인덱스(스테이지) 변경. additions/deletions 는 계산하지 않아 null 이다 */
-  staged: FileChange[]
-  /** 작업 트리 변경(충돌 파일 포함, status 'U') */
-  unstaged: FileChange[]
-  /** 추적 안 되는 파일 경로(상한까지만 담는다) */
-  untracked: string[]
-  /** 상한 때문에 목록에 담지 못한 추적 안 되는 파일 수 */
-  untrackedMore: number
-  /** 충돌(병합 미해결) 파일 수 — unstaged 에도 'U' 로 들어 있다 */
-  conflicted: number
-  counts: {
-    /** 기존 파일의 변경(수정·삭제·이름 변경 등). 스테이지/작업 트리를 합쳐 경로 기준으로 중복을 뺀다 */
-    modified: number
-    /** 새 파일(스테이지된 추가 + 추적 안 됨, 상한 밖 포함) */
-    added: number
-    staged: number
-    unstaged: number
-    untracked: number
-  }
-}
-
-export interface WipDiffRequest {
-  area: WipArea
-  path: string
-  /** 스테이지된 이름 변경의 원래 경로 */
-  oldPath?: string
-  /** true 면 크기 상한을 무시하고 전체를 불러온다 */
-  full?: boolean
-}
+
+// ── WIP: 작업 트리 변경 ──────────────────────────────────
+
+/** WIP 파일이 속한 영역: 스테이지됨 · 스테이지 안 됨(추적 중인 파일의 작업 트리 변경) · 추적 안 됨 */
+export type WipArea = 'staged' | 'unstaged' | 'untracked'
+
+/** 작업 트리 상태(`git status`). 읽기 전용 — 스테이지·커밋은 하지 않는다 */
+export interface WipStatus {
+  /** 인덱스(스테이지) 변경. additions/deletions 는 계산하지 않아 null 이다 */
+  staged: FileChange[]
+  /** 작업 트리 변경(충돌 파일 포함, status 'U') */
+  unstaged: FileChange[]
+  /** 추적 안 되는 파일 경로(상한까지만 담는다) */
+  untracked: string[]
+  /** 상한 때문에 목록에 담지 못한 추적 안 되는 파일 수 */
+  untrackedMore: number
+  /** 충돌(병합 미해결) 파일 수 — unstaged 에도 'U' 로 들어 있다 */
+  conflicted: number
+  counts: {
+    /** 기존 파일의 변경(수정·삭제·이름 변경 등). 스테이지/작업 트리를 합쳐 경로 기준으로 중복을 뺀다 */
+    modified: number
+    /** 새 파일(스테이지된 추가 + 추적 안 됨, 상한 밖 포함) */
+    added: number
+    staged: number
+    unstaged: number
+    untracked: number
+  }
+}
+
+export interface WipDiffRequest {
+  area: WipArea
+  path: string
+  /** 스테이지된 이름 변경의 원래 경로 */
+  oldPath?: string
+  /** true 면 크기 상한을 무시하고 전체를 불러온다 */
+  full?: boolean
+}

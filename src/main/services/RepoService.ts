@@ -1,5 +1,6 @@
 import type {
   AddRepoInput,
+  CommitActivity,
   RemoteDirListing,
   CommitDetail,
   FileDiff,
@@ -21,6 +22,7 @@ import { ProcessQueue } from '../executors/ProcessQueue'
 import { SshExecutor } from '../executors/SshExecutor'
 import { WslExecutor } from '../executors/WslExecutor'
 import { wslFromUnc } from '../executors/wslPaths'
+import { commitActivity } from '../git/activity'
 import * as git from '../git/commands'
 import { LogCursor } from '../git/logCursor'
 import * as wip from '../git/wip'
@@ -44,6 +46,8 @@ const DIFF_CACHE_BYTES = 32 * 1024 * 1024
 const DIFF_CACHE_ENTRIES = 500
 /** 연결 테스트 제한 시간(SSH 접속·WSL 배포판 기동 포함) */
 const ENV_TEST_TIMEOUT_MS = 25_000
+/** 커밋 활동 캐시 항목 수 */
+const ACTIVITY_CACHE_ENTRIES = 8
 /** GitHub remote 추론 결과 캐시 시간 */
 const GH_REPO_TTL_MS = 60_000
 
@@ -102,6 +106,8 @@ export class RepoService {
   private readonly commitCache = new LruCache<string, CommitDetail>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
   private readonly diffCache = new LruCache<string, FileDiff>(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES)
   private readonly inflight = new Map<string, Inflight<unknown>>()
+  /** 커밋 활동 집계 캐시: 저장소+ref 별로 ref 시그니처와 함께 보관한다(시그니처가 같으면 이력이 같다) */
+  private readonly activityCache = new Map<string, { sig: string; value: CommitActivity }>()
   private readonly ghRepoCache = new Map<string, { at: number; value: GhRepoRef | null }>()
   private readonly sweeper = setInterval(() => this.sweepIdleCursors(), CURSOR_SWEEP_MS)
 
@@ -265,6 +271,28 @@ export class RepoService {
     return this.withSignal(requestId, (signal) =>
       rt.queue.run(() => git.search(rt.exec, repo.path, query, ref, { signal }), { signal })
     )
+  }
+
+  /**
+   * 커밋 활동 미니맵 데이터. 전체 이력을 한 번 훑으므로 ref 시그니처(HEAD·모든 ref 의 해시 요약)가 같으면
+   * 캐시를 돌려주고, 같은 키의 진행 중 요청은 공유한다. 취소 가능(큐 슬롯을 오래 쥐지 않게 renderer 가 취소한다).
+   */
+  activity(repoId: string, ref: string | undefined, requestId?: string): Promise<CommitActivity> {
+    if (ref !== undefined && typeof ref !== 'string') throw new Error('잘못된 ref 입니다')
+    const { repo, rt } = this.resolve(repoId)
+    const key = `${repoId}\0${ref ?? ''}`
+    return this.shared(`activity\0${key}`, requestId, async (signal) => {
+      const opts = { signal }
+      const sig = await rt.queue.run(() => git.refsSignature(rt.exec, repo.path, opts), opts)
+      const hit = this.activityCache.get(key)
+      if (hit && hit.sig === sig) return hit.value
+      const value = await rt.queue.run(() => commitActivity(rt.exec, repo.path, ref, opts), opts)
+      this.activityCache.delete(key)
+      this.activityCache.set(key, { sig, value })
+      // 저장소·필터를 오가도 메모리가 쌓이지 않게 오래된 것부터 버린다
+      if (this.activityCache.size > ACTIVITY_CACHE_ENTRIES) this.activityCache.delete(this.activityCache.keys().next().value!)
+      return value
+    })
   }
 
   /** 커밋 상세(메타데이터 + 첫 부모 대비 변경 파일). 해시 기준 불변 캐시 + 진행 중 요청 공유 */
@@ -446,6 +474,7 @@ export class RepoService {
     for (const c of this.cursors.values()) c.dispose()
     this.cursors.clear()
     this.anchors.clear()
+    this.activityCache.clear()
     this.commitCache.clear()
     this.diffCache.clear()
     this.ghRepoCache.clear()

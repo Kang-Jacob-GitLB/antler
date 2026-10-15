@@ -335,6 +335,27 @@ try {
     console.log('scroll perf:', JSON.stringify(perf))
     await shot(`scrolled-${theme}`)
 
+    // 커밋 활동 미니맵: 호버 툴팁과 클릭 점프(왼쪽 = 오래된 쪽이면 페이지를 더 읽으며 찾아간다)
+    const chart = await page.$('.minimap__chart canvas')
+    if (chart) {
+      const box = await chart.boundingBox()
+      await page.mouse.move(box.x + box.width * 0.3, box.y + box.height / 2)
+      const tip = await page.textContent('.minimap__tip').catch(() => null)
+      console.log(`minimap tooltip: ${tip ? `"${tip}"` : '(없음)'}`)
+      const dateAt = () => page.evaluate(() => {
+        const el = document.querySelector('.commit-list__scroll')
+        const row = [...el.querySelectorAll('.commit-row')].find((r) => r.getBoundingClientRect().top >= el.getBoundingClientRect().top)
+        return row?.querySelector('.cell--date')?.textContent
+      })
+      const before = await dateAt()
+      const t0 = Date.now()
+      await page.mouse.click(box.x + box.width * 0.3, box.y + box.height / 2)
+      await page.waitForFunction(() => !document.querySelector('.minimap__spinner'), null, { timeout: 60_000 }).catch(() => {})
+      await page.waitForTimeout(400)
+      console.log(`minimap click 30%: 맨 위 날짜 "${before}" → "${await dateAt()}" (+${Date.now() - t0} ms), ${await page.textContent('.commit-list__foot')}`)
+      await shot(`minimap-jump-${theme}`)
+    }
+
     // Ctrl+P 저장소 전환기
     await page.keyboard.press('Control+P')
     await page.waitForSelector('.switcher')

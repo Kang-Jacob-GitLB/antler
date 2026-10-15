@@ -29,17 +29,38 @@ class GraphEngine {
     return this.worker
   }
 
+  /** 기본 브랜치 tip(굵은 줄기의 시작). 다음 reset 부터 적용된다 */
+  private defaultTip: string | null = null
+  /** 이번 세대에 worker 로 보낸 행 수(이미 계산이 시작됐는지 판단용) */
+  private sent = 0
+
+  /**
+   * 기본 브랜치 tip 을 정한다. 이미 그래프를 계산하기 시작했고 tip 이 (새로) 정해졌으면 true —
+   * 호출자가 로그를 다시 읽어 줄기를 반영해야 한다. 아직 행을 보내기 전이면 이번 세대에 바로 반영한다.
+   */
+  setDefaultTip(tip: string | null): boolean {
+    if (tip === this.defaultTip) return false
+    this.defaultTip = tip
+    if (this.sent === 0) {
+      this.post({ type: 'reset', gen: this.gen, tip })
+      return false
+    }
+    return tip !== null
+  }
+
   reset(gen: number): void {
     this.gen = gen
     this.chunks = []
     this.count = 0
+    this.sent = 0
     this.maxWidth = 1
-    this.post({ type: 'reset', gen })
+    this.post({ type: 'reset', gen, tip: this.defaultTip })
     this.emit()
   }
 
   append(gen: number, start: number, commits: Commit[]): void {
     if (gen !== this.gen || commits.length === 0) return
+    this.sent += commits.length
     // worker 로는 레인 계산에 필요한 필드만 보낸다
     const slim = commits.map(({ hash, parents, refs, subject }) => ({ hash, parents, refs, subject }))
     this.post({ type: 'append', gen, start, commits: slim })

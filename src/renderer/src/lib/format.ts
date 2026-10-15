@@ -1,4 +1,5 @@
 import type { Locale } from '@shared/types'
+import { authorInitials } from '../graph/nodeStyle'
 
 const rtfCache = new Map<Locale, Intl.RelativeTimeFormat>()
 const dtfCache = new Map<Locale, Intl.DateTimeFormat>()
@@ -42,9 +43,6 @@ export function formatAbsolute(epochSec: number, locale: Locale): string {
 
 /** 아바타 이니셜: 한글 이름은 첫 글자, 영문은 단어 머리글자 2개 */
 export function initials(name: string): string {
-  const trimmed = name.trim()
-  if (!trimmed) return '?'
-  if (/^[ㄱ-힝]/.test(trimmed)) return trimmed.slice(0, 1)
-  const parts = trimmed.split(/[\s._-]+/).filter(Boolean)
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
+  // 그래프 노드와 같은 규칙을 쓴다
+  return authorInitials(name)
 }

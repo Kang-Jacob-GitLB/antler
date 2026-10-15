@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto'
 import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsSnapshot, SearchResult } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
+import { pickDefaultBranch } from './defaultBranch'
 import { parseChanges } from './parsers/changes'
 import { COMMIT_FORMAT_ARGS, parseCommitMeta } from './parsers/commit'
 import { DiffParser } from './parsers/diff'
@@ -118,16 +119,27 @@ export async function remotes(exec: GitExecutor, repoPath: string, opts?: RunOpt
 
 /** 사이드바용 ref 스냅샷. 다섯 조회를 동시에 돌린다. */
 export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsSnapshot> {
-  const [refsOut, remoteOut, worktreeOut, stashOut, headInfo] = await Promise.all([
+  const [refsOut, remoteOut, worktreeOut, stashOut, headInfo, originHead] = await Promise.all([
     ok(exec, repoPath, REFS_ARGS, opts),
     okOrEmpty(exec, repoPath, ['remote'], opts),
     okOrEmpty(exec, repoPath, WORKTREE_ARGS, opts),
     // 스태시가 없거나 reflog 가 없는 저장소는 빈 목록이다
     okOrEmpty(exec, repoPath, STASH_ARGS, opts),
-    head(exec, repoPath, opts)
+    head(exec, repoPath, opts),
+    // origin/HEAD 가 없으면(clone 이 아니거나 git remote set-head 를 안 한 저장소) 실패 코드로 끝난다 — 기본 브랜치는 대체 규칙으로 정한다
+    exec.run(repoPath, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], opts).then((r) => (r.code === 0 ? r.stdout.toString('utf8') : null))
   ])
   const { local, remotes, tags } = parseRefs(refsOut, parseRemoteNames(remoteOut))
-  return { head: headInfo, local, remotes, tags, worktrees: parseWorktrees(worktreeOut), stashes: parseStashes(stashOut) }
+  const defaultBranch = pickDefaultBranch(originHead, local, remotes)
+  return {
+    head: headInfo,
+    local,
+    remotes,
+    tags,
+    worktrees: parseWorktrees(worktreeOut),
+    stashes: parseStashes(stashOut),
+    ...(defaultBranch ? { defaultBranch } : {})
+  }
 }
 
 /**

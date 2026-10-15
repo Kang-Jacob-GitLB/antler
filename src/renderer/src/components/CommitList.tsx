@@ -3,14 +3,17 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Commit, Locale, RefLabel } from '@shared/types'
 import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
-import { formatDate, initials } from '../lib/format'
-import { branchKey, fnv1a, laneIndexFor, laneVar, LANE_COUNT } from '../lib/laneColor'
+import { formatDate } from '../lib/format'
+import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
+import { pendingAuthors, requestAvatars } from '../stores/avatarStore'
 import { PREFETCH, useLogStore } from '../stores/logStore'
 import { useSearchStore } from '../stores/searchStore'
 import { selectWip } from '../stores/wipActions'
 import { useWipStore, wipDirty } from '../stores/wipStore'
 import { GraphCanvas, graphWidth, useGraphVersion } from './GraphCanvas'
+import { AuthorAvatar } from './AuthorAvatar'
+import { CommitMinimap } from './CommitMinimap'
 import { IconCloud, IconMonitor, IconTag } from './icons'
 import { SearchBar } from './SearchBar'
 import { WipGraph } from './WipGraph'
@@ -97,7 +100,6 @@ const Row = memo(function Row({
   onSelect(i: number): void
 }) {
   const chips = useMemo(() => toChips(commit.refs), [commit.refs])
-  const avatarLane = fnv1a(commit.authorEmail) % LANE_COUNT
   const firstChip = chips[0]
   return (
     <div
@@ -120,9 +122,7 @@ const Row = memo(function Row({
         <span className="commit-subject">{commit.subject}</span>
       </div>
       <div className="cell cell--author">
-        <span className="avatar" style={{ '--avatar': laneVar(avatarLane) } as React.CSSProperties}>
-          {initials(commit.authorName)}
-        </span>
+        <AuthorAvatar email={commit.authorEmail} name={commit.authorName} size={18} />
         <span className="cell__text">{commit.authorName}</span>
       </div>
       <div className="cell cell--date">{formatDate(commit.authorDate, locale)}</div>
@@ -184,7 +184,7 @@ function WipRow({ selected }: { selected: boolean }): React.JSX.Element | null {
 export function CommitList(): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
-  const { commits, hasMore, loading, error, selected, scrollRequest, filter } = useLogStore()
+  const { commits, hasMore, loading, error, selected, scrollRequest, filter, repoId: logRepoId } = useLogStore()
   const { loadMore } = useLogStore.getState()
   const search = useSearchStore()
   // WIP 행: 변경이 있고 전체 그래프(ref 필터 없음)를 볼 때 맨 위에 둔다. 커밋 행은 그만큼 아래로 밀린다
@@ -197,7 +197,8 @@ export function CommitList(): React.JSX.Element {
   const headGraphRef = useRef<HTMLDivElement>(null)
   const [graphBox, setGraphBox] = useState({ left: 0, width: 0 })
   useGraphVersion()
-  const colGraph = graphWidth(graphEngine.maxWidth)
+  const avatars = useAppStore((s) => s.config?.ui.graphInitials !== false)
+  const colGraph = graphWidth(graphEngine.maxWidth, avatars)
 
   const virtualizer = useVirtualizer({
     count: commits.length + (hasMore ? 1 : 0),
@@ -213,6 +214,13 @@ export function CommitList(): React.JSX.Element {
   useEffect(() => {
     if (hasMore && !loading && lastIndex >= commits.length - PREFETCH) void loadMore()
   }, [lastIndex, commits.length, hasMore, loading, loadMore])
+
+  // 화면에 보이는 행의 작성자 중 아직 모르는 사람의 프로필 사진을 묻는다(debounce 는 스토어가 한다)
+  const firstIndex = items[0]?.index ?? 0
+  useEffect(() => {
+    if (!logRepoId) return
+    requestAvatars(logRepoId, pendingAuthors(commits, firstIndex, lastIndex))
+  }, [logRepoId, commits, firstIndex, lastIndex])
 
   useEffect(() => {
     if (selected >= 0) virtualizer.scrollToIndex(selected, { align: 'auto' })
@@ -270,6 +278,7 @@ export function CommitList(): React.JSX.Element {
 
   return (
     <section className="commit-list" style={{ '--col-graph': `${colGraph}px` } as React.CSSProperties}>
+      <CommitMinimap scrollEl={scrollEl} rowHeight={ROW_H} topOffset={wipOff} />
       <SearchBar />
       <div className="commit-list__head" role="row">
         <div className="cell cell--refs">{t('col.refs')}</div>

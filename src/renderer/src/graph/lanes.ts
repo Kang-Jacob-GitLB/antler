@@ -13,6 +13,8 @@ import { branchKey, LANE_COUNT, laneIndexFor } from '../lib/laneColor'
 export const SEG_FULL = 0
 export const SEG_TOP = 1
 export const SEG_BOTTOM = 2
+/** 선분 color 필드에 더하는 표지: 기본 브랜치의 first-parent 줄기라 굵게 그린다(색 인덱스는 `color & (SEG_BOLD - 1)`) */
+export const SEG_BOLD = 64
 
 /** 레인 계산에 필요한 커밋 필드만 */
 export interface GraphCommit {
@@ -73,9 +75,21 @@ export class LaneBuilder {
   private colors: number[] = []
   private rotate = 0
   maxWidth = 0
+  /**
+   * 기본 브랜치 줄기: tip 부터 first parent 를 따라가며 표시한다. 스트림에서 기대하는 다음 줄기 커밋 해시와,
+   * 그 줄기가 지금 놓인 레인(아직 tip 을 못 만났으면 -1). tip 이 아직 로드되지 않았으면 만날 때까지 아무것도 표시하지 않는다.
+   */
+  private chainExpect: string | null
+
+  constructor(defaultTip: string | null = null) {
+    this.chainExpect = defaultTip
+  }
+  private chainLane = -1
 
   add(c: GraphCommit): GraphRow {
     const segs: number[] = []
+    const marked = this.chainExpect !== null && c.hash === this.chainExpect
+    const bold = (j: number, expect: string | null): number => (j === this.chainLane && expect === this.chainExpect && this.chainExpect !== null ? SEG_BOLD : 0)
     const before = this.lanes.length
     // 이 커밋을 기다리는 레인이 여럿이면(갈라진 지점) main 색 레인을 이어 가서 main 줄기가 앰버를 유지하게 한다
     let lane = -1
@@ -96,9 +110,9 @@ export class LaneBuilder {
       const expect = this.lanes[j]
       if (expect == null) continue
       if (expect === c.hash) {
-        if (j !== lane || continued) segs.push(SEG_TOP, j, lane, this.colors[j]!)
+        if (j !== lane || continued) segs.push(SEG_TOP, j, lane, this.colors[j]! + bold(j, expect))
       } else {
-        segs.push(SEG_FULL, j, j, this.colors[j]!)
+        segs.push(SEG_FULL, j, j, this.colors[j]! + bold(j, expect))
       }
     }
     for (let j = 0; j < this.lanes.length; j++) {
@@ -116,7 +130,7 @@ export class LaneBuilder {
       this.lanes[lane] = null
     } else {
       this.lanes[lane] = first
-      segs.push(SEG_BOTTOM, lane, lane, color)
+      segs.push(SEG_BOTTOM, lane, lane, marked ? color + SEG_BOLD : color)
       rest.forEach((p, i) => {
         let k = this.lanes.indexOf(p)
         if (k === -1) {
@@ -127,6 +141,12 @@ export class LaneBuilder {
         }
         segs.push(SEG_BOTTOM, lane, k, this.colors[k]!)
       })
+    }
+
+    if (marked) {
+      // 줄기는 first parent 로 이어진다(루트면 끝)
+      this.chainExpect = first ?? null
+      this.chainLane = lane
     }
 
     const width = Math.max(before, this.lanes.length)

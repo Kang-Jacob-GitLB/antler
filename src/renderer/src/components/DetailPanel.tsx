@@ -2,12 +2,12 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Commit, CommitDetail } from '@shared/types'
 import { useT } from '../i18n'
-import { formatAbsolute, initials } from '../lib/format'
-import { fnv1a, LANE_COUNT, laneVar } from '../lib/laneColor'
+import { formatAbsolute } from '../lib/format'
 import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
 import { useLogStore } from '../stores/logStore'
 import { useWipStore, wipDirty } from '../stores/wipStore'
+import { AuthorAvatar } from './AuthorAvatar'
 import { FileRow } from './FileRow'
 import { WipPanel } from './WipPanel'
 import { markdownToHtml } from '../lib/markdown'
@@ -153,12 +153,7 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
         {d?.body && <CommitBody body={d.body} />}
 
         <div className="detail__person">
-          <span
-            className="avatar avatar--lg"
-            style={{ '--avatar': laneVar(fnv1a(commit.authorEmail) % LANE_COUNT) } as React.CSSProperties}
-          >
-            {initials(commit.authorName)}
-          </span>
+          <AuthorAvatar email={commit.authorEmail} name={commit.authorName} size={32} className="avatar--lg" />
           <div className="detail__person-text">
             <div className="detail__name selectable">{commit.authorName}</div>
             <div className="detail__when">

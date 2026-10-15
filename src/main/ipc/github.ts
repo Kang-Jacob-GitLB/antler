@@ -1,7 +1,7 @@
 import { shell, type IpcMainInvokeEvent } from 'electron'
 import type { IpcArgs, IpcChannel, IpcResult } from '@shared/ipc'
 import type { GitHubService } from '../github/service'
-import { allowedExternalUrl, parseId, parseListQuery, parseNumber, parsePat } from '../github/validate'
+import { allowedExternalUrl, parseAvatarAuthors, parseId, parseListQuery, parseNumber, parsePat } from '../github/validate'
 import type { RepoService } from '../services/RepoService'
 
 /** handlers.ts 의 handle() 과 같은 모양 — 결과를 IpcEnvelope 로 감싸 등록하는 함수를 주입받는다 */
@@ -29,6 +29,9 @@ export function registerGithubIpc(handle: IpcHandle, gh: GitHubService, repos: R
   handle('gh:issue', (_e, repoId, n) => gh.issue(parseId(repoId, '저장소 ID'), parseNumber(n)))
   handle('gh:comments', (_e, repoId, n) => gh.comments(parseId(repoId, '저장소 ID'), parseNumber(n)))
   handle('gh:filters', (_e, repoId) => gh.filters(parseId(repoId, '저장소 ID')))
+  handle('gh:avatars', (_e, repoId, requestId, authors) =>
+    gh.avatars(parseId(repoId, '저장소 ID'), parseId(requestId, '요청 ID'), parseAvatarAuthors(authors))
+  )
   handle('gh:openExternal', async (_e, url) => {
     const href = allowedExternalUrl(url)
     if (!href) throw new Error('GitHub(https://github.com/) 주소만 열 수 있습니다')

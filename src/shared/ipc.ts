@@ -2,7 +2,10 @@
 import type {
   AddRepoInput,
   AppConfig,
+  CommitActivity,
   GhAuthState,
+  GhAvatarQuery,
+  GhAvatarResult,
   GhComment,
   GhCommitSummary,
   GhDeviceCode,
@@ -75,12 +78,16 @@ export interface IpcContract {
   /** 필터용 라벨·담당 가능 사용자 */
   'gh:filters': { args: [repoId: string]; result: { labels: GhLabel[]; assignees: GhUser[] } }
   /** GitHub 웹 페이지를 기본 브라우저로(https://github.com/ 만 허용) */
+  /** 작성자 아바타 해석(커밋 sha → GitHub 계정). 이메일은 GitHub 로 보내지 않는다. requestId 로 취소 */
+  'gh:avatars': { args: [repoId: string, requestId: string, authors: GhAvatarQuery[]]; result: GhAvatarResult }
   'gh:openExternal': { args: [url: string]; result: void }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
   'git:refs': { args: [repoId: string]; result: RefsSnapshot }
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
   /** 메시지·작성자·해시 검색. ref 를 주면 그 ref 기준 이력에서만 찾는다 */
   'git:search': { args: [repoId: string, query: string, ref?: string, requestId?: string]; result: SearchResult }
+  /** 커밋 활동 미니맵용 시간 구간별 커밋 수. ref 를 주면 그 ref 기준(그래프 필터와 같은 범위) */
+  'git:activity': { args: [repoId: string, ref?: string, requestId?: string]; result: CommitActivity }
   /** 커밋 메타데이터 + 첫 부모 대비 변경 파일 목록(+/- 통계). 커밋 해시 기준 불변 캐시 */
   'git:commit': { args: [repoId: string, hash: string, requestId?: string]; result: CommitDetail }
   /** 파일 하나의 diff. 크기 상한을 넘으면 앞부분만 담고 truncated=true(req.full 로 전체) */
@@ -134,10 +141,12 @@ export const IPC_CHANNELS = [
   'gh:issue',
   'gh:comments',
   'gh:filters',
+  'gh:avatars',
   'gh:openExternal',
   'git:refs',
   'git:search',
   'git:log',
+  'git:activity',
   'git:commit',
   'git:fileDiff',
   'git:wipStatus',
