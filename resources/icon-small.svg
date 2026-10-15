@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!--
+    16·24·32px 용 단순판. 픽셀 격자에 맞춘 굵은 선과 큰 노드로, 작은 크기에서도 Y 자 뿔과 앰버 끝점이 보이게 한다.
+    색은 icon.svg 와 같다.
+  -->
+  <rect x="0.5" y="0.5" width="31" height="31" rx="7" fill="#14110F"/>
+  <g fill="none" stroke="#EDE6D8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 27 V17"/>
+    <path d="M16 17 C16 13 11 12 9.5 8"/>
+    <path d="M16 17 C16 13 21 12 22.5 8"/>
+  </g>
+  <g fill="#D9A441">
+    <circle cx="9" cy="7" r="3"/>
+    <circle cx="23" cy="7" r="3"/>
+  </g>
+</svg>

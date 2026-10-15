@@ -3,10 +3,7 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  border-radius: var(--neu-radius);
   background: var(--list-bg);
-  box-shadow: var(--neu-raised);
   container-type: inline-size;
   container-name: commits;
   /* 그래프 폭은 레인 수에 맞춰 CommitList 가 인라인 스타일로 덮어쓴다 */
@@ -54,7 +51,7 @@
   height: 30px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
-  background: var(--neu-bg);
+  background: var(--bg-surface);
   font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -104,7 +101,7 @@
   height: 24px;
   padding: 0 var(--space-3);
   border-top: 1px solid var(--border);
-  background: var(--neu-bg);
+  background: var(--bg-surface);
   font-size: var(--fs-xs);
   color: var(--text-muted);
   flex-shrink: 0;

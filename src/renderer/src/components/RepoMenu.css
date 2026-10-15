@@ -5,8 +5,8 @@
   z-index: 40;
   width: 240px;
   padding: var(--space-3);
-  border-radius: var(--neu-radius-sm);
-  background: var(--neu-bg);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
   box-shadow: var(--shadow-popover);
   cursor: default;
   font-size: var(--fs-sm);
@@ -32,12 +32,12 @@
   padding: 0 var(--space-2);
   border: 0;
   border-radius: var(--radius-md);
-  background: var(--neu-bg);
-  box-shadow: var(--neu-inset-sm);
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px var(--border);
   outline: none;
 }
 .repo-menu__input:focus-visible {
-  box-shadow: var(--neu-inset-sm), 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .repo-menu__sep {
   height: 1px;

@@ -13,6 +13,11 @@ app.setName('Antler')
 if (process.env['ANTLER_USER_DATA']) app.setPath('userData', process.env['ANTLER_USER_DATA'])
 if (process.platform === 'win32') app.setAppUserModelId('com.antler.app')
 
+// 하드웨어 가속은 기본으로 끈다. 이 앱은 Canvas 2D·텍스트 위주라 GPU 합성 이득이 없고, GPU 프로세스가
+// 메모리를 크게 쓴다(10만 커밋 저장소 실측: private 506MB → 280MB, 스크롤 p95 16.8ms → 13.4ms).
+// 드라이버 문제 등으로 비교가 필요하면 ANTLER_GPU=1 로 켤 수 있다.
+if (process.env['ANTLER_GPU'] !== '1') app.disableHardwareAcceleration()
+
 // 토큰 --bg-base 와 같은 값. 첫 페인트 전 흰 화면 깜빡임을 막는다.
 const BG = { dark: '#14110F', light: '#F6F1E7' }
 
@@ -20,6 +25,16 @@ let config: ConfigStore
 let repos: RepoService
 let gh: GitHubService
 let watcher: RepoWatcher | undefined
+
+/**
+ * 창 아이콘. 패키지된 Windows·macOS 는 실행 파일·번들 아이콘을 쓰므로 지정하지 않는다.
+ * Linux 는 실행 파일 아이콘이 없어(.desktop 없이 AppImage 를 바로 띄우는 경우 등) extraResources 의 icon.png 를 준다.
+ */
+function windowIcon(): { icon?: string } {
+  if (!app.isPackaged) return { icon: join(__dirname, '../../resources/icon.png') }
+  if (process.platform === 'linux') return { icon: join(process.resourcesPath, 'icon.png') }
+  return {}
+}
 
 function createWindow(): BrowserWindow {
   const pref = config.get().ui.theme
@@ -32,6 +47,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     backgroundColor: dark ? BG.dark : BG.light,
+    ...windowIcon(),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

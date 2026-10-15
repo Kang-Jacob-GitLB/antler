@@ -5,10 +5,6 @@
  * 2층 semantic  역할 이름(--bg-base, --text-primary …). 테마는 이 층의 값만 교체한다.
  * 3층 component 2층만 참조하는 컴포넌트용 별칭(--row-hover …). 테마별로 다시 정의하지 않는다.
  *
- * 뉴모피즘(soft UI): 면 색 = 배경 색(--neu-bg = --bg-surface)이고 깊이는 그림자 두 겹으로만 만든다.
- * 테마가 바꾸는 값은 2층의 --neu-shadow-dark / --neu-shadow-light 둘뿐이며, 3층의 --neu-* 합성 그림자는 공용이다.
- * 행(커밋·diff·파일) 단위에는 그림자를 쓰지 않는다(스크롤 성능). 상태는 그림자 + 앰버 가장자리/포커스 링으로 함께 표시한다.
- *
  * 테마: :root = Dark "Forest night", [data-theme='light'] = Light "Bone paper".
  * renderer 가 시스템 설정을 해석해 data-theme 을 항상 'dark' | 'light' 로 지정한다.
  * 대비 검사: node scripts/check-contrast.mjs
@@ -64,9 +60,7 @@
   --lane-6: #8FB3A0;
   --lane-7: #C98B7A;
 
-  /* 뉴모피즘 그림자 색: 어두운 쪽(우하) / 밝은 쪽(좌상). 다크는 하이라이트를 따뜻하고 아주 옅게 */
-  --neu-shadow-dark: rgb(0 0 0 / 0.6);
-  --neu-shadow-light: rgb(255 236 210 / 0.075);
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px var(--border);
   --backdrop: rgb(0 0 0 / 0.45);
   --scrollbar-thumb: #3A322B;
   --scrollbar-thumb-hover: #4D4339;
@@ -79,18 +73,7 @@
   --toolbar-bg: var(--bg-surface);
   --sidebar-bg: var(--bg-surface);
   --panel-bg: var(--bg-surface);
-  --list-bg: var(--bg-surface);
-  --neu-bg: var(--bg-surface);
-  --neu-radius: 14px;
-  --neu-radius-sm: 8px;
-  --neu-gap: 12px;
-  --neu-raised: 6px 6px 14px var(--neu-shadow-dark), -5px -5px 12px var(--neu-shadow-light);
-  --neu-raised-sm: 3px 3px 6px var(--neu-shadow-dark), -2px -2px 5px var(--neu-shadow-light);
-  --neu-inset: inset 4px 4px 9px var(--neu-shadow-dark), inset -3px -3px 8px var(--neu-shadow-light);
-  --neu-inset-sm: inset 2px 2px 4px var(--neu-shadow-dark), inset -1px -1px 3px var(--neu-shadow-light);
-  --neu-pressed: inset 2px 2px 5px var(--neu-shadow-dark), inset -1px -1px 2px var(--neu-shadow-light);
-  --neu-float: 10px 10px 28px var(--neu-shadow-dark), -6px -6px 18px var(--neu-shadow-light);
-  --shadow-popover: var(--neu-float);
+  --list-bg: var(--bg-base);
   --splitter-hover: var(--accent);
   --badge-local-bg: color-mix(in srgb, var(--renamed) 22%, transparent);
   --badge-local-fg: var(--renamed-text);
@@ -119,10 +102,10 @@
   --syn-meta: #A89F91;
 
   /* ── 타이포·간격·모션 (테마 무관) ─────────────── */
-  /* 번들 폰트(styles/fonts.css): UI = Pretendard, 코드 = D2Coding. 뒤는 로드 실패 시 대체 */
+  /* 번들 폰트(styles/fonts.css): UI = Pretendard, 코드 = Jetendard. 뒤는 로드 실패 시 대체 */
   --font-ui: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo',
     'Malgun Gothic', 'Noto Sans KR', sans-serif;
-  --font-mono: 'D2Coding', Consolas, 'SF Mono', Menlo, monospace;
+  --font-mono: 'Jetendard', 'JetBrains Mono', Consolas, 'SF Mono', Menlo, monospace;
   --fs-xs: 11px;
   --fs-sm: 12px;
   --fs-md: 13px;
@@ -179,8 +162,7 @@
   --lane-6: #6F9884;
   --lane-7: #B47462;
 
-  --neu-shadow-dark: rgb(150 126 88 / 0.42);
-  --neu-shadow-light: rgb(255 255 255 / 0.95);
+  --shadow-popover: 0 8px 24px rgb(42 33 27 / 0.14), 0 0 0 1px var(--border);
   --backdrop: rgb(42 33 27 / 0.18);
   --syn-keyword: #9A4A36;
   --syn-string: #4A733A;
