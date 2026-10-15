@@ -1,0 +1,111 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--sidebar-bg);
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.sidebar__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.icon-btn--sm {
+  width: 22px;
+  height: 22px;
+}
+
+.sidebar__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 var(--space-2) var(--space-3);
+}
+
+.sidebar__empty {
+  padding: var(--space-2) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.sidebar__group + .sidebar__group {
+  margin-top: var(--space-2);
+}
+.sidebar__group-label {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.repo-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.repo-item:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.repo-item.is-active {
+  background: var(--row-selected);
+  color: var(--text-primary);
+}
+.repo-item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--row-selected-edge);
+}
+.repo-item__icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.repo-item.is-active .repo-item__icon {
+  color: var(--accent);
+}
+.repo-item__name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.repo-item__remove {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease);
+}
+.repo-item:hover .repo-item__remove,
+.repo-item:focus-within .repo-item__remove {
+  opacity: 1;
+}
+.repo-item__remove:hover {
+  background: var(--bg-base);
+  color: var(--removed-text);
+}

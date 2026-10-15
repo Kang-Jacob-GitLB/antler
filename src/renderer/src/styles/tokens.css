@@ -1,0 +1,150 @@
+/*
+ * Antler 디자인 토큰 — 사슴뿔 + 숲.
+ *
+ * 1층 palette   테마와 무관한 원시 색값. 컴포넌트에서 직접 쓰지 않는다.
+ * 2층 semantic  역할 이름(--bg-base, --text-primary …). 테마는 이 층의 값만 교체한다.
+ * 3층 component 2층만 참조하는 컴포넌트용 별칭(--row-hover …). 테마별로 다시 정의하지 않는다.
+ *
+ * 테마: :root = Dark "Forest night", [data-theme='light'] = Light "Bone paper".
+ * renderer 가 시스템 설정을 해석해 data-theme 을 항상 'dark' | 'light' 로 지정한다.
+ * 대비 검사: node scripts/check-contrast.mjs
+ */
+
+:root {
+  /* ── 1층: palette ─────────────────────────────── */
+  --palette-amber: #D9A441;
+  --palette-moss: #7FA06A;
+  --palette-rust: #C4624A;
+  --palette-slate: #6E9AA6;
+  --palette-plum: #A5809F;
+  --palette-sand: #C9B07A;
+  --palette-sage: #8FB3A0;
+  --palette-clay: #C98B7A;
+  --palette-velvet: #6B4A32;
+
+  /* ── 2층: semantic (Dark) ─────────────────────── */
+  color-scheme: dark;
+  --bg-base: #14110F;
+  --bg-surface: #1C1815;
+  --bg-elevated: #26211D;
+  --bg-inset: #100D0B;
+  --border: #342D27;
+  --border-strong: #4A4038;
+  --text-primary: #EDE6D8;
+  --text-secondary: #A89F91;
+  --text-muted: #968D7F;
+  --accent: #D9A441;
+  --accent-text: #D9A441;
+  --accent-soft: #D9A44126;
+  --accent-contrast: #14110F;
+  --velvet: #6B4A32;
+  --velvet-text: #C09474;
+
+  --added: #7FA06A;
+  --removed: #C4624A;
+  --modified: #D9A441;
+  --renamed: #6E9AA6;
+  --info: #6E9AA6;
+  --added-text: #93B47E;
+  --removed-text: #D9826B;
+  --modified-text: #D9A441;
+  --renamed-text: #86B0BB;
+
+  /* 그래프 레인 (8색 순환, lane-0 = main/master 고정) */
+  --lane-0: #D9A441;
+  --lane-1: #7FA06A;
+  --lane-2: #C4624A;
+  --lane-3: #6E9AA6;
+  --lane-4: #A5809F;
+  --lane-5: #C9B07A;
+  --lane-6: #8FB3A0;
+  --lane-7: #C98B7A;
+
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 0.45), 0 0 0 1px var(--border);
+  --backdrop: rgb(0 0 0 / 0.45);
+  --scrollbar-thumb: #3A322B;
+  --scrollbar-thumb-hover: #4D4339;
+
+  /* ── 3층: component ───────────────────────────── */
+  --row-hover: var(--bg-elevated);
+  --row-selected: var(--accent-soft);
+  --row-selected-edge: var(--accent);
+  --focus-ring: 0 0 0 2px var(--accent);
+  --toolbar-bg: var(--bg-surface);
+  --sidebar-bg: var(--bg-surface);
+  --panel-bg: var(--bg-surface);
+  --list-bg: var(--bg-base);
+  --splitter-hover: var(--accent);
+  --badge-local-bg: color-mix(in srgb, var(--renamed) 22%, transparent);
+  --badge-local-fg: var(--renamed-text);
+  --badge-wsl-bg: color-mix(in srgb, var(--added) 22%, transparent);
+  --badge-wsl-fg: var(--added-text);
+  --badge-ssh-bg: color-mix(in srgb, var(--velvet) 45%, transparent);
+  --badge-ssh-fg: var(--velvet-text);
+  --ref-head-ring: var(--accent);
+
+  /* ── 타이포·간격·모션 (테마 무관) ─────────────── */
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Pretendard', 'Apple SD Gothic Neo',
+    'Malgun Gothic', 'Noto Sans KR', Ubuntu, sans-serif;
+  --font-mono: 'Cascadia Mono', 'JetBrains Mono', 'SF Mono', Consolas, 'D2Coding', Menlo, monospace;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --row-h: 28px;
+  --toolbar-h: 44px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 90ms;
+  --dur-med: 160ms;
+}
+
+/* ── 2층: semantic (Light "Bone paper") ─────────── */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg-base: #F6F1E7;
+  --bg-surface: #EFE8DA;
+  --bg-elevated: #FFFFFF;
+  --bg-inset: #E9E1D1;
+  --border: #DDD3C0;
+  --border-strong: #C8BBA3;
+  --text-primary: #2A211B;
+  --text-secondary: #6B5F52;
+  --text-muted: #716455;
+  --accent: #B27A12;
+  --accent-text: #85590A;
+  --accent-soft: #B27A1220;
+  --accent-contrast: #FFFFFF;
+  --velvet: #8A6044;
+  --velvet-text: #7A5238;
+
+  --added: #668850;
+  --removed: #B9543C;
+  --modified: #B27A12;
+  --renamed: #5A8794;
+  --info: #5A8794;
+  --added-text: #4A6E38;
+  --removed-text: #A0412A;
+  --modified-text: #85590A;
+  --renamed-text: #3B6A77;
+
+  --lane-0: #B8821C;
+  --lane-1: #6A8C55;
+  --lane-2: #B5543D;
+  --lane-3: #5A8794;
+  --lane-4: #92698C;
+  --lane-5: #A88E52;
+  --lane-6: #6F9884;
+  --lane-7: #B47462;
+
+  --shadow-popover: 0 8px 24px rgb(42 33 27 / 0.14), 0 0 0 1px var(--border);
+  --backdrop: rgb(42 33 27 / 0.18);
+  --scrollbar-thumb: #D3C7B1;
+  --scrollbar-thumb-hover: #BFB096;
+}
