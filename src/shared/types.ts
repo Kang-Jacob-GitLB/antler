@@ -160,6 +160,34 @@ export interface SearchResult {
   truncated: boolean
 }
 
+// ── M4: 원격 환경 ─────────────────────────────────────
+
+/** 저장소 추가 입력. path 는 그 환경의 원래 경로 형식(WSL·SSH 는 /home/…) */
+export interface AddRepoInput {
+  kind: SourceKind
+  /** kind === 'wsl' */
+  distro?: string
+  /** kind === 'ssh' — ~/.ssh/config 의 Host 별칭 또는 user@host[:port] */
+  sshHost?: string
+  path: string
+  group?: string
+}
+
+/** ~/.ssh/config 에서 읽은 접속 대상(비밀번호는 다루지 않는다 — 키/agent 인증만) */
+export interface SshHostInfo {
+  alias: string
+  hostName: string
+  user?: string
+  port: number
+  proxyJump?: string
+}
+
+export interface RepoPatch {
+  /** 빈 문자열 또는 null 이면 그룹 해제 */
+  group?: string | null
+  name?: string
+}
+
 // ── M3: 커밋 상세·diff ─────────────────────────────────
 
 /** A 추가 · M 수정 · D 삭제 · R 이름 변경 · C 복사 · T 타입 변경(파일↔심볼릭 링크 등) · U 병합 충돌 */

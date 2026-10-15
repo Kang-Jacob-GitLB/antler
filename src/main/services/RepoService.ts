@@ -1,5 +1,5 @@
-import { basename } from 'node:path'
 import type {
+  AddRepoInput,
   CommitDetail,
   FileDiff,
   FileDiffRequest,
@@ -14,9 +14,12 @@ import type {
 import { AbortError, type GitExecutor } from '../executors/GitExecutor'
 import { LocalExecutor } from '../executors/LocalExecutor'
 import { ProcessQueue } from '../executors/ProcessQueue'
+import { SshExecutor } from '../executors/SshExecutor'
+import { WslExecutor } from '../executors/WslExecutor'
+import { wslFromUnc } from '../executors/wslPaths'
 import * as git from '../git/commands'
 import { LogCursor } from '../git/logCursor'
-import { LOCAL_SOURCE_ID, type ConfigStore } from './ConfigStore'
+import { LOCAL_SOURCE_ID, sourceFor, type ConfigStore } from './ConfigStore'
 import { LruCache } from './lru'
 
 /** 환경별 동시 git 프로세스 상한(LogCursor 는 저장소당 하나라 큐 밖에서 돈다) */
@@ -33,6 +36,8 @@ const COMMIT_CACHE_BYTES = 24 * 1024 * 1024
 /** diff 캐시 총 크기(추정 바이트) */
 const DIFF_CACHE_BYTES = 32 * 1024 * 1024
 const DIFF_CACHE_ENTRIES = 500
+/** 연결 테스트 제한 시간(SSH 접속·WSL 배포판 기동 포함) */
+const ENV_TEST_TIMEOUT_MS = 25_000
 
 /** 같은 키의 진행 중 요청. 구독자(waiters)가 모두 취소했을 때만 git 을 끊는다 */
 interface Inflight<T> {
@@ -93,12 +98,85 @@ export class RepoService {
     this.sweeper.unref?.()
   }
 
-  async addLocal(path: string): Promise<Repo> {
-    const rt = this.runtime(this.config.source(LOCAL_SOURCE_ID)!)
-    const top = await git.resolveTopLevel(rt.exec, path)
-    // Windows git 은 C:/a/b 형식으로 돌려주므로 사용자가 고른 표기(역슬래시)로 맞춘다
-    const normalized = process.platform === 'win32' ? top.replace(/\//g, '\\') : top
-    return this.config.addRepo({ sourceId: LOCAL_SOURCE_ID, path: normalized, name: basename(normalized) })
+  /**
+   * 환경과 경로로 저장소를 추가한다. 그 환경 안에서 git 최상위 경로를 확인해 저장하므로 하위 폴더를 골라도 된다.
+   * 로컬로 고른 경로가 \\wsl.localhost\… 같은 WSL 공유 경로면 WSL 저장소로 바꿔 등록한다(WSL 안에서 git 을 돌려야
+   * 9P 파일 공유를 거치지 않아 빠르고 줄바꿈·권한이 정확하다).
+   */
+  async addRepo(input: AddRepoInput): Promise<Repo> {
+    let { kind, path } = input
+    let target = kind === 'wsl' ? input.distro : kind === 'ssh' ? input.sshHost?.trim() : undefined
+    path = path.trim()
+    if (kind === 'local' || kind === 'wsl') {
+      const unc = wslFromUnc(path)
+      if (unc) {
+        kind = 'wsl'
+        target = unc.distro
+        path = unc.path
+      }
+    }
+    if (!path) throw new Error('경로를 입력하세요')
+    const source = sourceFor(kind, target)
+    const isNewSource = !this.config.source(source.id)
+    const rt = this.runtime(source)
+    try {
+      const top = await rt.queue.run(() => git.resolveTopLevel(rt.exec, remoteRelative(kind, path)))
+      // Windows git 은 C:/a/b 형식으로 돌려주므로 사용자가 고른 표기(역슬래시)로 맞춘다
+      const normalized = kind === 'local' && process.platform === 'win32' ? top.replace(/\//g, '\\') : top
+      const name = normalized.split(/[\\/]/).filter(Boolean).pop() ?? normalized
+      const group = input.group?.trim()
+      return this.config.addRepo({ sourceId: source.id, path: normalized, name, ...(group ? { group } : {}) }, source)
+    } catch (err) {
+      // 처음 써 본 원격 환경이 실패했으면 열어 둔 연결을 남기지 않는다
+      if (isNewSource) void this.releaseRuntime(source.id)
+      throw err
+    }
+  }
+
+  /** 연결 테스트: 그 환경에서 git 버전을 돌려준다(SSH 인증·호스트 키·WSL 배포판 문제를 저장 전에 드러낸다) */
+  async testEnv(input: Omit<AddRepoInput, 'path' | 'group'>): Promise<string> {
+    const target = input.kind === 'wsl' ? input.distro : input.kind === 'ssh' ? input.sshHost?.trim() : undefined
+    const source = sourceFor(input.kind, target)
+    const isNewSource = !this.config.source(source.id)
+    const rt = this.runtime(source)
+    try {
+      const r = await rt.queue.run(() => rt.exec.run('.', ['--version'], { signal: AbortSignal.timeout(ENV_TEST_TIMEOUT_MS) }))
+      if (r.code !== 0) throw new Error(r.stderr.trim() || `git 실행 실패(${r.code})`)
+      return r.stdout.toString('utf8').trim()
+    } finally {
+      if (isNewSource) void this.releaseRuntime(source.id)
+    }
+  }
+
+  /** 변경 감지용 시그니처: HEAD 와 모든 ref 가 가리키는 해시를 요약한 값 */
+  signature(repoId: string): Promise<string> {
+    const { repo, rt } = this.resolve(repoId)
+    return rt.queue.run(() => git.refsSignature(rt.exec, repo.path), { key: `sig:${repoId}` })
+  }
+
+  /** 로컬 저장소의 .git 디렉터리들(워크트리는 git-dir 과 공통 디렉터리가 다르다). 원격 환경이면 null */
+  async localGitDirs(repoId: string): Promise<string[] | null> {
+    const { repo, rt } = this.resolve(repoId)
+    if (rt.exec.kind !== 'local') return null
+    return rt.queue.run(() => git.gitDirs(rt.exec, repo.path))
+  }
+
+  repoKind(repoId: string): SourceKind | null {
+    const repo = this.config.repo(repoId)
+    return repo ? (this.config.source(repo.sourceId)?.kind ?? null) : null
+  }
+
+  /** 저장소를 지운 뒤 더 이상 쓰지 않는 환경의 연결(SSH 세션 등)을 닫는다 */
+  async releaseUnused(): Promise<void> {
+    const used = new Set(this.config.get().repos.map((r) => r.sourceId))
+    await Promise.all([...this.runtimes.keys()].filter((id) => id !== LOCAL_SOURCE_ID && !used.has(id)).map((id) => this.releaseRuntime(id)))
+  }
+
+  private async releaseRuntime(sourceId: string): Promise<void> {
+    const rt = this.runtimes.get(sourceId)
+    if (!rt) return
+    this.runtimes.delete(sourceId)
+    await rt.exec.dispose().catch(() => {})
   }
 
   refs(repoId: string): Promise<RefsSnapshot> {
@@ -318,7 +396,19 @@ function createExecutor(source: Source): GitExecutor {
     case 'local':
       return new LocalExecutor()
     case 'wsl':
+      if (process.platform !== 'win32') throw new Error('WSL 저장소는 Windows 에서만 열 수 있습니다')
+      return new WslExecutor(source.distro!)
     case 'ssh':
-      throw new Error(`${source.kind} executor is not implemented yet (M4)`)
+      return new SshExecutor(source.sshHost!)
   }
+}
+
+/**
+ * WSL·SSH 에서 '~/' 로 시작하는 경로는 셸 없이 실행하므로 펼쳐지지 않는다.
+ * 두 실행기 모두 홈 디렉터리에서 git 을 실행하므로(WSL --cd ~, SSH exec 기본 위치) 홈 기준 상대 경로로 바꾼다.
+ */
+function remoteRelative(kind: SourceKind, path: string): string {
+  if (kind === 'local') return path
+  if (path === '~') return '.'
+  return path.startsWith('~/') ? path.slice(2) || '.' : path
 }

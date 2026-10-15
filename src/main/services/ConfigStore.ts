@@ -1,9 +1,18 @@
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { AppConfig, Repo, Source, UiPrefs } from '@shared/types'
+import type { AppConfig, Repo, RepoPatch, Source, SourceKind, UiPrefs } from '@shared/types'
 
 export const LOCAL_SOURCE_ID = 'local'
+
+/** 환경 하나를 나타내는 소스. id 가 결정적이라 같은 배포판·호스트는 같은 소스로 모인다 */
+export function sourceFor(kind: SourceKind, target?: string): Source {
+  if (kind === 'local') return { id: LOCAL_SOURCE_ID, kind: 'local', label: 'Local' }
+  if (!target) throw new Error(`${kind} 소스에는 ${kind === 'wsl' ? '배포판' : '호스트'} 이름이 필요합니다`)
+  return kind === 'wsl'
+    ? { id: `wsl:${target}`, kind, label: `WSL · ${target}`, distro: target }
+    : { id: `ssh:${target}`, kind, label: `SSH · ${target}`, sshHost: target }
+}
 
 function defaults(): AppConfig {
   return {
@@ -38,18 +47,41 @@ export class ConfigStore {
     return this.update({ ...this.config, ui: { ...this.config.ui, ...patch } })
   }
 
-  /** 같은 소스·경로가 이미 있으면 기존 항목을 돌려준다. */
-  addRepo(input: Omit<Repo, 'id'>): Repo {
+  /**
+   * 같은 소스·경로가 이미 있으면 기존 항목을 돌려준다.
+   * source 를 함께 주면(처음 쓰는 WSL 배포판·SSH 호스트) 저장소와 같은 쓰기로 소스도 추가한다.
+   */
+  addRepo(input: Omit<Repo, 'id'>, source?: Source): Repo {
     const existing = this.config.repos.find((r) => r.sourceId === input.sourceId && r.path === input.path)
     if (existing) return existing
     const repo: Repo = { ...input, id: randomUUID() }
-    this.update({ ...this.config, repos: [...this.config.repos, repo] })
+    const sources = source && !this.source(source.id) ? [...this.config.sources, source] : this.config.sources
+    this.update({ ...this.config, sources, repos: [...this.config.repos, repo] })
     return repo
   }
 
+  updateRepo(id: string, patch: RepoPatch): AppConfig {
+    const repos = this.config.repos.map((r) => {
+      if (r.id !== id) return r
+      const next: Repo = { ...r }
+      if (patch.name !== undefined && patch.name.trim()) next.name = patch.name.trim()
+      if (patch.group !== undefined) {
+        const g = patch.group?.trim()
+        if (g) next.group = g
+        else delete next.group
+      }
+      return next
+    })
+    return this.update({ ...this.config, repos })
+  }
+
+  /** 저장소를 지우고, 더 이상 쓰는 저장소가 없는 WSL·SSH 소스도 함께 정리한다(로컬 소스는 항상 남긴다) */
   removeRepo(id: string): AppConfig {
     const ui = this.config.ui.lastRepoId === id ? { ...this.config.ui, lastRepoId: undefined } : this.config.ui
-    return this.update({ ...this.config, ui, repos: this.config.repos.filter((r) => r.id !== id) })
+    const repos = this.config.repos.filter((r) => r.id !== id)
+    const used = new Set(repos.map((r) => r.sourceId))
+    const sources = this.config.sources.filter((s) => s.id === LOCAL_SOURCE_ID || used.has(s.id))
+    return this.update({ ...this.config, ui, repos, sources })
   }
 
   /** 디스크에 먼저 쓰고, 성공했을 때만 메모리 상태를 바꾼다 */

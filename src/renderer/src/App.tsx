@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CommitList } from './components/CommitList'
 import { DetailPanel } from './components/DetailPanel'
+import { AddRepoDialog } from './components/AddRepoDialog'
 import { DiffView } from './components/DiffView'
 import { EmptyState } from './components/EmptyState'
 import { RepoSwitcher } from './components/RepoSwitcher'
@@ -35,6 +36,12 @@ export function App(): React.JSX.Element | null {
 
   useEffect(() => {
     void useAppStore.getState().init()
+    // 외부(터미널·IDE)에서 커밋·체크아웃·fetch 하면 main 감시자가 알려 준다 — 선택은 유지한 채 다시 읽는다
+    return window.antler.on('repo:changed', ({ repoId }) => {
+      if (repoId !== useAppStore.getState().activeRepoId) return
+      void useAppStore.getState().refreshRefs()
+      useLogStore.getState().reload(true)
+    })
   }, [])
 
   // 저장된 패널 폭은 설정을 처음 받았을 때 한 번만 반영한다
@@ -150,6 +157,7 @@ export function App(): React.JSX.Element | null {
         </div>
       )}
       <RepoSwitcher />
+      <AddRepoDialog />
     </div>
   )
 }

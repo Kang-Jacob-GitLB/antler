@@ -1,5 +1,15 @@
 import { create } from 'zustand'
-import type { AppConfig, HeadInfo, Locale, RefsSnapshot, Repo, ThemePref, UiPrefs } from '@shared/types'
+import type {
+  AddRepoInput,
+  AppConfig,
+  HeadInfo,
+  Locale,
+  RefsSnapshot,
+  Repo,
+  RepoPatch,
+  ThemePref,
+  UiPrefs
+} from '@shared/types'
 import { api, errorMessage } from '../lib/api'
 
 type ResolvedTheme = 'dark' | 'light'
@@ -13,11 +23,15 @@ interface AppState {
   systemDark: boolean
   error: string | null
   switcherOpen: boolean
+  addOpen: boolean
 
   init(): Promise<void>
   selectRepo(id: string | null): void
   refreshRefs(): Promise<void>
-  addLocalRepo(): Promise<void>
+  /** 저장소 추가 대화상자 */
+  openAddDialog(open?: boolean): void
+  addRepo(input: AddRepoInput): Promise<void>
+  updateRepo(id: string, patch: RepoPatch): Promise<void>
   removeRepo(id: string): Promise<void>
   setUi(patch: Partial<UiPrefs>): Promise<void>
   cycleTheme(): void
@@ -44,6 +58,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   systemDark: media.matches,
   error: null,
   switcherOpen: false,
+  addOpen: false,
 
   async init() {
     const config = await api.invoke('config:get')
@@ -56,12 +71,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ systemDark: e.matches })
       applyTheme(get().config?.ui.theme ?? 'system', e.matches)
     })
+    void api.invoke('repos:watch', activeRepoId)
     void get().refreshRefs()
   },
 
   selectRepo(id) {
     if (id === get().activeRepoId) return
     set({ activeRepoId: id, head: null, refs: null })
+    // 활성 저장소만 감시한다(비활성 저장소는 폴링하지 않는다)
+    void api.invoke('repos:watch', id)
     if (id) {
       void get().setUi({ lastRepoId: id })
       void get().refreshRefs()
@@ -79,13 +97,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  async addLocalRepo() {
+  openAddDialog(open = true) {
+    set({ addOpen: open })
+  },
+
+  async addRepo(input) {
+    // 실패는 대화상자 안에서 보여 주도록 그대로 던진다
+    const repo: Repo = await api.invoke('repos:add', input)
+    const config = await api.invoke('config:get')
+    set({ config, addOpen: false })
+    get().selectRepo(repo.id)
+  },
+
+  async updateRepo(id, patch) {
     try {
-      const repo: Repo | null = await api.invoke('repos:pickLocal')
-      if (!repo) return
-      const config = await api.invoke('config:get')
+      const config = await api.invoke('repos:update', id, patch)
       set({ config })
-      get().selectRepo(repo.id)
     } catch (err) {
       set({ error: errorMessage(err) })
     }

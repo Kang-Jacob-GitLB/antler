@@ -3,7 +3,7 @@
 Windows · WSL · SSH(원격 Ubuntu)의 git 저장소를 한 화면에서 살펴보는 가벼운 Git GUI.
 사슴뿔(antler)처럼 갈라져 뻗는 브랜치 구조에서 이름을 따왔다. 읽기(조회) 전용이다.
 
-> 현재 단계: **M3** — 커밋 상세·변경 파일 목록·diff 뷰어(unified/split, 지연 로딩, syntax highlight)
+> 현재 단계: **M4** — WSL·SSH 저장소(환경별 git 실행), 환경 관리 UI(추가·그룹·연결 테스트), 외부 변경 자동 반영
 
 ## 실행
 
@@ -62,6 +62,16 @@ tests/           vitest + fixtures/
   행마다 FULL(통과)·TOP(모여듦)·BOTTOM(갈라짐) 선분과 노드 레인을 계산한다. renderer 는 보이는 행만 Canvas 에
   색별 `Path2D` 로 묶어 그린다. 색: main/master 는 `--lane-0`(앰버) 고정, 브랜치 tip 은 이름 해시,
   merge 의 두 번째 부모는 merge 제목(`Merge branch 'x'`)에서 이름을 읽어 같은 브랜치가 세션이 바뀌어도 같은 색이 된다.
+- **환경별 실행(M4)**: git 은 항상 저장소가 있는 환경 안에서 돈다.
+  - WSL: `wsl.exe -d <배포판> --cd ~ --exec env <GIT_ENV> git -C <경로> …` — `--exec` 라 리눅스 셸이 인자를 해석하지 않는다.
+    `\\wsl.localhost\<배포판>\…` 경로를 고르면 WSL 저장소로 바꿔 등록한다(9P 공유를 거치지 않아 빠르고 정확하다).
+  - SSH: `ssh2` 로 호스트당 연결 하나를 유지하고 exec 채널을 연다(Windows OpenSSH 는 ControlMaster 미지원).
+    `~/.ssh/config`(Host·HostName·User·Port·IdentityFile·ProxyJump·Include)를 따르고, 인증은 ssh-agent·키 파일만 —
+    비밀번호는 저장하지도 묻지도 않는다. 호스트 키는 `known_hosts` 로 검증하며 모르는 키는 자동 등록하지 않는다.
+  - 경로 `~/x` 는 셸 없이 실행되므로 두 실행기 모두 홈 디렉터리에서 실행해 상대 경로로 처리한다.
+- **외부 변경 자동 반영**: 활성 저장소만 감시한다. 로컬은 `.git`(워크트리면 공통 디렉터리까지) 재귀 감시 → 디바운스,
+  WSL 4초·SSH 30초 폴링(창이 뒤에 있으면 4배 느리게, 앞으로 오면 즉시 확인). HEAD 와 모든 ref 의 해시 요약이
+  바뀐 경우에만 사이드바·그래프를 다시 읽고, 보던 커밋 선택은 유지한다.
 - **커밋 상세·diff**: 커밋을 고르면(↑↓ 연타 대비 60ms 디바운스) 메타데이터와 첫 부모 대비 변경 파일(+/− 통계)을
   불러온다. 파일을 누르면 중앙이 diff 로 바뀐다(Esc 닫기, Alt+↑/↓ 이전/다음 파일). diff 는 3,000줄까지만 담아
   보내고 나머지는 "전체 불러오기"로 받는다. 상세·diff 는 커밋 해시 기준 불변 LRU 캐시(main)와 상세 캐시(renderer)에
@@ -85,6 +95,7 @@ tests/           vitest + fixtures/
 | typescript, @types/* | strict 타입 검사 |
 | vitest | 파서·executor 단위 테스트 |
 | playwright-core (dev) | 빌드된 앱을 실제로 띄워 측정·스크린샷(`scripts/drive.mjs`) — 브라우저 다운로드 없는 core 판 |
+| ssh2 | SSH 연결 유지·exec 채널 — Windows OpenSSH 는 ControlMaster 미지원 |
 | highlight.js | diff syntax highlight — core 와 필요한 언어만 diff 를 열 때 지연 로드(언어별 청크) |
 | pretendard (dev) | UI 폰트 Pretendard Variable(OFL 1.1). woff2 하나만 renderer 자산으로 번들 |
 | d2coding (dev) | 코드 폰트 D2Coding Regular/Bold 전체 한글 글리프(OFL 1.1). woff2 만 번들 |
@@ -94,6 +105,6 @@ tests/           vitest + fixtures/
 - [x] **M1** 스캐폴딩 + 디자인 토큰/테마 + LocalExecutor + 커밋 목록
 - [x] **M2** 그래프 렌더링(레인 팔레트) + 브랜치/태그/워크트리 사이드바
 - [x] **M3** 커밋 상세, 변경 파일 리스트, diff 뷰어
-- [ ] M4 WslExecutor, SshExecutor + 환경 관리 UI
+- [x] **M4** WslExecutor, SshExecutor + 환경 관리 UI
 - [ ] M5 GitHub PR/이슈 연동
 - [ ] M6 아이콘/브랜딩, 성능 튜닝, 패키징

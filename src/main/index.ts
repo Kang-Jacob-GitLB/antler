@@ -3,6 +3,7 @@ import { app, BrowserWindow, nativeTheme, session, shell } from 'electron'
 import { registerIpc } from './ipc/handlers'
 import { ConfigStore } from './services/ConfigStore'
 import { RepoService } from './services/RepoService'
+import { RepoWatcher } from './services/RepoWatcher'
 
 app.setName('Antler')
 // 테스트·자동화용으로 설정 저장 위치를 바꿀 수 있다(실사용 설정을 건드리지 않기 위해)
@@ -14,6 +15,7 @@ const BG = { dark: '#14110F', light: '#F6F1E7' }
 
 let config: ConfigStore
 let repos: RepoService
+let watcher: RepoWatcher | undefined
 
 function createWindow(): BrowserWindow {
   const pref = config.get().ui.theme
@@ -36,6 +38,9 @@ function createWindow(): BrowserWindow {
     }
   })
   win.once('ready-to-show', () => win.show())
+  // 창이 뒤에 있을 때는 원격 폴링을 늦추고, 다시 앞으로 오면 바로 확인한다
+  win.on('focus', () => watcher?.setFocused(true))
+  win.on('blur', () => watcher?.setFocused(false))
 
   // 외부 링크는 기본 브라우저로, 앱 내 탐색은 막는다
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -55,7 +60,11 @@ function createWindow(): BrowserWindow {
 app.whenReady().then(() => {
   config = new ConfigStore(join(app.getPath('userData'), 'antler.config.json'))
   repos = new RepoService(config)
-  registerIpc(config, repos)
+  // 활성 저장소의 ref 가 바뀌면(외부에서 커밋·fetch·체크아웃) renderer 에 알린다
+  watcher = new RepoWatcher(repos, (repoId) => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })
+  })
+  registerIpc(config, repos, watcher)
 
   // 카메라·마이크 등 어떤 권한도 주지 않는다
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
@@ -77,5 +86,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
+  watcher?.dispose()
   void repos?.dispose()
 })

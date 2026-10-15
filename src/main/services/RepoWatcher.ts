@@ -1,0 +1,129 @@
+import { watch, type FSWatcher } from 'node:fs'
+import type { RepoService } from './RepoService'
+
+/** 원격 환경 폴링 주기(ms). 창이 포커스를 잃으면 FOCUS_SLOWDOWN 배로 늦춘다 */
+const POLL_MS = { wsl: 4_000, ssh: 30_000 } as const
+const FOCUS_SLOWDOWN = 4
+/** 로컬 .git 이벤트를 모아서 한 번만 확인하는 지연 */
+const DEBOUNCE_MS = 400
+/** 로컬에서도 watcher 가 놓친 변화(네트워크 드라이브 등)를 잡는 안전망 폴링 */
+const LOCAL_SAFETY_POLL_MS = 60_000
+
+/**
+ * 활성 저장소 하나만 감시한다(비활성 저장소는 감시·폴링하지 않는다).
+ * - 로컬: .git(워크트리면 공통 디렉터리까지) 재귀 fs.watch → 디바운스 → ref 시그니처 비교
+ * - WSL: 9P 공유는 파일 이벤트가 믿을 만하지 않아 짧은 주기 폴링
+ * - SSH: 저빈도 폴링(+ 사용자의 수동 새로고침)
+ * 시그니처가 바뀐 경우에만 onChange 를 부른다 — .git 안의 잦은 변화(index, objects)는 걸러진다.
+ */
+export class RepoWatcher {
+  private repoId: string | null = null
+  private generation = 0
+  private watchers: FSWatcher[] = []
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private debounce: ReturnType<typeof setTimeout> | null = null
+  private lastSig: string | null = null
+  private focused = true
+  private checking = false
+
+  constructor(
+    private readonly repos: RepoService,
+    private readonly onChange: (repoId: string) => void
+  ) {}
+
+  /** 지금 감시 중인 저장소 */
+  get current(): string | null {
+    return this.repoId
+  }
+
+  async watch(repoId: string | null): Promise<void> {
+    if (repoId === this.repoId) return
+    this.stop()
+    this.repoId = repoId
+    const gen = ++this.generation
+    if (!repoId) return
+    // 기준 시그니처를 먼저 잡아 둔다(감시 시작 전 상태와 비교)
+    this.lastSig = await this.repos.signature(repoId).catch(() => null)
+    if (gen !== this.generation) return
+    const kind = this.repos.repoKind(repoId)
+    if (kind === 'local') await this.watchLocal(repoId, gen)
+    this.schedule(gen)
+  }
+
+  /** 창 포커스 변화. 다시 포커스를 얻으면 바로 한 번 확인한다(다른 도구에서 커밋하고 돌아온 경우) */
+  setFocused(focused: boolean): void {
+    this.focused = focused
+    if (focused && this.repoId) void this.check(this.generation)
+  }
+
+  dispose(): void {
+    this.stop()
+    this.repoId = null
+  }
+
+  private async watchLocal(repoId: string, gen: number): Promise<void> {
+    const dirs = await this.repos.localGitDirs(repoId).catch(() => null)
+    if (!dirs || gen !== this.generation) return
+    for (const dir of dirs) {
+      try {
+        const w = watch(dir, { recursive: true }, (_event, file) => {
+          // 객체 파일은 fetch·gc 때 대량으로 바뀐다 — ref 가 함께 바뀌므로 그쪽 이벤트로 충분하다
+          const name = typeof file === 'string' ? file.replace(/\\/g, '/') : ''
+          if (name.startsWith('objects/')) return
+          this.kick(gen)
+        })
+        w.on('error', () => {}) // 디렉터리가 사라지면(저장소 삭제) 폴링 안전망이 처리한다
+        this.watchers.push(w)
+      } catch {
+        // 재귀 감시를 지원하지 않는 파일 시스템 — 안전망 폴링에 맡긴다
+      }
+    }
+  }
+
+  private kick(gen: number): void {
+    if (this.debounce) clearTimeout(this.debounce)
+    this.debounce = setTimeout(() => void this.check(gen), DEBOUNCE_MS)
+  }
+
+  private schedule(gen: number): void {
+    if (this.timer) clearTimeout(this.timer)
+    const kind = this.repoId ? this.repos.repoKind(this.repoId) : null
+    if (!kind) return
+    const base = kind === 'local' ? LOCAL_SAFETY_POLL_MS : POLL_MS[kind]
+    this.timer = setTimeout(
+      () => {
+        void this.check(gen).finally(() => {
+          if (gen === this.generation) this.schedule(gen)
+        })
+      },
+      this.focused ? base : base * FOCUS_SLOWDOWN
+    )
+  }
+
+  private async check(gen: number): Promise<void> {
+    const repoId = this.repoId
+    if (!repoId || gen !== this.generation || this.checking) return
+    this.checking = true
+    try {
+      const sig = await this.repos.signature(repoId)
+      if (gen !== this.generation) return
+      if (this.lastSig !== null && sig !== this.lastSig) this.onChange(repoId)
+      this.lastSig = sig
+    } catch {
+      // 일시적인 실패(SSH 끊김·잠금 경합)는 다음 주기에 다시 본다
+    } finally {
+      this.checking = false
+    }
+  }
+
+  private stop(): void {
+    this.generation++
+    for (const w of this.watchers) w.close()
+    this.watchers = []
+    if (this.timer) clearTimeout(this.timer)
+    if (this.debounce) clearTimeout(this.debounce)
+    this.timer = null
+    this.debounce = null
+    this.lastSig = null
+  }
+}

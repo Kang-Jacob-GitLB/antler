@@ -6,6 +6,7 @@ import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
 import { useLogStore, type LogFilter } from '../stores/logStore'
 import { EnvBadge } from './EnvBadge'
+import { RepoMenu } from './RepoMenu'
 import {
   IconCheck,
   IconChevronRight,
@@ -13,6 +14,7 @@ import {
   IconCloud,
   IconFolder,
   IconFunnel,
+  IconMore,
   IconMonitor,
   IconPlus,
   IconRepo,
@@ -201,11 +203,17 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const config = useAppStore((s) => s.config)
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   const refs = useAppStore((s) => s.refs)
-  const { selectRepo, addLocalRepo, removeRepo } = useAppStore.getState()
+  const { selectRepo, openAddDialog, removeRepo, updateRepo } = useAppStore.getState()
   const filter = useLogStore((s) => s.filter)
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
   const { isOpen, toggle } = useCollapse()
+  /** 메뉴(그룹 지정·제거)를 연 저장소 */
+  const [menuFor, setMenuFor] = useState<string | null>(null)
+  const allGroups = useMemo(
+    () => [...new Set((config?.repos ?? []).map((r) => r.group).filter((g): g is string => !!g))].sort(),
+    [config]
+  )
 
   const repoGroups = useMemo(() => {
     if (!config) return []
@@ -295,43 +303,76 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
           title={t('sidebar.repos')}
           count={config?.repos.length}
           extra={
-            <button className="icon-btn icon-btn--sm" title={t('sidebar.addRepo')} onClick={() => void addLocalRepo()}>
+            <button className="icon-btn icon-btn--sm" title={t('sidebar.addRepo')} onClick={() => openAddDialog()}>
               <IconPlus size={13} />
             </button>
           }
         >
           {repoGroups.length === 0 && <div className="sidebar__empty">{t('sidebar.empty')}</div>}
-          {repoGroups.map(({ source, repos }) => (
-            <div key={source.id}>
-              {repoGroups.length > 1 && <div className="sidebar__group-label">{source.label}</div>}
-              {repos.map((repo) => (
-                <ItemRow
-                  key={repo.id}
-                  depth={0}
-                  icon={<IconRepo size={13} />}
-                  label={repo.name}
-                  title={repo.path}
-                  active={repo.id === activeRepoId}
-                  onClick={() => selectRepo(repo.id)}
-                  trailing={
-                    <>
-                      <EnvBadge kind={source.kind} />
-                      <button
-                        className="side-item__action"
-                        title={t('sidebar.removeRepo')}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          void removeRepo(repo.id)
-                        }}
-                      >
-                        <IconClose size={11} />
-                      </button>
-                    </>
-                  }
-                />
-              ))}
-            </div>
-          ))}
+          {repoGroups.map(({ source, repos }) => {
+            // 같은 환경 안에서는 사용자 그룹별로 접을 수 있는 폴더로 묶는다(그룹 없는 저장소는 맨 아래)
+            const grouped = new Map<string, Repo[]>()
+            const loose: Repo[] = []
+            for (const r of repos) {
+              if (r.group) grouped.set(r.group, [...(grouped.get(r.group) ?? []), r])
+              else loose.push(r)
+            }
+            const repoRow = (repo: Repo, depth: number): ReactNode => (
+              <ItemRow
+                key={repo.id}
+                depth={depth}
+                icon={<IconRepo size={13} />}
+                label={repo.name}
+                title={`${source.label} · ${repo.path}`}
+                active={repo.id === activeRepoId}
+                onClick={() => selectRepo(repo.id)}
+                trailing={
+                  <>
+                    <EnvBadge kind={source.kind} />
+                    <button
+                      className="side-item__action"
+                      title={t('sidebar.repoMenu')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMenuFor(menuFor === repo.id ? null : repo.id)
+                      }}
+                    >
+                      <IconMore size={12} />
+                    </button>
+                    {menuFor === repo.id && (
+                      <RepoMenu
+                        repo={repo}
+                        groups={allGroups}
+                        onClose={() => setMenuFor(null)}
+                        onGroup={(group) => void updateRepo(repo.id, { group })}
+                        onRemove={() => void removeRepo(repo.id)}
+                      />
+                    )}
+                  </>
+                }
+              />
+            )
+            return (
+              <div key={source.id}>
+                {(repoGroups.length > 1 || source.kind !== 'local') && (
+                  <div className="sidebar__group-label">{source.label}</div>
+                )}
+                {[...grouped.entries()]
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([group, items]) => {
+                    const key = `repogroup:${source.id}:${group}`
+                    const open = isOpen(key)
+                    return (
+                      <div key={group}>
+                        <FolderRow depth={0} name={group} count={items.length} open={open} onToggle={() => toggle(key)} />
+                        {open && items.map((r) => repoRow(r, 1))}
+                      </div>
+                    )
+                  })}
+                {loose.map((r) => repoRow(r, 0))}
+              </div>
+            )
+          })}
         </Section>
 
         {refs && (

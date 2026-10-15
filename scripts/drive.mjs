@@ -24,7 +24,18 @@ const locale = opt('locale', 'ko')
 const searchQuery = opt('search', 'Merge branch')
 // 실험용: 이 CSS 를 페이지에 주입한 상태로 측정한다(예: --inject-css '* { box-shadow: none !important }')
 const injectCss = opt('inject-css', '')
-const repos = args.map((p) => resolve(p))
+// 저장소 지정: 로컬 경로 또는 'wsl:<배포판>:<리눅스 경로>' / 'ssh:<호스트>:<경로>'
+const repos = args.map((p) => {
+  const m = /^(wsl|ssh):([^:]+):(.+)$/.exec(p)
+  if (!m) return { kind: 'local', sourceId: 'local', path: resolve(p) }
+  const [, kind, target, path] = m
+  return { kind, sourceId: `${kind}:${target}`, target, path }
+})
+const sources = [{ id: 'local', kind: 'local', label: 'Local' }]
+for (const r of repos) {
+  if (r.kind === 'local' || sources.some((s) => s.id === r.sourceId)) continue
+  sources.push({ id: r.sourceId, kind: r.kind, label: `${r.kind.toUpperCase()} · ${r.target}`, ...(r.kind === 'wsl' ? { distro: r.target } : { sshHost: r.target }) })
+}
 mkdirSync(outDir, { recursive: true })
 
 const userData = mkdtempSync(join(tmpdir(), 'antler-userdata-'))
@@ -32,8 +43,8 @@ writeFileSync(
   join(userData, 'antler.config.json'),
   JSON.stringify({
     version: 1,
-    sources: [{ id: 'local', kind: 'local', label: 'Local' }],
-    repos: repos.map((p, i) => ({ id: `r${i}`, sourceId: 'local', path: p, name: basename(p) })),
+    sources,
+    repos: repos.map((r, i) => ({ id: `r${i}`, sourceId: r.sourceId, path: r.path, name: basename(r.path) })),
     ui: { theme, locale, paneWidths: [248, 380], lastRepoId: repos.length ? 'r0' : undefined }
   })
 )
@@ -191,6 +202,21 @@ try {
     await page.keyboard.press('Control+P')
     await page.waitForSelector('.switcher')
     await shot(`switcher-${theme}`)
+    await page.keyboard.press('Escape')
+
+    // 저장소 추가 대화상자: WSL 탭이 있으면 연결 테스트까지(원격 SSH 서버에는 접속하지 않는다)
+    await page.click('.side-section__extra .icon-btn')
+    await page.waitForSelector('.add-dialog')
+    const wslTab = await page.$('.add-dialog__tabs .seg__btn:nth-child(2)')
+    if (wslTab && (await wslTab.textContent())?.includes('WSL')) {
+      await wslTab.click()
+      await page.waitForTimeout(800)
+      const t = Date.now()
+      await page.click('.add-dialog__foot .btn:first-child')
+      await page.waitForSelector('.add-dialog__msg', { timeout: 30_000 }).catch(() => {})
+      console.log(`add dialog WSL test: "${(await page.textContent('.add-dialog__msg').catch(() => ''))?.trim()}" (+${Date.now() - t} ms)`)
+    }
+    await shot(`add-dialog-${theme}`)
     await page.keyboard.press('Escape')
   }
   // 유휴 상태 메모리: 잠시 쉰 뒤 프로세스별 working set / private bytes(KB → MB)

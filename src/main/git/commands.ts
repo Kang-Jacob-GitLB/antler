@@ -1,4 +1,5 @@
 // git 조회 명령 모음. executor 위에서 동작하며 환경과 무관하다.
+import { createHash } from 'node:crypto'
 import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsSnapshot, SearchResult } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { parseChanges } from './parsers/changes'
@@ -36,6 +37,26 @@ export function isEmptyRepoError(stderr: string): boolean {
 export async function resolveTopLevel(exec: GitExecutor, path: string): Promise<string> {
   const out = await ok(exec, path, ['rev-parse', '--show-toplevel'])
   return out.toString('utf8').trim()
+}
+
+/**
+ * 변경 감지용 시그니처. HEAD(브랜치·해시)와 모든 ref 가 가리키는 해시를 SHA-1 로 요약한다.
+ * 커밋·체크아웃·fetch·브랜치 생성/삭제·스태시는 모두 이 값을 바꾼다. 작업 트리 파일 변경은 대상이 아니다(읽기 전용 뷰).
+ */
+export async function refsSignature(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<string> {
+  const [refsOut, headRef, headHash] = await Promise.all([
+    exec.run(repoPath, ['for-each-ref', '--format=%(objectname) %(refname)'], opts),
+    exec.run(repoPath, ['symbolic-ref', '--quiet', 'HEAD'], opts),
+    exec.run(repoPath, ['rev-parse', '--verify', '--quiet', 'HEAD'], opts)
+  ])
+  if (refsOut.code !== 0) throw new GitError(refsOut.stderr.trim() || 'for-each-ref failed', refsOut.code, refsOut.stderr, [])
+  return createHash('sha1').update(refsOut.stdout).update('\0').update(headRef.stdout).update('\0').update(headHash.stdout).digest('hex')
+}
+
+/** git-dir 과 공통 디렉터리(절대 경로). 링크된 워크트리는 둘이 다르고, ref 는 공통 디렉터리에 있다 */
+export async function gitDirs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<string[]> {
+  const out = await ok(exec, repoPath, ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], opts)
+  return [...new Set(out.toString('utf8').split('\n').map((s) => s.trim()).filter(Boolean))]
 }
 
 export async function head(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<HeadInfo> {
