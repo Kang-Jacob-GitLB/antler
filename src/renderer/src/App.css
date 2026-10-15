@@ -8,6 +8,17 @@
   display: flex;
   flex: 1;
   min-height: 0;
+  /* 패널은 간격으로 떼어 놓는다(Splitter 폭 = --neu-gap). 그림자가 잘리지 않게 바깥 여백을 둔다 */
+  padding: 0 var(--neu-gap) var(--neu-gap);
+}
+
+.app__center {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.app__center.is-hidden {
+  display: none;
 }
 
 .empty-state {
@@ -18,7 +29,9 @@
   justify-content: center;
   gap: var(--space-3);
   padding: var(--space-4);
-  background: var(--bg-base);
+  border-radius: var(--neu-radius);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-inset);
   text-align: center;
 }
 .empty-state__art {
@@ -43,9 +56,9 @@
   bottom: var(--space-4);
   max-width: 440px;
   padding: var(--space-3) var(--space-4);
-  border-radius: var(--radius-md);
+  border-radius: var(--neu-radius-sm);
   border-left: 3px solid var(--removed);
-  background: var(--bg-elevated);
+  background: var(--neu-bg);
   box-shadow: var(--shadow-popover);
   color: var(--text-primary);
   font-size: var(--fs-sm);

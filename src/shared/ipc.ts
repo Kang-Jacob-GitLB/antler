@@ -1,5 +1,16 @@
 // IPC 계약. 채널 이름과 인자·결과 타입을 한곳에서 정의해 main/preload/renderer 가 공유한다.
-import type { AppConfig, LogPage, LogQuery, RefsSnapshot, Repo, SearchResult, UiPrefs } from './types'
+import type {
+  AppConfig,
+  CommitDetail,
+  FileDiff,
+  FileDiffRequest,
+  LogPage,
+  LogQuery,
+  RefsSnapshot,
+  Repo,
+  SearchResult,
+  UiPrefs
+} from './types'
 
 export interface IpcContract {
   'config:get': { args: []; result: AppConfig }
@@ -12,6 +23,10 @@ export interface IpcContract {
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
   /** 메시지·작성자·해시 검색. ref 를 주면 그 ref 기준 이력에서만 찾는다 */
   'git:search': { args: [repoId: string, query: string, ref?: string, requestId?: string]; result: SearchResult }
+  /** 커밋 메타데이터 + 첫 부모 대비 변경 파일 목록(+/- 통계). 커밋 해시 기준 불변 캐시 */
+  'git:commit': { args: [repoId: string, hash: string, requestId?: string]; result: CommitDetail }
+  /** 파일 하나의 diff. 크기 상한을 넘으면 앞부분만 담고 truncated=true(req.full 로 전체) */
+  'git:fileDiff': { args: [repoId: string, req: FileDiffRequest, requestId?: string]; result: FileDiff }
   /** 진행 중인 요청 취소 */
   'req:cancel': { args: [requestId: string]; result: void }
 }
@@ -36,6 +51,8 @@ export const IPC_CHANNELS = [
   'git:refs',
   'git:search',
   'git:log',
+  'git:commit',
+  'git:fileDiff',
   'req:cancel'
 ] as const satisfies readonly IpcChannel[]
 

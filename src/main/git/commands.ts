@@ -1,6 +1,9 @@
 // git 조회 명령 모음. executor 위에서 동작하며 환경과 무관하다.
-import type { HeadInfo, RefsSnapshot, SearchResult } from '@shared/types'
+import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsSnapshot, SearchResult } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
+import { parseChanges } from './parsers/changes'
+import { COMMIT_FORMAT_ARGS, parseCommitMeta } from './parsers/commit'
+import { DiffParser } from './parsers/diff'
 import { LOG_FORMAT_ARGS } from './parsers/log'
 import { NulRecordSplitter } from './parsers/nulRecords'
 import { parseRefs, parseRemoteNames, REFS_ARGS } from './parsers/refs'
@@ -9,6 +12,14 @@ import { parseWorktrees, WORKTREE_ARGS } from './parsers/worktree'
 
 /** 검색 결과 상한. 넘으면 truncated 로 알린다 */
 export const SEARCH_LIMIT = 10_000
+/** 커밋 상세의 파일 목록 상한. 넘으면 truncated 로 알린다 */
+export const COMMIT_FILES_LIMIT = 5000
+/** 일반 diff 요청이 읽는 입력 바이트 상한 */
+export const DIFF_MAX_BYTES = 8 * 1024 * 1024
+/** "전체 보기"(full) 요청의 입력 바이트 상한 */
+export const DIFF_FULL_MAX_BYTES = 64 * 1024 * 1024
+
+const HEX_RE = /^[0-9a-f]{4,64}$/i
 
 async function ok(exec: GitExecutor, repoPath: string, args: string[], opts?: RunOpts): Promise<Buffer> {
   const r = await exec.run(repoPath, args, opts)
@@ -145,4 +156,78 @@ async function mergeInGraphOrder(
     if (out.length >= want.size) break
   }
   return out
+}
+
+function assertHex(value: string | undefined, what: string): asserts value is string {
+  if (typeof value !== 'string' || !HEX_RE.test(value)) throw new Error(`invalid ${what}`)
+}
+
+/**
+ * 커밋 상세: 메타데이터 + 첫 부모 대비 변경 파일 목록(+/- 통계).
+ * 첫 부모를 알아야 하므로 메타데이터를 먼저 읽고, 이어서 name-status 와 numstat 을 동시에 돌린다.
+ * 루트 커밋은 `--root`(빈 트리 대비), merge 는 첫 부모 대비다.
+ */
+export async function commitDetail(exec: GitExecutor, repoPath: string, hash: string, opts?: RunOpts): Promise<CommitDetail> {
+  assertHex(hash, 'commit hash')
+  // 해시는 위 정규식으로 hex 만 허용하므로 옵션으로 해석될 수 없다
+  const metaOut = await ok(exec, repoPath, ['log', '-1', ...COMMIT_FORMAT_ARGS, hash, '--'], opts)
+  const meta = parseCommitMeta(metaOut)
+  const baseParent = meta.parents[0] ?? null
+
+  const base = ['diff-tree', '-r', '-z', '-M', '--no-commit-id', '--no-ext-diff']
+  const range = baseParent ? [baseParent, meta.hash] : ['--root', meta.hash]
+  const [nameStatus, numstat] = await Promise.all([
+    ok(exec, repoPath, [...base, '--name-status', ...range, '--'], opts),
+    ok(exec, repoPath, [...base, '--numstat', ...range, '--'], opts)
+  ])
+  const all = parseChanges(nameStatus, numstat)
+  let additions = 0
+  let deletions = 0
+  for (const f of all) {
+    // 바이너리는 null 이라 합계에서 빠진다
+    additions += f.additions ?? 0
+    deletions += f.deletions ?? 0
+  }
+  const truncated = all.length > COMMIT_FILES_LIMIT
+  return { ...meta, baseParent, files: truncated ? all.slice(0, COMMIT_FILES_LIMIT) : all, additions, deletions, truncated }
+}
+
+/**
+ * 파일 하나의 diff. 출력은 스트림으로 읽어 줄 수 상한(기본 3000)까지만 객체로 만들고,
+ * 나머지는 줄 수만 센다(최대 20만 줄 — 넘으면 totalLines 는 하한값). full 이면 줄 수 상한 없이 64MB 까지 읽는다.
+ * 경로는 renderer 가 보낸 값이므로 `--` 뒤에 두고, GIT_LITERAL_PATHSPECS(GIT_ENV)로 pathspec magic 을 끈다.
+ */
+export async function fileDiff(exec: GitExecutor, repoPath: string, req: FileDiffRequest, opts?: RunOpts): Promise<FileDiff> {
+  assertHex(req.hash, 'commit hash')
+  if (req.parent !== undefined) assertHex(req.parent, 'parent hash')
+  for (const p of [req.path, req.oldPath]) {
+    if (p !== undefined && (typeof p !== 'string' || p === '' || p.includes('\0'))) throw new Error('invalid path')
+  }
+  const parent = req.parent ?? (await firstParent(exec, repoPath, req.hash, opts))
+  const paths = req.oldPath !== undefined && req.oldPath !== req.path ? [req.oldPath, req.path] : [req.path]
+  const args = [
+    'diff-tree',
+    '-p',
+    '-M',
+    '--no-color',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--no-commit-id',
+    '-U3',
+    ...(parent ? [parent, req.hash] : ['--root', req.hash]),
+    '--',
+    ...paths
+  ]
+  const parser = new DiffParser(req.path, req.oldPath, req.full ? { maxLines: Infinity, maxBytes: DIFF_FULL_MAX_BYTES } : { maxBytes: DIFF_MAX_BYTES })
+  for await (const chunk of exec.stream(repoPath, args, opts)) {
+    // 상한을 넘기고 줄 수 세기도 끝났으면 git 을 끊는다(break 하면 stream 이 프로세스를 정리한다)
+    if (!parser.push(chunk)) break
+  }
+  return parser.finish()
+}
+
+/** 첫 부모 해시. 루트 커밋이면 null */
+async function firstParent(exec: GitExecutor, repoPath: string, hash: string, opts?: RunOpts): Promise<string | null> {
+  const out = await ok(exec, repoPath, ['rev-list', '--parents', '-n1', hash, '--'], opts)
+  return out.toString('utf8').trim().split(' ')[1] ?? null
 }

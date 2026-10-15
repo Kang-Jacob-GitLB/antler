@@ -32,6 +32,8 @@ export interface UiPrefs {
   paneWidths: [number, number]
   /** 접힌 사이드바 섹션·폴더 키 */
   collapsed?: string[]
+  /** diff 보기 방식 */
+  diffMode?: 'unified' | 'split'
   lastRepoId?: string
 }
 
@@ -156,4 +158,91 @@ export interface SearchResult {
   hashes: string[]
   /** 상한에 걸려 잘렸는지 */
   truncated: boolean
+}
+
+// ── M3: 커밋 상세·diff ─────────────────────────────────
+
+/** A 추가 · M 수정 · D 삭제 · R 이름 변경 · C 복사 · T 타입 변경(파일↔심볼릭 링크 등) · U 병합 충돌 */
+export type FileStatus = 'A' | 'M' | 'D' | 'R' | 'C' | 'T' | 'U'
+
+export interface FileChange {
+  status: FileStatus
+  /** 변경 후 경로(삭제면 삭제된 경로) */
+  path: string
+  /** 이름 변경·복사의 원래 경로 */
+  oldPath?: string
+  /** 이름 변경·복사 유사도(0~100) */
+  similarity?: number
+  /** 바이너리면 null */
+  additions: number | null
+  deletions: number | null
+  binary: boolean
+}
+
+export interface CommitDetail {
+  hash: string
+  parents: string[]
+  authorName: string
+  authorEmail: string
+  /** epoch seconds */
+  authorDate: number
+  committerName: string
+  committerEmail: string
+  /** epoch seconds */
+  commitDate: number
+  subject: string
+  /** 제목 줄을 뺀 본문(앞뒤 공백 제거) */
+  body: string
+  /** 비교 기준 부모(merge 는 첫 부모, 루트 커밋은 null) */
+  baseParent: string | null
+  files: FileChange[]
+  additions: number
+  deletions: number
+  /** 파일 수 상한에 걸려 목록이 잘렸는지 */
+  truncated: boolean
+}
+
+export interface FileDiffRequest {
+  hash: string
+  path: string
+  oldPath?: string
+  /** 비교 기준 부모. 생략하면 첫 부모(루트 커밋이면 빈 트리) */
+  parent?: string
+  /** true 면 크기 상한을 무시하고 전체를 불러온다(지연 로딩의 "전체 보기") */
+  full?: boolean
+}
+
+/** diff 한 줄: ' ' 문맥 · '+' 추가 · '-' 삭제 · '\\' "No newline at end of file" */
+export interface DiffLine {
+  t: ' ' | '+' | '-' | '\\'
+  text: string
+  /** 원래 파일 줄 번호(추가 줄은 없음) */
+  o?: number
+  /** 새 파일 줄 번호(삭제 줄은 없음) */
+  n?: number
+}
+
+export interface DiffHunk {
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  /** @@ 뒤의 함수 문맥 등 */
+  header: string
+  lines: DiffLine[]
+}
+
+export interface FileDiff {
+  path: string
+  oldPath?: string
+  binary: boolean
+  hunks: DiffHunk[]
+  /** 크기 상한으로 일부만 담았는지(full 요청으로 전체를 받을 수 있다) */
+  truncated: boolean
+  /** 전체 diff 줄 수(잘렸을 때 안내용, 모르면 담긴 줄 수) */
+  totalLines: number
+  /** 세기 한계에 걸려 totalLines 가 하한값인지("N+ 줄") */
+  totalIsLowerBound?: boolean
+  /** 모드 변경 등 내용 외 변경 안내("new file mode 100755" 등) */
+  meta: string[]
 }

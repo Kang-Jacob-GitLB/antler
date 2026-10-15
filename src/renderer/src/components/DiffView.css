@@ -1,0 +1,322 @@
+/* 긴 줄 생략 표시, 잘린 diff 안내 */
+.diff-long {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.diff-trunc__err {
+  color: var(--removed-text);
+}
+.diff-trunc__max {
+  color: var(--text-muted);
+}
+
+.diff-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--neu-radius);
+  background: var(--list-bg);
+  box-shadow: var(--neu-raised);
+}
+
+/* ── 머리 ── */
+.diff-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 40px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--neu-bg);
+  flex-shrink: 0;
+}
+.diff-head__path {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.diff-head__from,
+.diff-head__dir {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+}
+.diff-head__from {
+  margin-right: 6px;
+}
+.diff-head__base {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.diff-head__stat {
+  display: inline-flex;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.diff-head__pos {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  padding: 0 2px;
+}
+.diff-head .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* 분절 버튼(unified / split) */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-inset-sm);
+}
+.seg__btn {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  transition:
+    box-shadow var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.seg__btn:hover {
+  color: var(--text-primary);
+}
+.seg__btn.is-on {
+  background: var(--neu-bg);
+  color: var(--accent-text);
+  box-shadow: var(--neu-raised-sm);
+}
+.seg__btn:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .seg__btn {
+    transition: none;
+  }
+}
+
+.diff-meta {
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ── 본문 ── */
+.diff-scroll {
+  position: relative;
+  flex: 1;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-variant-ligatures: none;
+  tab-size: 4;
+  contain: strict;
+}
+.diff-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.diff-notice {
+  padding: var(--space-4);
+  font-family: var(--font-ui);
+  color: var(--text-secondary);
+}
+.diff-notice.is-error {
+  color: var(--removed-text);
+}
+
+.diff-row {
+  display: grid;
+  height: 100%;
+  line-height: 20px;
+  white-space: pre;
+  user-select: text;
+  cursor: text;
+}
+.diff-row--unified {
+  grid-template-columns: 48px 48px 18px 1fr;
+}
+.diff-row--split {
+  grid-template-columns: 1fr 1fr;
+}
+.diff-row--split {
+  min-width: 0;
+}
+.diff-scroll--split {
+  overflow-x: hidden;
+}
+.diff-side {
+  display: grid;
+  grid-template-columns: 48px 18px minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+}
+.diff-side .diff-code {
+  overflow: hidden;
+}
+.diff-side + .diff-side {
+  border-left: 1px solid var(--border);
+}
+.diff-side.is-empty {
+  background: var(--diff-empty-bg);
+}
+
+.diff-no {
+  padding-right: 8px;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  user-select: none;
+}
+.diff-sign {
+  text-align: center;
+  color: var(--text-muted);
+  user-select: none;
+}
+.diff-code {
+  min-width: 0;
+  padding-right: var(--space-4);
+  color: var(--text-primary);
+}
+.diff-code--note {
+  font-family: var(--font-ui);
+  font-style: italic;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.is-add.diff-row,
+.diff-side.is-add {
+  background: var(--diff-add-bg);
+}
+.is-del.diff-row,
+.diff-side.is-del {
+  background: var(--diff-del-bg);
+}
+.is-add > .diff-no,
+.is-add > .diff-sign {
+  background: var(--diff-add-gutter);
+  color: var(--added-text);
+}
+.is-del > .diff-no,
+.is-del > .diff-sign {
+  background: var(--diff-del-gutter);
+  color: var(--removed-text);
+}
+.is-add .diff-emph {
+  background: var(--diff-add-emph);
+  color: inherit;
+  border-radius: 2px;
+}
+.is-del .diff-emph {
+  background: var(--diff-del-emph);
+  color: inherit;
+  border-radius: 2px;
+}
+
+.diff-row--hunk {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3);
+  background: var(--diff-hunk-bg);
+  color: var(--text-secondary);
+  user-select: none;
+  cursor: default;
+}
+.diff-hunk__range {
+  font-size: 11.5px;
+  color: var(--renamed-text);
+}
+.diff-hunk__ctx {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-trunc {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--neu-bg);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* ── highlight.js 토큰 → 디자인 토큰 ── */
+.diff-code .hljs-keyword,
+.diff-code .hljs-selector-tag,
+.diff-code .hljs-literal,
+.diff-code .hljs-doctag {
+  color: var(--syn-keyword);
+}
+.diff-code .hljs-string,
+.diff-code .hljs-regexp,
+.diff-code .hljs-template-variable,
+.diff-code .hljs-addition {
+  color: var(--syn-string);
+}
+.diff-code .hljs-number,
+.diff-code .hljs-symbol,
+.diff-code .hljs-bullet {
+  color: var(--syn-number);
+}
+.diff-code .hljs-comment,
+.diff-code .hljs-quote {
+  color: var(--syn-comment);
+  font-style: italic;
+}
+.diff-code .hljs-title,
+.diff-code .hljs-section,
+.diff-code .hljs-selector-id {
+  color: var(--syn-function);
+}
+.diff-code .hljs-type,
+.diff-code .hljs-built_in,
+.diff-code .hljs-title.class_,
+.diff-code .hljs-selector-class {
+  color: var(--syn-type);
+}
+.diff-code .hljs-attr,
+.diff-code .hljs-attribute,
+.diff-code .hljs-property,
+.diff-code .hljs-variable,
+.diff-code .hljs-params,
+.diff-code .hljs-name {
+  color: var(--syn-attr);
+}
+.diff-code .hljs-meta,
+.diff-code .hljs-tag,
+.diff-code .hljs-punctuation,
+.diff-code .hljs-operator,
+.diff-code .hljs-subst {
+  color: var(--syn-meta);
+}
+.diff-code .hljs-emphasis {
+  font-style: italic;
+}
+.diff-code .hljs-strong {
+  font-weight: 700;
+}

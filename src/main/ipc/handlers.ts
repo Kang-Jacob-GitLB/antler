@@ -42,5 +42,7 @@ export function registerIpc(config: ConfigStore, repos: RepoService): void {
   handle('git:refs', (_e, repoId) => repos.refs(repoId))
   handle('git:log', (_e, repoId, query, requestId) => repos.log(repoId, query, requestId))
   handle('git:search', (_e, repoId, query, ref, requestId) => repos.search(repoId, query, ref, requestId))
+  handle('git:commit', (_e, repoId, hash, requestId) => repos.commit(repoId, hash, requestId))
+  handle('git:fileDiff', (_e, repoId, req, requestId) => repos.fileDiff(repoId, req, requestId))
   handle('req:cancel', (_e, requestId) => repos.cancel(requestId))
 }

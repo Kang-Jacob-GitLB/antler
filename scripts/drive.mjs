@@ -22,6 +22,8 @@ const outDir = resolve(opt('out', join(tmpdir(), 'antler-shots')))
 const theme = opt('theme', 'dark')
 const locale = opt('locale', 'ko')
 const searchQuery = opt('search', 'Merge branch')
+// 실험용: 이 CSS 를 페이지에 주입한 상태로 측정한다(예: --inject-css '* { box-shadow: none !important }')
+const injectCss = opt('inject-css', '')
 const repos = args.map((p) => resolve(p))
 mkdirSync(outDir, { recursive: true })
 
@@ -53,6 +55,7 @@ const shot = async (name) => {
 
 try {
   await page.setViewportSize({ width: 1440, height: 860 }).catch(() => {})
+  if (injectCss) await page.addStyleTag({ content: injectCss })
   if (!repos.length) {
     await page.waitForSelector('.empty-state', { timeout: 15_000 })
     console.log(`cold start → empty state: ${Date.now() - t0} ms`)
@@ -62,6 +65,14 @@ try {
     console.log(`cold start → first commit row: ${Date.now() - t0} ms`)
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
+
+    // 번들 폰트가 실제로 로드·적용됐는지
+    const fonts = await page.evaluate(async () => {
+      await document.fonts.ready
+      const loaded = [...document.fonts].filter((f) => f.status === 'loaded').map((f) => `${f.family} ${f.weight}`)
+      return { loaded, ui: getComputedStyle(document.body).fontFamily.split(',')[0] }
+    })
+    console.log(`fonts loaded: ${fonts.loaded.join(', ') || '(none)'} — body: ${fonts.ui}`)
 
     // 사이드바 ref 섹션이 채워질 때까지
     const tRefs = Date.now()
@@ -92,6 +103,39 @@ try {
       await page.click('.filter-chip')
       await page.waitForSelector('.filter-chip', { state: 'detached' })
       await page.waitForSelector('.commit-subject')
+    }
+
+    // 커밋 상세 → 변경 파일 → diff (M3)
+    await page.click('.commit-list__scroll')
+    await page.keyboard.press('Home')
+    const tDetail = Date.now()
+    await page.waitForSelector('.file-row', { timeout: 10_000 }).catch(() => {})
+    const files = await page.$$eval('.file-row', (els) => els.length)
+    console.log(`detail files: ${files} (+${Date.now() - tDetail} ms) — ${await page.textContent('.file-list__head').catch(() => '')}`)
+    if (files) {
+      // 가장 많이 바뀐 파일을 연다(강조·줄 안 변경을 보기 좋게)
+      await page.$$eval('.file-row', (els) => {
+        const score = (e) => [...e.querySelectorAll('.file-row__stat span')].reduce((n, s) => n + Number(s.textContent.replace(/[^0-9]/g, '')), 0)
+        els.sort((a, b) => score(b) - score(a))[0].click()
+      })
+      const tDiff = Date.now()
+      await page.waitForSelector('.diff-row, .diff-notice', { timeout: 10_000 })
+      await page.waitForTimeout(500)
+      const rows = await page.$$eval('.diff-row', (els) => els.length)
+      const hl = await page.$$eval('.diff-code [class^="hljs-"]', (els) => els.length)
+      console.log(`diff "${await page.textContent('.diff-head__base')}": ${rows} rows rendered, ${hl} highlighted tokens (+${Date.now() - tDiff} ms)`)
+      await shot(`diff-unified-${theme}`)
+      await page.click('.seg__btn:nth-child(2)')
+      await page.waitForSelector('.diff-row--split')
+      await page.waitForTimeout(300)
+      await shot(`diff-split-${theme}`)
+      await page.click('.seg__btn:nth-child(1)')
+      await page.keyboard.press('Alt+ArrowDown')
+      await page.waitForTimeout(400)
+      console.log(`Alt+↓ → "${await page.textContent('.diff-head__base')}" (${await page.textContent('.diff-head__pos')})`)
+      await page.keyboard.press('Escape')
+      await page.waitForSelector('.diff-view', { state: 'detached' })
+      console.log('Esc → diff closed, graph visible:', await page.isVisible('.commit-list'))
     }
 
     // Ctrl+F 검색

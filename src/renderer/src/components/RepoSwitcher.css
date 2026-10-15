@@ -15,8 +15,8 @@
   max-height: 60vh;
   display: flex;
   flex-direction: column;
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
+  border-radius: var(--neu-radius);
+  background: var(--neu-bg);
   box-shadow: var(--shadow-popover);
   overflow: hidden;
   animation: pop-in var(--dur-med) var(--ease);
@@ -26,15 +26,21 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  margin: var(--space-3) var(--space-3) var(--space-1);
   padding: 0 var(--space-3);
-  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-inset-sm);
+}
+.switcher__input-row:focus-within {
+  box-shadow: var(--neu-inset-sm), 0 0 0 2px var(--accent);
 }
 .switcher__icon {
   color: var(--text-muted);
 }
 .switcher__input {
   flex: 1;
-  height: 42px;
+  height: 36px;
   border: 0;
   outline: none;
   background: transparent;
@@ -51,7 +57,7 @@
 .switcher__list {
   list-style: none;
   margin: 0;
-  padding: var(--space-1);
+  padding: var(--space-2) var(--space-3) var(--space-3);
   overflow-y: auto;
 }
 .switcher__none {
@@ -68,6 +74,7 @@
 }
 .switcher__item.is-active {
   background: var(--row-selected);
+  box-shadow: var(--neu-pressed), inset 2px 0 0 var(--row-selected-edge);
 }
 .switcher__name {
   font-weight: 600;
