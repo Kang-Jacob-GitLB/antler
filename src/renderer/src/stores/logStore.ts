@@ -10,7 +10,16 @@ export const PAGE_SIZE = 1000
 export const PREFETCH = 300
 /** 멀리 있는 커밋을 찾아갈 때 쓰는 큰 페이지 */
 const REVEAL_PAGE_SIZE = 5000
+/** 부드러운 다시 읽기에서 한 번에 읽는 최대 커밋 수 */
+const SOFT_RELOAD_MAX = 5000
 let revealToken = 0
+/** 다시 읽은 첫 페이지에서 선택을 이어 갈 커밋 */
+let keepAfterReload: string | null = null
+function firstSelection(commits: Commit[]): number {
+  const i = keepAfterReload ? commits.findIndex((c) => c.hash === keepAfterReload) : -1
+  keepAfterReload = null
+  return i >= 0 ? i : 0
+}
 
 /** 그래프를 특정 ref 기준으로만 보는 필터 */
 export interface LogFilter {
@@ -36,9 +45,15 @@ interface LogState {
   /** 목록이 이 행으로 스크롤해야 함을 알리는 요청(같은 값 재요청도 감지하도록 seq 포함) */
   scrollRequest: { index: number; seq: number } | null
 
-  open(repoId: string | null, filter?: LogFilter | null): void
+  /** keepHash: 첫 페이지에 그 커밋이 있으면 선택을 유지한다(외부 변경으로 다시 읽을 때) */
+  open(repoId: string | null, filter?: LogFilter | null, keepHash?: string): void
   setFilter(filter: LogFilter | null): void
-  reload(): void
+  reload(keepSelection?: boolean): void
+  /**
+   * 외부 변경(커밋·fetch) 반영용 부드러운 다시 읽기: 목록을 비우지 않고 첫 구간을 새로 읽어 한 번에 바꾼다.
+   * 선택한 커밋이 그 구간에 있으면 선택(과 열린 diff)을 그대로 둔다.
+   */
+  softReload(): Promise<void>
   loadMore(count?: number): Promise<void>
   select(index: number): void
   /** 해시의 커밋을 (필요하면 더 불러와서) 선택하고 보이게 한다. 찾으면 true */
@@ -58,7 +73,8 @@ export const useLogStore = create<LogState>((set, get) => ({
   pendingRequest: null,
   scrollRequest: null,
 
-  open(repoId, filter = null) {
+  open(repoId, filter = null, keepHash) {
+    keepAfterReload = keepHash ?? null
     const pending = get().pendingRequest
     if (pending) void api.invoke('req:cancel', pending)
     const generation = get().generation + 1
@@ -84,8 +100,10 @@ export const useLogStore = create<LogState>((set, get) => ({
     get().open(get().repoId, filter)
   },
 
-  reload() {
-    get().open(get().repoId, get().filter)
+  reload(keepSelection = false) {
+    const s = get()
+    const keep = keepSelection && s.selected >= 0 ? s.commits[s.selected]?.hash : undefined
+    get().open(s.repoId, s.filter, keep)
   },
 
   async loadMore(count = PAGE_SIZE) {
@@ -107,7 +125,7 @@ export const useLogStore = create<LogState>((set, get) => ({
           hasMore: page.hasMore,
           loading: false,
           pendingRequest: null,
-          selected: s.selected < 0 && start === 0 && page.commits.length ? 0 : s.selected
+          selected: s.selected < 0 && start === 0 && page.commits.length ? firstSelection(page.commits) : s.selected
         }
       })
     } catch (err) {
@@ -122,6 +140,44 @@ export const useLogStore = create<LogState>((set, get) => ({
       // 취소는 오류가 아니다. 다음 스크롤에서 다시 요청할 수 있게 hasMore 를 유지한다
       if (isAbort(err)) set({ loading: false, pendingRequest: null })
       else set({ loading: false, pendingRequest: null, error: errorMessage(err), hasMore: false })
+    }
+  },
+
+  async softReload() {
+    const s = get()
+    if (!s.repoId) return
+    // 페이지를 읽는 중이면 그 결과와 섞이지 않도록 일반 다시 읽기로 대신한다
+    if (s.loading) return get().reload(true)
+    const keep = s.selected >= 0 ? s.commits[s.selected]?.hash : undefined
+    // 지금까지 불러온 만큼(최대 SOFT_RELOAD_MAX) 다시 읽어 스크롤 위치 근처가 그대로 보이게 한다
+    const count = Math.min(Math.max(PAGE_SIZE, s.commits.length), SOFT_RELOAD_MAX)
+    const myGen = s.generation
+    const requestId = newRequestId('log')
+    set({ loading: true, pendingRequest: requestId })
+    try {
+      const page = await api.invoke('git:log', s.repoId, { skip: 0, count, ref: s.filter?.rev }, requestId)
+      if (get().generation !== myGen) return
+      const generation = myGen + 1
+      graphEngine.reset(generation)
+      graphEngine.append(generation, 0, page.commits)
+      const index = new Map<string, number>()
+      page.commits.forEach((c, i) => index.set(c.hash, i))
+      const kept = keep !== undefined ? index.get(keep) : undefined
+      set({
+        generation,
+        commits: page.commits,
+        index,
+        hasMore: page.hasMore,
+        loading: false,
+        pendingRequest: null,
+        error: null,
+        selected: kept ?? (page.commits.length ? 0 : -1)
+      })
+    } catch (err) {
+      if (get().generation !== myGen) return
+      set({ loading: false, pendingRequest: null })
+      if (isStale(err)) get().reload(true)
+      else if (!isAbort(err)) set({ error: errorMessage(err) })
     }
   },
 

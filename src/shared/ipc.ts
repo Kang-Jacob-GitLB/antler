@@ -1,6 +1,9 @@
 // IPC 계약. 채널 이름과 인자·결과 타입을 한곳에서 정의해 main/preload/renderer 가 공유한다.
 import type {
+  AddRepoInput,
   AppConfig,
+  RepoPatch,
+  SshHostInfo,
   CommitDetail,
   FileDiff,
   FileDiffRequest,
@@ -15,9 +18,21 @@ import type {
 export interface IpcContract {
   'config:get': { args: []; result: AppConfig }
   'config:setUi': { args: [patch: Partial<UiPrefs>]; result: AppConfig }
-  /** 폴더 선택 대화상자를 띄워 로컬 저장소를 추가한다. 취소하면 null */
-  'repos:pickLocal': { args: []; result: Repo | null }
+  /** 폴더 선택 대화상자. 취소하면 null. defaultPath 로 시작 위치(\\wsl.localhost\… 등)를 줄 수 있다 */
+  'dialog:pickFolder': { args: [defaultPath?: string]; result: string | null }
   'repos:remove': { args: [repoId: string]; result: AppConfig }
+  /** 환경(로컬·WSL·SSH)과 경로로 저장소를 추가한다. 그 환경에서 git 최상위 경로를 확인한 뒤 저장한다 */
+  'repos:add': { args: [input: AddRepoInput]; result: Repo }
+  /** 이름·그룹 변경 */
+  'repos:update': { args: [repoId: string, patch: RepoPatch]; result: AppConfig }
+  /** 변경 감시 대상(활성 저장소). null 이면 감시 중단. 바뀌면 'repo:changed' 이벤트 */
+  'repos:watch': { args: [repoId: string | null]; result: void }
+  /** 설치된 WSL 배포판(docker-desktop 류 제외). Windows 가 아니면 빈 배열 */
+  'env:wslDistros': { args: []; result: string[] }
+  /** ~/.ssh/config 의 Host 목록(와일드카드 패턴 제외) */
+  'env:sshHosts': { args: []; result: SshHostInfo[] }
+  /** 연결 테스트: 그 환경에서 git 이 실행되는지 확인하고 git 버전 문자열을 돌려준다 */
+  'env:test': { args: [input: Omit<AddRepoInput, 'path' | 'group'>]; result: string }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
   'git:refs': { args: [repoId: string]; result: RefsSnapshot }
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
@@ -46,8 +61,14 @@ export type IpcEvent = keyof IpcEvents
 export const IPC_CHANNELS = [
   'config:get',
   'config:setUi',
-  'repos:pickLocal',
+  'dialog:pickFolder',
   'repos:remove',
+  'repos:add',
+  'repos:update',
+  'repos:watch',
+  'env:wslDistros',
+  'env:sshHosts',
+  'env:test',
   'git:refs',
   'git:search',
   'git:log',

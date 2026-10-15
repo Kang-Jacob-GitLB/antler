@@ -54,13 +54,13 @@ describe('RepoService.log', () => {
   })
 })
 
-describe('RepoService.addLocal', () => {
+describe('RepoService.addRepo (local)', () => {
   it('하위 폴더를 골라도 최상위 경로로 등록하고, 다시 추가하면 같은 항목을 돌려준다', async () => {
     const { svc } = setup()
     const sub = join(repoPath, '하위 폴더')
     mkdirSync(sub, { recursive: true })
-    const a = await svc.addLocal(sub)
-    const b = await svc.addLocal(repoPath)
+    const a = await svc.addRepo({ kind: 'local', path: sub })
+    const b = await svc.addRepo({ kind: 'local', path: repoPath, group: '  ' })
     expect(a.path).toBe(process.platform === 'win32' ? repoPath.replace(/\//g, '\\') : repoPath)
     expect(b.id).toBe(a.id)
     expect(a.name).toBe('repo')
@@ -68,7 +68,7 @@ describe('RepoService.addLocal', () => {
 
   it('git 저장소가 아니면 실패한다', async () => {
     const { svc } = setup()
-    await expect(svc.addLocal(mkdtempSync(join(tmpdir(), 'antler-notrepo-')))).rejects.toThrow()
+    await expect(svc.addRepo({ kind: 'local', path: mkdtempSync(join(tmpdir(), 'antler-notrepo-')) })).rejects.toThrow()
   })
 })
 

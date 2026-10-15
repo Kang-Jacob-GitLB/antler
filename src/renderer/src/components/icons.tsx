@@ -130,6 +130,26 @@ export const IconChevronRight = (p: P) => (
     <path d="M6.5 4.5L10 8l-3.5 3.5" />
   </Svg>
 )
+export const IconMore = (p: P) => (
+  <Svg {...p}>
+    <circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none" />
+  </Svg>
+)
+export const IconTerminal = (p: P) => (
+  <Svg {...p}>
+    <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6" />
+    <path d="M4.5 6.5L6.5 8l-2 1.5M8 10h3" />
+  </Svg>
+)
+export const IconServer = (p: P) => (
+  <Svg {...p}>
+    <rect x="2" y="2.5" width="12" height="4.5" rx="1.2" />
+    <rect x="2" y="9" width="12" height="4.5" rx="1.2" />
+    <path d="M4.5 4.75h.01M4.5 11.25h.01" strokeWidth={2} />
+  </Svg>
+)
 export const IconRepo = (p: P) => (
   <Svg {...p}>
     <path d="M3.5 3a1 1 0 0 1 1-1h8v10h-8a1 1 0 0 0-1 1z" />
