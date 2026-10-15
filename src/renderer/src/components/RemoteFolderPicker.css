@@ -90,3 +90,8 @@
   font-size: var(--fs-sm);
   color: var(--text-secondary);
 }
+/* '..'·'이동' 같은 짧은 글자 버튼이 입력 칸 높이(28)와 같은 정사각 이상이 되게 */
+.rfp__addr .btn {
+  min-width: var(--control-h);
+  flex-shrink: 0;
+}

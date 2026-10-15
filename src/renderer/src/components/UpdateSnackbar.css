@@ -50,7 +50,7 @@
   flex-shrink: 0;
 }
 .update-snack__link {
-  height: 24px;
+  height: var(--control-h-sm);
   padding: 0 var(--space-1);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);

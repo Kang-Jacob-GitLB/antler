@@ -7,6 +7,8 @@
   justify-content: center;
   padding-top: 10vh;
   background: var(--backdrop);
+  /* 툴바(drag 영역) 위까지 덮으므로 no-drag 로 두어야 그 위 클릭이 배경막에 닿는다 */
+  -webkit-app-region: no-drag;
 }
 
 .add-dialog {
@@ -50,45 +52,6 @@
 .field__row {
   display: flex;
   gap: var(--space-2);
-}
-.field__input {
-  flex: 1;
-  min-width: 0;
-  height: 32px;
-  padding: 0 var(--space-3);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: var(--bg-base);
-  box-shadow: inset 0 0 0 1px var(--border);
-  color: var(--text-primary);
-  outline: none;
-}
-.field__input:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-.field__input::placeholder {
-  color: var(--text-muted);
-}
-/* 폴더 선택 칸(버튼이지만 입력칸처럼 보인다) */
-.field__picker {
-  display: block;
-  text-align: left;
-  font: inherit;
-  font-family: var(--font-mono);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.field__picker:hover {
-  box-shadow: inset 0 0 0 1px var(--border-strong);
-}
-.field__picker.is-empty {
-  font-family: var(--font-ui);
-  color: var(--text-muted);
-}
-select.field__input {
-  appearance: auto;
 }
 .field__hint {
   font-size: var(--fs-xs);

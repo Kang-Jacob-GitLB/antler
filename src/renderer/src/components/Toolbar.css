@@ -34,7 +34,7 @@
   gap: var(--space-2);
   padding-right: var(--space-3);
   border-right: 1px solid var(--border);
-  height: 24px;
+  height: var(--control-h-sm);
 }
 .toolbar__name {
   font-weight: 650;
@@ -111,7 +111,7 @@ button.crumb:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
+  height: var(--control-h-sm);
   margin-left: var(--space-2);
   padding: 0 8px;
   border-radius: 12px;

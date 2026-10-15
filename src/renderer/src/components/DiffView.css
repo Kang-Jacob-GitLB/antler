@@ -80,33 +80,6 @@
   cursor: default;
 }
 
-/* 분절 버튼(unified / split) */
-.seg {
-  display: inline-flex;
-  padding: 2px;
-  border-radius: var(--radius-md);
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-}
-.seg__btn {
-  height: 22px;
-  padding: 0 10px;
-  border-radius: 4px;
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  transition:
-    background var(--dur-fast) var(--ease),
-    color var(--dur-fast) var(--ease);
-}
-.seg__btn:hover {
-  color: var(--text-primary);
-}
-.seg__btn.is-on {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  box-shadow: 0 0 0 1px var(--border-strong);
-}
-
 .diff-meta {
   padding: 6px var(--space-3);
   border-bottom: 1px solid var(--border);
