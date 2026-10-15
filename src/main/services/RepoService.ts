@@ -382,6 +382,24 @@ export class RepoService {
   }
 
   /**
+   * 아바타 조회용: 그 작성자의 push 된(원격 추적 ref 에서 닿는) 커밋 sha 몇 개. 로컬 브랜치에만 있는 커밋은
+   * GitHub 가 몰라 404 이므로, 같은 작성자의 다른 커밋으로 다시 묻는 데 쓴다. 이메일은 로컬 git 인자로만 쓴다(-F: 정규식 아님).
+   */
+  async pushedShasByAuthor(repoId: string, email: string, limit: number, signal?: AbortSignal): Promise<string[]> {
+    const { repo, rt } = this.resolve(repoId)
+    const r = await rt.queue.run(
+      () => rt.exec.run(repo.path, ['log', '--remotes', `--max-count=${limit}`, '--format=%H', '-F', '-i', `--author=<${email}>`], { signal }),
+      { signal }
+    )
+    if (r.code !== 0) return []
+    return r.stdout
+      .toString('utf8')
+      .split('\n')
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(s))
+  }
+
+  /**
    * 메시지·작성자·해시 검색. 전체 이력을 훑을 수 있어 비싸므로 requestId 로 취소할 수 있게 하고,
    * renderer 는 새 질의를 보낼 때 이전 검색을 취소한다(큐 슬롯을 계속 쥐고 스크롤을 막지 않게).
    */
