@@ -1,0 +1,54 @@
+name: build
+
+# PR 머지 게이트: 타입 검사 + 테스트 + 빌드 검증만 한다(설치본 패키징은 release.yml).
+# 잡 이름(name)이 main 룰셋의 필수 상태 체크 이름이다 — 바꾸면 룰셋도 함께 고칠 것.
+on:
+  pull_request:
+    branches: [main]
+
+# 같은 PR 에 새 푸시가 오면 진행 중인 이전 실행을 취소한다
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Node 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: 의존성 설치
+        # vitest·electron-vite build 는 Electron 런타임 바이너리가 필요 없다
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: pnpm install --frozen-lockfile
+
+      - name: 타입 검사
+        run: pnpm typecheck
+
+      # 테스트는 git 저장소를 임시로 만들어 쓰므로 커밋 작성자를 정해 둔다
+      - name: 테스트 (vitest)
+        env:
+          GIT_AUTHOR_NAME: ci
+          GIT_AUTHOR_EMAIL: ci@example.invalid
+          GIT_COMMITTER_NAME: ci
+          GIT_COMMITTER_EMAIL: ci@example.invalid
+        run: pnpm test
+
+      - name: 빌드 검증 (electron-vite build)
+        run: pnpm build
+
+      - name: WCAG 대비 검사
+        run: node scripts/check-contrast.mjs

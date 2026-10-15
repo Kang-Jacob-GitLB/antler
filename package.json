@@ -5,6 +5,7 @@
   "description": "Windows / WSL / SSH 저장소를 한 화면에서 보는 가벼운 Git GUI",
   "main": "./out/main/index.js",
   "license": "UNLICENSED",
+  "packageManager": "pnpm@10.34.7",
   "private": true,
   "scripts": {
     "dev": "electron-vite dev",
