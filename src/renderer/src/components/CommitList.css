@@ -6,13 +6,14 @@
   background: var(--list-bg);
   container-type: inline-size;
   container-name: commits;
+  /* 그래프 폭은 레인 수에 맞춰 CommitList 가 인라인 스타일로 덮어쓴다 */
+  --col-graph: 72px;
 }
 
 /* 컬럼 폭은 컨테이너 폭에 따라 줄이거나 숨긴다(GitKraken 처럼 좁으면 SHA → 작성자 순으로 접는다) */
 .commit-list__head,
 .commit-list__scroll {
   --col-refs: 180px;
-  --col-graph: 72px;
   --col-author: 150px;
   --col-date: 124px;
   --col-sha: 68px;
@@ -82,7 +83,11 @@
   right: 0;
 }
 
+/* 행 좌표와 canvas 좌표가 어긋나지 않도록 흐름 밖에 띄운다 */
 .commit-list__notice {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 2;
   padding: var(--space-4);
   color: var(--text-secondary);
 }
@@ -204,38 +209,31 @@
   font-weight: 600;
 }
 
-/* ── 그래프 자리표시(M2 에서 Canvas 로 대체) ── */
-.cell--graph {
-  position: relative;
-  justify-content: center;
+/* ── 그래프 canvas: 스크롤 영역 맨 위에 sticky 로 붙어 행 위에 겹친다 ── */
+.graph-layer {
+  position: sticky;
+  top: 0;
+  height: 0;
+  z-index: 1;
+  pointer-events: none;
 }
-.graph-stub__line {
+.graph-canvas {
   position: absolute;
   top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--lane-0);
-  opacity: 0.55;
+  display: block;
 }
-.graph-stub__node {
-  --node: var(--lane-0);
-  position: relative;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--node);
-  box-shadow: 0 0 0 2px var(--list-bg);
+
+/* ── 검색 결과 표시 ── */
+.commit-row.is-dim > .cell:not(.cell--graph) {
+  opacity: 0.38;
 }
-.graph-stub__node.is-merge {
-  background: var(--list-bg);
-  border: 2px solid var(--node);
+.commit-row.is-match .commit-subject,
+.commit-row.is-current .commit-subject {
+  color: var(--accent-text);
+  font-weight: 600;
 }
-.graph-stub__node.is-head {
-  box-shadow:
-    0 0 0 2px var(--list-bg),
-    0 0 0 3.5px var(--accent);
+.commit-row.is-current {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 /* ── 아바타 ── */

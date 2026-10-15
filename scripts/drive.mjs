@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { _electron as electron } from 'playwright-core'
+import { createRequire } from 'node:module'
 
 const APP_DIR = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
@@ -20,6 +21,7 @@ const opt = (name, def) => {
 const outDir = resolve(opt('out', join(tmpdir(), 'antler-shots')))
 const theme = opt('theme', 'dark')
 const locale = opt('locale', 'ko')
+const searchQuery = opt('search', 'Merge branch')
 const repos = args.map((p) => resolve(p))
 mkdirSync(outDir, { recursive: true })
 
@@ -36,7 +38,8 @@ writeFileSync(
 
 const t0 = Date.now()
 const app = await electron.launch({
-  executablePath: join(APP_DIR, 'node_modules/electron/dist', process.platform === 'win32' ? 'electron.exe' : 'electron'),
+  // require('electron') 는 실행 파일 경로를 돌려주며, 바이너리가 없으면 그때 내려받는다(Electron 44+)
+  executablePath: createRequire(import.meta.url)('electron'),
   args: [APP_DIR],
   env: { ...process.env, ANTLER_USER_DATA: userData },
   timeout: 30_000
@@ -60,8 +63,51 @@ try {
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
 
+    // 사이드바 ref 섹션이 채워질 때까지
+    const tRefs = Date.now()
+    await page.waitForSelector('.side-section:nth-of-type(2)', { timeout: 20_000 }).catch(() => {})
+    const sections = await page.$$eval('.side-section__head', (els) => els.map((e) => e.textContent?.trim()))
+    console.log(`sidebar sections (+${Date.now() - tRefs} ms): ${sections.join(' | ')}`)
+    await page.waitForTimeout(300)
+    await shot(`graph-${theme}`)
+
+    // 브랜치 클릭 → 그래프에서 그 커밋으로 이동
+    const branch = await page.$$eval('.side-section:nth-of-type(2) .side-item:not(.side-item--folder)', (els) =>
+      els.map((e) => e.textContent?.trim()).filter(Boolean)
+    )
+    const target = branch.at(-1)
+    if (target) {
+      await page.click(`.side-section:nth-of-type(2) .side-item:not(.side-item--folder) >> nth=-1`)
+      await page.waitForTimeout(600)
+      const chip = await page.textContent('.commit-row.is-selected .cell--refs').catch(() => null)
+      console.log(`reveal branch "${target}": selected row refs = "${chip}"`)
+      await shot(`reveal-${theme}`)
+
+      // 더블클릭 → 해당 ref 만 보기
+      await page.dblclick(`.side-section:nth-of-type(2) .side-item:not(.side-item--folder) >> nth=-1`)
+      await page.waitForSelector('.filter-chip', { timeout: 5_000 })
+      await page.waitForTimeout(500)
+      console.log(`filter chip: "${await page.textContent('.filter-chip')}", rows: ${await page.textContent('.commit-list__foot')}`)
+      await shot(`filter-${theme}`)
+      await page.click('.filter-chip')
+      await page.waitForSelector('.filter-chip', { state: 'detached' })
+      await page.waitForSelector('.commit-subject')
+    }
+
+    // Ctrl+F 검색
+    await page.keyboard.press('Control+F')
+    await page.waitForSelector('.search-bar__input')
+    await page.fill('.search-bar__input', searchQuery)
+    await page.waitForTimeout(1200)
+    console.log(`search "${searchQuery}": ${await page.textContent('.search-bar__status')}`)
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(300)
+    await shot(`search-${theme}`)
+    await page.keyboard.press('Escape')
+
     // 키보드 ↓ 이동과 상세 패널 반영 확인
     await page.click('.commit-list__scroll')
+    await page.keyboard.press('Home')
     for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowDown')
     const subject = await page.textContent('.detail__subject')
     const selected = await page.textContent('.commit-row.is-selected .commit-subject')

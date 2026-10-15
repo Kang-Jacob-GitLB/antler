@@ -97,6 +97,39 @@ export const IconChevronDown = (p: P) => (
     <path d="M4.5 6.5L8 10l3.5-3.5" />
   </Svg>
 )
+export const IconFunnel = (p: P) => (
+  <Svg {...p}>
+    <path d="M2.5 3h11l-4.2 5v4.5l-2.6 1V8z" />
+  </Svg>
+)
+export const IconCheck = (p: P) => (
+  <Svg {...p}>
+    <path d="M3 8.5l3.2 3L13 4.5" />
+  </Svg>
+)
+export const IconFolder = (p: P) => (
+  <Svg {...p}>
+    <path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />
+  </Svg>
+)
+export const IconStash = (p: P) => (
+  <Svg {...p}>
+    <path d="M2.5 6.5h11v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
+    <path d="M1.8 4h12.4v2.5H1.8zM6.5 9h3" />
+  </Svg>
+)
+export const IconWorktree = (p: P) => (
+  <Svg {...p}>
+    <rect x="2" y="2.5" width="5" height="4" rx="1" />
+    <rect x="9" y="9.5" width="5" height="4" rx="1" />
+    <path d="M4.5 6.5v3.5a1.5 1.5 0 0 0 1.5 1.5h3" />
+  </Svg>
+)
+export const IconChevronRight = (p: P) => (
+  <Svg {...p}>
+    <path d="M6.5 4.5L10 8l-3.5 3.5" />
+  </Svg>
+)
 export const IconRepo = (p: P) => (
   <Svg {...p}>
     <path d="M3.5 3a1 1 0 0 1 1-1h8v10h-8a1 1 0 0 0-1 1z" />

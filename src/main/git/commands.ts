@@ -1,7 +1,14 @@
 // git 조회 명령 모음. executor 위에서 동작하며 환경과 무관하다.
-import type { HeadInfo } from '@shared/types'
+import type { HeadInfo, RefsSnapshot, SearchResult } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { LOG_FORMAT_ARGS } from './parsers/log'
+import { NulRecordSplitter } from './parsers/nulRecords'
+import { parseRefs, parseRemoteNames, REFS_ARGS } from './parsers/refs'
+import { parseStashes, STASH_ARGS } from './parsers/stash'
+import { parseWorktrees, WORKTREE_ARGS } from './parsers/worktree'
+
+/** 검색 결과 상한. 넘으면 truncated 로 알린다 */
+export const SEARCH_LIMIT = 10_000
 
 async function ok(exec: GitExecutor, repoPath: string, args: string[], opts?: RunOpts): Promise<Buffer> {
   const r = await exec.run(repoPath, args, opts)
@@ -32,12 +39,110 @@ export async function head(exec: GitExecutor, repoPath: string, opts?: RunOpts):
 }
 
 /**
+ * 이력 범위(rev) 인자. renderer 가 보낸 ref 가 옵션으로 해석되지 않도록 --end-of-options(git 2.24+) 뒤에 둔다.
+ * --ignore-missing: 아직 커밋이 없는 브랜치(orphan)에 HEAD 가 있어도 다른 브랜치들은 보여 준다.
+ */
+export function revArgs(ref: string | undefined): string[] {
+  return ref ? ['--end-of-options', ref] : ['--ignore-missing', '--branches', '--remotes', '--tags', 'HEAD']
+}
+
+/**
  * 커밋 목록용 git log 인자. `--date-order` 는 자식이 항상 부모보다 먼저 나오도록 보장해
  * 레인 계산(M2)이 위에서 아래로 한 번에 끝난다.
  */
 export function logArgs(ref: string | undefined, skip: number): string[] {
-  // renderer 가 보낸 ref 가 옵션으로 해석되지 않도록 --end-of-options(git 2.24+) 뒤에 둔다.
-  // --ignore-missing: 아직 커밋이 없는 브랜치(orphan)에 HEAD 가 있어도 다른 브랜치들은 보여 준다.
-  const revs = ref ? ['--end-of-options', ref] : ['--ignore-missing', '--branches', '--remotes', '--tags', 'HEAD']
-  return ['log', ...LOG_FORMAT_ARGS, '--date-order', ...(skip > 0 ? [`--skip=${skip}`] : []), ...revs, '--']
+  return ['log', ...LOG_FORMAT_ARGS, '--date-order', ...(skip > 0 ? [`--skip=${skip}`] : []), ...revArgs(ref), '--']
+}
+
+/** 실패해도(스태시 없음·커밋 없음 등) 빈 결과로 취급해야 하는 조회용. 취소·실행 실패는 그대로 던진다 */
+async function okOrEmpty(exec: GitExecutor, repoPath: string, args: string[], opts?: RunOpts): Promise<Buffer> {
+  const r = await exec.run(repoPath, args, opts)
+  return r.code === 0 ? r.stdout : Buffer.alloc(0)
+}
+
+/** 사이드바용 ref 스냅샷. 다섯 조회를 동시에 돌린다. */
+export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsSnapshot> {
+  const [refsOut, remoteOut, worktreeOut, stashOut, headInfo] = await Promise.all([
+    ok(exec, repoPath, REFS_ARGS, opts),
+    okOrEmpty(exec, repoPath, ['remote'], opts),
+    okOrEmpty(exec, repoPath, WORKTREE_ARGS, opts),
+    // 스태시가 없거나 reflog 가 없는 저장소는 빈 목록이다
+    okOrEmpty(exec, repoPath, STASH_ARGS, opts),
+    head(exec, repoPath, opts)
+  ])
+  const { local, remotes, tags } = parseRefs(refsOut, parseRemoteNames(remoteOut))
+  return { head: headInfo, local, remotes, tags, worktrees: parseWorktrees(worktreeOut), stashes: parseStashes(stashOut) }
+}
+
+/**
+ * 메시지·작성자·해시 검색. 결과는 그래프와 같은 --date-order 순서를 유지한 합집합이다.
+ * 질의는 `--grep=<q>` 처럼 옵션에 붙여 넘기므로 '-' 로 시작해도 옵션으로 해석되지 않는다.
+ * 해시 prefix 에 일치하는 커밋은 맨 앞에 둔다.
+ */
+export async function search(
+  exec: GitExecutor,
+  repoPath: string,
+  query: string,
+  ref: string | undefined,
+  opts?: RunOpts
+): Promise<SearchResult> {
+  const q = query.trim()
+  if (!q) return { hashes: [], truncated: false }
+
+  const base = ['log', '--format=%H', '-z', '--date-order', '-i', '-F', `--max-count=${SEARCH_LIMIT + 1}`]
+  const revs = [...revArgs(ref), '--']
+  const run = async (filter: string): Promise<string[]> => {
+    const r = await exec.run(repoPath, [...base, filter, ...revs], opts)
+    // 커밋이 아직 없는 저장소는 일치 항목이 없는 것과 같다
+    if (r.code !== 0 && isEmptyRepoError(r.stderr)) return []
+    if (r.code !== 0) throw new GitError(r.stderr.trim() || `git log failed (${r.code})`, r.code, r.stderr, base)
+    return r.stdout.toString('utf8').split('\0').filter((h) => h.length > 0)
+  }
+  const resolveHash = /^[0-9a-f]{4,40}$/i.test(q)
+    ? // q 는 위 정규식으로 hex 만 허용하므로 옵션으로 해석될 수 없다(--end-of-options 불필요)
+      exec.run(repoPath, ['rev-parse', '--verify', '--quiet', `${q}^{commit}`], opts)
+    : Promise.resolve(null)
+
+  const [byMessage, byAuthor, byHash] = await Promise.all([run(`--grep=${q}`), run(`--author=${q}`), resolveHash])
+
+  const matched = await mergeInGraphOrder(exec, repoPath, ref, byMessage, byAuthor, opts)
+  const hashes = new Set<string>()
+  const resolved = byHash && byHash.code === 0 ? byHash.stdout.toString('utf8').trim() : ''
+  // 스태시처럼 지금 보는 이력에서 닿지 않는 커밋은 그래프에서 찾아갈 수 없으므로 뺀다
+  if (resolved && (await reachable(exec, repoPath, resolved, ref, opts))) hashes.add(resolved)
+  for (const h of matched) hashes.add(h)
+  const all = [...hashes]
+  return all.length > SEARCH_LIMIT ? { hashes: all.slice(0, SEARCH_LIMIT), truncated: true } : { hashes: all, truncated: false }
+}
+
+/** 커밋이 보기 범위(revArgs)에서 도달 가능한지. hash 는 호출자가 rev-parse 로 해석한 전체 해시다 */
+async function reachable(exec: GitExecutor, repoPath: string, hash: string, ref: string | undefined, opts?: RunOpts): Promise<boolean> {
+  const r = await exec.run(repoPath, ['rev-list', '-n1', hash, '--not', ...revArgs(ref)], opts)
+  return r.code === 0 && r.stdout.toString('utf8').trim() === ''
+}
+
+/**
+ * 메시지 일치와 작성자 일치를 그래프(--date-order) 순서로 합친다.
+ * 두 목록은 같은 순서의 부분 수열이지만 서로 다른 항목끼리의 선후는 알 수 없으므로,
+ * 둘 다 비어 있지 않을 때만 전체 순서를 스트림으로 훑어 합집합을 다 찾는 순간 멈춘다.
+ */
+async function mergeInGraphOrder(
+  exec: GitExecutor,
+  repoPath: string,
+  ref: string | undefined,
+  a: string[],
+  b: string[],
+  opts?: RunOpts
+): Promise<string[]> {
+  if (a.length === 0) return b
+  if (b.length === 0) return a
+  const want = new Set([...a, ...b])
+  const out: string[] = []
+  const splitter = new NulRecordSplitter()
+  const args = ['log', '--format=%H', '-z', '--date-order', ...revArgs(ref), '--']
+  for await (const chunk of exec.stream(repoPath, args, opts)) {
+    for (const h of splitter.push(chunk)) if (want.has(h)) out.push(h)
+    if (out.length >= want.size) break
+  }
+  return out
 }

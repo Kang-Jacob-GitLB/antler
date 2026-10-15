@@ -39,7 +39,8 @@ export function registerIpc(config: ConfigStore, repos: RepoService): void {
   })
   handle('repos:remove', (_e, repoId) => config.removeRepo(repoId))
 
-  handle('git:head', (_e, repoId) => repos.head(repoId))
+  handle('git:refs', (_e, repoId) => repos.refs(repoId))
   handle('git:log', (_e, repoId, query, requestId) => repos.log(repoId, query, requestId))
+  handle('git:search', (_e, repoId, query, ref, requestId) => repos.search(repoId, query, ref, requestId))
   handle('req:cancel', (_e, requestId) => repos.cancel(requestId))
 }

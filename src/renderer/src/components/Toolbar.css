@@ -84,3 +84,28 @@ button.crumb:hover {
   font-size: var(--fs-xs);
   font-weight: 600;
 }
+
+/* 그래프 ref 필터 표시 */
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  margin-left: var(--space-2);
+  padding: 0 8px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  max-width: 280px;
+  transition: filter var(--dur-fast) var(--ease);
+}
+.filter-chip:hover {
+  filter: brightness(1.15);
+}
+.filter-chip__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

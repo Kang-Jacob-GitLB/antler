@@ -1,5 +1,5 @@
 // IPC 계약. 채널 이름과 인자·결과 타입을 한곳에서 정의해 main/preload/renderer 가 공유한다.
-import type { AppConfig, HeadInfo, LogPage, LogQuery, Repo, UiPrefs } from './types'
+import type { AppConfig, LogPage, LogQuery, RefsSnapshot, Repo, SearchResult, UiPrefs } from './types'
 
 export interface IpcContract {
   'config:get': { args: []; result: AppConfig }
@@ -7,8 +7,11 @@ export interface IpcContract {
   /** 폴더 선택 대화상자를 띄워 로컬 저장소를 추가한다. 취소하면 null */
   'repos:pickLocal': { args: []; result: Repo | null }
   'repos:remove': { args: [repoId: string]; result: AppConfig }
-  'git:head': { args: [repoId: string]; result: HeadInfo }
+  /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
+  'git:refs': { args: [repoId: string]; result: RefsSnapshot }
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
+  /** 메시지·작성자·해시 검색. ref 를 주면 그 ref 기준 이력에서만 찾는다 */
+  'git:search': { args: [repoId: string, query: string, ref?: string, requestId?: string]; result: SearchResult }
   /** 진행 중인 요청 취소 */
   'req:cancel': { args: [requestId: string]; result: void }
 }
@@ -30,7 +33,8 @@ export const IPC_CHANNELS = [
   'config:setUi',
   'repos:pickLocal',
   'repos:remove',
-  'git:head',
+  'git:refs',
+  'git:search',
   'git:log',
   'req:cancel'
 ] as const satisfies readonly IpcChannel[]

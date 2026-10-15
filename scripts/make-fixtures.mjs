@@ -9,6 +9,8 @@ import { join, resolve } from 'node:path'
 
 const OUT = resolve(import.meta.dirname, '..', 'tests', 'fixtures')
 const repo = mkdtempSync(join(tmpdir(), 'antler-fixture-'))
+// 링크드 작업 트리는 저장소 밖에 만든다(한글 + 공백 경로 포함)
+const wtRoot = mkdtempSync(join(tmpdir(), 'antler-fixture-wt-'))
 
 const env = {
   ...process.env,
@@ -68,13 +70,57 @@ try {
   mkdirSync(OUT, { recursive: true })
   const dump = (name, ...args) => writeFileSync(join(OUT, name), git(...args))
   dump('log.bin', 'log', '-z', '--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s', '--decorate=full', '--date-order', '--branches', '--remotes', '--tags', 'HEAD')
-  dump('show-ref.bin', 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)', 'refs/heads', 'refs/remotes', 'refs/tags')
   dump('name-status-merge.bin', 'show', '-z', '--format=', '--name-status', '-M', 'HEAD~1', '--first-parent')
   dump('name-status-rename.bin', 'show', '-z', '--format=', '--name-status', '-M', 'feature/이름-변경~1')
   dump('numstat-rename.bin', 'show', '-z', '--format=', '--numstat', '-M', 'feature/이름-변경~1')
   dump('numstat-binary.bin', 'show', '-z', '--format=', '--numstat', '-M', 'feature/이름-변경')
   dump('name-status-delete.bin', 'show', '-z', '--format=', '--name-status', '-M', 'HEAD')
+
+  // ---- 여기부터는 refs/worktree/stash fixture 용 추가 구성. log.bin 은 위에서 이미 덤프했다 ----
+  git('tag', 'v0.10.0') // lightweight (자연 정렬 확인용: v0.2.0 < v0.10.0)
+  git('tag', '-a', 'v0.9.0', '-m', '릴리스 0.9.0')
+
+  // 리모트: 이름에 '/' 가 들어간 것 포함. fetch 없이 refs 만 직접 만든다
+  git('remote', 'add', 'origin', 'https://example.com/origin.git')
+  git('remote', 'add', 'team/upstream', 'https://example.com/team.git')
+  git('update-ref', 'refs/remotes/team/upstream/main', 'HEAD')
+  git('update-ref', 'refs/remotes/team/upstream/feature/x', 'HEAD~2')
+
+  // 업스트림: main 은 ahead 2, behind-br 는 behind 만, diverged 는 ahead 1 + behind
+  git('branch', '--set-upstream-to=origin/main', 'main')
+  git('branch', 'behind-br', 'HEAD~3')
+  git('branch', '--set-upstream-to=origin/main', 'behind-br')
+  git('branch', 'diverged', 'HEAD~2')
+  git('update-ref', 'refs/remotes/origin/diverged', 'HEAD~1')
+  git('branch', '--set-upstream-to=origin/diverged', 'diverged')
+  git('checkout', '-q', 'diverged')
+  git('commit', '-q', '--allow-empty', '-m', 'chore: diverged 전용 커밋')
+  git('checkout', '-q', 'main')
+  // gone: 업스트림이 설정됐지만 리모트 추적 ref 가 없다
+  git('branch', 'gone-br', 'HEAD~1')
+  git('config', 'branch.gone-br.remote', 'origin')
+  git('config', 'branch.gone-br.merge', 'refs/heads/gone-br')
+
+  // 작업 트리: 한글 + 공백 경로, detached
+  git('worktree', 'add', '-q', join(wtRoot, '작업 트리'), '-b', 'wt-branch')
+  git('worktree', 'add', '-q', '--detach', join(wtRoot, 'detached-wt'), 'HEAD~1')
+
+  // 스태시 2개(하나는 한글 메시지)
+  write('src/main app.ts', 'export const a = 1\nexport const b = 3\n')
+  git('stash', 'push', '-q', '-m', '임시 저장: 한글 메시지')
+  write('src/main app.ts', 'export const a = 1\nexport const b = 4\n')
+  git('stash', 'push', '-q', '-m', 'second stash')
+
+  // 트리를 가리키는 태그(linux.git 의 v2.6.11-tree 같은 경우)와, 이름이 /HEAD 로 끝나는 실제 리모트 브랜치
+  git('tag', 'tree-tag', 'HEAD^{tree}')
+  git('update-ref', 'refs/remotes/origin/team/HEAD', 'HEAD')
+
+  dump('for-each-ref.bin', 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(symref)%00%(objecttype)%00%(*objecttype)', 'refs/heads', 'refs/remotes', 'refs/tags')
+  dump('remotes.txt', 'remote')
+  dump('worktree.bin', 'worktree', 'list', '--porcelain', '-z')
+  dump('stash.bin', 'stash', 'list', '-z', '--format=%H%x1f%gd%x1f%ct%x1f%gs')
   console.log(`fixtures written to ${OUT}`)
 } finally {
   rmSync(repo, { recursive: true, force: true })
+  rmSync(wtRoot, { recursive: true, force: true })
 }

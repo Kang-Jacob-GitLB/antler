@@ -30,6 +30,8 @@ export interface UiPrefs {
   locale: Locale
   /** 3분할 패널 폭(px): [사이드바, 상세] */
   paneWidths: [number, number]
+  /** 접힌 사이드바 섹션·폴더 키 */
+  collapsed?: string[]
   lastRepoId?: string
 }
 
@@ -83,8 +85,75 @@ export interface HeadInfo {
   hash: string | null
 }
 
-export interface RepoStatus {
-  repoId: string
-  ok: boolean
-  error?: string
+export interface Branch {
+  /** 짧은 이름. 로컬: feature/x, 리모트: origin/feature/x */
+  name: string
+  /** refs/heads/feature/x, refs/remotes/origin/feature/x */
+  fullName: string
+  hash: string
+  /** 로컬 브랜치의 업스트림 짧은 이름(origin/feature/x) */
+  upstream?: string
+  ahead?: number
+  behind?: number
+  /** 업스트림이 설정됐지만 원격에서 사라짐 */
+  upstreamGone?: boolean
+  isHead: boolean
+}
+
+export interface RemoteGroup {
+  /** 리모트 이름(origin) */
+  name: string
+  /** 이 리모트의 브랜치들. name 은 'origin/feature/x' 형식, origin/HEAD 는 제외 */
+  branches: Branch[]
+}
+
+export interface Tag {
+  name: string
+  fullName: string
+  /** 태그가 가리키는 커밋(annotated 태그는 peel 한 커밋 해시) */
+  hash: string
+  annotated: boolean
+  /** 최종 대상이 커밋인지(트리·블롭·중첩 태그면 false — 그래프에서 찾아갈 수 없다) */
+  targetsCommit: boolean
+}
+
+export interface Worktree {
+  path: string
+  /** HEAD 커밋. 아직 커밋이 없으면 null */
+  head: string | null
+  /** 체크아웃된 브랜치 짧은 이름. detached 면 null */
+  branch: string | null
+  detached: boolean
+  bare: boolean
+  locked: boolean
+  prunable: boolean
+  /** 목록 첫 항목(주 작업 트리) */
+  isMain: boolean
+}
+
+export interface Stash {
+  index: number
+  /** stash@{0} */
+  ref: string
+  hash: string
+  message: string
+  /** epoch seconds */
+  date: number
+}
+
+/** 사이드바용 ref 스냅샷 */
+export interface RefsSnapshot {
+  head: HeadInfo
+  local: Branch[]
+  remotes: RemoteGroup[]
+  tags: Tag[]
+  worktrees: Worktree[]
+  stashes: Stash[]
+}
+
+export interface SearchResult {
+  /** 그래프와 같은 순서(--date-order)의 일치 커밋 해시 */
+  hashes: string[]
+  /** 상한에 걸려 잘렸는지 */
+  truncated: boolean
 }

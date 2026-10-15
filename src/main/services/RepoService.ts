@@ -1,5 +1,5 @@
 import { basename } from 'node:path'
-import type { HeadInfo, LogPage, LogQuery, Repo, Source, SourceKind } from '@shared/types'
+import type { LogPage, LogQuery, RefsSnapshot, Repo, SearchResult, Source, SourceKind } from '@shared/types'
 import { AbortError, type GitExecutor } from '../executors/GitExecutor'
 import { LocalExecutor } from '../executors/LocalExecutor'
 import { ProcessQueue } from '../executors/ProcessQueue'
@@ -54,9 +54,20 @@ export class RepoService {
     return this.config.addRepo({ sourceId: LOCAL_SOURCE_ID, path: normalized, name: basename(normalized) })
   }
 
-  head(repoId: string): Promise<HeadInfo> {
+  refs(repoId: string): Promise<RefsSnapshot> {
     const { repo, rt } = this.resolve(repoId)
-    return rt.queue.run(() => git.head(rt.exec, repo.path), { key: `head:${repoId}` })
+    return rt.queue.run(() => git.refs(rt.exec, repo.path), { key: `refs:${repoId}` })
+  }
+
+  /**
+   * 메시지·작성자·해시 검색. 전체 이력을 훑을 수 있어 비싸므로 requestId 로 취소할 수 있게 하고,
+   * renderer 는 새 질의를 보낼 때 이전 검색을 취소한다(큐 슬롯을 계속 쥐고 스크롤을 막지 않게).
+   */
+  search(repoId: string, query: string, ref?: string, requestId?: string): Promise<SearchResult> {
+    const { repo, rt } = this.resolve(repoId)
+    return this.withSignal(requestId, (signal) =>
+      rt.queue.run(() => git.search(rt.exec, repo.path, query, ref, { signal }), { signal })
+    )
   }
 
   /**

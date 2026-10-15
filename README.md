@@ -3,12 +3,12 @@
 Windows · WSL · SSH(원격 Ubuntu)의 git 저장소를 한 화면에서 살펴보는 가벼운 Git GUI.
 사슴뿔(antler)처럼 갈라져 뻗는 브랜치 구조에서 이름을 따왔다. 읽기(조회) 전용이다.
 
-> 현재 단계: **M1** — 스캐폴딩, 디자인 토큰/테마, LocalExecutor, 커밋 목록
+> 현재 단계: **M2** — Canvas 레인 그래프, 브랜치·리모트·태그·워크트리·스태시 사이드바, ref 필터, 커밋 검색
 
 ## 실행
 
 ```bash
-pnpm install          # Node 22+, pnpm 10+, git 2.24+ (--end-of-options)
+pnpm install          # Node 22+, pnpm 10+, git 2.36+ (worktree list -z)
 pnpm dev              # 개발 모드(HMR)
 pnpm build            # out/ 에 빌드
 pnpm test             # 파서·executor·커서 단위 테스트(vitest)
@@ -16,8 +16,7 @@ pnpm typecheck        # main/preload/renderer 타입 검사
 ```
 
 > pnpm 이 없으면 `corepack enable pnpm`(관리자 권한 필요) 또는 `npm i -g pnpm`.
-> pnpm 10 은 설치 스크립트를 기본 차단하므로 `package.json` 의 `pnpm.onlyBuiltDependencies` 에 electron·esbuild 를 허용해 두었다.
-> 그래도 `node_modules/electron/dist` 가 비어 있으면 `node node_modules/electron/install.js` 를 실행한다.
+> Electron 44+ 는 설치 시점이 아니라 **첫 실행 때** 바이너리를 내려받는다(`pnpm dev` 첫 실행이 조금 느릴 수 있다).
 
 ### 개발 도구 스크립트
 
@@ -25,7 +24,7 @@ pnpm typecheck        # main/preload/renderer 타입 검사
 |---|---|
 | `node scripts/make-fixtures.mjs` | 파서 테스트용 git 출력 fixture 재생성(한글 경로·공백·rename·merge·바이너리) |
 | `node scripts/make-big-repo.mjs <dir> [n]` | 성능 검증용 대형 저장소(기본 10만 커밋, feature 브랜치·merge 포함) 생성 |
-| `node scripts/drive.mjs <repo...> [--theme light] [--out dir]` | 빌드된 앱을 Playwright 로 띄워 콜드 스타트·스크롤 프레임·메모리 측정 + 스크린샷 |
+| `node scripts/drive.mjs <repo...> [--theme light] [--search q] [--out dir]` | 빌드된 앱을 Playwright 로 띄워 콜드 스타트·사이드바·찾아가기·필터·검색·스크롤 프레임·메모리 측정 + 스크린샷 |
 | `node scripts/bench-log.mjs <repo>` | git log 옵션 조합별 소요 시간 |
 | `node scripts/check-contrast.mjs` | 디자인 토큰 WCAG 대비 검사(미달 시 exit 1) |
 
@@ -38,13 +37,15 @@ src/
   shared/      types.ts(데이터 타입), ipc.ts(IPC 계약 — 채널·인자·결과 타입)
   main/
     executors/ GitExecutor 인터페이스, LocalExecutor, processRunner, ProcessQueue(동시성 제한+dedupe)
-    git/       commands.ts, logCursor.ts, parsers/(log, nulRecords)
+    git/       commands.ts(refs·search·logArgs), logCursor.ts, parsers/(log, refs, worktree, stash, nulRecords)
     services/  ConfigStore(JSON 설정), RepoService(저장소 단위 진입점)
     ipc/       handlers.ts(IpcEnvelope 로 감싸 등록)
   preload/     window.antler — 허용 목록 채널만 노출
   renderer/src/
     components/  Toolbar, Sidebar, CommitList, DetailPanel, RepoSwitcher, Splitter …
-    stores/      appStore(설정·활성 저장소·테마), logStore(커밋 페이지)
+    stores/      appStore(설정·활성 저장소·테마·refs), logStore(커밋 페이지·필터·찾아가기), searchStore
+    graph/       lanes.ts(레인 계산, 순수 함수), graphEngine.ts(worker 결과 보관)
+    workers/     laneWorker.ts
     styles/      tokens.css(디자인 토큰 3층), base.css
     i18n/        ko, en
 tests/           vitest + fixtures/
@@ -57,6 +58,12 @@ tests/           vitest + fixtures/
 - **LogCursor**: `git log` 는 시작할 때마다 모든 ref 를 읽는다. loose ref 2,500개짜리 저장소에서 이 고정 비용이
   약 450ms 라, 페이지마다 `--skip` 으로 새 프로세스를 띄우면 스크롤을 못 따라간다. 그래서 프로세스 하나를 열어 두고
   스트림 backpressure 로 멈춰 둔 채 다음 페이지를 이어 읽는다. 순서를 벗어난 요청만 `--skip` 으로 다시 시작한다.
+- **레인 그래프**: `--date-order`(자식이 항상 부모보다 먼저) 결과를 Web Worker 가 위에서 아래로 한 번 훑으며
+  행마다 FULL(통과)·TOP(모여듦)·BOTTOM(갈라짐) 선분과 노드 레인을 계산한다. renderer 는 보이는 행만 Canvas 에
+  색별 `Path2D` 로 묶어 그린다. 색: main/master 는 `--lane-0`(앰버) 고정, 브랜치 tip 은 이름 해시,
+  merge 의 두 번째 부모는 merge 제목(`Merge branch 'x'`)에서 이름을 읽어 같은 브랜치가 세션이 바뀌어도 같은 색이 된다.
+- **사이드바 동작(GitKraken 식)**: 브랜치·태그 클릭 = 그래프에서 그 커밋으로 이동(필요하면 더 불러옴),
+  더블클릭/깔때기 버튼 = 그 ref 만 보기(툴바 필터 칩으로 해제). 워크트리·스태시 클릭 = 그 HEAD 기준 보기.
 - **보안**: contextIsolation · sandbox · nodeIntegration off, preload 는 허용 목록 채널만 노출,
   프로덕션 빌드에 CSP 메타 태그 주입, 외부 링크는 기본 브라우저로, 권한 요청은 모두 거부.
 - **디자인 토큰**: palette(원시) → semantic(테마가 교체하는 층) → component(semantic 만 참조) 3층.
@@ -77,7 +84,7 @@ tests/           vitest + fixtures/
 ## 마일스톤
 
 - [x] **M1** 스캐폴딩 + 디자인 토큰/테마 + LocalExecutor + 커밋 목록
-- [ ] M2 그래프 렌더링(레인 팔레트) + 브랜치/태그/워크트리 사이드바
+- [x] **M2** 그래프 렌더링(레인 팔레트) + 브랜치/태그/워크트리 사이드바
 - [ ] M3 커밋 상세, 변경 파일 리스트, diff 뷰어
 - [ ] M4 WslExecutor, SshExecutor + 환경 관리 UI
 - [ ] M5 GitHub PR/이슈 연동

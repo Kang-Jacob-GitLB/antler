@@ -8,6 +8,7 @@ import { Splitter, type SplitterHandlers } from './components/Splitter'
 import { Toolbar } from './components/Toolbar'
 import { useAppStore } from './stores/appStore'
 import { useLogStore } from './stores/logStore'
+import { useSearchStore } from './stores/searchStore'
 import './App.css'
 
 type Widths = [sidebar: number, detail: number]
@@ -43,14 +44,27 @@ export function App(): React.JSX.Element | null {
 
   // 활성 저장소가 바뀌면 커밋 목록을 새로 연다
   useEffect(() => {
+    useSearchStore.getState().close()
     useLogStore.getState().open(activeRepoId)
   }, [activeRepoId])
 
+  // 그래프 필터가 바뀌면 검색 결과도 그 범위로 다시 구한다(옛 범위의 일치 표시가 남지 않게)
+  const filterRev = useLogStore((s) => s.filter?.rev)
+  useEffect(() => {
+    const search = useSearchStore.getState()
+    if (search.open && search.ranQuery) void search.run()
+  }, [filterRev])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
+      const key = e.key.toLowerCase()
+      if (key === 'p') {
         e.preventDefault()
         useAppStore.getState().setSwitcherOpen(true)
+      } else if (key === 'f' && useAppStore.getState().activeRepoId) {
+        e.preventDefault()
+        useSearchStore.getState().show()
       }
     }
     window.addEventListener('keydown', onKey)
