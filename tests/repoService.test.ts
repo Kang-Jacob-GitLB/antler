@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -51,6 +51,24 @@ describe('RepoService.log', () => {
     // 처음부터 다시 읽으면 새 커밋이 맨 위에 온다
     const fresh = await svc.log(repoId, { skip: 0, count: 1 })
     expect(fresh.commits[0]!.subject).toBe('new')
+  })
+})
+
+describe('RepoService.addLocal', () => {
+  it('하위 폴더를 골라도 최상위 경로로 등록하고, 다시 추가하면 같은 항목을 돌려준다', async () => {
+    const { svc } = setup()
+    const sub = join(repoPath, '하위 폴더')
+    mkdirSync(sub, { recursive: true })
+    const a = await svc.addLocal(sub)
+    const b = await svc.addLocal(repoPath)
+    expect(a.path).toBe(process.platform === 'win32' ? repoPath.replace(/\//g, '\\') : repoPath)
+    expect(b.id).toBe(a.id)
+    expect(a.name).toBe('repo')
+  })
+
+  it('git 저장소가 아니면 실패한다', async () => {
+    const { svc } = setup()
+    await expect(svc.addLocal(mkdtempSync(join(tmpdir(), 'antler-notrepo-')))).rejects.toThrow()
   })
 })
 

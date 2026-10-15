@@ -8,7 +8,7 @@ Windows · WSL · SSH(원격 Ubuntu)의 git 저장소를 한 화면에서 살펴
 ## 실행
 
 ```bash
-pnpm install          # Node 22+, pnpm 10+
+pnpm install          # Node 22+, pnpm 10+, git 2.24+ (--end-of-options)
 pnpm dev              # 개발 모드(HMR)
 pnpm build            # out/ 에 빌드
 pnpm test             # 파서·executor·커서 단위 테스트(vitest)
