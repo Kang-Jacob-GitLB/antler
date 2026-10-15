@@ -156,3 +156,9 @@ export const IconRepo = (p: P) => (
     <path d="M3.5 13a1 1 0 0 0 1 1h8v-2" />
   </Svg>
 )
+export const IconSubmodule = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 1.8 13.5 4.9v6.2L8 14.2 2.5 11.1V4.9z" />
+    <path d="M2.7 5 8 8l5.3-3M8 8v6" />
+  </Svg>
+)

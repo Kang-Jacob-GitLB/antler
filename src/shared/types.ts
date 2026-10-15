@@ -170,8 +170,28 @@ export interface RefsSnapshot {
   tags: Tag[]
   worktrees: Worktree[]
   stashes: Stash[]
+  /** 최상위 서브모듈(중첩은 보지 않는다). 없으면 빈 배열 */
+  submodules: SubmoduleInfo[]
   /** 저장소의 기본 브랜치와 그 tip(그래프에서 굵게 그릴 줄기). 정할 수 없으면 없음 */
   defaultBranch?: DefaultBranch
+}
+
+/** uninitialized: 작업 트리에 체크아웃되지 않음 · clean: HEAD 가 기록된 커밋과 같음 · modified: 다른 커밋 · unknown: 상한 초과 등으로 확인하지 않음 */
+export type SubmoduleStatus = 'uninitialized' | 'clean' | 'modified' | 'unknown'
+
+export interface SubmoduleInfo {
+  /** .gitmodules 의 이름(없으면 경로) */
+  name: string
+  /** 상위 저장소 기준 상대 경로(POSIX 구분자) */
+  path: string
+  /** .gitmodules 의 URL — 표시 전용 텍스트 */
+  url?: string
+  branch?: string
+  /** 상위 저장소가 기록한 커밋 */
+  recorded: string
+  /** 체크아웃된 HEAD(초기화되지 않았거나 알 수 없으면 없음) */
+  head?: string
+  status: SubmoduleStatus
 }
 
 export interface DefaultBranch {

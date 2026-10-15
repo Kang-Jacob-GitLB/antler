@@ -1,6 +1,6 @@
 // git 조회 명령 모음. executor 위에서 동작하며 환경과 무관하다.
 import { createHash } from 'node:crypto'
-import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsSnapshot, SearchResult } from '@shared/types'
+import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { pickDefaultBranch } from './defaultBranch'
 import { parseChanges } from './parsers/changes'
@@ -9,6 +9,7 @@ import { DiffParser } from './parsers/diff'
 import { LOG_FORMAT_ARGS } from './parsers/log'
 import { NulRecordSplitter } from './parsers/nulRecords'
 import { parseRefs, parseRemoteNames, REFS_ARGS } from './parsers/refs'
+import { GITLINK_ARGS, GITMODULES_ARGS, parseGitlinks, parseGitmodules, parseProbe, submoduleStatus } from './parsers/submodule'
 import { parseStashes, STASH_ARGS } from './parsers/stash'
 import { parseWorktrees, WORKTREE_ARGS } from './parsers/worktree'
 
@@ -117,9 +118,70 @@ export async function remotes(exec: GitExecutor, repoPath: string, opts?: RunOpt
   return out
 }
 
+/** 서브모듈 수 상한 */
+export const SUBMODULE_MAX = 200
+/** 이 수를 넘는 서브모듈은 HEAD 를 확인하지 않는다(status: unknown) */
+export const SUBMODULE_PROBE_MAX = 50
+const SUBMODULE_PROBE_CONCURRENCY = 8
+
+/**
+ * 최상위 서브모듈 목록. `git submodule` 은 쓰지 않는다(하위 저장소 설정까지 건드린다).
+ * 상태 판정은 하위 경로에서 하드닝된 executor 로 `rev-parse --absolute-git-dir HEAD` 만 돌린다 —
+ * 초기화되지 않은 서브모듈 디렉터리는 비어 있어 git 이 상위 저장소를 찾아 올라가므로, git-dir 이 상위와 같으면 미초기화다
+ * (fs 접근 없이 WSL·SSH 에서도 같게 동작). 중첩 서브모듈은 보지 않는다(최상위만).
+ * 실패는 목록 전체를 막지 않는다: 읽을 수 없으면 빈 목록, 하나의 확인 실패는 unknown.
+ */
+export async function submodules(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<SubmoduleInfo[]> {
+  const linkOut = await exec.run(repoPath, GITLINK_ARGS, opts)
+  if (linkOut.code !== 0) return []
+  const links = parseGitlinks(linkOut.stdout).slice(0, SUBMODULE_MAX)
+  if (links.length === 0) return []
+  const [modOut, parentProbe] = await Promise.all([
+    exec.run(repoPath, GITMODULES_ARGS, opts),
+    exec.run(repoPath, ['rev-parse', '--absolute-git-dir'], opts)
+  ])
+  const modules = modOut.code === 0 ? parseGitmodules(modOut.stdout) : new Map<string, { name: string; url?: string; branch?: string }>()
+  const parentGitDir = parentProbe.code === 0 ? parentProbe.stdout.toString('utf8').split('\n')[0]?.replace(/\r$/, '') : undefined
+
+  const result: SubmoduleInfo[] = links.map((l) => {
+    const m = modules.get(l.path)
+    return { name: m?.name ?? l.path, path: l.path, ...(m?.url ? { url: m.url } : {}), ...(m?.branch ? { branch: m.branch } : {}), recorded: l.sha, status: 'unknown' as const }
+  })
+  if (!parentGitDir) return result
+
+  const base = repoPath.replace(/[\\/]+$/, '')
+  const probe = async (s: SubmoduleInfo): Promise<void> => {
+    try {
+      const r = await exec.run(`${base}/${s.path}`, ['rev-parse', '--absolute-git-dir', 'HEAD'], opts)
+      const { gitDir, head } = parseProbe(r.stdout.toString('utf8'))
+      // 디렉터리 자체가 없는 경우(체크아웃된 적 없음)도 미초기화다
+      if (!gitDir) {
+        if (r.code !== 0 && /cannot change to|No such file|not a directory/i.test(r.stderr)) s.status = 'uninitialized'
+        return
+      }
+      if (gitDir === parentGitDir) {
+        s.status = 'uninitialized'
+        return
+      }
+      if (head) s.head = head
+      s.status = submoduleStatus(s.recorded, head)
+    } catch {
+      /* 이 서브모듈만 unknown 으로 둔다 */
+    }
+  }
+  const targets = result.slice(0, SUBMODULE_PROBE_MAX)
+  let next = 0
+  await Promise.all(
+    Array.from({ length: Math.min(SUBMODULE_PROBE_CONCURRENCY, targets.length) }, async () => {
+      while (next < targets.length) await probe(targets[next++]!)
+    })
+  )
+  return result
+}
+
 /** 사이드바용 ref 스냅샷. 다섯 조회를 동시에 돌린다. */
 export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsSnapshot> {
-  const [refsOut, remoteOut, worktreeOut, stashOut, headInfo, originHead] = await Promise.all([
+  const [refsOut, remoteOut, worktreeOut, stashOut, headInfo, originHead, subs] = await Promise.all([
     ok(exec, repoPath, REFS_ARGS, opts),
     okOrEmpty(exec, repoPath, ['remote'], opts),
     okOrEmpty(exec, repoPath, WORKTREE_ARGS, opts),
@@ -127,7 +189,9 @@ export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts):
     okOrEmpty(exec, repoPath, STASH_ARGS, opts),
     head(exec, repoPath, opts),
     // origin/HEAD 가 없으면(clone 이 아니거나 git remote set-head 를 안 한 저장소) 실패 코드로 끝난다 — 기본 브랜치는 대체 규칙으로 정한다
-    exec.run(repoPath, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], opts).then((r) => (r.code === 0 ? r.stdout.toString('utf8') : null))
+    exec.run(repoPath, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], opts).then((r) => (r.code === 0 ? r.stdout.toString('utf8') : null)),
+    // 서브모듈은 부가 정보라 실패해도 ref 스냅샷을 막지 않는다
+    submodules(exec, repoPath, opts).catch(() => [])
   ])
   const { local, remotes, tags } = parseRefs(refsOut, parseRemoteNames(remoteOut))
   const defaultBranch = pickDefaultBranch(originHead, local, remotes)
@@ -138,6 +202,7 @@ export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts):
     tags,
     worktrees: parseWorktrees(worktreeOut),
     stashes: parseStashes(stashOut),
+    submodules: subs,
     ...(defaultBranch ? { defaultBranch } : {})
   }
 }

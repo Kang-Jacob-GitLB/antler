@@ -229,3 +229,21 @@
 .side-track.is-gone {
   color: var(--removed-text);
 }
+.side-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  height: 16px;
+  line-height: 16px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.side-badge.is-modified {
+  color: var(--modified-text);
+}
+.side-item[aria-disabled='true'] {
+  cursor: default;
+}
