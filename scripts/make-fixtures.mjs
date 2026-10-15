@@ -119,6 +119,12 @@ try {
   dump('remotes.txt', 'remote')
   dump('worktree.bin', 'worktree', 'list', '--porcelain', '-z')
   dump('stash.bin', 'stash', 'list', '-z', '--format=%H%x1f%gd%x1f%ct%x1f%gs')
+  // M3: diff-tree 기반 변경 목록 fixture. 한글 + 공백 경로(문서/설계 노트.md)와 루트 커밋(--root)
+  const koreanCommit = git('log', '--format=%H', '--grep=한글 경로 파일 추가', 'main').toString('utf8').trim()
+  const rootCommit = git('rev-parse', 'v0.1.0').toString('utf8').trim()
+  dump('dt-name-status-korean.bin', 'diff-tree', '-r', '-z', '-M', '--name-status', '--no-commit-id', rootCommit, koreanCommit)
+  dump('dt-numstat-korean.bin', 'diff-tree', '-r', '-z', '-M', '--numstat', '--no-commit-id', rootCommit, koreanCommit)
+  dump('dt-name-status-root.bin', 'diff-tree', '-r', '-z', '-M', '--name-status', '--no-commit-id', '--root', rootCommit)
   console.log(`fixtures written to ${OUT}`)
 } finally {
   rmSync(repo, { recursive: true, force: true })

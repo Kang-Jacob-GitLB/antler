@@ -10,6 +10,15 @@
   min-height: 0;
 }
 
+.app__center {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+.app__center.is-hidden {
+  display: none;
+}
+
 .empty-state {
   flex: 1;
   display: flex;

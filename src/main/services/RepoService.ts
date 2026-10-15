@@ -1,11 +1,23 @@
 import { basename } from 'node:path'
-import type { LogPage, LogQuery, RefsSnapshot, Repo, SearchResult, Source, SourceKind } from '@shared/types'
+import type {
+  CommitDetail,
+  FileDiff,
+  FileDiffRequest,
+  LogPage,
+  LogQuery,
+  RefsSnapshot,
+  Repo,
+  SearchResult,
+  Source,
+  SourceKind
+} from '@shared/types'
 import { AbortError, type GitExecutor } from '../executors/GitExecutor'
 import { LocalExecutor } from '../executors/LocalExecutor'
 import { ProcessQueue } from '../executors/ProcessQueue'
 import * as git from '../git/commands'
 import { LogCursor } from '../git/logCursor'
 import { LOCAL_SOURCE_ID, type ConfigStore } from './ConfigStore'
+import { LruCache } from './lru'
 
 /** 환경별 동시 git 프로세스 상한(LogCursor 는 저장소당 하나라 큐 밖에서 돈다) */
 const CONCURRENCY: Record<SourceKind, number> = { local: 6, wsl: 4, ssh: 4 }
@@ -15,6 +27,29 @@ const CONCURRENCY: Record<SourceKind, number> = { local: 6, wsl: 4, ssh: 4 }
  */
 const CURSOR_IDLE_MS = 5_000
 const CURSOR_SWEEP_MS = 2_500
+/** 커밋 상세 캐시 항목 수 */
+const COMMIT_CACHE_ENTRIES = 300
+/** diff 캐시 총 크기(추정 바이트) */
+const DIFF_CACHE_BYTES = 32 * 1024 * 1024
+const DIFF_CACHE_ENTRIES = 500
+
+/** 같은 키의 진행 중 요청. 구독자(waiters)가 모두 취소했을 때만 git 을 끊는다 */
+interface Inflight<T> {
+  ac: AbortController
+  waiters: number
+  promise: Promise<T>
+}
+
+/** diff 가 차지하는 메모리 추정치(바이트). 줄 객체 오버헤드를 고정값으로 어림한다 */
+export function estimateDiffBytes(d: FileDiff): number {
+  let n = 256 + d.path.length * 2 + (d.oldPath?.length ?? 0) * 2
+  for (const m of d.meta) n += m.length * 2 + 16
+  for (const h of d.hunks) {
+    n += 96 + h.header.length * 2
+    for (const l of h.lines) n += 48 + l.text.length * 2
+  }
+  return n
+}
 
 /** 이어 읽으려던 위치의 커밋이 바뀌었다 — renderer 는 처음부터 다시 읽어야 한다 */
 export class StaleLogError extends Error {
@@ -32,7 +67,7 @@ interface Runtime {
 /**
  * 저장소 단위 git 조회의 진입점. 소스별 executor·큐를 소유하고, 요청 취소(requestId)를 관리한다.
  * 커밋 목록은 ref 이동으로 바뀔 수 있어 캐시하지 않고 LogCursor 로 이어 읽는다
- * (커밋 해시 기반 불변 캐시는 M3 상세/diff 에서 쓴다).
+ * (커밋 해시 기반 상세/diff 는 불변이라 LRU 로 캐시한다).
  */
 export class RepoService {
   private readonly runtimes = new Map<string, Runtime>()
@@ -40,6 +75,10 @@ export class RepoService {
   private readonly cursors = new Map<string, LogCursor>()
   /** 닫힌 커서의 마지막 위치. 다음 페이지가 이어지는지 검증하는 데 쓴다 */
   private readonly anchors = new Map<string, { position: number; hash: string }>()
+  /** 커밋 해시 기준이라 불변이다 — 무효화하지 않는다 */
+  private readonly commitCache = new LruCache<string, CommitDetail>(COMMIT_CACHE_ENTRIES)
+  private readonly diffCache = new LruCache<string, FileDiff>(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES)
+  private readonly inflight = new Map<string, Inflight<unknown>>()
   private readonly sweeper = setInterval(() => this.sweepIdleCursors(), CURSOR_SWEEP_MS)
 
   constructor(private readonly config: ConfigStore) {
@@ -68,6 +107,81 @@ export class RepoService {
     return this.withSignal(requestId, (signal) =>
       rt.queue.run(() => git.search(rt.exec, repo.path, query, ref, { signal }), { signal })
     )
+  }
+
+  /** 커밋 상세(메타데이터 + 첫 부모 대비 변경 파일). 해시 기준 불변 캐시 + 진행 중 요청 공유 */
+  commit(repoId: string, hash: string, requestId?: string): Promise<CommitDetail> {
+    const { repo, rt } = this.resolve(repoId)
+    const key = `${repoId}\0${hash.toLowerCase()}`
+    const cached = this.commitCache.get(key)
+    if (cached) return Promise.resolve(cached)
+    return this.shared(key, requestId, async (signal) => {
+      const detail = await rt.queue.run(() => git.commitDetail(rt.exec, repo.path, hash, { signal }), { signal })
+      this.commitCache.set(key, detail)
+      return detail
+    })
+  }
+
+  /** 파일 하나의 diff. 상한을 넘으면 truncated, req.full 이면 전체(별도 캐시 항목) */
+  fileDiff(repoId: string, req: FileDiffRequest, requestId?: string): Promise<FileDiff> {
+    const { repo, rt } = this.resolve(repoId)
+    const key = [repoId, req.hash.toLowerCase(), req.parent?.toLowerCase() ?? '', req.oldPath ?? '', req.path, req.full ? 'full' : 'part'].join('\0')
+    const cached = this.diffCache.get(key)
+    if (cached) return Promise.resolve(cached)
+    return this.shared(key, requestId, async (signal) => {
+      const diff = await rt.queue.run(() => git.fileDiff(rt.exec, repo.path, req, { signal }), { signal })
+      this.diffCache.set(key, diff, estimateDiffBytes(diff))
+      return diff
+    })
+  }
+
+  /**
+   * 키가 같은 진행 중 요청을 공유한다. 공유 요청의 취소는 구독자 전원이 취소했을 때만 git 에 전달되므로
+   * 한 호출자의 cancel 이 다른 호출자의 결과를 죽이지 않는다.
+   */
+  private shared<T>(key: string, requestId: string | undefined, start: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return this.withSignal(requestId, (signal) => {
+      let entry = this.inflight.get(key) as Inflight<T> | undefined
+      if (!entry) {
+        const ac = new AbortController()
+        const created: Inflight<T> = { ac, waiters: 0, promise: undefined as unknown as Promise<T> }
+        created.promise = start(ac.signal).finally(() => {
+          if (this.inflight.get(key) === created) this.inflight.delete(key)
+        })
+        this.inflight.set(key, created)
+        entry = created
+      }
+      const e = entry
+      e.waiters++
+      return new Promise<T>((resolve, reject) => {
+        let settled = false
+        const onAbort = (): void => {
+          if (settled) return
+          settled = true
+          if (--e.waiters === 0) {
+            if (this.inflight.get(key) === e) this.inflight.delete(key)
+            e.ac.abort()
+          }
+          reject(new AbortError())
+        }
+        if (signal?.aborted) return onAbort()
+        signal?.addEventListener('abort', onAbort, { once: true })
+        e.promise.then(
+          (v) => {
+            if (settled) return
+            settled = true
+            signal?.removeEventListener('abort', onAbort)
+            resolve(v)
+          },
+          (err) => {
+            if (settled) return
+            settled = true
+            signal?.removeEventListener('abort', onAbort)
+            reject(err)
+          }
+        )
+      })
+    })
   }
 
   /**
@@ -155,6 +269,8 @@ export class RepoService {
     for (const c of this.cursors.values()) c.dispose()
     this.cursors.clear()
     this.anchors.clear()
+    this.commitCache.clear()
+    this.diffCache.clear()
     for (const ac of this.requests.values()) ac.abort()
     await Promise.all([...this.runtimes.values()].map((r) => r.exec.dispose()))
     this.runtimes.clear()

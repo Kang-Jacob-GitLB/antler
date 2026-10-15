@@ -82,6 +82,24 @@
   --badge-ssh-bg: color-mix(in srgb, var(--velvet) 45%, transparent);
   --badge-ssh-fg: var(--velvet-text);
   --ref-head-ring: var(--accent);
+  --diff-add-bg: color-mix(in srgb, var(--added) 13%, transparent);
+  --diff-del-bg: color-mix(in srgb, var(--removed) 13%, transparent);
+  --diff-add-gutter: color-mix(in srgb, var(--added) 22%, transparent);
+  --diff-del-gutter: color-mix(in srgb, var(--removed) 22%, transparent);
+  --diff-add-emph: color-mix(in srgb, var(--added) 38%, transparent);
+  --diff-del-emph: color-mix(in srgb, var(--removed) 38%, transparent);
+  --diff-hunk-bg: color-mix(in srgb, var(--renamed) 10%, var(--bg-surface));
+  --diff-empty-bg: color-mix(in srgb, var(--text-muted) 6%, transparent);
+
+  /* 코드 강조(highlight.js 토큰) — 채도 낮은 숲 색 */
+  --syn-keyword: #C98B7A;
+  --syn-string: #9DB884;
+  --syn-number: #C9B07A;
+  --syn-comment: #968D7F;
+  --syn-function: #8FB6C2;
+  --syn-type: #B898B1;
+  --syn-attr: #8FB3A0;
+  --syn-meta: #A89F91;
 
   /* ── 타이포·간격·모션 (테마 무관) ─────────────── */
   --font-ui: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Pretendard', 'Apple SD Gothic Neo',
@@ -145,6 +163,15 @@
 
   --shadow-popover: 0 8px 24px rgb(42 33 27 / 0.14), 0 0 0 1px var(--border);
   --backdrop: rgb(42 33 27 / 0.18);
+  --syn-keyword: #9A4A36;
+  --syn-string: #4A733A;
+  --syn-number: #855F14;
+  --syn-comment: #716455;
+  --syn-function: #33626E;
+  --syn-type: #7A4F73;
+  --syn-attr: #42705C;
+  --syn-meta: #6B5F52;
+
   --scrollbar-thumb: #D3C7B1;
   --scrollbar-thumb-hover: #BFB096;
 }

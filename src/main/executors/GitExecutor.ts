@@ -51,6 +51,8 @@ export const GIT_GLOBAL_ARGS = ['-c', 'core.quotepath=false', '-c', 'color.ui=fa
 export const GIT_ENV: Record<string, string> = {
   GIT_OPTIONAL_LOCKS: '0',
   GIT_TERMINAL_PROMPT: '0',
+  // renderer 가 보낸 경로가 pathspec magic(:(top), *, :! 등)으로 해석되지 않게 한다
+  GIT_LITERAL_PATHSPECS: '1',
   GIT_PAGER: 'cat',
   LANG: 'C.UTF-8',
   LC_ALL: 'C.UTF-8'

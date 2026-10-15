@@ -94,6 +94,39 @@ try {
       await page.waitForSelector('.commit-subject')
     }
 
+    // 커밋 상세 → 변경 파일 → diff (M3)
+    await page.click('.commit-list__scroll')
+    await page.keyboard.press('Home')
+    const tDetail = Date.now()
+    await page.waitForSelector('.file-row', { timeout: 10_000 }).catch(() => {})
+    const files = await page.$$eval('.file-row', (els) => els.length)
+    console.log(`detail files: ${files} (+${Date.now() - tDetail} ms) — ${await page.textContent('.file-list__head').catch(() => '')}`)
+    if (files) {
+      // 가장 많이 바뀐 파일을 연다(강조·줄 안 변경을 보기 좋게)
+      await page.$$eval('.file-row', (els) => {
+        const score = (e) => [...e.querySelectorAll('.file-row__stat span')].reduce((n, s) => n + Number(s.textContent.replace(/[^0-9]/g, '')), 0)
+        els.sort((a, b) => score(b) - score(a))[0].click()
+      })
+      const tDiff = Date.now()
+      await page.waitForSelector('.diff-row, .diff-notice', { timeout: 10_000 })
+      await page.waitForTimeout(500)
+      const rows = await page.$$eval('.diff-row', (els) => els.length)
+      const hl = await page.$$eval('.diff-code [class^="hljs-"]', (els) => els.length)
+      console.log(`diff "${await page.textContent('.diff-head__base')}": ${rows} rows rendered, ${hl} highlighted tokens (+${Date.now() - tDiff} ms)`)
+      await shot(`diff-unified-${theme}`)
+      await page.click('.seg__btn:nth-child(2)')
+      await page.waitForSelector('.diff-row--split')
+      await page.waitForTimeout(300)
+      await shot(`diff-split-${theme}`)
+      await page.click('.seg__btn:nth-child(1)')
+      await page.keyboard.press('Alt+ArrowDown')
+      await page.waitForTimeout(400)
+      console.log(`Alt+↓ → "${await page.textContent('.diff-head__base')}" (${await page.textContent('.diff-head__pos')})`)
+      await page.keyboard.press('Escape')
+      await page.waitForSelector('.diff-view', { state: 'detached' })
+      console.log('Esc → diff closed, graph visible:', await page.isVisible('.commit-list'))
+    }
+
     // Ctrl+F 검색
     await page.keyboard.press('Control+F')
     await page.waitForSelector('.search-bar__input')
