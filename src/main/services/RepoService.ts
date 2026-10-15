@@ -9,8 +9,20 @@ import { LOCAL_SOURCE_ID, type ConfigStore } from './ConfigStore'
 
 /** 환경별 동시 git 프로세스 상한(LogCursor 는 저장소당 하나라 큐 밖에서 돈다) */
 const CONCURRENCY: Record<SourceKind, number> = { local: 6, wsl: 4, ssh: 4 }
-/** 이 시간 동안 안 쓰인 LogCursor 는 닫는다 */
-const CURSOR_IDLE_MS = 60_000
+/**
+ * 이 시간 동안 안 쓰인 LogCursor 는 닫는다. 멈춘 git log 는 pack 파일 핸들을 쥐고 있어
+ * 사용자의 `git gc`/`repack` 이나 폴더 이동을 막으므로 짧게 둔다.
+ */
+const CURSOR_IDLE_MS = 5_000
+const CURSOR_SWEEP_MS = 2_500
+
+/** 이어 읽으려던 위치의 커밋이 바뀌었다 — renderer 는 처음부터 다시 읽어야 한다 */
+export class StaleLogError extends Error {
+  constructor() {
+    super('commit history changed while paging')
+    this.name = 'StaleLogError'
+  }
+}
 
 interface Runtime {
   exec: GitExecutor
@@ -26,7 +38,9 @@ export class RepoService {
   private readonly runtimes = new Map<string, Runtime>()
   private readonly requests = new Map<string, AbortController>()
   private readonly cursors = new Map<string, LogCursor>()
-  private readonly sweeper = setInterval(() => this.sweepIdleCursors(), 30_000)
+  /** 닫힌 커서의 마지막 위치. 다음 페이지가 이어지는지 검증하는 데 쓴다 */
+  private readonly anchors = new Map<string, { position: number; hash: string }>()
+  private readonly sweeper = setInterval(() => this.sweepIdleCursors(), CURSOR_SWEEP_MS)
 
   constructor(private readonly config: ConfigStore) {
     this.sweeper.unref?.()
@@ -55,21 +69,36 @@ export class RepoService {
     const skip = Math.max(0, Math.floor(query.skip))
     const key = `${repoId}\0${query.ref ?? ''}`
 
-    for (const [k, c] of this.cursors) {
-      if (k !== key) {
-        c.dispose()
-        this.cursors.delete(k)
-      }
-    }
+    for (const [k, c] of this.cursors) if (k !== key) this.retire(k, c)
+    if (skip === 0) this.anchors.delete(key)
+
     let cursor = this.cursors.get(key)
-    if (!cursor || cursor.position !== skip) {
-      cursor?.dispose()
-      cursor = new LogCursor(rt.exec, repo.path, (s) => git.logArgs(query.ref, s), skip)
+    // 예약된 다음 위치가 맞고 살아 있는 커서만 이어 쓴다
+    let verify: string | null = null
+    if (!cursor || !cursor.usable || cursor.nextPosition !== skip) {
+      if (cursor) this.retire(key, cursor)
+      // 닫힌 커서의 마지막 커밋 위치에서 다시 시작하면, 그 커밋이 그대로인지 한 개 겹쳐 읽어 확인한다
+      const anchor = this.anchors.get(key)
+      const start = anchor && anchor.position === skip && skip > 0 ? skip - 1 : skip
+      if (start !== skip) verify = anchor!.hash
+      cursor = new LogCursor(rt.exec, repo.path, (s) => git.logArgs(query.ref, s), start)
       this.cursors.set(key, cursor)
     }
     const active = cursor
+    const expected = verify
     return this.withSignal(requestId, async (signal) => {
-      const page = active.read(count)
+      const page = (async () => {
+        if (expected) {
+          const head = await active.read(1)
+          if (head.commits[0]?.hash !== expected) {
+            // 그 사이 ref 가 움직였다 — 이어 붙이면 중복·누락이 생기므로 renderer 가 처음부터 다시 읽게 한다
+            this.retire(key, active)
+            this.anchors.delete(key)
+            throw new StaleLogError()
+          }
+        }
+        return active.read(count)
+      })()
       if (!signal) return page
       return Promise.race([
         page,
@@ -80,6 +109,7 @@ export class RepoService {
               // 읽는 도중 취소되면 커서 위치를 신뢰할 수 없으므로 버린다
               active.dispose()
               if (this.cursors.get(key) === active) this.cursors.delete(key)
+              page.catch(() => {})
               reject(new AbortError())
             },
             { once: true }
@@ -94,13 +124,18 @@ export class RepoService {
     this.requests.delete(requestId)
   }
 
+  /** 커서를 닫는다. 이어 읽을 수 있도록 마지막 위치·해시를 앵커로 남긴다 */
+  private retire(key: string, cursor: LogCursor): void {
+    if (cursor.usable && cursor.lastHash) this.anchors.set(key, { position: cursor.position, hash: cursor.lastHash })
+    cursor.dispose()
+    if (this.cursors.get(key) === cursor) this.cursors.delete(key)
+  }
+
   private sweepIdleCursors(): void {
     const now = Date.now()
     for (const [k, c] of this.cursors) {
-      if (now - c.lastUsed > CURSOR_IDLE_MS) {
-        c.dispose()
-        this.cursors.delete(k)
-      }
+      // 읽는 중인 커서는 건드리지 않는다
+      if (!c.reading && now - c.lastUsed > CURSOR_IDLE_MS) this.retire(k, c)
     }
   }
 
@@ -108,6 +143,7 @@ export class RepoService {
     clearInterval(this.sweeper)
     for (const c of this.cursors.values()) c.dispose()
     this.cursors.clear()
+    this.anchors.clear()
     for (const ac of this.requests.values()) ac.abort()
     await Promise.all([...this.runtimes.values()].map((r) => r.exec.dispose()))
     this.runtimes.clear()

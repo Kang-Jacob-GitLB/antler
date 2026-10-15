@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Commit } from '@shared/types'
-import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { api, errorMessage, isAbort, isStale, newRequestId } from '../lib/api'
 
 /** 한 번에 가져오는 커밋 수. 보이는 영역 끝에서 PREFETCH 행 전에 다음 페이지를 요청한다. */
 export const PAGE_SIZE = 1000
@@ -71,7 +71,14 @@ export const useLogStore = create<LogState>((set, get) => ({
       }))
     } catch (err) {
       if (get().generation !== generation) return
-      set({ loading: false, pendingRequest: null, error: isAbort(err) ? null : errorMessage(err), hasMore: false })
+      if (isStale(err)) {
+        // 페이지를 넘기는 사이 이력이 바뀌었다 — 이어 붙이면 중복·누락이 생기므로 처음부터 다시 읽는다
+        get().reload()
+        return
+      }
+      // 취소는 오류가 아니다. 다음 스크롤에서 다시 요청할 수 있게 hasMore 를 유지한다
+      if (isAbort(err)) set({ loading: false, pendingRequest: null })
+      else set({ loading: false, pendingRequest: null, error: errorMessage(err), hasMore: false })
     }
   },
 

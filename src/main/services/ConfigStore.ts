@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { AppConfig, Repo, Source, UiPrefs } from '@shared/types'
 
@@ -52,28 +52,50 @@ export class ConfigStore {
     return this.update({ ...this.config, ui, repos: this.config.repos.filter((r) => r.id !== id) })
   }
 
+  /** 디스크에 먼저 쓰고, 성공했을 때만 메모리 상태를 바꾼다 */
   private update(next: AppConfig): AppConfig {
+    this.save(next)
     this.config = next
-    this.save()
     return next
   }
 
   private load(): AppConfig {
     const base = defaults()
+    let text: string
     try {
-      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<AppConfig>
+      text = readFileSync(this.file, 'utf8')
+    } catch {
+      return base // 첫 실행
+    }
+    try {
+      const raw = JSON.parse(text) as Partial<AppConfig>
       const sources = raw.sources?.length ? raw.sources : base.sources
       if (!sources.some((s) => s.id === LOCAL_SOURCE_ID)) sources.unshift(base.sources[0]!)
       return { version: 1, sources, repos: raw.repos ?? [], ui: { ...base.ui, ...raw.ui } }
     } catch {
+      // 손상된 설정은 덮어쓰기 전에 보존해 둔다(사용자가 저장소 목록을 복구할 수 있게)
+      try {
+        copyFileSync(this.file, `${this.file}.corrupt-${Date.now()}.bak`)
+      } catch {
+        /* 보존 실패는 무시하고 기본값으로 시작한다 */
+      }
       return base
     }
   }
 
-  private save(): void {
+  private save(config: AppConfig): void {
     mkdirSync(dirname(this.file), { recursive: true })
     const tmp = `${this.file}.tmp`
-    writeFileSync(tmp, JSON.stringify(this.config, null, 2), 'utf8')
-    renameSync(tmp, this.file)
+    writeFileSync(tmp, JSON.stringify(config, null, 2), 'utf8')
+    // Windows 에서 백신·인덱서가 파일을 잠깐 잡으면 rename 이 EPERM 으로 실패한다 — 몇 번 재시도한다
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameSync(tmp, this.file)
+        return
+      } catch (err) {
+        if (attempt >= 4 || (err as NodeJS.ErrnoException).code !== 'EPERM') throw err
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30 * (attempt + 1))
+      }
+    }
   }
 }

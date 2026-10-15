@@ -36,7 +36,8 @@ export async function head(exec: GitExecutor, repoPath: string, opts?: RunOpts):
  * 레인 계산(M2)이 위에서 아래로 한 번에 끝난다.
  */
 export function logArgs(ref: string | undefined, skip: number): string[] {
-  // renderer 가 보낸 ref 가 옵션으로 해석되지 않도록 --end-of-options 뒤에 둔다
-  const revs = ref ? ['--end-of-options', ref] : ['--branches', '--remotes', '--tags', 'HEAD']
+  // renderer 가 보낸 ref 가 옵션으로 해석되지 않도록 --end-of-options(git 2.24+) 뒤에 둔다.
+  // --ignore-missing: 아직 커밋이 없는 브랜치(orphan)에 HEAD 가 있어도 다른 브랜치들은 보여 준다.
+  const revs = ref ? ['--end-of-options', ref] : ['--ignore-missing', '--branches', '--remotes', '--tags', 'HEAD']
   return ['log', ...LOG_FORMAT_ARGS, '--date-order', ...(skip > 0 ? [`--skip=${skip}`] : []), ...revs, '--']
 }

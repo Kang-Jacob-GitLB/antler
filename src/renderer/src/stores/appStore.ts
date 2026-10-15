@@ -89,17 +89,31 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async removeRepo(id) {
-    const config = await api.invoke('repos:remove', id)
-    const active = get().activeRepoId === id ? (config.repos[0]?.id ?? null) : get().activeRepoId
-    set({ config })
-    if (active !== get().activeRepoId) get().selectRepo(active)
+    try {
+      const config = await api.invoke('repos:remove', id)
+      const active = get().activeRepoId === id ? (config.repos[0]?.id ?? null) : get().activeRepoId
+      set({ config })
+      if (active !== get().activeRepoId) get().selectRepo(active)
+    } catch (err) {
+      set({ error: errorMessage(err) })
+    }
   },
 
   async setUi(patch) {
     const prev = get().config
     if (prev) set({ config: { ...prev, ui: { ...prev.ui, ...patch } } }) // 낙관적 반영
-    const config = await api.invoke('config:setUi', patch)
-    set({ config })
+    try {
+      const config = await api.invoke('config:setUi', patch)
+      set({ config })
+    } catch (err) {
+      // 저장에 실패하면 화면도 이전 설정으로 되돌린다
+      if (prev) {
+        set({ config: prev })
+        applyTheme(prev.ui.theme, get().systemDark)
+        document.documentElement.lang = prev.ui.locale
+      }
+      set({ error: errorMessage(err) })
+    }
   },
 
   cycleTheme() {

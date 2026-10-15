@@ -47,7 +47,9 @@ export class ProcessQueue {
       const exec = (): void => {
         signal?.removeEventListener('abort', onAbort)
         this.active++
-        task()
+        // task 가 동기로 throw 해도 슬롯을 돌려받도록 Promise 체인 안에서 호출한다
+        Promise.resolve()
+          .then(task)
           .then(resolve, reject)
           .finally(() => {
             this.active--

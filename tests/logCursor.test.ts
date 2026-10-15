@@ -73,6 +73,36 @@ describe('LogCursor', () => {
   })
 })
 
+describe('LogCursor 오류·특수 상태', () => {
+  it('HEAD 가 아직 커밋 없는 orphan 브랜치여도 다른 브랜치 커밋을 보여 준다', async () => {
+    const dir = join(root, 'orphan')
+    const g = (...a: string[]) =>
+      execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { stdio: 'ignore' })
+    execFileSync('git', ['init', '-q', '-b', 'main', dir])
+    g('commit', '-q', '--allow-empty', '-m', 'on main')
+    g('switch', '-q', '--orphan', 'fresh')
+    const cursor = new LogCursor(exec, dir, (s) => logArgs(undefined, s))
+    const page = await cursor.read(10)
+    cursor.dispose()
+    expect(page.commits.map((c) => c.subject)).toEqual(['on main'])
+  })
+
+  it('git 이 실패한 커서는 usable=false 가 되어 재사용되지 않는다', async () => {
+    const cursor = new LogCursor(exec, join(root, '없는 경로'), (s) => logArgs(undefined, s))
+    await expect(cursor.read(10)).rejects.toThrow()
+    expect(cursor.usable).toBe(false)
+  })
+
+  it('끝에서 덜 받으면 예약 위치를 되돌린다', async () => {
+    const cursor = new LogCursor(exec, repo, (s) => logArgs(undefined, s), COMMITS - 5)
+    const page = await cursor.read(100)
+    cursor.dispose()
+    expect(page.commits).toHaveLength(5)
+    expect(page.hasMore).toBe(false)
+    expect(cursor.nextPosition).toBe(COMMITS)
+  })
+})
+
 describe('logArgs', () => {
   it('ref 는 옵션으로 해석되지 않게 --end-of-options 뒤에 둔다', () => {
     const args = logArgs('--output=/tmp/x', 0)

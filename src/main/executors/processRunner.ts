@@ -18,8 +18,18 @@ function launch(spec: SpawnSpec, opts: RunOpts): ChildProcess {
   })
 }
 
+/**
+ * 프로세스 트리를 종료한다. Windows 에서 PATH 의 git 이 Git for Windows 래퍼(cmd\git.exe)면
+ * 실제 git.exe 는 손자 프로세스라 child.kill() 로는 남으므로 taskkill /T 를 쓴다.
+ */
 function killTree(child: ChildProcess): void {
-  if (child.exitCode === null && !child.killed) child.kill()
+  if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) return
+  if (process.platform === 'win32') {
+    const tk = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+    tk.on('error', () => child.kill())
+  } else {
+    child.kill()
+  }
 }
 
 export function runProcess(spec: SpawnSpec, opts: RunOpts = {}): Promise<RunResult> {

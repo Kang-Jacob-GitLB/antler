@@ -2,7 +2,7 @@ import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electro
 import type { IpcArgs, IpcChannel, IpcEnvelope, IpcResult } from '@shared/ipc'
 import { AbortError, GitError } from '../executors/GitExecutor'
 import type { ConfigStore } from '../services/ConfigStore'
-import type { RepoService } from '../services/RepoService'
+import { StaleLogError, type RepoService } from '../services/RepoService'
 
 type Handler<C extends IpcChannel> = (e: IpcMainInvokeEvent, ...args: IpcArgs<C>) => Promise<IpcResult<C>> | IpcResult<C>
 
@@ -12,7 +12,14 @@ function handle<C extends IpcChannel>(channel: C, fn: Handler<C>): void {
     try {
       return { ok: true, data: await fn(e, ...(args as IpcArgs<C>)) }
     } catch (err) {
-      const code = err instanceof AbortError ? 'ABORTED' : err instanceof GitError ? 'GIT' : 'ERROR'
+      const code =
+        err instanceof AbortError
+          ? 'ABORTED'
+          : err instanceof StaleLogError
+            ? 'STALE'
+            : err instanceof GitError
+              ? 'GIT'
+              : 'ERROR'
       return { ok: false, error: err instanceof Error ? err.message : String(err), code }
     }
   })

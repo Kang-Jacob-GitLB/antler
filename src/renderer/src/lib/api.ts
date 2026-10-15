@@ -12,6 +12,11 @@ export function isAbort(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('[ABORTED]')
 }
 
+/** 페이지를 넘기는 사이 커밋 이력이 바뀌어 처음부터 다시 읽어야 하는 경우 */
+export function isStale(err: unknown): boolean {
+  return err instanceof Error && err.message.startsWith('[STALE]')
+}
+
 export function errorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
   return msg.replace(/^\[[A-Z]+\]\s*/, '')
