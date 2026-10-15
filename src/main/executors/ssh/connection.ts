@@ -57,6 +57,15 @@ export function killChannel(ch: ClientChannel): void {
 }
 
 const DEFAULT_KEY_NAMES = ['id_ed25519', 'id_ecdsa', 'id_rsa']
+
+/**
+ * 원격 로그인 셸 확인용 고정 명령. 원격 명령은 POSIX 작은따옴표로 인용하는데, 로그인 셸이 cmd.exe·PowerShell 이면
+ * 작은따옴표가 인용이 아니라서 경로 안의 & | 등이 명령으로 해석될 수 있다. 사용자 값이 든 명령을 보내기 전에
+ * 연결마다 한 번 확인한다: sh/bash/zsh/fish 는 인접한 두 따옴표 문자열을 이어 "antler" 를 출력하고,
+ * cmd 는 따옴표를 그대로, PowerShell 은 an'tler 를 출력한다.
+ */
+export const SHELL_PROBE = "echo 'an''tler'"
+export const SHELL_PROBE_EXPECT = 'antler'
 const WIN_AGENT_PIPE = '\\\\.\\pipe\\openssh-ssh-agent'
 
 /** IdentitiesOnly 용: 허용된 공개키 blob 과 일치하는 agent 키만 노출한다. */
@@ -233,6 +242,13 @@ export class SshConnection {
     const target = resolveHost(config, this.opts.hostSpec)
     const hops = target.proxyJump.map((h) => resolveHost(config, h.spec))
     const nodes = [...hops, target]
+    for (const n of nodes) {
+      if (n.unsupported) {
+        throw new SshConnectError(
+          `${n.alias}: 지원하지 않는 ssh 설정(${n.unsupported})이 걸려 있어 접속하지 않습니다 — ProxyJump 로 바꾸거나 해당 블록을 정리하세요`
+        )
+      }
+    }
     const clients: Client[] = []
     try {
       let sock: Duplex | undefined
@@ -253,6 +269,12 @@ export class SshConnection {
       throw new SshConnectError('SSH 연결이 이미 종료되었습니다')
     }
     const last = clients[clients.length - 1]!
+    try {
+      await checkPosixShell(last)
+    } catch (e) {
+      for (const c of clients) c.destroy()
+      throw e
+    }
     this.chain = clients
     this.ready = last
     for (const c of clients) {
@@ -419,4 +441,32 @@ export class SshConnection {
   private wrapExecError(err: Error): Error {
     return new SshConnectError(`원격 명령을 시작하지 못했습니다: ${err.message}`)
   }
+}
+
+/** 원격 로그인 셸이 POSIX 계열인지 확인한다(SHELL_PROBE 참고). 아니면 사용자 값이 든 명령을 보내지 않는다 */
+function checkPosixShell(client: Client): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new SshConnectError('원격 셸 확인이 시간 안에 끝나지 않았습니다')), 10_000)
+    client.exec(SHELL_PROBE, (err, ch) => {
+      if (err) {
+        clearTimeout(timer)
+        return reject(new SshConnectError(`원격 셸을 확인하지 못했습니다: ${err.message}`))
+      }
+      let out = ''
+      ch.on('data', (d: Buffer) => {
+        if (out.length < 256) out += d.toString('utf8')
+      })
+      ch.stderr.on('data', () => {})
+      ch.on('close', () => {
+        clearTimeout(timer)
+        if (out.trim() === SHELL_PROBE_EXPECT) resolve()
+        else
+          reject(
+            new SshConnectError(
+              '원격 로그인 셸이 POSIX 셸이 아닙니다(sh·bash·zsh·fish 만 지원합니다). Windows OpenSSH 서버라면 기본 셸을 바꿔야 합니다.'
+            )
+          )
+      })
+    })
+  })
 }

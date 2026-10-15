@@ -6,6 +6,7 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Server, utils, type ParsedKey } from 'ssh2'
+import { SHELL_PROBE, SHELL_PROBE_EXPECT } from '../src/main/executors/ssh/connection'
 
 /** POSIX 셸 인용 해제(작은따옴표·큰따옴표·백슬래시). 원격 셸이 하는 일을 흉내 내 argv 를 복원한다. */
 export function unquote(cmd: string): string[] {
@@ -80,7 +81,11 @@ export interface TestServer {
   close: () => Promise<void>
 }
 
-export async function startServer(opts: { authorized: KeyPair[]; hostKey?: KeyPair }): Promise<TestServer> {
+/**
+ * shell: 원격 로그인 셸 흉내. 'posix' 면 셸 확인 명령에 POSIX 처럼 답하고, 'cmd' 면 Windows cmd 처럼
+ * 작은따옴표를 문자 그대로 돌려준다(SshConnection 의 셸 확인이 거부해야 한다).
+ */
+export async function startServer(opts: { authorized: KeyPair[]; hostKey?: KeyPair; shell?: 'posix' | 'cmd' }): Promise<TestServer> {
   const hostKey = opts.hostKey ?? newKeyPair()
   let connections = 0
   let active = 0
@@ -106,6 +111,12 @@ export async function startServer(opts: { authorized: KeyPair[]; hostKey?: KeyPa
         const session = accept()
         session.on('exec', (acceptExec, _reject, info) => {
           const stream = acceptExec()
+          if (info.command === SHELL_PROBE) {
+            stream.write(opts.shell === 'cmd' ? "'an''tler'\r\n" : `${SHELL_PROBE_EXPECT}\n`)
+            stream.exit(0)
+            stream.end()
+            return
+          }
           const argv = unquote(info.command)
           const env: Record<string, string> = {}
           let i = 1 // argv[0] === 'env'

@@ -27,6 +27,8 @@ interface ConfigBlock {
   patterns: string[] | null
   /** 적용 불가 Match 블록 */
   skipped: boolean
+  /** skipped Match 블록의 조건(소문자 키워드·값 쌍) — 대상 호스트에 해당할 수 있는지 판단용 */
+  matchArgs?: string[]
   options: ConfigOption[]
 }
 
@@ -54,6 +56,8 @@ export interface ResolvedHost {
   identitiesOnly: boolean
   /** undefined: 기본(SSH_AUTH_SOCK 등) · null: 사용 안 함 · string: 소켓/파이프 경로 */
   identityAgent: string | null | undefined
+  /** 지원하지 않아 무시할 수 없는 설정이 있으면 그 설명(ProxyCommand, 이 호스트에 해당할 수 있는 Match 블록) */
+  unsupported?: string
 }
 
 const MAX_INCLUDE_DEPTH = 16
@@ -144,7 +148,7 @@ function parseInto(text: string, cfg: SshConfig, state: ParseState, depth: numbe
       cfg.blocks.push(state.cur)
     } else if (key === 'match') {
       const all = args.length === 1 && args[0]!.toLowerCase() === 'all'
-      state.cur = { patterns: null, skipped: !all, options: [] }
+      state.cur = { patterns: null, skipped: !all, options: [], ...(all ? {} : { matchArgs: args }) }
       cfg.blocks.push(state.cur)
     } else if (key === 'include') {
       if (depth >= MAX_INCLUDE_DEPTH) continue
@@ -185,6 +189,30 @@ export function loadSshConfig(configPath: string, opts: ParseOptions = {}): SshC
     // 설정 파일이 없어도 user@host 직접 입력은 동작해야 한다
   }
   return parseSshConfig(text, opts)
+}
+
+function hostNameFor(first: Map<string, string[]>, alias: string): string {
+  const raw = first.get('hostname')?.[0]
+  return raw ? expandTokens(raw, { h: alias }) : alias
+}
+
+/**
+ * 해석하지 않은 Match 블록이 이 호스트에 걸릴 수 있는지 보수적으로 판단한다.
+ * host/originalhost 조건이 있고 그 패턴이 별칭·HostName 어느 쪽과도 맞지 않으면 무관하다고 본다.
+ * 그 밖의 조건(exec, user, localuser, canonical …)만 있으면 판단할 수 없으므로 걸릴 수 있다고 본다.
+ */
+function matchMayApply(args: string[], names: string[]): boolean {
+  for (let i = 0; i + 1 < args.length; i += 2) {
+    const crit = args[i]!.toLowerCase().replace(/^!/, '')
+    if (crit !== 'host' && crit !== 'originalhost') continue
+    const negated = args[i]!.startsWith('!')
+    const patterns = args[i + 1]!.split(',')
+    const hit = names.some((n) =>
+      patterns.some((p) => (p.startsWith('!') ? false : globToRegExp(p).test(n)))
+    )
+    if (negated ? hit : !hit) return false
+  }
+  return true
 }
 
 function blockApplies(block: ConfigBlock, host: string): boolean {
@@ -276,6 +304,17 @@ export function resolveHost(config: SshConfig, spec: string, opts: { localUser?:
     .filter((f) => f.toLowerCase() !== 'none')
     .map((f) => normalize(expandTilde(expandTokens(f, tokens), config.homeDir)))
 
+  // 조용히 무시하면 위험한 설정: ProxyCommand 를 무시하면 bastion 을 건너뛰고 내부 이름으로 직접 접속하고,
+  // 이 호스트에 걸릴 수 있는 Match 블록(IdentitiesOnly·User 등)을 무시하면 의도와 다른 신원으로 접속한다
+  const problems: string[] = []
+  const pc = first.get('proxycommand')?.[0]
+  if (pc && pc.toLowerCase() !== 'none') problems.push('ProxyCommand')
+  for (const block of config.blocks) {
+    if (block.skipped && block.options.length && matchMayApply(block.matchArgs ?? [], [alias, hostNameFor(first, alias)])) {
+      problems.push(`Match ${(block.matchArgs ?? []).join(' ')}`)
+    }
+  }
+
   const pj = first.get('proxyjump')
   const agentRaw = first.get('identityagent')?.[0]
   let identityAgent: string | null | undefined
@@ -293,7 +332,8 @@ export function resolveHost(config: SshConfig, spec: string, opts: { localUser?:
     identityFiles: files,
     proxyJump: pj ? parseProxyJump(pj.join(' ')) : [],
     identitiesOnly: first.get('identitiesonly')?.[0]?.toLowerCase() === 'yes',
-    identityAgent
+    identityAgent,
+    ...(problems.length ? { unsupported: problems.join(', ') } : {})
   }
 }
 

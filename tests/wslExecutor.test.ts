@@ -150,13 +150,14 @@ describe.skipIf(process.platform !== 'win32')('WslExecutor (integration)', () =>
   })
 
   t('취소하면 리눅스 git 프로세스도 종료된다', async () => {
-    // 출력 없이 오래 블록하는 명령: ext 원격이 sleep 을 실행한다(SIGPIPE 로 우연히 죽는 경우를 배제).
+    // 출력 없이 오래 블록하는 명령: git 셸 alias 가 sleep 을 실행한다(SIGPIPE 로 우연히 죽는 경우를 배제).
+    // (전송 프로토콜은 GIT_ALLOW_PROTOCOL=none 으로 막혀 있어 ext:: 원격은 쓸 수 없다)
     const id = String(100000 + Math.floor(Math.random() * 899999))
     const marker = `sleep ${id}`
     // pgrep -f 가 검사용 sh -c 자신의 명령줄에 걸리지 않도록 첫 글자를 대괄호로 감싼다
     const pat = `sleep [${id[0]}]${id.slice(1)}`
     const ac = new AbortController()
-    const p = exec().run(dir, ['-c', 'protocol.ext.allow=always', 'ls-remote', `ext::${marker}`], { signal: ac.signal })
+    const p = exec().run(dir, ['-c', `alias.antlersleep=!${marker}`, 'antlersleep'], { signal: ac.signal })
     p.catch(() => {})
     // 리눅스 쪽에서 sleep 이 실제로 뜰 때까지 기다린다
     let alive = false

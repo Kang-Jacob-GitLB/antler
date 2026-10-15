@@ -1,4 +1,5 @@
-import { watch, type FSWatcher } from 'node:fs'
+import { existsSync, watch, type FSWatcher } from 'node:fs'
+import { join } from 'node:path'
 import type { RepoService } from './RepoService'
 
 /** 원격 환경 폴링 주기(ms). 창이 포커스를 잃으면 FOCUS_SLOWDOWN 배로 늦춘다 */
@@ -6,6 +7,8 @@ const POLL_MS = { wsl: 4_000, ssh: 30_000 } as const
 const FOCUS_SLOWDOWN = 4
 /** 로컬 .git 이벤트를 모아서 한 번만 확인하는 지연 */
 const DEBOUNCE_MS = 400
+/** 이벤트가 몰려도 시그니처 확인(git 실행) 사이에 두는 최소 간격 */
+const MIN_CHECK_INTERVAL_MS = 2_000
 /** 로컬에서도 watcher 가 놓친 변화(네트워크 드라이브 등)를 잡는 안전망 폴링 */
 const LOCAL_SAFETY_POLL_MS = 60_000
 
@@ -25,6 +28,8 @@ export class RepoWatcher {
   private lastSig: string | null = null
   private focused = true
   private checking = false
+  private lastCheck = 0
+  private pendingSince = 0
 
   constructor(
     private readonly repos: RepoService,
@@ -65,6 +70,9 @@ export class RepoWatcher {
     const dirs = await this.repos.localGitDirs(repoId).catch(() => null)
     if (!dirs || gen !== this.generation) return
     for (const dir of dirs) {
+      // .git 파일의 gitdir/commondir 은 저장소가 정한다 — 악성 저장소가 홈 전체나 네트워크 경로를 가리키면
+      // 재귀 감시가 이벤트 폭주(DoS)가 되므로, 실제 git 디렉터리(HEAD 가 있는 곳)이고 네트워크 경로가 아닐 때만 감시한다
+      if (/^[\\/]{2}/.test(dir) || !existsSync(join(dir, 'HEAD'))) continue
       try {
         const w = watch(dir, { recursive: true }, (_event, file) => {
           // 객체 파일은 fetch·gc 때 대량으로 바뀐다 — ref 가 함께 바뀌므로 그쪽 이벤트로 충분하다
@@ -80,9 +88,21 @@ export class RepoWatcher {
     }
   }
 
+  /** 이벤트가 쉬지 않고 와도 확인은 MIN_CHECK_INTERVAL_MS 에 한 번을 넘지 않는다(디바운스만으로는 계속 밀린다) */
   private kick(gen: number): void {
-    if (this.debounce) clearTimeout(this.debounce)
-    this.debounce = setTimeout(() => void this.check(gen), DEBOUNCE_MS)
+    const now = Date.now()
+    if (this.debounce) {
+      // 이미 오래 기다린 확인은 더 미루지 않는다 — 계속 미루면 이벤트가 끊이지 않는 동안 영영 확인하지 못한다
+      if (now - this.pendingSince > MIN_CHECK_INTERVAL_MS) return
+      clearTimeout(this.debounce)
+    } else {
+      this.pendingSince = now
+    }
+    const wait = Math.max(DEBOUNCE_MS, this.lastCheck + MIN_CHECK_INTERVAL_MS - now)
+    this.debounce = setTimeout(() => {
+      this.debounce = null
+      void this.check(gen)
+    }, wait)
   }
 
   private schedule(gen: number): void {
@@ -104,6 +124,7 @@ export class RepoWatcher {
     const repoId = this.repoId
     if (!repoId || gen !== this.generation || this.checking) return
     this.checking = true
+    this.lastCheck = Date.now()
     try {
       const sig = await this.repos.signature(repoId)
       if (gen !== this.generation) return

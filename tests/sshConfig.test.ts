@@ -179,3 +179,24 @@ Host bastion
     expect(list[2]!.proxyJump).toBeUndefined()
   })
 })
+
+describe('지원하지 않는 설정은 조용히 무시하지 않는다', () => {
+  const r = (t: string, h: string) => resolveHost(parse(t), h, { localUser: 'me' })
+
+  it('ProxyCommand 가 걸린 호스트는 unsupported', () => {
+    expect(r('Host inner\n  ProxyCommand ssh -W %h:%p bastion\n', 'inner').unsupported).toMatch(/ProxyCommand/)
+    expect(r('Host inner\n  ProxyCommand none\n', 'inner').unsupported).toBeUndefined()
+  })
+
+  it('이 호스트에 걸릴 수 있는 Match 블록만 unsupported', () => {
+    const cfg = 'Match host *.corp exec "true"\n  IdentitiesOnly yes\nMatch user root\n  User admin\n'
+    // *.corp 가 아닌 호스트: host 조건 블록은 무관, user 조건 블록은 판단할 수 없어 unsupported
+    expect(r(cfg, 'box.home').unsupported).toMatch(/Match user root/)
+    expect(r(cfg, 'box.home').unsupported).not.toMatch(/corp/)
+    expect(r(cfg, 'db.corp').unsupported).toMatch(/\*\.corp/)
+    // 다른 호스트만 겨냥한 Match 는 영향 없음
+    expect(r('Match host other\n  User x\n', 'mine').unsupported).toBeUndefined()
+    // 옵션 없는 Match 블록은 무관
+    expect(r('Match exec "true"\n', 'mine').unsupported).toBeUndefined()
+  })
+})

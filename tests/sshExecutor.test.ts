@@ -251,6 +251,20 @@ describe('SshExecutor 거부 경로', () => {
     await ex.dispose()
     await expect(ex.run(repo, ['rev-parse', 'HEAD'])).rejects.toThrow(/종료/)
   })
+
+  it('원격 로그인 셸이 POSIX 가 아니면(cmd 등) 사용자 값이 든 명령을 보내기 전에 거부한다', async () => {
+    const winbox = await startServer({ authorized: [clientKey], shell: 'cmd' })
+    try {
+      const e2 = makeHome(clientKey)
+      writeFileSync(e2.configPath, `Host test\n  HostName 127.0.0.1\n  Port ${winbox.port}\n  User t\n  IdentityFile ${e2.keyPath}\n`)
+      writeFileSync(e2.knownHostsPath, `${knownHostsLine(winbox.port, winbox.hostKey)}\n`)
+      const ex = executor('test', e2)
+      await expect(ex.run(repo, ['rev-parse', 'HEAD'])).rejects.toThrow(/POSIX 셸이 아닙니다/)
+      await ex.dispose()
+    } finally {
+      await winbox.close()
+    }
+  })
 })
 
 describe('ProxyJump', () => {
