@@ -122,6 +122,14 @@ export function registerIpc(config: ConfigStore, repos: RepoService, watcher: Re
     await checkEnvInput(e, input, false)
     return repos.testEnv(input)
   })
+  handle('env:listDir', async (e, input) => {
+    const i = input as { sshHost?: unknown; path?: unknown } | null
+    const path = i && typeof i.path === 'string' ? i.path : ''
+    if (path.length > MAX_PATH_LEN || path.includes('\0')) throw new Error('잘못된 경로입니다')
+    // 호스트 검증은 연결 테스트와 같다(설정에 없는 호스트면 사용자 확인)
+    await checkEnvInput(e, { kind: 'ssh', sshHost: i?.sshHost }, false)
+    return repos.listRemoteDir(String(i?.sshHost).trim(), path)
+  })
 
   handle('git:refs', (_e, repoId) => repos.refs(repoId))
   handle('git:log', (_e, repoId, query, requestId) => repos.log(repoId, query, requestId))

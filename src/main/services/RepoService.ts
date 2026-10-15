@@ -1,5 +1,6 @@
 import type {
   AddRepoInput,
+  RemoteDirListing,
   CommitDetail,
   FileDiff,
   FileDiffRequest,
@@ -155,6 +156,24 @@ export class RepoService {
       // 시간 초과는 "취소"가 아니라 응답이 없었던 것이다 — 그대로 보여 준다
       if (timeout.aborted && err instanceof AbortError) {
         throw new Error(`${ENV_TEST_TIMEOUT_MS / 1000}초 안에 응답이 없습니다(네트워크·방화벽·WSL 상태를 확인하세요)`)
+      }
+      throw err
+    } finally {
+      this.dropRuntime(source.id)
+    }
+  }
+
+  /** SSH 원격 폴더 목록(저장소 추가 창의 폴더 탐색). 연결 테스트처럼 저장 전 환경의 런타임을 잠시 쓴다 */
+  async listRemoteDir(sshHost: string, path: string): Promise<RemoteDirListing> {
+    const source = sourceFor('ssh', sshHost)
+    const rt = this.holdRuntime(source)
+    const timeout = AbortSignal.timeout(ENV_TEST_TIMEOUT_MS)
+    try {
+      if (!(rt.exec instanceof SshExecutor)) throw new Error('SSH 환경이 아닙니다')
+      return await rt.exec.listDirs(path, timeout)
+    } catch (err) {
+      if (timeout.aborted && err instanceof AbortError) {
+        throw new Error(`${ENV_TEST_TIMEOUT_MS / 1000}초 안에 응답이 없습니다(네트워크·방화벽 상태를 확인하세요)`)
       }
       throw err
     } finally {
