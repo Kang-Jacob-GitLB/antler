@@ -16,6 +16,7 @@ import type {
   GhUser
 } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { resetAvatarSession } from './avatarStore'
 import { useDetailStore } from './detailStore'
 
 /** 중앙에 띄우는 GitHub 화면 */
@@ -61,6 +62,8 @@ interface GithubState {
   device: GhDeviceCode | null
   devicePending: string | null
   authError: string | null
+  /** 툴바의 GitHub 로그인 팝오버가 열려 있는지(다른 화면의 안내 버튼도 열 수 있게 스토어에 둔다) */
+  authPopoverOpen: boolean
   view: GhView | null
   pulls: ListState<GhPullSummary>
   issues: ListState<GhIssueSummary>
@@ -77,6 +80,9 @@ interface GithubState {
   reload(): void
   refreshAuth(): Promise<void>
   loginPat(token: string): Promise<void>
+  /** GitHub CLI(gh)에 로그인된 계정으로 로그인 */
+  importCli(): Promise<void>
+  setAuthPopoverOpen(open: boolean): void
   startDevice(): Promise<void>
   cancelDevice(): void
   logout(): Promise<void>
@@ -90,6 +96,10 @@ interface GithubState {
 let gen = 0
 /** 목록별 요청 순번 — 같은 목록에 겹친 요청(더 보기 중 필터 변경 등) 중 마지막 것만 반영한다 */
 const listSeq: Record<ListKey, number> = { pulls: 0, issues: 0, sidePulls: 0, sideIssues: 0 }
+/** 비로그인에서 404(비공개 저장소)였던 저장소 — 로그인/로그아웃 전까지 사이드바 목록을 자동으로 다시 묻지 않는다(비로그인 한도는 시간당 60회) */
+const anonNotFound = new Map<string, string>()
+/** main 의 GH_NOT_FOUND 메시지에 들어 있는 문구(에러 코드는 IPC 를 건너오지 않는다) */
+const NOT_FOUND_HINT = '로그인 필요'
 
 export const useGithubStore = create<GithubState>((set, get) => {
   const current = (g: number, repoId: string | null): boolean => g === gen && get().repoId === repoId
@@ -117,7 +127,9 @@ export const useGithubStore = create<GithubState>((set, get) => {
     } catch (err) {
       if (!current(g, repoId) || seq !== listSeq[key]) return
       // 실패해도 페이지 번호는 그대로 — 다시 '더 보기'를 누르면 같은 페이지를 다시 요청한다
-      set({ [key]: { ...(get()[key] as ListState<unknown>), loading: false, error: errorMessage(err) } } as Partial<GithubState>)
+      const msg = errorMessage(err)
+      if (!get().auth.signedIn && msg.includes(NOT_FOUND_HINT)) anonNotFound.set(repoId, msg)
+      set({ [key]: { ...(get()[key] as ListState<unknown>), loading: false, error: msg } } as Partial<GithubState>)
     }
   }
 
@@ -179,6 +191,12 @@ export const useGithubStore = create<GithubState>((set, get) => {
 
   /** 사이드바 목록(열린 항목) 두 개를 받는다 */
   const loadSide = (): void => {
+    const known = anonNotFound.get(get().repoId ?? '')
+    if (known !== undefined) {
+      // 다시 묻지 않고, 전에 받은 이유(로그인 필요)를 그대로 보여 준다
+      set({ sidePulls: { ...emptyList(), error: known }, sideIssues: { ...emptyList(), error: known } })
+      return
+    }
     void fetchList('sidePulls', { state: 'open' }, false)
     void fetchList('sideIssues', { state: 'open' }, false)
   }
@@ -190,6 +208,7 @@ export const useGithubStore = create<GithubState>((set, get) => {
     device: null,
     devicePending: null,
     authError: null,
+    authPopoverOpen: false,
     view: null,
     pulls: emptyList(),
     issues: emptyList(),
@@ -228,6 +247,7 @@ export const useGithubStore = create<GithubState>((set, get) => {
 
     reload() {
       const { repoId, ref, view } = get()
+      anonNotFound.clear()
       if (!repoId) return
       ++gen
       // 비공개 저장소는 로그인 뒤에야 보이므로 GitHub 저장소 여부부터 다시 본다
@@ -252,12 +272,30 @@ export const useGithubStore = create<GithubState>((set, get) => {
       try {
         const auth = await api.invoke('gh:loginPat', token)
         set({ auth })
+        resetAvatarSession()
         // 로그인하면 비공개 저장소·리뷰/CI 보강이 가능해지므로 보던 화면 그대로 다시 받는다
         get().reload()
       } catch (err) {
         set({ authError: errorMessage(err) })
         throw err
       }
+    },
+
+    async importCli() {
+      set({ authError: null })
+      try {
+        const auth = await api.invoke('gh:importCliToken')
+        set({ auth })
+        resetAvatarSession()
+        get().reload()
+      } catch (err) {
+        set({ authError: errorMessage(err) })
+        throw err
+      }
+    },
+
+    setAuthPopoverOpen(open) {
+      set({ authPopoverOpen: open })
     },
 
     async startDevice() {
@@ -273,6 +311,7 @@ export const useGithubStore = create<GithubState>((set, get) => {
         const auth = await api.invoke('gh:devicePoll', requestId)
         if (get().devicePending !== requestId) return
         set({ auth, device: null, devicePending: null })
+        resetAvatarSession()
         get().reload()
       } catch (err) {
         if (get().devicePending !== requestId) return
@@ -288,6 +327,7 @@ export const useGithubStore = create<GithubState>((set, get) => {
 
     async logout() {
       set({ auth: await api.invoke('gh:logout') })
+      resetAvatarSession()
       get().reload()
     },
 

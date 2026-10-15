@@ -28,6 +28,15 @@ const PER_CALL_CAP = 60
 const UNKNOWN_SHA_RETRY_MS = 10 * 60_000
 const NETWORK_RETRY_MS = 60_000
 const SAVE_DELAY_MS = 2000
+/** 비로그인에서 성공 없이 404 가 이만큼 쌓이면 비공개 저장소로 본다 */
+const ANON_NOT_FOUND_LIMIT = 3
+
+export interface AvatarBlock {
+  reason: 'rate-limited' | 'needs-login' | 'session-cap'
+  /** epoch seconds (rate-limited) */
+  resetAt?: number
+  signedIn: boolean
+}
 
 const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/
 
@@ -56,6 +65,10 @@ export class AvatarResolver {
   private active = 0
   private readonly waiting: (() => void)[] = []
   private pausedUntil = 0
+  /** pausedUntil 이 호출 한도 소진 때문인지(그렇다면 안내에 풀리는 시각을 보인다) */
+  private pausedByRate = false
+  /** 비로그인 조회 결과를 저장소별로 센다: 404 만 쌓이고 성공이 없으면 비공개 저장소다(메모리에만 — 디스크 캐시에 부정 결과로 남기지 않는다) */
+  private readonly anonProbe = new Map<string, { notFound: number; ok: number; checking: boolean; private: boolean }>()
   /** 이번 실행에서 보낸 API 호출 수(테스트·진단용) */
   calls = 0
 
@@ -88,7 +101,7 @@ export class AvatarResolver {
         out[a.email] = hit.v
         continue
       }
-      if (!slug || (this.retryAt.get(key) ?? 0) > now) continue
+      if (!slug || (this.retryAt.get(key) ?? 0) > now || this.needsLogin(slug)) continue
       const pending = this.inflight.get(key)
       if (pending) waits.push(pending)
       else if (todo.length < PER_CALL_CAP) {
@@ -126,6 +139,37 @@ export class AvatarResolver {
     }
   }
 
+  /** 비로그인인데 이 저장소의 조회가 계속 404 — 비공개 저장소로 보고 로그인 전까지 더 묻지 않는다(404 도 한도를 쓴다) */
+  private needsLogin(slug: { owner: string; repo: string }): boolean {
+    if (this.client.hasToken()) return false
+    const p = this.anonProbe.get(`${slug.owner}/${slug.repo}`.toLowerCase())
+    return !!p && p.private
+  }
+
+  /**
+   * 사진 조회가 막혀 있는 이유(막혀 있지 않으면 null). 화면이 안내를 띄우는 데 쓴다.
+   * 한도 소진 → 비공개 저장소(로그인 필요) → 이번 실행의 조회 상한 순으로 본다.
+   */
+  blockedFor(slug: { owner: string; repo: string } | null): AvatarBlock | null {
+    const now = this.now()
+    const signedIn = this.client.hasToken()
+    if (now < this.pausedUntil && this.pausedByRate) return { reason: 'rate-limited', resetAt: Math.ceil(this.pausedUntil / 1000), signedIn }
+    const rate = this.client.rate
+    if (rate && rate.remaining < MIN_REMAINING && now < rate.reset * 1000) return { reason: 'rate-limited', resetAt: rate.reset, signedIn }
+    if (slug && this.needsLogin(slug)) return { reason: 'needs-login', signedIn }
+    if (this.calls >= (signedIn ? SESSION_CAP_AUTH : SESSION_CAP_ANON)) return { reason: 'session-cap', signedIn }
+    return null
+  }
+
+  /** 로그인·로그아웃으로 조건이 달라졌을 때: 메모리의 "나중에/로그인 필요/한도" 표시와 세션 호출 수를 비운다. 확인된 결과(entries)는 남긴다 */
+  resetSession(): void {
+    this.retryAt.clear()
+    this.anonProbe.clear()
+    this.pausedUntil = 0
+    this.pausedByRate = false
+    this.calls = 0
+  }
+
   /** 호출해도 되는 상태인지: 한도 여유·일시 중지·세션 상한 */
   private canCall(): boolean {
     const now = this.now()
@@ -133,6 +177,7 @@ export class AvatarResolver {
     const rate = this.client.rate
     if (rate && rate.remaining < MIN_REMAINING && now < rate.reset * 1000) {
       this.pausedUntil = rate.reset * 1000
+      this.pausedByRate = true
       return false
     }
     return this.calls < (this.client.hasToken() ? SESSION_CAP_AUTH : SESSION_CAP_ANON)
@@ -150,6 +195,12 @@ export class AvatarResolver {
    * GET /commits/{sha} 는 변경 파일 목록까지 실어 응답이 커질 수 있어 이쪽을 쓴다.
    */
   private async lookup(base: string, sha: string, key: string, signal: AbortSignal): Promise<void> {
+    // 같은 묶음에서 먼저 간 조회들이 이 저장소를 비공개로 판정했다면, 이미 대기열에 들어온 나머지도 보내지 않는다
+    const sk = AvatarResolver.slugKeyOfBase(base)
+    if (sk && !this.client.hasToken() && this.anonProbe.get(sk)?.private) {
+      this.retryAt.set(key, this.now() + UNKNOWN_SHA_RETRY_MS)
+      return
+    }
     this.calls++
     try {
       const { data } = await this.client.get<CommitListItem[]>(base, { query: { sha, per_page: 1 }, signal })
@@ -158,6 +209,7 @@ export class AvatarResolver {
         this.retryAt.set(key, this.now() + NETWORK_RETRY_MS)
         return
       }
+      void this.probe(base, 'ok', signal)
       const a = c.author
       if (!a) return this.store(key, null)
       const login = typeof a.login === 'string' && LOGIN_RE.test(a.login) ? a.login : null
@@ -170,17 +222,48 @@ export class AvatarResolver {
         if (err.code === 'GH_RATE_LIMIT') {
           const reset = this.client.rate?.reset
           this.pausedUntil = Math.max(this.now() + NETWORK_RETRY_MS, reset ? reset * 1000 : 0)
+          this.pausedByRate = true
         } else if (err.code === 'GH_AUTH') {
           this.pausedUntil = this.now() + NETWORK_RETRY_MS
+          this.pausedByRate = false
         } else if (err.code === 'GH_NOT_FOUND' || err.status === 422 || err.status === 409) {
           // 아직 push 하지 않은 커밋 등 — 다른 커밋으로 다시 시도할 수 있도록 기록은 남기지 않는다
           this.retryAt.set(key, this.now() + UNKNOWN_SHA_RETRY_MS)
+          if (err.code === 'GH_NOT_FOUND') await this.probe(base, 'notFound', signal)
         } else {
           this.retryAt.set(key, this.now() + NETWORK_RETRY_MS)
         }
         return
       }
       this.retryAt.set(key, this.now() + NETWORK_RETRY_MS)
+    }
+  }
+
+  /** base(/repos/o/r/commits)로 저장소를 식별해 비로그인 조회 결과를 센다 */
+  /** base(/repos/o/r/commits) → 'o/r'(소문자) */
+  private static slugKeyOfBase(base: string): string | null {
+    const m = /^\/repos\/([^/]+)\/([^/]+)\/commits$/.exec(base)
+    return m ? `${decodeURIComponent(m[1]!)}/${decodeURIComponent(m[2]!)}`.toLowerCase() : null
+  }
+
+  private async probe(base: string, kind: 'ok' | 'notFound', signal: AbortSignal): Promise<void> {
+    if (this.client.hasToken()) return
+    const k = AvatarResolver.slugKeyOfBase(base)
+    if (!k) return
+    const p = this.anonProbe.get(k) ?? { notFound: 0, ok: 0, checking: false, private: false }
+    this.anonProbe.set(k, p)
+    p[kind]++
+    // 404 만 쌓였다고 비공개로 단정하지 않는다(공개 저장소의 미푸시 커밋도 404). 저장소 자체를 한 번 확인해 404 면 비공개다
+    if (kind === 'notFound' && p.ok === 0 && p.notFound >= ANON_NOT_FOUND_LIMIT && !p.checking && !p.private) {
+      p.checking = true
+      this.calls++
+      try {
+        await this.client.get(base.slice(0, -'/commits'.length), { signal })
+        p.ok++
+      } catch (err) {
+        if (err instanceof GitHubApiError && err.code === 'GH_NOT_FOUND') p.private = true
+        else p.checking = false
+      }
     }
   }
 

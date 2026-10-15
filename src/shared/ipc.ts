@@ -64,6 +64,8 @@ export interface IpcContract {
   'gh:auth': { args: []; result: GhAuthState }
   /** PAT 로 로그인(검증 후 safeStorage 로 암호화 저장) */
   'gh:loginPat': { args: [token: string]; result: GhAuthState }
+  /** GitHub CLI(gh)에 로그인된 토큰을 가져와 로그인(토큰은 main 안에서만 쓰고 돌려주지 않는다) */
+  'gh:importCliToken': { args: []; result: GhAuthState }
   /** Device Flow 시작. 설정의 githubClientId 가 필요하다 */
   'gh:deviceStart': { args: []; result: GhDeviceCode }
   /** Device Flow 완료까지 폴링(사용자가 브라우저에서 승인). 취소는 req:cancel */
@@ -144,6 +146,7 @@ export const IPC_CHANNELS = [
   'gh:repo',
   'gh:auth',
   'gh:loginPat',
+  'gh:importCliToken',
   'gh:deviceStart',
   'gh:devicePoll',
   'gh:logout',

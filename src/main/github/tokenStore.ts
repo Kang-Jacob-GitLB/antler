@@ -13,7 +13,7 @@ export interface SafeStorageLike {
   getSelectedStorageBackend?(): string
 }
 
-export type TokenMethod = 'pat' | 'device'
+export type TokenMethod = 'pat' | 'device' | 'gh-cli'
 
 export interface StoredToken {
   token: string
@@ -88,7 +88,7 @@ export class TokenStore {
   private readMethod(): TokenMethod {
     try {
       const m = (JSON.parse(readFileSync(this.metaPath, 'utf8')) as { method?: unknown }).method
-      return m === 'device' ? 'device' : 'pat'
+      return m === 'device' || m === 'gh-cli' ? m : 'pat'
     } catch {
       return 'pat'
     }

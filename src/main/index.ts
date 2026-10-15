@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, safeStorage, session, shell } from 'electron'
 import { AVATAR_CACHE_FILE } from './github/avatars'
 import { GitHubService } from './github/service'
+import { createGhCli } from './github/ghCli'
 import { TokenStore } from './github/tokenStore'
 import { registerIpc } from './ipc/handlers'
 import { allowedExternalUrl } from './github/validate'
@@ -99,6 +100,7 @@ app.whenReady().then(() => {
     config,
     repos,
     store: new TokenStore(app.getPath('userData'), safeStorage),
+    cli: createGhCli(),
     avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE)
   })
   updates = new UpdateService({

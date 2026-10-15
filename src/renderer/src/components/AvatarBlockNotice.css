@@ -1,0 +1,46 @@
+/* 작성자 열 머리의 안내 점 — 눈에 띄지 않게 작은 점만 두고, 누르면 말풍선으로 설명한다 */
+.avatar-notice__dot {
+  flex-shrink: 0;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+.avatar-notice__dot::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.avatar-notice__dot:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.avatar-notice__pop {
+  position: fixed;
+  z-index: 46;
+  width: 292px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+}
+.avatar-notice__text {
+  line-height: 1.5;
+  color: var(--text-secondary);
+}

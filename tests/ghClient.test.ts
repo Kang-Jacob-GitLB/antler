@@ -44,7 +44,8 @@ describe('ETag 캐시', () => {
     const { fetch, calls } = fakeFetch((req) =>
       req.headers['if-none-match'] === '"v1"' ? new Response(null, { status: 304 }) : json([{ n: 1 }], { headers: { etag: '"v1"', link: '<https://api.github.com/x?page=2>; rel="next"' } })
     )
-    const c = new GitHubClient(fetch)
+    // 로그인 상태(비로그인은 3분 안의 같은 요청을 네트워크 없이 처리한다)
+    const c = new GitHubClient(fetch, () => 'tok')
     const a = await c.get<{ n: number }[]>('/x')
     const b = await c.get<{ n: number }[]>('/x')
     expect(calls[0]!.headers['if-none-match']).toBeUndefined()

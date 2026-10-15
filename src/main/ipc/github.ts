@@ -18,6 +18,7 @@ export function registerGithubIpc(handle: IpcHandle, gh: GitHubService, repos: R
   handle('gh:repo', (_e, repoId) => repos.ghRepo(parseId(repoId, '저장소 ID')))
   handle('gh:auth', () => gh.auth())
   handle('gh:loginPat', (_e, token) => gh.loginPat(parsePat(token)))
+  handle('gh:importCliToken', () => gh.importCliToken())
   handle('gh:deviceStart', () => gh.deviceStart())
   handle('gh:devicePoll', (_e, requestId) => gh.devicePoll(parseId(requestId, '요청 ID')))
   handle('gh:logout', () => gh.logout())
