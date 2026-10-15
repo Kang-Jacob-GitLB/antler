@@ -1,0 +1,104 @@
+.switcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: var(--backdrop);
+  animation: fade-in var(--dur-med) var(--ease);
+}
+
+.switcher {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+  animation: pop-in var(--dur-med) var(--ease);
+}
+
+.switcher__input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.switcher__icon {
+  color: var(--text-muted);
+}
+.switcher__input {
+  flex: 1;
+  height: 42px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: var(--fs-lg);
+}
+/* 입력 행 자체가 포커스 영역이라 별도 포커스 링을 그리지 않는다 */
+.switcher__input:focus-visible {
+  box-shadow: none;
+}
+.switcher__input::placeholder {
+  color: var(--text-muted);
+}
+
+.switcher__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1);
+  overflow-y: auto;
+}
+.switcher__none {
+  padding: var(--space-3);
+  color: var(--text-muted);
+}
+.switcher__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+}
+.switcher__item.is-active {
+  background: var(--row-selected);
+}
+.switcher__name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.switcher__path {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .switcher-backdrop,
+  .switcher {
+    animation: none;
+  }
+}

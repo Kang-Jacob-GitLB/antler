@@ -1,0 +1,35 @@
+.splitter {
+  position: relative;
+  width: 1px;
+  flex-shrink: 0;
+  background: var(--border);
+  cursor: col-resize;
+  z-index: 2;
+}
+/* 실제 잡는 영역은 좌우 4px 씩 넓힌다 */
+.splitter::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0 -1px;
+  background: var(--splitter-hover);
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease);
+}
+.splitter:hover::after,
+body.is-resizing .splitter:active::after {
+  opacity: 1;
+}
+body.is-resizing {
+  cursor: col-resize;
+}
+body.is-resizing * {
+  pointer-events: none;
+}
+body.is-resizing .splitter {
+  pointer-events: auto;
+}

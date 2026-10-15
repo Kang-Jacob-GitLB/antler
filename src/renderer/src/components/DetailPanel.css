@@ -1,0 +1,107 @@
+.detail {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+  background: var(--panel-bg);
+}
+
+.detail__empty {
+  margin: auto;
+  color: var(--text-muted);
+}
+
+.detail__scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.detail__sha-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 24px;
+}
+.detail__sha {
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.detail__copied {
+  font-size: var(--fs-xs);
+  color: var(--added-text);
+}
+
+.detail__subject {
+  margin: var(--space-2) 0 var(--space-4);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.detail__person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+}
+.avatar--lg {
+  width: 32px;
+  height: 32px;
+  font-size: var(--fs-sm);
+}
+.detail__person-text {
+  min-width: 0;
+}
+.detail__name {
+  font-weight: 600;
+}
+.detail__email {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.detail__meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px var(--space-3);
+  margin: var(--space-4) 0;
+  font-size: var(--fs-sm);
+}
+.detail__meta dt {
+  color: var(--text-muted);
+}
+.detail__meta dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.detail__parents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.detail__parent {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+}
+.detail__parent:hover {
+  background: var(--accent-soft);
+}
+
+.detail__soon {
+  padding: var(--space-3);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
