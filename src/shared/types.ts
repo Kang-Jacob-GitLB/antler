@@ -333,6 +333,19 @@ export interface AddRepoInput {
   group?: string
 }
 
+/** 원격 폴더 탐색 결과(SSH 저장소 추가 창). path 는 원격의 절대 경로 */
+export interface RemoteDirListing {
+  path: string
+  /** 루트(/)면 null */
+  parent: string | null
+  /** 이 폴더 자체가 git 작업 트리인가(.git 이 있음) */
+  isRepo: boolean
+  /** 숨김 폴더를 뺀 하위 폴더. isRepo 는 앞쪽 일부만 확인한다(undefined = 확인 안 함) */
+  dirs: { name: string; isRepo?: boolean }[]
+  /** 항목이 너무 많아 일부만 실었다 */
+  truncated: boolean
+}
+
 /** ~/.ssh/config 에서 읽은 접속 대상(비밀번호는 다루지 않는다 — 키/agent 인증만) */
 export interface SshHostInfo {
   alias: string

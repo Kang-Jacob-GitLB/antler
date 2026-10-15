@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { SshHostInfo } from '@shared/types'
+import type { RemoteDirListing, SshHostInfo } from '@shared/types'
 import {
   AbortError,
   DEFAULT_MAX_BUFFER,
@@ -13,6 +13,7 @@ import {
 import { listHosts, loadSshConfig } from './ssh/config'
 import { killChannel, SshConnection } from './ssh/connection'
 import { buildRemoteCommand } from './ssh/quote'
+import { listRemoteDirs } from './ssh/remoteDir'
 
 export interface SshExecutorOptions {
   /** 기본 ~/.ssh/config */
@@ -149,6 +150,11 @@ export class SshExecutor implements GitExecutor {
       killChannel(channel)
       release()
     }
+  }
+
+  /** 원격 폴더 목록(저장소 추가 창의 폴더 탐색용, SFTP) */
+  listDirs(path: string, signal?: AbortSignal): Promise<RemoteDirListing> {
+    return this.conn.withClient((client) => listRemoteDirs(client, path), signal)
   }
 
   dispose(): Promise<void> {

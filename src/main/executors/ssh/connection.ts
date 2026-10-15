@@ -175,6 +175,17 @@ export class SshConnection {
     }
   }
 
+  /** 채널 슬롯 하나를 잡고 연결된 클라이언트로 fn 을 실행한다(SFTP 등 exec 이 아닌 채널용) */
+  async withClient<T>(fn: (client: Client) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    await this.acquireSlot(signal)
+    try {
+      const client = await this.withAbort(this.connect(), signal)
+      return await this.withAbort(fn(client), signal)
+    } finally {
+      this.releaseSlot()
+    }
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     this.teardown()

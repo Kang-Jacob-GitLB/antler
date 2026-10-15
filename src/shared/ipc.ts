@@ -16,6 +16,7 @@ import type {
   GhPullSummary,
   GhRepoRef,
   GhUser,
+  RemoteDirListing,
   RepoPatch,
   SshHostInfo,
   CommitDetail,
@@ -47,6 +48,8 @@ export interface IpcContract {
   'env:sshHosts': { args: []; result: SshHostInfo[] }
   /** 연결 테스트: 그 환경에서 git 이 실행되는지 확인하고 git 버전 문자열을 돌려준다 */
   'env:test': { args: [input: Omit<AddRepoInput, 'path' | 'group'>]; result: string }
+  /** SSH 원격 폴더 목록(저장소 추가 창의 폴더 탐색). path 가 비었거나 '~' 면 홈 */
+  'env:listDir': { args: [input: { sshHost: string; path: string }]; result: RemoteDirListing }
 
   // ── GitHub (API 는 환경과 무관하게 main 에서 직접 호출, 토큰은 main 에만 있다) ──
   /** 저장소 remote 에서 GitHub owner/repo 추론. GitHub 저장소가 아니면 null */
@@ -107,6 +110,7 @@ export const IPC_CHANNELS = [
   'env:wslDistros',
   'env:sshHosts',
   'env:test',
+  'env:listDir',
   'gh:repo',
   'gh:auth',
   'gh:loginPat',

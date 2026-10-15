@@ -1,11 +1,11 @@
 // SSH 테스트 공용 도구. 실제 원격 호스트에는 절대 접속하지 않는다 — 모든 통합 테스트는 127.0.0.1 의
 // 프로세스 내 ssh2 Server 와 테스트가 만든 임시 키·config·known_hosts 만 쓴다.
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync, type Stats } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Server, utils, type ParsedKey } from 'ssh2'
+import { join, posix } from 'node:path'
+import { Server, utils, type Attributes, type ParsedKey, type SFTPWrapper } from 'ssh2'
 import { SHELL_PROBE, SHELL_PROBE_EXPECT } from '../src/main/executors/ssh/connection'
 
 /** POSIX 셸 인용 해제(작은따옴표·큰따옴표·백슬래시). 원격 셸이 하는 일을 흉내 내 argv 를 복원한다. */
@@ -85,7 +85,13 @@ export interface TestServer {
  * shell: 원격 로그인 셸 흉내. 'posix' 면 셸 확인 명령에 POSIX 처럼 답하고, 'cmd' 면 Windows cmd 처럼
  * 작은따옴표를 문자 그대로 돌려준다(SshConnection 의 셸 확인이 거부해야 한다).
  */
-export async function startServer(opts: { authorized: KeyPair[]; hostKey?: KeyPair; shell?: 'posix' | 'cmd' }): Promise<TestServer> {
+export async function startServer(opts: {
+  authorized: KeyPair[]
+  hostKey?: KeyPair
+  shell?: 'posix' | 'cmd'
+  /** SFTP 서브시스템을 켠다: 가상 '/' 를 이 로컬 폴더로, 홈은 /home/tester 로 둔다 */
+  sftpRoot?: string
+}): Promise<TestServer> {
   const hostKey = opts.hostKey ?? newKeyPair()
   let connections = 0
   let active = 0
@@ -109,6 +115,10 @@ export async function startServer(opts: { authorized: KeyPair[]; hostKey?: KeyPa
     client.on('ready', () => {
       client.on('session', (accept) => {
         const session = accept()
+        session.on('sftp', (acceptSftp, rejectSftp) => {
+          if (!opts.sftpRoot) return rejectSftp()
+          serveSftp(acceptSftp(), opts.sftpRoot)
+        })
         session.on('exec', (acceptExec, _reject, info) => {
           const stream = acceptExec()
           if (info.command === SHELL_PROBE) {
@@ -174,6 +184,57 @@ export async function startServer(opts: { authorized: KeyPair[]; hostKey?: KeyPa
         server.close(() => resolve())
       })
   }
+}
+
+/** 읽기 전용 최소 SFTP 서버(REALPATH·OPENDIR·READDIR·STAT·LSTAT·CLOSE). 가상 경로는 POSIX, 홈 = /home/tester */
+function serveSftp(sftp: SFTPWrapper, root: string): void {
+  const HOME = '/home/tester'
+  const real = (v: string): string => join(root, ...v.split('/').filter(Boolean))
+  const virt = (p: string): string => posix.resolve(HOME, p)
+  const attrsOf = (st: Stats): Attributes => ({
+    mode: (st.isDirectory() ? 0o040000 : 0o100000) | 0o755,
+    uid: 0,
+    gid: 0,
+    size: st.size,
+    atime: Math.floor(st.atimeMs / 1000),
+    mtime: Math.floor(st.mtimeMs / 1000)
+  })
+  const dirs = new Map<number, { path: string; sent: boolean }>()
+  let next = 1
+  sftp.on('REALPATH', (id, p) => {
+    const v = virt(p)
+    sftp.name(id, [{ filename: v, longname: v, attrs: {} as Attributes }])
+  })
+  const stat = (id: number, p: string): void => {
+    try {
+      sftp.attrs(id, attrsOf(statSync(real(virt(p)))))
+    } catch {
+      sftp.status(id, utils.sftp.STATUS_CODE.NO_SUCH_FILE)
+    }
+  }
+  sftp.on('STAT', stat)
+  sftp.on('LSTAT', stat)
+  sftp.on('OPENDIR', (id, p) => {
+    const v = virt(p)
+    if (!existsSync(real(v))) return sftp.status(id, utils.sftp.STATUS_CODE.NO_SUCH_FILE)
+    const h = next++
+    dirs.set(h, { path: v, sent: false })
+    const buf = Buffer.alloc(4)
+    buf.writeUInt32BE(h)
+    sftp.handle(id, buf)
+  })
+  sftp.on('READDIR', (id, handle) => {
+    const d = dirs.get(handle.readUInt32BE(0))
+    if (!d) return sftp.status(id, utils.sftp.STATUS_CODE.FAILURE)
+    if (d.sent) return sftp.status(id, utils.sftp.STATUS_CODE.EOF)
+    d.sent = true
+    const names = readdirSync(real(d.path)).map((n) => ({ filename: n, longname: n, attrs: attrsOf(statSync(join(real(d.path), n))) }))
+    sftp.name(id, names)
+  })
+  sftp.on('CLOSE', (id, handle) => {
+    dirs.delete(handle.readUInt32BE(0))
+    sftp.status(id, utils.sftp.STATUS_CODE.OK)
+  })
 }
 
 export interface SshEnv {

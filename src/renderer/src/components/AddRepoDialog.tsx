@@ -4,6 +4,7 @@ import { useT } from '../i18n'
 import { api, errorMessage } from '../lib/api'
 import { useAppStore } from '../stores/appStore'
 import { IconCheck, IconFolder, IconMonitor, IconServer, IconTerminal } from './icons'
+import { RemoteFolderPicker } from './RemoteFolderPicker'
 import './AddRepoDialog.css'
 
 const isWindows = window.antler.platform === 'win32'
@@ -25,6 +26,8 @@ export function AddRepoDialog(): React.JSX.Element | null {
   const [busy, setBusy] = useState<'add' | 'test' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tested, setTested] = useState<string | null>(null)
+  // SSH 원격 폴더 탐색 창
+  const [remoteBrowse, setRemoteBrowse] = useState(false)
 
   const groups = useMemo(
     () => [...new Set((config?.repos ?? []).map((r) => r.group).filter((g): g is string => !!g))].sort(),
@@ -43,6 +46,7 @@ export function AddRepoDialog(): React.JSX.Element | null {
     setError(null)
     setTested(null)
     setBusy(null)
+    setRemoteBrowse(false)
     if (isWindows) {
       void api.invoke('env:wslDistros').then((list) => {
         setDistros(list)
@@ -65,6 +69,10 @@ export function AddRepoDialog(): React.JSX.Element | null {
   const canSubmit = !!path.trim() && (kind !== 'wsl' || !!distro) && (kind !== 'ssh' || !!host.trim()) && !busy
 
   const browse = async (): Promise<void> => {
+    if (kind === 'ssh') {
+      if (host.trim()) setRemoteBrowse(true)
+      return
+    }
     // WSL 은 \\wsl.localhost\<배포판>\ 에서 시작한다 — 고른 경로는 main 이 WSL 경로로 바꿔 등록한다
     const start = kind === 'wsl' && distro ? `\\\\wsl.localhost\\${distro}\\home` : undefined
     const picked = await api.invoke('dialog:pickFolder', start)
@@ -124,6 +132,17 @@ export function AddRepoDialog(): React.JSX.Element | null {
           void submit()
         }}
       >
+        {remoteBrowse && (
+          <RemoteFolderPicker
+            host={host.trim()}
+            initialPath={path.trim()}
+            onClose={() => setRemoteBrowse(false)}
+            onPick={(p) => {
+              setPath(p)
+              setRemoteBrowse(false)
+            }}
+          />
+        )}
         <h2 id="add-title" className="add-dialog__title">
           {t('add.title')}
         </h2>
@@ -186,19 +205,30 @@ export function AddRepoDialog(): React.JSX.Element | null {
         <label className="field">
           <span className="field__label">{t('add.path')}</span>
           <div className="field__row">
-            <input
-              className="field__input mono"
-              value={path}
-              placeholder={kind === 'local' ? (isWindows ? 'C:\\work\\project' : '~/work/project') : '~/work/project'}
-              onChange={(e) => setPath(e.target.value)}
-              autoFocus={kind !== 'ssh'}
-            />
-            {kind !== 'ssh' && (
-              <button type="button" className="btn" onClick={() => void browse()}>
-                <IconFolder size={14} />
-                {t('add.browse')}
+            {kind === 'ssh' ? (
+              // SSH 는 SFTP 를 막은 서버도 있어 직접 입력을 남겨 둔다(찾아보기는 원격 폴더 탐색)
+              <input
+                className="field__input mono"
+                value={path}
+                placeholder="~/work/project"
+                onChange={(e) => setPath(e.target.value)}
+              />
+            ) : (
+              // 로컬·WSL 은 OS 폴더 선택 창으로 고른다 — 칸을 눌러도 열린다
+              <button
+                type="button"
+                className={`field__input field__picker mono${path ? '' : ' is-empty'}`}
+                title={path || t('add.pathPick')}
+                onClick={() => void browse()}
+                autoFocus
+              >
+                {path || t('add.pathPick')}
               </button>
             )}
+            <button type="button" className="btn" disabled={kind === 'ssh' && !host.trim()} onClick={() => void browse()}>
+              <IconFolder size={14} />
+              {t('add.browse')}
+            </button>
           </div>
           {kind !== 'local' && <span className="field__hint">{t('add.remotePathHint')}</span>}
         </label>

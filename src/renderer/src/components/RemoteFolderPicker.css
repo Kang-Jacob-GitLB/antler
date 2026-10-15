@@ -1,0 +1,92 @@
+/* SSH 원격 폴더 탐색 — 저장소 추가 창 위에 겹쳐 띄운다 */
+.rfp {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) calc(var(--space-4) + 4px);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+.rfp__title {
+  font-size: var(--fs-lg);
+  font-weight: 650;
+}
+.rfp__addr {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+.rfp__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px var(--border);
+  padding: 4px 0;
+  outline: none;
+}
+.rfp__list:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.rfp__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3);
+  color: var(--text-secondary);
+  cursor: default;
+  user-select: none;
+}
+.rfp__item:hover {
+  background: var(--row-hover);
+}
+.rfp__item.is-sel {
+  background: var(--row-selected);
+  color: var(--text-primary);
+}
+.rfp__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rfp__chev {
+  color: var(--text-muted);
+}
+.rfp__badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-family: var(--font-mono);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.rfp__msg {
+  padding: var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.rfp__msg.is-error {
+  color: var(--removed-text);
+}
+.rfp__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.rfp__pick {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
