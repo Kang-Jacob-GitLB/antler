@@ -143,7 +143,7 @@ input {
   color: var(--badge-ssh-fg);
 }
 
-/* 코드 폰트(Jetendard)의 합자를 끈다 — PR 본문 코드·경로도 diff 와 같은 글자로 보이게 */
+/* 코드 글꼴의 합자를 끈다 — PR 본문 코드·경로도 diff 와 같은 글자로 보이게 */
 code,
 pre,
 kbd,
