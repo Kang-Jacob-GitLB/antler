@@ -55,14 +55,13 @@ export class SshExecutor implements GitExecutor {
   async run(repoPath: string, args: string[], opts: RunOpts = {}): Promise<RunResult> {
     if (opts.signal?.aborted) throw new AbortError()
     const cmd = buildRemoteCommand(repoPath, args, { ...GIT_ENV, ...opts.env })
-    const { channel, release } = await this.conn.exec(cmd, opts.signal)
+    const { channel, exitCode, closed } = await this.conn.exec(cmd, opts.signal)
     const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER
     return new Promise<RunResult>((resolve, reject) => {
       const out: Buffer[] = []
       const err: Buffer[] = []
       let size = 0
       let errSize = 0
-      let code: number | null = null
       let settled = false
 
       const finish = (fn: () => void): void => {
@@ -91,17 +90,20 @@ export class SshExecutor implements GitExecutor {
         errSize += chunk.length
         if (errSize <= MAX_STDERR) err.push(chunk)
       })
-      channel.on('exit', (c: number | null) => {
-        code = c ?? -1 // 시그널로 죽은 경우
-      })
       channel.on('error', (e: Error) => finish(() => reject(e)))
-      channel.on('close', () => {
-        release()
+      // close 는 connection 이 콜백 안에서 잡아 둔다. 버퍼에 남은 stdout 을 다 읽은 뒤(end) 결과를 확정한다
+      const drained = new Promise<void>((done) => {
+        if (channel.readableEnded || channel.destroyed) return done()
+        channel.once('end', done)
+        channel.once('close', done)
+      })
+      void Promise.all([closed, drained]).then(() =>
         finish(() => {
+          const code = exitCode()
           if (code === null) reject(new Error(CONNECTION_LOST))
           else resolve({ stdout: Buffer.concat(out), stderr: Buffer.concat(err).toString('utf8'), code })
         })
-      })
+      )
     })
   }
 
@@ -112,24 +114,14 @@ export class SshExecutor implements GitExecutor {
   async *stream(repoPath: string, args: string[], opts: RunOpts = {}): AsyncIterable<Buffer> {
     if (opts.signal?.aborted) throw new AbortError()
     const cmd = buildRemoteCommand(repoPath, args, { ...GIT_ENV, ...opts.env })
-    const { channel, release } = await this.conn.exec(cmd, opts.signal)
+    const { channel, release, exitCode, closed } = await this.conn.exec(cmd, opts.signal)
 
     const err: Buffer[] = []
     let errSize = 0
-    let code: number | null = null
     channel.stderr.on('data', (chunk: Buffer) => {
       errSize += chunk.length
       if (errSize <= MAX_STDERR) err.push(chunk)
     })
-    channel.on('exit', (c: number | null) => {
-      code = c ?? -1
-    })
-    const closed = new Promise<void>((resolve) =>
-      channel.once('close', () => {
-        release()
-        resolve()
-      })
-    )
     const onAbort = (): void => killChannel(channel)
     opts.signal?.addEventListener('abort', onAbort, { once: true })
     try {
@@ -144,6 +136,7 @@ export class SshExecutor implements GitExecutor {
       }
       await closed
       if (opts.signal?.aborted) throw new AbortError()
+      const code = exitCode()
       if (code === null) throw new Error(CONNECTION_LOST)
       if (code !== 0) {
         const stderr = Buffer.concat(err).toString('utf8')

@@ -36,6 +36,10 @@ export interface ExecChannel {
   channel: ClientChannel
   /** 채널 슬롯 반환(여러 번 불러도 한 번만 반영) */
   release(): void
+  /** 원격 종료 코드. exit-status 를 받기 전엔 null, 시그널로 죽었으면 -1 */
+  exitCode(): number | null
+  /** 채널이 닫히면 이행된다(닫힐 때 슬롯도 반환된다) */
+  closed: Promise<void>
 }
 
 /**
@@ -141,15 +145,30 @@ export class SshConnection {
     }
     try {
       const client = await this.withAbort(this.connect(), signal)
+      // exit·close 리스너는 콜백 안에서 바로 붙인다. 원격이 빨리 끝나면 성공 응답·출력·exit-status·close 가
+      // 한 패킷 묶음으로 와서, ssh2 가 콜백 직후 같은 틱에 'exit' 을 내보낸다 — await 뒤에 붙이면 종료 코드를
+      // 놓쳐 "연결 끊김"으로 오판한다(출력은 스트림 버퍼에 남아 잃지 않는다).
+      let code: number | null = null
+      let markClosed!: () => void
+      const closed = new Promise<void>((resolve) => (markClosed = resolve))
       const channel = await new Promise<ClientChannel>((resolve, reject) => {
-        client.exec(command, (err, ch) => (err ? reject(this.wrapExecError(err)) : resolve(ch)))
+        client.exec(command, (err, ch) => {
+          if (err) return reject(this.wrapExecError(err))
+          ch.on('exit', (c: number | null) => {
+            code = c ?? -1
+          })
+          ch.once('close', () => {
+            release()
+            markClosed()
+          })
+          resolve(ch)
+        })
       })
       if (signal?.aborted) {
         killChannel(channel)
         throw new AbortError()
       }
-      channel.once('close', release)
-      return { channel, release }
+      return { channel, release, exitCode: () => code, closed }
     } catch (e) {
       release()
       throw e

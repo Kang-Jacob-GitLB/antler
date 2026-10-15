@@ -59,9 +59,13 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 
 | OS | 타깃 |
 |---|---|
-| Windows | NSIS 설치 프로그램(x64, arm64) + portable(x64) |
+| Windows | NSIS 설치 프로그램 + portable (x64) |
 | macOS | dmg(x64, arm64) — ad-hoc 서명(`identity: '-'`, hardened runtime 끔). 개발자 ID 서명·공증은 배포 계정 설정 후 추가 |
 | Linux | AppImage + deb |
+
+### 릴리스(CI)
+
+`package.json` 의 `version` 과 같은 semver 태그(`v0.1.0`, 프리릴리스는 `v0.2.0-rc.1`)를 annotated 태그로 push 하면 `.github/workflows/release.yml` 이 Windows·macOS·Ubuntu 러너에서 설치본을 빌드해 GitHub Release 에 첨부한다. 릴리스 노트는 태그 메시지에서 가져온다. PR 은 `build.yml`(타입 검사·테스트·빌드·대비 검사)을 통과해야 main 에 squash 머지된다.
 
 검증 상태:
 

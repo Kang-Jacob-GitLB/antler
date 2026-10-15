@@ -1,0 +1,146 @@
+name: release
+
+# semver 태그(v0.1.0, 프리릴리스 v0.2.0-rc.1)를 푸시하면 세 OS 설치본을 빌드해 GitHub Release 에 첨부한다.
+# 태그 버전은 package.json 의 version 과 같아야 한다(다르면 실패 — 버전은 PR 로 올린 뒤 태그한다).
+# 주의: tags 필터는 정규식이 아니라 glob 이다.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  # 수동 실행: 태그 없이 세 OS 설치본만 빌드해 아티팩트로 올린다(릴리스 전 패키징 점검용, 발행하지 않음)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── OS별 설치본 빌드 ─────────────────────────────────────────────────
+  # 각 러너에서 electron-builder 로 그 OS 설치본을 만들어 워크플로 아티팩트로 올린다.
+  # 실제 Release 발행은 아래 release 잡이 셋을 모아 한 번에 한다(같은 태그에 동시 발행하는 레이스 방지).
+  # 타깃은 electron-builder.yml 을 따른다:
+  #   Windows — NSIS 설치 프로그램 + portable (x64)
+  #   macOS   — dmg (arm64, x64 — arm64 러너에서 둘 다 빌드), ad-hoc 서명
+  #   Linux   — AppImage + deb (x64, Ubuntu)
+  build:
+    name: 빌드 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 한 OS 가 실패해도 나머지는 끝까지 돌려 원인 파악을 쉽게 한다(release 는 needs 라 발행되지 않는다)
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: win
+            eb_platform: "--win"
+            installer_glob: |
+              dist/*.exe
+          - os: macos-latest
+            asset: mac
+            eb_platform: "--mac"
+            installer_glob: |
+              dist/*.dmg
+          - os: ubuntu-latest
+            asset: linux
+            eb_platform: "--linux"
+            installer_glob: |
+              dist/*.AppImage
+              dist/*.deb
+
+    # Windows 도 Git Bash 로 고정해 셸 차이를 없앤다
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 태그·package.json 버전 확인
+        if: github.ref_type == 'tag'
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          echo "태그=$GITHUB_REF_NAME / package.json=$PKG_VERSION"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::태그 버전($TAG_VERSION)과 package.json 버전($PKG_VERSION)이 다릅니다"
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Node 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: 의존성 설치
+        run: pnpm install --frozen-lockfile
+
+      - name: 빌드 (electron-vite)
+        run: pnpm build
+
+      # --publish never: 태그 트리거 + 토큰이 있는 상태에서 electron-builder 가 스스로 Release 를 만들어
+      #   아래 release 잡과 충돌하는 것을 막는다.
+      # 코드 서명: Windows 는 인증서가 없어 미서명, macOS 는 electron-builder.yml 의 ad-hoc('-') 서명.
+      #   CSC_IDENTITY_AUTO_DISCOVERY=false 로 러너 키체인의 인증서를 집어 쓰지 않게 한다.
+      - name: 패키징 (electron-builder)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: pnpm exec electron-builder ${{ matrix.eb_platform }} --publish never
+
+      - name: 설치본 아티팩트 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.asset }}
+          path: ${{ matrix.installer_glob }}
+          if-no-files-found: error
+
+  # ── 릴리스 발행: 세 OS 설치본을 모아 한 번에 Release 생성·첨부 ──────────
+  release:
+    name: 릴리스 발행
+    needs: build # 세 OS 빌드가 모두 성공해야 발행(반쪽짜리 릴리스 방지)
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 설치본 아티팩트 다운로드
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+
+      - name: 첨부할 설치본 목록
+        run: ls -la installers
+
+      # 릴리스 노트: annotated 태그 메시지. 없으면 GitHub 자동 생성 노트로 대신한다
+      - name: 릴리스 노트 추출
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" || true
+          : > release_notes.md
+          if [ "$(git cat-file -t "$TAG" 2>/dev/null)" = "tag" ]; then
+            git tag -l --format='%(contents)' "$TAG" > release_notes.md
+          fi
+          if [ -s release_notes.md ]; then
+            echo "fallback=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "fallback=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 릴리스 생성 + 설치본 첨부 (Windows / macOS / Ubuntu)
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          generate_release_notes: ${{ steps.notes.outputs.fallback == 'true' }}
+          # 하이픈이 든 태그(v0.2.0-rc.1)는 프리릴리스로 표시
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            installers/*
