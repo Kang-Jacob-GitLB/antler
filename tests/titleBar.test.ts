@@ -1,6 +1,6 @@
 // 제목 표시줄 오버레이 색: 모달 dim 때 배경막(--backdrop)과 같은 비율로 섞인다.
 import { describe, expect, it } from 'vitest'
-import { titleBarOverlay } from '../src/main/titleBar'
+import { OVERLAY_HEIGHT, TOOLBAR_HEIGHT, titleBarOverlay } from '../src/main/titleBar'
 
 describe('titleBarOverlay', () => {
   it('평소에는 툴바 색 그대로', () => {
@@ -14,5 +14,11 @@ describe('titleBarOverlay', () => {
     // 0xEF*0.82+42*0.18 = 203.54 → cc
     expect(titleBarOverlay(false, true).color.slice(0, 3)).toBe('#cc')
     expect(titleBarOverlay(true, true).height).toBe(titleBarOverlay(true).height)
+  })
+
+  it('오버레이는 툴바보다 1px 낮아 아래 경계선이 창 컨트롤 밑까지 이어진다', () => {
+    expect(OVERLAY_HEIGHT).toBe(TOOLBAR_HEIGHT - 1)
+    expect(titleBarOverlay(true).height).toBe(OVERLAY_HEIGHT)
+    expect(titleBarOverlay(false, true).height).toBe(OVERLAY_HEIGHT)
   })
 })

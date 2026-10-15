@@ -20,6 +20,8 @@ export function MenuButton<V extends string>(props: {
   /** 버튼 안에 그릴 내용(현재 값을 나타내는 아이콘 등) */
   children: React.ReactNode
   className?: string
+  /** 메뉴가 열리는 방향. 화면 아래의 상태 표시줄에서는 'top'(위로) */
+  placement?: 'bottom' | 'top'
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -84,7 +86,7 @@ export function MenuButton<V extends string>(props: {
         {props.children}
       </button>
       {open && (
-        <div className="menu-btn__pop" role="menu" aria-label={props.label} onKeyDown={onMenuKey}>
+        <div className={`menu-btn__pop${props.placement === 'top' ? ' menu-btn__pop--top' : ''}`} role="menu" aria-label={props.label} onKeyDown={onMenuKey}>
           <div className="menu-btn__title">{props.label}</div>
           {props.options.map((o, i) => {
             const on = o.value === props.value

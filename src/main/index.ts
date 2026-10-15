@@ -121,7 +121,7 @@ app.whenReady().then(() => {
     avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE)
   })
   updates = new UpdateService({
-    currentVersion: app.getVersion(),
+    currentVersion: __APP_VERSION__,
     platform: process.platform,
     arch: process.arch,
     env: process.env,
@@ -134,7 +134,7 @@ app.whenReady().then(() => {
     },
     createAutoBackend: () =>
       createAutoBackend({
-        currentVersion: app.getVersion(),
+        currentVersion: __APP_VERSION__,
         packaged: app.isPackaged,
         ...(process.env['ANTLER_UPDATE_FEED'] ? { feedUrl: process.env['ANTLER_UPDATE_FEED'] } : {})
       }),

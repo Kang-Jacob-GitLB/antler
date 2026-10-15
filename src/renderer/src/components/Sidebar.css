@@ -65,6 +65,19 @@
 .side-section + .side-section {
   border-top: 1px solid var(--border);
 }
+.side-section--card {
+  margin: 0 var(--space-2) var(--space-2);
+  padding-bottom: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+.side-section--card + .side-section {
+  border-top: 0;
+}
+.side-section--card .side-section__head {
+  padding-left: var(--space-2);
+}
 .side-section__head {
   display: flex;
   align-items: center;

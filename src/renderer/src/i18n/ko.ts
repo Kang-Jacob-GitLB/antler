@@ -148,6 +148,7 @@ export const ko = {
   'fetch.autoOff': '끄기',
   'fetch.autoEvery': '{n}분마다',
   'toolbar.localeMenu': '언어',
+  'status.bar': '상태 표시줄',
   'toolbar.themeMenu': '테마',
   'toolbar.switchRepo': '저장소 전환',
   'toolbar.detached': '분리된 HEAD',

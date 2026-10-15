@@ -3,9 +3,12 @@ import type { BrowserWindow } from 'electron'
 /**
  * 제목 표시줄 오버레이. 앱 툴바가 곧 제목 표시줄이고, Windows·Linux 의 창 컨트롤만 OS 가 그 위에 그린다.
  * color 는 토큰 --toolbar-bg(= --bg-surface), symbolColor 는 --text-primary 와 같은 값이어야 한다.
- * height 는 --toolbar-h 와 같아야 한다.
+ * 툴바 높이는 --toolbar-h(44) 와 같아야 한다.
+ * 오버레이는 툴바보다 1px 낮게(OVERLAY_HEIGHT) 잡는다 — 툴바 맨 아래 1px 는 border-bottom 인데, 오버레이가 같은 높이면
+ * 창 컨트롤 영역에서 그 경계선이 OS 가 그리는 오버레이에 덮여 선이 끊겨 보인다.
  */
 export const TOOLBAR_HEIGHT = 44
+export const OVERLAY_HEIGHT = TOOLBAR_HEIGHT - 1
 
 const OVERLAY = {
   dark: { color: '#1C1815', symbolColor: '#EDE6D8' },
@@ -32,9 +35,9 @@ function blend(hex: string, over: { rgb: number[]; alpha: number }): string {
 
 export function titleBarOverlay(dark: boolean, dim = false): { color: string; symbolColor: string; height: number } {
   const o = dark ? OVERLAY.dark : OVERLAY.light
-  if (!dim) return { ...o, height: TOOLBAR_HEIGHT }
+  if (!dim) return { ...o, height: OVERLAY_HEIGHT }
   const b = dark ? BACKDROP.dark : BACKDROP.light
-  return { color: blend(o.color, b), symbolColor: blend(o.symbolColor, b), height: TOOLBAR_HEIGHT }
+  return { color: blend(o.color, b), symbolColor: blend(o.symbolColor, b), height: OVERLAY_HEIGHT }
 }
 
 /** Windows·Linux 에서만 동작한다(macOS 는 신호등 버튼이라 오버레이가 없다) */

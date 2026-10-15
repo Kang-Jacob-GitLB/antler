@@ -1,7 +1,11 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// 앱 버전은 package.json 에서 빌드 때 주입한다(개발 실행에서 app.getVersion() 은 Electron 버전을 돌려준다)
+const appVersion = (JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }).version
 
 const shared = { '@shared': resolve('src/shared') }
 
@@ -34,7 +38,7 @@ function cspPlugin(): Plugin {
 }
 
 export default defineConfig({
-  main: { resolve: { alias: shared } },
+  main: { resolve: { alias: shared }, define: { __APP_VERSION__: JSON.stringify(appVersion) } },
   preload: { resolve: { alias: shared } },
   renderer: {
     resolve: {
@@ -42,7 +46,8 @@ export default defineConfig({
         ...shared,
         '@renderer': resolve('src/renderer/src'),
         // 폰트는 npm 패키지의 woff2 를 그대로 번들한다(오프라인 앱 + CSP font-src 'self')
-        '@font-pretendard': resolve('node_modules/pretendard/dist/web/variable/woff2')
+        '@font-pretendard': resolve('node_modules/pretendard/dist/web/variable/woff2'),
+        '@font-nanumcoding': resolve('node_modules/@fontsource/nanum-gothic-coding/files')
       }
     },
     plugins: [react(), cspPlugin()],

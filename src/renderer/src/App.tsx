@@ -7,6 +7,7 @@ import { EmptyState } from './components/EmptyState'
 import { RepoSwitcher } from './components/RepoSwitcher'
 import { Sidebar } from './components/Sidebar'
 import { Splitter, type SplitterHandlers } from './components/Splitter'
+import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
 import { useAppStore } from './stores/appStore'
 import { useDetailStore } from './stores/detailStore'
@@ -179,6 +180,7 @@ export function App(): React.JSX.Element | null {
           <EmptyState />
         )}
       </div>
+      <StatusBar />
       {error && (
         <div className="toast" role="alert" onClick={() => useAppStore.getState().clearError()}>
           {error}

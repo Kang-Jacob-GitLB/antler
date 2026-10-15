@@ -238,7 +238,7 @@ try {
       await page.dblclick(`.side-section:nth-of-type(2) .side-item:not(.side-item--folder) >> nth=-1`)
       await page.waitForSelector('.filter-chip', { timeout: 5_000 })
       await page.waitForTimeout(500)
-      console.log(`filter chip: "${await page.textContent('.filter-chip')}", rows: ${await page.textContent('.commit-list__foot')}`)
+      console.log(`filter chip: "${await page.textContent('.filter-chip')}", rows: ${await page.textContent('.statusbar__count')}`)
       await shot(`filter-${theme}`)
       await page.click('.filter-chip')
       await page.waitForSelector('.filter-chip', { state: 'detached' })
@@ -375,7 +375,7 @@ try {
         avgMs: +avg.toFixed(2),
         p95Ms: +frames[Math.floor(frames.length * 0.95)].toFixed(2),
         maxMs: +frames.at(-1).toFixed(2),
-        rows: document.querySelector('.commit-list__foot')?.textContent
+        rows: document.querySelector('.statusbar__count')?.textContent
       }
     })
     console.log('scroll perf:', JSON.stringify(perf))
@@ -398,7 +398,7 @@ try {
       await page.mouse.click(box.x + box.width * 0.3, box.y + box.height / 2)
       await page.waitForFunction(() => !document.querySelector('.minimap__spinner'), null, { timeout: 60_000 }).catch(() => {})
       await page.waitForTimeout(400)
-      console.log(`minimap click 30%: 맨 위 날짜 "${before}" → "${await dateAt()}" (+${Date.now() - t0} ms), ${await page.textContent('.commit-list__foot')}`)
+      console.log(`minimap click 30%: 맨 위 날짜 "${before}" → "${await dateAt()}" (+${Date.now() - t0} ms), ${await page.textContent('.statusbar__count')}`)
       await shot(`minimap-jump-${theme}`)
     }
 

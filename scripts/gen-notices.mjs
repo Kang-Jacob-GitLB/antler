@@ -2,7 +2,7 @@
 // renderer 번들에 들어가는 라이브러리의 라이선스 고지를 resources/licenses/THIRD_PARTY_NOTICES.txt 로 모은다.
 // 압축된 번들에서는 @license 주석이 지워지므로 배포물에 별도 파일로 동봉한다(electron-builder extraResources).
 // main 의 ssh2 와 그 의존 패키지는 app.asar 의 node_modules 에 LICENSE 째로 실리므로 여기서 다루지 않는다.
-// 폰트(Pretendard, OFL 1.1)는 같은 폴더의 Pretendard-LICENSE.txt 로 따로 둔다.
+// 폰트(Pretendard·나눔고딕코딩, OFL 1.1)는 같은 폴더의 *-LICENSE.txt 로 따로 둔다.
 // 사용: node scripts/gen-notices.mjs (의존성 버전을 올린 뒤 다시 실행)
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -35,7 +35,7 @@ for (const name of BUNDLED) {
   parts.push(`${'='.repeat(72)}\n${pkg.name}@${pkg.version} — ${pkg.license}\n${'='.repeat(72)}\n\n${text}\n`)
 }
 const header = 'Antler 에 포함된 서드파티 소프트웨어의 라이선스 고지입니다.\n' +
-  '폰트 라이선스는 같은 폴더의 Pretendard-LICENSE.txt 를 보세요.\n\n'
+  '폰트 라이선스는 같은 폴더의 Pretendard-LICENSE.txt, NanumGothicCoding-LICENSE.txt 를 보세요.\n\n'
 const out = resolve(ROOT, 'resources', 'licenses', 'THIRD_PARTY_NOTICES.txt')
 writeFileSync(out, header + parts.join('\n'))
 console.log(`${BUNDLED.length} notices → ${out}`)

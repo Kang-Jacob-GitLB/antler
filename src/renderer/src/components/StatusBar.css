@@ -1,0 +1,110 @@
+/* 하단 상태 표시줄 — 평면, 위쪽 1px 경계, 툴바와 같은 면(bg-surface). 드래그 영역이 아니다. */
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  height: var(--statusbar-h);
+  padding: 0 var(--space-2);
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  line-height: 1;
+  color: var(--text-secondary);
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+.statusbar__left,
+.statusbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 100%;
+  min-width: 0;
+}
+.statusbar__left {
+  flex: 1;
+  overflow: hidden;
+}
+.statusbar__right {
+  flex-shrink: 0;
+  gap: 2px;
+}
+.statusbar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.statusbar__icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.statusbar__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.statusbar__count,
+.statusbar__fetch .statusbar__text {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.statusbar__fetch.is-bad {
+  color: var(--removed-text);
+}
+.statusbar__fetch.is-bad .statusbar__text {
+  font-weight: 600;
+}
+.statusbar__spin {
+  flex-shrink: 0;
+  animation: statusbar-spin 0.9s linear infinite;
+}
+@keyframes statusbar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .statusbar__spin {
+    animation-duration: 2.7s;
+  }
+}
+.statusbar__ver {
+  padding: 0 var(--space-2);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 텍스트 버튼(MenuButton 의 .icon-btn 과 같은 규칙으로 덮어쓴다 — 우선순위를 맞추려고 .icon-btn 을 함께 적는다) */
+.statusbar__btn,
+.icon-btn.statusbar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  height: var(--control-h-sm);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.statusbar__btn:hover,
+.icon-btn.statusbar__btn:hover,
+.icon-btn.statusbar__btn[aria-pressed='true'] {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+.statusbar__btn:focus-visible,
+.icon-btn.statusbar__btn:focus-visible {
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}

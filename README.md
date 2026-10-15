@@ -240,7 +240,7 @@ tests/           vitest + fixtures/
 
 - 사슴뿔과 숲에서 가져온 색 토큰을 palette → semantic → component 3층으로 둔다(`tokens.css`).
 - 스타일은 평면(Fork/GitKraken식)이다.
-- 폰트: UI 는 Pretendard Variable(앱에 번들, OFL 1.1). 코드는 GitHub 과 같은 시스템 고정폭 스택(`ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono`).
+- 폰트: UI 는 Pretendard Variable(앱에 번들, OFL 1.1). 코드는 GitHub 과 같은 시스템 고정폭 스택(`ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono`). 한글만 나눔고딕코딩(400·700, OFL 1.1, 앱에 번들, unicode-range 로 한글에만 적용)으로 그린다.
 
 ## 개발 도구 스크립트
 
@@ -293,6 +293,7 @@ tests/           vitest + fixtures/
 | @resvg/resvg-js, png2icons | 아이콘 생성(`pnpm icons`): SVG → PNG, PNG → ico/icns |
 | marked | 커밋 메시지 본문을 마크다운으로 렌더(GFM). 결과 HTML 은 `lib/sanitize.ts` 허용 목록으로 정화 |
 | pretendard | UI 폰트 Pretendard Variable(OFL 1.1). woff2 하나만 renderer 자산으로 번들 |
+| @fontsource/nanum-gothic-coding | 코드 속 한글용 나눔고딕코딩(OFL 1.1). korean 서브셋 400·700 woff2 두 개(약 1 MB) — devDependency |
 
 ## 알려진 한계
 
@@ -317,5 +318,6 @@ tests/           vitest + fixtures/
 앱 자체의 라이선스는 아직 정하지 않았다(LICENSE 파일 없음). 번들 폰트는 SIL OFL 1.1 이다.
 
 - Pretendard — OFL 1.1
+- Nanum Gothic Coding — OFL 1.1
 
-라이선스 고지는 `resources/licenses/`(Pretendard 폰트, 번들 라이브러리 `THIRD_PARTY_NOTICES.txt`)에 있고, 패키지에는 `resources/licenses/` 로 동봉된다. ssh2 와 그 의존 패키지는 `app.asar` 의 node_modules 에 각자의 LICENSE 와 함께 실린다.
+라이선스 고지는 `resources/licenses/`(Pretendard·나눔고딕코딩 폰트, 번들 라이브러리 `THIRD_PARTY_NOTICES.txt`)에 있고, 패키지에는 `resources/licenses/` 로 동봉된다. ssh2 와 그 의존 패키지는 `app.asar` 의 node_modules 에 각자의 LICENSE 와 함께 실린다.

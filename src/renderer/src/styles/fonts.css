@@ -1,7 +1,7 @@
 /*
  * 번들 폰트(SIL Open Font License 1.1).
  *   UI   — Pretendard Variable (가변 굵기 45~920, npm pretendard)
- *   코드 — 번들하지 않는다. GitHub 과 같은 시스템 고정폭 스택을 쓴다(tokens.css 의 --font-mono).
+ *   코드 — 한글만 나눔고딕코딩(Nanum Gothic Coding, 400·700, korean 서브셋; unicode-range 로 한글에만 적용). 라틴 문자는 시스템 고정폭 스택(tokens.css 의 --font-mono)
  * 로컬 자산이라 금방 로드되므로 font-display: block 으로 대체 폰트 깜빡임(FOUT)을 피한다.
  */
 @font-face {
@@ -10,4 +10,23 @@
   font-style: normal;
   font-display: block;
   src: url('@font-pretendard/PretendardVariable.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'NanumGothicCoding';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  /* 한글 자모·호환 자모·확장 A/B·음절 + CJK 문장부호 */
+  unicode-range: U+1100-11FF, U+3000-303F, U+3130-318F, U+A960-A97F, U+AC00-D7A3, U+D7B0-D7FF;
+  src: url('@font-nanumcoding/nanum-gothic-coding-korean-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'NanumGothicCoding';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  /* 한글 자모·호환 자모·확장 A/B·음절 + CJK 문장부호 */
+  unicode-range: U+1100-11FF, U+3000-303F, U+3130-318F, U+A960-A97F, U+AC00-D7A3, U+D7B0-D7FF;
+  src: url('@font-nanumcoding/nanum-gothic-coding-korean-700-normal.woff2') format('woff2');
 }
