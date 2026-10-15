@@ -1,12 +1,16 @@
-import { memo, useEffect, useMemo, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Commit, Locale, RefLabel } from '@shared/types'
+import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
 import { formatDate, initials } from '../lib/format'
 import { branchKey, fnv1a, laneIndexFor, laneVar, LANE_COUNT } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
 import { PREFETCH, useLogStore } from '../stores/logStore'
+import { useSearchStore } from '../stores/searchStore'
+import { GraphCanvas, graphWidth, useGraphVersion } from './GraphCanvas'
 import { IconCloud, IconMonitor, IconTag } from './icons'
+import { SearchBar } from './SearchBar'
 import './CommitList.css'
 
 const ROW_H = 28
@@ -71,26 +75,30 @@ const RefChip = ({ chip }: { chip: Chip }): React.JSX.Element => (
   </span>
 )
 
+/** 검색 중 행 표시: 일치(match) / 불일치(dim) / 검색 아님(none) */
+type SearchMark = 'match' | 'current' | 'dim' | 'none'
+
 const Row = memo(function Row({
   commit,
   index,
   selected,
   locale,
+  mark,
   onSelect
 }: {
   commit: Commit
   index: number
   selected: boolean
   locale: Locale
+  mark: SearchMark
   onSelect(i: number): void
 }) {
   const chips = useMemo(() => toChips(commit.refs), [commit.refs])
-  const isHead = commit.refs.some((r) => r.kind === 'head')
   const avatarLane = fnv1a(commit.authorEmail) % LANE_COUNT
   const firstChip = chips[0]
   return (
     <div
-      className={`commit-row${selected ? ' is-selected' : ''}`}
+      className={`commit-row${selected ? ' is-selected' : ''}${mark === 'none' ? '' : ` is-${mark}`}`}
       onMouseDown={() => onSelect(index)}
       role="row"
       aria-selected={selected}
@@ -103,14 +111,8 @@ const Row = memo(function Row({
           </span>
         )}
       </div>
-      {/* M2 에서 Canvas 레인 그래프로 교체된다 */}
-      <div className="cell cell--graph">
-        <span className="graph-stub__line" />
-        <span
-          className={`graph-stub__node${commit.parents.length > 1 ? ' is-merge' : ''}${isHead ? ' is-head' : ''}`}
-          style={{ '--node': laneVar(firstChip?.lane ?? 0) } as React.CSSProperties}
-        />
-      </div>
+      {/* 그래프는 GraphCanvas 가 이 컬럼 위에 겹쳐 그린다 */}
+      <div className="cell cell--graph" />
       <div className="cell cell--message">
         <span className="commit-subject">{commit.subject}</span>
       </div>
@@ -129,13 +131,18 @@ const Row = memo(function Row({
 export function CommitList(): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
-  const { commits, hasMore, loading, error, selected } = useLogStore()
+  const { commits, hasMore, loading, error, selected, scrollRequest } = useLogStore()
   const { loadMore, select } = useLogStore.getState()
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const search = useSearchStore()
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
+  const headGraphRef = useRef<HTMLDivElement>(null)
+  const [graphBox, setGraphBox] = useState({ left: 0, width: 0 })
+  useGraphVersion()
+  const colGraph = graphWidth(graphEngine.maxWidth)
 
   const virtualizer = useVirtualizer({
     count: commits.length + (hasMore ? 1 : 0),
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => scrollEl,
     estimateSize: () => ROW_H,
     overscan: 20
   })
@@ -150,8 +157,32 @@ export function CommitList(): React.JSX.Element {
     if (selected >= 0) virtualizer.scrollToIndex(selected, { align: 'auto' })
   }, [selected, virtualizer])
 
+  // 사이드바·검색에서 찾아간 커밋은 화면 가운데로
+  useEffect(() => {
+    if (scrollRequest) virtualizer.scrollToIndex(scrollRequest.index, { align: 'center' })
+  }, [scrollRequest, virtualizer])
+
+  // 그래프 canvas 를 헤더의 그래프 컬럼 위치에 맞춘다(컬럼 폭은 container query 로도 바뀐다)
+  useLayoutEffect(() => {
+    const el = headGraphRef.current
+    if (!el) return
+    // 헤더 행 기준 x 좌표(스크롤 컨테이너와 헤더는 같은 가로 위치에서 시작한다)
+    const measure = (): void =>
+      setGraphBox({ left: el.getBoundingClientRect().left - el.parentElement!.getBoundingClientRect().left, width: el.offsetWidth })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    ro.observe(el.parentElement!)
+    return () => ro.disconnect()
+  }, [])
+
+  const searching = search.open && search.hitSet.size > 0
+  const current = search.cursor >= 0 ? search.hits[search.cursor] : undefined
+  const markOf = (c: Commit): SearchMark =>
+    !searching ? 'none' : c.hash === current ? 'current' : search.hitSet.has(c.hash) ? 'match' : 'dim'
+
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    const page = Math.max(1, Math.floor((scrollRef.current?.clientHeight ?? ROW_H * 10) / ROW_H) - 1)
+    const page = Math.max(1, Math.floor((scrollEl?.clientHeight ?? ROW_H * 10) / ROW_H) - 1)
     const moves: Record<string, number> = {
       ArrowDown: selected + 1,
       ArrowUp: selected - 1,
@@ -169,10 +200,13 @@ export function CommitList(): React.JSX.Element {
   const showEmpty = !loading && !hasMore && commits.length === 0
 
   return (
-    <section className="commit-list">
+    <section className="commit-list" style={{ '--col-graph': `${colGraph}px` } as React.CSSProperties}>
+      <SearchBar />
       <div className="commit-list__head" role="row">
         <div className="cell cell--refs">{t('col.refs')}</div>
-        <div className="cell cell--graph">{t('col.graph')}</div>
+        <div className="cell cell--graph" ref={headGraphRef}>
+          {t('col.graph')}
+        </div>
         <div className="cell cell--message">{t('col.message')}</div>
         <div className="cell cell--author">{t('col.author')}</div>
         <div className="cell cell--date">{t('col.date')}</div>
@@ -180,15 +214,21 @@ export function CommitList(): React.JSX.Element {
       </div>
 
       <div
-        ref={scrollRef}
+        ref={setScrollEl}
         className="commit-list__scroll"
         tabIndex={0}
         role="grid"
         aria-rowcount={commits.length}
         onKeyDown={onKeyDown}
       >
-        {error && <div className="commit-list__notice is-error">{t('error.generic', { msg: error })}</div>}
-        {showEmpty && !error && <div className="commit-list__notice">{t('list.noCommits')}</div>}
+        <div className="graph-layer">
+          <GraphCanvas scrollEl={scrollEl} rowHeight={ROW_H} left={graphBox.left} width={graphBox.width} commits={commits} />
+        </div>
+        {(error || showEmpty) && (
+          <div className={`commit-list__notice${error ? ' is-error' : ''}`}>
+            {error ? t('error.generic', { msg: error }) : t('list.noCommits')}
+          </div>
+        )}
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {items.map((vi) => {
             const commit = commits[vi.index]
@@ -199,7 +239,14 @@ export function CommitList(): React.JSX.Element {
                 style={{ transform: `translateY(${vi.start}px)`, height: ROW_H }}
               >
                 {commit ? (
-                  <Row commit={commit} index={vi.index} selected={vi.index === selected} locale={locale} onSelect={select} />
+                  <Row
+                    commit={commit}
+                    index={vi.index}
+                    selected={vi.index === selected}
+                    locale={locale}
+                    mark={markOf(commit)}
+                    onSelect={select}
+                  />
                 ) : (
                   <div className="commit-row commit-row--loading">{t('list.loading')}</div>
                 )}

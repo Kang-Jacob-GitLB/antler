@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppConfig, HeadInfo, Locale, Repo, ThemePref, UiPrefs } from '@shared/types'
+import type { AppConfig, HeadInfo, Locale, RefsSnapshot, Repo, ThemePref, UiPrefs } from '@shared/types'
 import { api, errorMessage } from '../lib/api'
 
 type ResolvedTheme = 'dark' | 'light'
@@ -8,13 +8,15 @@ interface AppState {
   config: AppConfig | null
   activeRepoId: string | null
   head: HeadInfo | null
+  /** 활성 저장소의 ref 스냅샷(사이드바) */
+  refs: RefsSnapshot | null
   systemDark: boolean
   error: string | null
   switcherOpen: boolean
 
   init(): Promise<void>
   selectRepo(id: string | null): void
-  refreshHead(): Promise<void>
+  refreshRefs(): Promise<void>
   addLocalRepo(): Promise<void>
   removeRepo(id: string): Promise<void>
   setUi(patch: Partial<UiPrefs>): Promise<void>
@@ -38,6 +40,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   config: null,
   activeRepoId: null,
   head: null,
+  refs: null,
   systemDark: media.matches,
   error: null,
   switcherOpen: false,
@@ -53,24 +56,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ systemDark: e.matches })
       applyTheme(get().config?.ui.theme ?? 'system', e.matches)
     })
-    void get().refreshHead()
+    void get().refreshRefs()
   },
 
   selectRepo(id) {
     if (id === get().activeRepoId) return
-    set({ activeRepoId: id, head: null })
+    set({ activeRepoId: id, head: null, refs: null })
     if (id) {
       void get().setUi({ lastRepoId: id })
-      void get().refreshHead()
+      void get().refreshRefs()
     }
   },
 
-  async refreshHead() {
+  async refreshRefs() {
     const id = get().activeRepoId
     if (!id) return
     try {
-      const head = await api.invoke('git:head', id)
-      if (get().activeRepoId === id) set({ head })
+      const refs = await api.invoke('git:refs', id)
+      if (get().activeRepoId === id) set({ refs, head: refs.head })
     } catch (err) {
       set({ error: errorMessage(err) })
     }
