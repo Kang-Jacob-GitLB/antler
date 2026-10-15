@@ -42,6 +42,7 @@ const CHECKS = [
   ['--syn-type', 4.5],
   ['--syn-attr', 4.5],
   ['--syn-meta', 4.5],
+  ['--field-border', 3.0], // 입력 칸 테두리(WCAG 1.4.11 비텍스트 3:1) — 둘러싼 면 3종 모두에서
   ['--accent', 3.0],
   ['--added', 3.0],
   ['--removed', 3.0],

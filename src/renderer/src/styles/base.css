@@ -76,9 +76,9 @@ input {
 .icon-btn {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
+  width: var(--control-h);
+  height: var(--control-h);
+  border-radius: var(--control-radius);
   color: var(--text-secondary);
   transition:
     background var(--dur-fast) var(--ease),
@@ -91,14 +91,23 @@ input {
 .icon-btn:active {
   transform: translateY(0.5px);
 }
+/* 작은 아이콘 버튼(사이드바 섹션 헤더·검색 바·diff 머리) — 컴포넌트 CSS 보다 뒤에 로드되므로 여기서 정의한다 */
+.icon-btn.icon-btn--sm {
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
+  border-radius: var(--radius-sm);
+}
 
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--space-2);
-  height: 30px;
-  padding: 0 var(--space-3);
-  border-radius: var(--radius-md);
+  height: var(--control-h-lg);
+  padding: 0 var(--control-px-lg);
+  border-radius: var(--control-radius);
+  white-space: nowrap;
+  line-height: 1.2;
   border: 1px solid var(--border-strong);
   background: var(--bg-elevated);
   color: var(--text-primary);
@@ -107,6 +116,12 @@ input {
 }
 .btn:hover {
   border-color: var(--accent);
+}
+/* 팝오버·툴바급 작은 버튼: 같은 줄의 .gh-auth__input / .field--sm 입력과 높이가 같다 */
+.btn.btn--sm {
+  height: var(--control-h);
+  padding: 0 var(--control-px);
+  font-size: var(--fs-sm);
 }
 .btn--primary {
   background: var(--accent);
@@ -122,12 +137,12 @@ input {
 .env-badge {
   display: inline-flex;
   align-items: center;
-  height: 16px;
+  height: var(--badge-h);
   padding: 0 5px;
   border-radius: 3px;
-  font-size: 9.5px;
+  font-size: var(--fs-xs);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   flex-shrink: 0;
 }
 .env-badge--local {
@@ -172,6 +187,15 @@ samp,
 .seg__btn.is-on:focus-visible {
   box-shadow: var(--focus-ring);
 }
+/* 전역 :focus-visible 의 radius-sm 때문에 포커스될 때 모서리가 바뀌지 않게 컨트롤 본래 반경을 유지한다 */
+.btn:focus-visible,
+.icon-btn:focus-visible {
+  border-radius: var(--control-radius);
+}
+.icon-btn.icon-btn--sm:focus-visible,
+.seg__btn:focus-visible {
+  border-radius: var(--radius-sm);
+}
 @media (prefers-reduced-motion: reduce) {
   .btn,
   .icon-btn,
@@ -181,4 +205,145 @@ samp,
   .icon-btn:active {
     transform: none;
   }
+}
+
+/* ── 분절 버튼(unified/split, 저장소 종류 탭, PR 상태 필터) ── 바깥 높이 = --control-h */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: var(--control-radius);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+}
+.seg__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-h-xs);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  color: var(--text-secondary);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.seg__btn:hover {
+  color: var(--text-primary);
+}
+.seg__btn.is-on {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--border-strong);
+}
+
+/* ── 입력 칸: <input>·<select>·입력처럼 보이는 버튼(.field__picker) 공통 ──
+   기본 = lg(32, 대화상자 폼). 팝오버·툴바급 compact 는 --md 높이(28). 같은 줄의 .btn / .btn--sm 과 높이가 맞는다.
+   flex 컨테이너(.field 는 column)에서 flex:1 이 높이를 0 으로 눌러 버리지 않도록 flex 는 .field__row 안에서만 준다. */
+.field__input,
+.gh-auth__input,
+.repo-menu__input,
+.gh-select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-h-lg);
+  margin: 0;
+  padding: 0 var(--control-px-lg);
+  border: 0;
+  border-radius: var(--control-radius);
+  background-color: var(--field-bg);
+  box-shadow: var(--field-ring);
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.2;
+  outline: none;
+}
+.gh-auth__input,
+.repo-menu__input,
+.gh-select,
+.rfp__addr .field__input {
+  height: var(--control-h);
+  padding: 0 var(--control-px);
+  font-size: var(--fs-sm);
+}
+.field__row > .field__input,
+.gh-auth__row > .gh-auth__input,
+.repo-menu__row > .repo-menu__input,
+.rfp__addr > .field__input {
+  flex: 1;
+  width: auto;
+}
+.field__input:focus-visible,
+.gh-auth__input:focus-visible,
+.repo-menu__input:focus-visible,
+.gh-select:focus-visible {
+  box-shadow: var(--focus-ring-field);
+  border-radius: var(--control-radius);
+}
+.field__input::placeholder,
+.gh-auth__input::placeholder,
+.repo-menu__input::placeholder {
+  color: var(--text-muted);
+}
+.field__input:disabled,
+.gh-auth__input:disabled,
+.gh-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+/* .mono 는 위의 font 단축 선언보다 앞서 정의돼 있어 덮어쓰이므로 다시 지정한다 */
+.field__input.mono,
+.gh-auth__input.mono,
+.repo-menu__input.mono {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+/* 폴더 선택 칸(버튼이지만 입력칸처럼 보인다) */
+.field__picker {
+  text-align: left;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.field__picker:hover {
+  box-shadow: var(--field-ring-hover);
+}
+.field__picker.is-empty {
+  font-family: var(--font-ui);
+  color: var(--text-muted);
+}
+/* 셀렉트: 운영체제 기본 모양 대신 입력 칸과 같은 면 + 테마색 캐럿(CSS 그라데이션이라 테마를 따라간다) */
+select.field__input,
+select.gh-select,
+input.field__input[list] {
+  appearance: none;
+  padding-right: 28px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
+    linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+select.field__input option,
+select.gh-select option {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+/* datalist 입력: 기본 화살표는 투명하게 두고 같은 자리에 눌러 열 수 있게 한다(캐럿은 셀렉트와 같은 그라데이션) */
+input.field__input[list]::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  width: 24px;
+  cursor: pointer;
+}
+select.gh-select {
+  width: auto;
 }
