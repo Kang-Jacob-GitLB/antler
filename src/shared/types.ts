@@ -265,6 +265,17 @@ export interface GhAvatarResult {
   github: boolean
   /** 이메일(요청에 쓴 문자열) → 해석 결과. null=GitHub 계정과 연결되지 않음. 빠진 키=지금은 못 정함(한도·네트워크·미푸시), 나중에 다시 */
   avatars: Record<string, GhAuthorAvatar | null>
+  /** 지금 사진 조회가 막혀 있는 이유(없으면 막히지 않음). 화면은 작성자 열 머리에 안내로만 드러낸다 */
+  blocked?: GhAvatarBlocked
+}
+
+/** rate-limited: 비로그인/로그인 API 한도 소진(resetAt 이후 재시도), needs-login: 비공개 저장소라 비로그인 조회가 404, session-cap: 이번 실행의 조회 상한 */
+export interface GhAvatarBlocked {
+  reason: 'rate-limited' | 'needs-login' | 'session-cap'
+  /** epoch seconds (rate-limited 일 때) */
+  resetAt?: number
+  /** 이 상태가 로그인으로 풀리는지 */
+  signedIn: boolean
 }
 
 export interface GhLabel {
@@ -277,8 +288,10 @@ export interface GhLabel {
 export interface GhAuthState {
   signedIn: boolean
   user?: GhUser
-  /** 'pat' | 'device' */
-  method?: 'pat' | 'device'
+  /** 'pat' | 'device' | 'gh-cli' */
+  method?: 'pat' | 'device' | 'gh-cli'
+  /** GitHub CLI(gh)가 설치되어 있어 로그인 가져오기를 쓸 수 있는지(아직 모르면 생략) */
+  cliAvailable?: boolean
   /** 남은 API 호출 수(마지막 응답 기준) */
   rateRemaining?: number
   rateLimit?: number

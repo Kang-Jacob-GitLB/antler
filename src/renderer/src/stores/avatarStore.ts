@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { GhAvatarQuery } from '@shared/types'
+import type { GhAvatarBlocked, GhAvatarQuery } from '@shared/types'
 import { avatarBaseUrl, parseNoreply } from '@shared/avatar'
 import { api, isAbort, newRequestId } from '../lib/api'
 
@@ -12,9 +12,13 @@ const RETRY_MS = 60_000
 interface AvatarState {
   /** 소문자 이메일 → 크기 없는 아바타 주소. null=GitHub 계정과 연결되지 않음. 키가 없으면 아직 모름 */
   urls: Record<string, string | null>
+  /** 사진 조회가 막혀 있는 이유(막혀 있지 않으면 null) — 작성자 열 머리의 안내 점이 쓴다 */
+  blocked: (GhAvatarBlocked & { repoId: string }) | null
+  /** 로그인·로그아웃으로 조건이 바뀔 때마다 증가 — 목록이 다시 묻도록 하는 신호 */
+  epoch: number
 }
 
-export const useAvatarStore = create<AvatarState>(() => ({ urls: {} }))
+export const useAvatarStore = create<AvatarState>(() => ({ urls: {}, blocked: null, epoch: 0 }))
 
 /** noreply 이메일은 이메일만으로 풀린다(결과를 캐시해 프레임마다 정규식을 돌리지 않는다) */
 const noreplyCache = new Map<string, string | null>()
@@ -47,6 +51,19 @@ const retryAt = new Map<string, number>()
 /** GitHub remote 가 없다고 확인된 저장소 — 더 묻지 않는다 */
 const noGithub = new Set<string>()
 const inflight = new Map<string, string>()
+
+/**
+ * 로그인·로그아웃 뒤: "나중에 다시"·"GitHub 저장소 아님" 표시와 진행 중 표시를 비우고 안내를 지운 뒤, epoch 를 올려 보이는 작성자를 다시 묻게 한다.
+ * (확인된 사진 주소는 계정이 같으니 남긴다.) main 이 중단한 요청의 늦은 응답은 inflight 가 비어 있어 무시된다.
+ */
+export function resetAvatarSession(): void {
+  clearTimeout(timer)
+  wanted = null
+  inflight.clear()
+  retryAt.clear()
+  noGithub.clear()
+  useAvatarStore.setState((s) => ({ blocked: null, epoch: s.epoch + 1 }))
+}
 
 /** 지금 알 수 없는 작성자만 골라 (이메일, sha) 목록을 만든다. 같은 작성자의 가장 오래된(=미푸시일 가능성이 낮은) 커밋을 쓴다 */
 export function pendingAuthors(commits: readonly { hash: string; authorEmail: string }[], first: number, last: number): GhAvatarQuery[] {
@@ -100,7 +117,11 @@ function flush(): void {
         else next[key] = hit ? hit.url : null
       }
       if (!res.github && !Object.keys(res.avatars).length) noGithub.add(w.repoId)
-      if (Object.keys(next).length) useAvatarStore.setState((s) => ({ urls: { ...s.urls, ...next } }))
+      // 이 저장소가 지금 보는 저장소일 때만 안내를 갱신한다(응답이 모두 무시된 경우는 위에서 이미 걸러진다)
+      const blocked = res.blocked ? { ...res.blocked, repoId: w.repoId } : null
+      if (Object.keys(next).length || blocked?.reason !== useAvatarStore.getState().blocked?.reason || blocked?.resetAt !== useAvatarStore.getState().blocked?.resetAt || blocked?.repoId !== useAvatarStore.getState().blocked?.repoId) {
+        useAvatarStore.setState((s) => ({ urls: { ...s.urls, ...next }, blocked }))
+      }
     },
     (err) => {
       for (const a of list) {

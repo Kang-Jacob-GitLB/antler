@@ -12,6 +12,12 @@ const REQUEST_TIMEOUT_MS = 15_000
 /** ETag 캐시 항목 수와 총 크기(추정 바이트) */
 const CACHE_ENTRIES = 500
 const CACHE_BYTES = 32 * 1024 * 1024
+/**
+ * 비로그인(시간당 60회)에서는 방금 받은 응답을 이 시간 동안 네트워크 없이 그대로 쓴다. 저장소를 오가며 PR·이슈 목록을 다시 열 때마다
+ * 호출이 나가지 않게 하기 위해서다. 304(조건부 요청)가 한도에서 빠진다는 보장은 인증 요청에만 확실하다고 보고 이쪽에 기대지 않는다.
+ * 로그인하면 이 단축은 쓰지 않는다(항상 조건부 요청).
+ */
+const ANON_FRESH_MS = 3 * 60_000
 
 export type GhErrorCode = 'GH_AUTH' | 'GH_RATE_LIMIT' | 'GH_NOT_FOUND' | 'GH_FORBIDDEN' | 'GH_HTTP' | 'GH_NETWORK' | 'GH_TIMEOUT'
 
@@ -53,6 +59,8 @@ interface CacheEntry {
   etag: string
   data: unknown
   hasMore: boolean
+  /** 받은 시각(epoch ms) */
+  at: number
 }
 
 export type TokenProvider = () => string | null
@@ -91,6 +99,7 @@ export class GitHubClient {
     const accept = opts.html ? ACCEPT_HTML : ACCEPT_JSON
     const key = `${token ? createHash('sha256').update(token).digest('hex').slice(0, 16) : 'anon'}\0${url.href}\0${accept}`
     const cached = this.cache.get(key)
+    if (cached && token === null && Date.now() - cached.at < ANON_FRESH_MS) return { data: cached.data as T, hasMore: cached.hasMore }
 
     const headers: Record<string, string> = {
       Accept: accept,
@@ -116,6 +125,7 @@ export class GitHubClient {
 
     if (res.status === 304) {
       if (!cached) throw new GitHubApiError('GitHub 가 예상치 못한 304 응답을 보냈습니다', 'GH_HTTP', 304)
+      cached.at = Date.now()
       return { data: cached.data as T, hasMore: cached.hasMore }
     }
     const text = await readText(res, opts.signal, timeout)
@@ -129,7 +139,7 @@ export class GitHubClient {
     }
     const hasMore = hasNextLink(res.headers.get('link'))
     const etag = res.headers.get('etag')
-    if (etag) this.cache.set(key, { etag, data, hasMore }, text.length * 2)
+    if (etag) this.cache.set(key, { etag, data, hasMore, at: Date.now() }, text.length * 2)
     return { data: data as T, hasMore }
   }
 

@@ -22,6 +22,7 @@ import { AbortError } from '../executors/GitExecutor'
 import * as api from './api'
 import { AvatarResolver } from './avatars'
 import { GitHubApiError, GitHubClient } from './client'
+import { GhCliError, type GhCli } from './ghCli'
 import { DeviceFlow, MISSING_CLIENT_ID_MESSAGE, type DeviceSession, type SleepFn } from './deviceFlow'
 import type { TokenMethod, TokenStore } from './tokenStore'
 import { parsePat as parsePatInput } from './validate'
@@ -35,6 +36,8 @@ export interface GitHubServiceDeps {
   sleep?: SleepFn
   /** 작성자 아바타 캐시 파일 경로(없으면 메모리에만 둔다) */
   avatarCacheFile?: string
+  /** GitHub CLI(gh) 연동. 없으면 "CLI 로그인 가져오기"는 제공하지 않는다 */
+  cli?: GhCli
 }
 
 export class GitHubService {
@@ -50,6 +53,7 @@ export class GitHubService {
   private readonly flow: DeviceFlow
   private readonly client: GitHubClient
   private readonly avatarResolver: AvatarResolver
+  private cliAvailable: boolean | undefined
 
   constructor(private readonly deps: GitHubServiceDeps) {
     const stored = deps.store.load()
@@ -64,6 +68,7 @@ export class GitHubService {
 
   /** 현재 로그인 상태. 저장된 토큰이 있으면 첫 호출에서 GET /user 로 검증하고 사용자 정보를 캐시한다 */
   async auth(): Promise<GhAuthState> {
+    if (this.deps.cli && this.cliAvailable === undefined) this.cliAvailable = await this.deps.cli.available()
     if (this.token && !this.user) await this.validate()
     return this.state()
   }
@@ -92,7 +97,8 @@ export class GitHubService {
       ...(this.token && this.user ? { user: this.user } : {}),
       ...(this.token && this.method ? { method: this.method } : {}),
       ...(rate ? { rateRemaining: rate.remaining, rateLimit: rate.limit, rateReset: rate.reset } : {}),
-      ...(this.deps.store.storageUnavailable ? { storageUnavailable: true } : {})
+      ...(this.deps.store.storageUnavailable ? { storageUnavailable: true } : {}),
+      ...(this.cliAvailable !== undefined ? { cliAvailable: this.cliAvailable } : {})
     }
   }
 
@@ -119,6 +125,8 @@ export class GitHubService {
     this.token = token
     this.method = method
     this.user = user
+    // 한도·"로그인 필요" 표시는 비로그인 기준이었으니 비우고 다시 묻게 한다
+    this.avatarResolver.resetSession()
     return this.state()
   }
 
@@ -130,11 +138,41 @@ export class GitHubService {
     this.user = null
     this.client.rate = null
     this.client.clearCache()
+    this.avatarResolver.resetSession()
   }
 
   async loginPat(raw: string): Promise<GhAuthState> {
     const token = parsePatInput(raw)
     return this.signIn(token, 'pat', await this.verify(token))
+  }
+
+  /**
+   * GitHub CLI(gh)의 로그인 토큰을 가져와 로그인한다. 토큰은 이 함수 안에서만 쓰이고 반환값·에러·로그에 실리지 않는다.
+   * 검증과 저장은 PAT 로그인과 같다(GET /user 로 확인 → safeStorage 암호화 저장).
+   */
+  async importCliToken(): Promise<GhAuthState> {
+    const cli = this.deps.cli
+    if (!cli) throw new Error('이 환경에서는 GitHub CLI 로그인 가져오기를 쓸 수 없습니다')
+    let raw: string
+    try {
+      raw = await cli.token()
+    } catch (err) {
+      if (err instanceof GhCliError) throw new Error(err.message)
+      throw new Error('GitHub CLI 에서 토큰을 읽지 못했습니다')
+    }
+    let token: string
+    try {
+      token = parsePatInput(raw)
+    } catch {
+      throw new Error('GitHub CLI 가 돌려준 토큰 형식이 올바르지 않습니다')
+    }
+    try {
+      return this.signIn(token, 'gh-cli', await this.verify(token))
+    } catch (err) {
+      if (err instanceof GitHubApiError || err instanceof AbortError) throw err
+      // verify() 의 "토큰이 올바르지 않거나 만료" 메시지는 gh 쪽 안내를 덧붙인다
+      throw new Error(`${err instanceof Error ? err.message : '로그인에 실패했습니다'} — 터미널에서 \`gh auth login\` 으로 다시 로그인한 뒤 시도하세요`)
+    }
   }
 
   /** Device Flow 시작. 이전에 진행 중이던 흐름은 버린다 */
@@ -243,7 +281,10 @@ export class GitHubService {
       const ref = await this.deps.repos.ghRepo(repoId).catch(() => null)
       const slug = ref ? { owner: ref.owner, repo: ref.repo } : null
       const avatars = await this.avatarResolver.resolve(slug, authors, AbortSignal.any([epoch, own]))
-      return { github: slug !== null, avatars }
+      // 풀리지 않은 작성자가 남아 있을 때만 막힌 이유를 알린다(전부 풀렸으면 알릴 것이 없다)
+      const unresolved = authors.some((a) => !(a.email in avatars))
+      const blocked = unresolved && slug ? this.avatarResolver.blockedFor(slug) : null
+      return { github: slug !== null, avatars, ...(blocked ? { blocked } : {}) }
     })
   }
 

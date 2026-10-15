@@ -22,12 +22,14 @@ const GhMark = ({ size = 16 }: { size?: number }): React.JSX.Element => (
 /** 툴바의 GitHub 로그인 상태 버튼 + 팝오버(PAT / Device Flow / 로그아웃 / client ID 설정) */
 export function GhAuthButton(): React.JSX.Element {
   const t = useT()
-  const { auth, device, devicePending, authError, refreshAuth, loginPat, startDevice, cancelDevice, logout } = useGithubStore()
+  const { auth, device, devicePending, authError, refreshAuth, loginPat, importCli, startDevice, cancelDevice, logout } = useGithubStore()
+  const open = useGithubStore((s) => s.authPopoverOpen)
+  const setOpen = useGithubStore((s) => s.setAuthPopoverOpen)
   const clientId = useAppStore((s) => s.config?.ui.githubClientId ?? '')
   const setUi = useAppStore((s) => s.setUi)
-  const [open, setOpen] = useState(false)
   const [pat, setPat] = useState('')
   const [busy, setBusy] = useState(false)
+  const [cliBusy, setCliBusy] = useState(false)
   const [cid, setCid] = useState(clientId)
   // 고급(client ID) 접힘 상태. client ID 없이 '브라우저로 로그인'을 누르면 펼쳐서 안내한다
   const [advOpen, setAdvOpen] = useState(false)
@@ -62,7 +64,7 @@ export function GhAuthButton(): React.JSX.Element {
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
+  }, [open, setOpen])
 
   const submitPat = async (): Promise<void> => {
     if (!pat.trim()) return
@@ -74,6 +76,17 @@ export function GhAuthButton(): React.JSX.Element {
       /* 오류는 authError 로 보인다 */
     } finally {
       setBusy(false)
+    }
+  }
+
+  const submitCli = async (): Promise<void> => {
+    setCliBusy(true)
+    try {
+      await importCli()
+    } catch {
+      /* 오류는 authError 로 보인다 */
+    } finally {
+      setCliBusy(false)
     }
   }
 
@@ -95,7 +108,7 @@ export function GhAuthButton(): React.JSX.Element {
         className={`icon-btn gh-auth__btn${auth.signedIn ? ' is-on' : ''}`}
         title={auth.signedIn ? t('gh.auth.signedInAs', { login: auth.user?.login ?? '' }) : t('gh.auth.signIn')}
         aria-pressed={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setOpen(!open)}
       >
         {auth.signedIn && auth.user ? <Avatar user={auth.user} size={18} /> : <GhMark />}
       </button>
@@ -107,7 +120,7 @@ export function GhAuthButton(): React.JSX.Element {
                 {auth.user && <Avatar user={auth.user} size={28} />}
                 <div>
                   <div className="gh-auth__login">{auth.user?.login}</div>
-                  <div className="gh-auth__sub">{t(auth.method === 'device' ? 'gh.auth.viaDevice' : 'gh.auth.viaPat')}</div>
+                  <div className="gh-auth__sub">{t(auth.method === 'device' ? 'gh.auth.viaDevice' : auth.method === 'gh-cli' ? 'gh.auth.viaGhCli' : 'gh.auth.viaPat')}</div>
                 </div>
               </div>
               {auth.rateLimit !== undefined && (
@@ -159,6 +172,14 @@ export function GhAuthButton(): React.JSX.Element {
               </div>
               <div className="gh-auth__sub">{t('gh.auth.patHint')}</div>
               <div className="gh-auth__sep" />
+              {auth.cliAvailable && (
+                <>
+                  <button className="btn btn--sm" disabled={cliBusy} onClick={() => void submitCli()}>
+                    {cliBusy ? t('add.adding') : t('gh.auth.importCli')}
+                  </button>
+                  <div className="gh-auth__sub">{t('gh.auth.importCliHint')}</div>
+                </>
+              )}
               <button className="btn btn--sm" disabled={!!devicePending} aria-describedby={needCid ? 'gh-need-cid' : undefined} onClick={onDevice}>
                 {t('gh.auth.device')}
               </button>

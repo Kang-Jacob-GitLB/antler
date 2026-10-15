@@ -1,18 +1,22 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Commit, Locale, RefLabel } from '@shared/types'
+import { parsePrNumber } from '@shared/prNumber'
+import { api } from '../lib/api'
 import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
 import { formatDate } from '../lib/format'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
-import { pendingAuthors, requestAvatars } from '../stores/avatarStore'
+import { useGithubStore } from '../stores/githubStore'
+import { pendingAuthors, requestAvatars, useAvatarStore } from '../stores/avatarStore'
 import { PREFETCH, useLogStore } from '../stores/logStore'
 import { useSearchStore } from '../stores/searchStore'
 import { selectWip } from '../stores/wipActions'
 import { useWipStore, wipDirty } from '../stores/wipStore'
 import { GraphCanvas, graphWidth, useGraphVersion } from './GraphCanvas'
 import { AuthorAvatar } from './AuthorAvatar'
+import { AvatarBlockNotice } from './AvatarBlockNotice'
 import { CommitMinimap } from './CommitMinimap'
 import { IconCloud, IconMonitor, IconTag } from './icons'
 import { SearchBar } from './SearchBar'
@@ -84,12 +88,38 @@ const RefChip = ({ chip }: { chip: Chip }): React.JSX.Element => (
 /** 검색 중 행 표시: 일치(match) / 불일치(dim) / 검색 아님(none) */
 type SearchMark = 'match' | 'current' | 'dim' | 'none'
 
+/** PR 열: 제목에서 읽은 번호. GitHub remote 가 있으면 PR 페이지로 가는 링크 칩, 없으면 그냥 글자 */
+function PrCell({ n, base, label }: { n: number | null; base: string | null; label: string }): React.JSX.Element {
+  return (
+    <div className="cell cell--pr">
+      {n !== null &&
+        (base ? (
+          <button
+            type="button"
+            className="pr-chip mono"
+            title={label}
+            aria-label={label}
+            // 행 선택(mousedown)으로 번지지 않게 하고, 키보드로도 누를 수 있게 버튼으로 둔다
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => void api.invoke('gh:openExternal', `${base}${n}`).catch(() => {})}
+          >
+            #{n}
+          </button>
+        ) : (
+          <span className="pr-text mono">#{n}</span>
+        ))}
+    </div>
+  )
+}
+
 const Row = memo(function Row({
   commit,
   index,
   selected,
   locale,
   mark,
+  showPr,
+  prBase,
   onSelect
 }: {
   commit: Commit
@@ -97,9 +127,14 @@ const Row = memo(function Row({
   selected: boolean
   locale: Locale
   mark: SearchMark
+  showPr: boolean
+  /** `https://github.com/o/r/pull/` — GitHub remote 가 없으면 null */
+  prBase: string | null
   onSelect(i: number): void
 }) {
+  const t = useT()
   const chips = useMemo(() => toChips(commit.refs), [commit.refs])
+  const pr = useMemo(() => (showPr ? parsePrNumber(commit.subject) : null), [showPr, commit.subject])
   const firstChip = chips[0]
   return (
     <div
@@ -121,6 +156,7 @@ const Row = memo(function Row({
       <div className="cell cell--message">
         <span className="commit-subject">{commit.subject}</span>
       </div>
+      {showPr && <PrCell n={pr} base={prBase} label={pr === null ? '' : t('pr.open', { n: pr })} />}
       <div className="cell cell--author">
         <AuthorAvatar email={commit.authorEmail} name={commit.authorName} size={18} />
         <span className="cell__text">{commit.authorName}</span>
@@ -138,7 +174,7 @@ function selectCommit(i: number): void {
 }
 
 /** 맨 위 "// WIP" 행 — 커밋하지 않은 작업 트리 변경(수정 ✎ n · 추가 + n). 그래프의 점선 노드는 WipGraph 가 그린다 */
-function WipRow({ selected }: { selected: boolean }): React.JSX.Element | null {
+function WipRow({ selected, showPr }: { selected: boolean; showPr: boolean }): React.JSX.Element | null {
   const t = useT()
   const counts = useWipStore((s) => s.status?.counts)
   const conflicted = useWipStore((s) => s.status?.conflicted ?? 0)
@@ -174,6 +210,7 @@ function WipRow({ selected }: { selected: boolean }): React.JSX.Element | null {
         )}
         {conflicted > 0 && <span className="wip-badge wip-badge--conflict">{t('wip.conflicts', { n: conflicted })}</span>}
       </div>
+      {showPr && <div className="cell cell--pr" />}
       <div className="cell cell--author" />
       <div className="cell cell--date" />
       <div className="cell cell--sha" />
@@ -190,6 +227,11 @@ export function CommitList(): React.JSX.Element {
   // WIP 행: 변경이 있고 전체 그래프(ref 필터 없음)를 볼 때 맨 위에 둔다. 커밋 행은 그만큼 아래로 밀린다
   const wipDirtyNow = useWipStore((s) => wipDirty(s.status))
   const wipSelected = useWipStore((s) => s.selected)
+  // PR 열: GitHub remote 가 있거나(번호가 있는 커밋만 칩이 보인다), remote 가 없어도 제목에 PR 번호가 보이는 커밋이 하나라도 있을 때
+  const ghRef = useGithubStore((s) => s.ref)
+  const anyPr = useMemo(() => commits.some((c) => parsePrNumber(c.subject) !== null), [commits])
+  const showPr = !!ghRef || anyPr
+  const prBase = ghRef ? `https://github.com/${encodeURIComponent(ghRef.owner)}/${encodeURIComponent(ghRef.repo)}/pull/` : null
   const showWip = wipDirtyNow && !filter && commits.length > 0
   const wipOff = showWip ? ROW_H : 0
   const wipOn = showWip && wipSelected
@@ -217,10 +259,12 @@ export function CommitList(): React.JSX.Element {
 
   // 화면에 보이는 행의 작성자 중 아직 모르는 사람의 프로필 사진을 묻는다(debounce 는 스토어가 한다)
   const firstIndex = items[0]?.index ?? 0
+  // 로그인·로그아웃으로 조건이 바뀌면(epoch) 보이는 작성자를 다시 묻는다
+  const avatarEpoch = useAvatarStore((s) => s.epoch)
   useEffect(() => {
     if (!logRepoId) return
     requestAvatars(logRepoId, pendingAuthors(commits, firstIndex, lastIndex))
-  }, [logRepoId, commits, firstIndex, lastIndex])
+  }, [logRepoId, commits, firstIndex, lastIndex, avatarEpoch])
 
   useEffect(() => {
     if (selected >= 0) virtualizer.scrollToIndex(selected, { align: 'auto' })
@@ -277,7 +321,7 @@ export function CommitList(): React.JSX.Element {
   const showEmpty = !loading && !hasMore && commits.length === 0
 
   return (
-    <section className="commit-list" style={{ '--col-graph': `${colGraph}px` } as React.CSSProperties}>
+    <section className={`commit-list${showPr ? ' has-pr' : ''}`} style={{ '--col-graph': `${colGraph}px` } as React.CSSProperties}>
       <CommitMinimap scrollEl={scrollEl} rowHeight={ROW_H} topOffset={wipOff} />
       <SearchBar />
       <div className="commit-list__head" role="row">
@@ -286,7 +330,11 @@ export function CommitList(): React.JSX.Element {
           {t('col.graph')}
         </div>
         <div className="cell cell--message">{t('col.message')}</div>
-        <div className="cell cell--author">{t('col.author')}</div>
+        {showPr && <div className="cell cell--pr">{t('col.pr')}</div>}
+        <div className="cell cell--author">
+          {t('col.author')}
+          <AvatarBlockNotice locale={locale} />
+        </div>
         <div className="cell cell--date">{t('col.date')}</div>
         <div className="cell cell--sha">{t('col.sha')}</div>
       </div>
@@ -311,7 +359,7 @@ export function CommitList(): React.JSX.Element {
         )}
         {showWip && (
           <div className="commit-list__wip" style={{ height: ROW_H }}>
-            <WipRow selected={wipOn} />
+            <WipRow selected={wipOn} showPr={showPr} />
           </div>
         )}
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -330,6 +378,8 @@ export function CommitList(): React.JSX.Element {
                     selected={!wipOn && vi.index === selected}
                     locale={locale}
                     mark={markOf(commit)}
+                    showPr={showPr}
+                    prBase={prBase}
                     onSelect={selectCommit}
                   />
                 ) : (

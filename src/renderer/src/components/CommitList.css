@@ -17,13 +17,18 @@
   --col-author: 150px;
   --col-date: 124px;
   --col-sha: 68px;
-  --cols: var(--col-refs) var(--col-graph) minmax(160px, 1fr) var(--col-author) var(--col-date) var(--col-sha);
+  /* PR 열은 .has-pr 일 때만 폭을 가진다(없으면 var(--col-pr,) 가 비어 트랙이 생기지 않는다) */
+  --cols: var(--col-refs) var(--col-graph) minmax(160px, 1fr) var(--col-pr,) var(--col-author) var(--col-date) var(--col-sha);
+}
+.commit-list.has-pr .commit-list__head,
+.commit-list.has-pr .commit-list__scroll {
+  --col-pr: 64px;
 }
 @container commits (max-width: 820px) {
   .commit-list__head,
   .commit-list__scroll {
     --col-refs: 150px;
-    --cols: var(--col-refs) var(--col-graph) minmax(160px, 1fr) var(--col-author) var(--col-date);
+    --cols: var(--col-refs) var(--col-graph) minmax(160px, 1fr) var(--col-pr,) var(--col-author) var(--col-date);
   }
   .commit-list .cell--sha {
     display: none;
@@ -35,7 +40,8 @@
     --col-refs: 120px;
     --cols: var(--col-refs) var(--col-graph) minmax(120px, 1fr) var(--col-date);
   }
-  .commit-list .cell--author {
+  .commit-list .cell--author,
+  .commit-list .cell--pr {
     display: none;
   }
 }
@@ -162,6 +168,34 @@
 .cell--sha {
   color: var(--text-muted);
   font-size: var(--fs-sm);
+}
+
+/* PR 번호: 링크 색의 평평한 글자 칩(밑줄은 호버·포커스에서만) */
+.cell--pr {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.pr-chip {
+  max-width: 100%;
+  height: 20px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent-text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.pr-chip:hover {
+  background: var(--accent-soft);
+  text-decoration: underline;
+}
+.pr-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.pr-text {
+  padding: 0 5px;
 }
 
 /* ── ref 칩 ── */
