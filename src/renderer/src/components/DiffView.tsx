@@ -139,23 +139,43 @@ function useHighlighter(path: string | undefined, lines: number): Hl | null {
   return hl
 }
 
-export function DiffView(): React.JSX.Element | null {
+/** unified / split 전환(설정에 저장) */
+export function DiffModeToggle(): React.JSX.Element {
   const t = useT()
-  const { file, diff, diffLoading, diffError, detail, diffFull, fullError } = useDetailStore()
-  const { closeFile, stepFile, openFile } = useDetailStore.getState()
   const mode = useAppStore((s) => s.config?.ui.diffMode ?? 'unified')
   const setUi = useAppStore((s) => s.setUi)
-  const scrollRef = useRef<HTMLDivElement>(null)
-
-  const current = diff && file && diff.path === file.path ? diff : null
-  const lineCount = useMemo(() => current?.hunks.reduce((n, h) => n + h.lines.length, 0) ?? 0, [current])
-  const rows = useMemo<(UnifiedRow | SplitRow)[]>(
-    () => (current ? (mode === 'split' ? splitRows(current.hunks) : unifiedRows(current.hunks)) : []),
-    [current, mode]
+  return (
+    <div className="seg" role="radiogroup" aria-label={t('diff.mode')}>
+      {(['unified', 'split'] as const).map((m) => (
+        <button key={m} role="radio" aria-checked={mode === m} className={`seg__btn${mode === m ? ' is-on' : ''}`} onClick={() => void setUi({ diffMode: m })}>
+          {t(`diff.${m}`)}
+        </button>
+      ))}
+    </div>
   )
-  const widest = useMemo(() => (current ? widestLine(current) : 0), [current])
-  const hl = useHighlighter(current?.path, lineCount)
+}
 
+interface DiffBodyProps {
+  /** 표시할 diff(아직 없으면 null) */
+  diff: FileDiff | null
+  loading?: boolean
+  error?: string | null
+  /** 바뀌면 맨 위로 스크롤한다(보통 파일 경로) */
+  resetKey?: unknown
+}
+
+/** diff 본문: 가상 스크롤 행 + 지연 로드 syntax highlight. 커밋 diff 와 PR 파일 diff 가 함께 쓴다 */
+export function DiffBody({ diff, loading = false, error = null, resetKey }: DiffBodyProps): React.JSX.Element {
+  const t = useT()
+  const mode = useAppStore((s) => s.config?.ui.diffMode ?? 'unified')
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const lineCount = useMemo(() => diff?.hunks.reduce((n, h) => n + h.lines.length, 0) ?? 0, [diff])
+  const rows = useMemo<(UnifiedRow | SplitRow)[]>(
+    () => (diff ? (mode === 'split' ? splitRows(diff.hunks) : unifiedRows(diff.hunks)) : []),
+    [diff, mode]
+  )
+  const widest = useMemo(() => (diff ? widestLine(diff) : 0), [diff])
+  const hl = useHighlighter(diff?.path, lineCount)
   const v = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -163,19 +183,52 @@ export function DiffView(): React.JSX.Element | null {
     overscan: 30
   })
 
-  // 새 파일을 열면 맨 위로
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, left: 0 })
-  }, [file])
+  }, [resetKey])
+
+  // unified 는 가장 긴 줄까지 가로 스크롤. split 은 두 열이 항상 화면에 함께 보이도록 폭을 맞추고 긴 줄은 자른다
+  const minWidth = mode === 'split' ? undefined : `calc(${widest + 2}ch + 120px)`
+
+  return (
+    <div ref={scrollRef} className={`diff-scroll diff-scroll--${mode}`}>
+      {error ? (
+        <div className="diff-notice is-error">{t('error.generic', { msg: error })}</div>
+      ) : !diff ? (
+        <div className="diff-notice">{loading ? t('list.loading') : ''}</div>
+      ) : diff.binary ? (
+        <div className="diff-notice">{t('diff.binary')}</div>
+      ) : rows.length === 0 ? (
+        <div className="diff-notice">{t('diff.noContent')}</div>
+      ) : (
+        <div style={{ height: v.getTotalSize(), position: 'relative', minWidth }}>
+          {v.getVirtualItems().map((vi) => {
+            const row = rows[vi.index]!
+            return (
+              <div key={vi.key} className="diff-slot" style={{ transform: `translateY(${vi.start}px)`, height: ROW_H }}>
+                {mode === 'split' ? <SplitRowView row={row as SplitRow} hl={hl} /> : <UnifiedRowView row={row as UnifiedRow} hl={hl} />}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function DiffView(): React.JSX.Element | null {
+  const t = useT()
+  const { file, diff, diffLoading, diffError, detail, diffFull, fullError } = useDetailStore()
+  const { closeFile, stepFile, openFile } = useDetailStore.getState()
+
+  const current = diff && file && diff.path === file.path ? diff : null
+  const lineCount = useMemo(() => current?.hunks.reduce((n, h) => n + h.lines.length, 0) ?? 0, [current])
 
   if (!file || !detail) return null
   const index = detail.files.indexOf(file)
   const slash = file.path.lastIndexOf('/')
   const dir = slash < 0 ? '' : file.path.slice(0, slash + 1)
   const base = file.path.slice(slash + 1)
-
-  // unified 는 가장 긴 줄까지 가로 스크롤. split 은 두 열이 항상 화면에 함께 보이도록 폭을 맞추고 긴 줄은 자른다
-  const minWidth = mode === 'split' ? undefined : `calc(${widest + 2}ch + 120px)`
 
   return (
     <section className="diff-view">
@@ -192,13 +245,7 @@ export function DiffView(): React.JSX.Element | null {
             <span className="is-del">−{file.deletions ?? 0}</span>
           </span>
         )}
-        <div className="seg" role="radiogroup" aria-label={t('diff.mode')}>
-          {(['unified', 'split'] as const).map((m) => (
-            <button key={m} role="radio" aria-checked={mode === m} className={`seg__btn${mode === m ? ' is-on' : ''}`} onClick={() => void setUi({ diffMode: m })}>
-              {t(`diff.${m}`)}
-            </button>
-          ))}
-        </div>
+        <DiffModeToggle />
         <span className="diff-head__pos">
           {index + 1} / {detail.files.length}
         </span>
@@ -220,28 +267,7 @@ export function DiffView(): React.JSX.Element | null {
 
       {current && current.meta.length > 0 && <div className="diff-meta">{current.meta.join(' · ')}</div>}
 
-      <div ref={scrollRef} className={`diff-scroll diff-scroll--${mode}`}>
-        {diffError ? (
-          <div className="diff-notice is-error">{t('error.generic', { msg: diffError })}</div>
-        ) : !current ? (
-          <div className="diff-notice">{diffLoading ? t('list.loading') : ''}</div>
-        ) : current.binary ? (
-          <div className="diff-notice">{t('diff.binary')}</div>
-        ) : rows.length === 0 ? (
-          <div className="diff-notice">{t('diff.noContent')}</div>
-        ) : (
-          <div style={{ height: v.getTotalSize(), position: 'relative', minWidth }}>
-            {v.getVirtualItems().map((vi) => {
-              const row = rows[vi.index]!
-              return (
-                <div key={vi.key} className="diff-slot" style={{ transform: `translateY(${vi.start}px)`, height: ROW_H }}>
-                  {mode === 'split' ? <SplitRowView row={row as SplitRow} hl={hl} /> : <UnifiedRowView row={row as UnifiedRow} hl={hl} />}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
+      <DiffBody diff={current} loading={diffLoading} error={diffError} resetKey={file} />
 
       {current?.truncated && (
         <footer className="diff-trunc">

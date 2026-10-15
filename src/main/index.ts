@@ -1,6 +1,9 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme, session, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, safeStorage, session, shell } from 'electron'
+import { GitHubService } from './github/service'
+import { TokenStore } from './github/tokenStore'
 import { registerIpc } from './ipc/handlers'
+import { allowedExternalUrl } from './github/validate'
 import { ConfigStore } from './services/ConfigStore'
 import { RepoService } from './services/RepoService'
 import { RepoWatcher } from './services/RepoWatcher'
@@ -15,6 +18,7 @@ const BG = { dark: '#14110F', light: '#F6F1E7' }
 
 let config: ConfigStore
 let repos: RepoService
+let gh: GitHubService
 let watcher: RepoWatcher | undefined
 
 function createWindow(): BrowserWindow {
@@ -43,8 +47,9 @@ function createWindow(): BrowserWindow {
   win.on('blur', () => watcher?.setFocused(false))
 
   // 외부 링크는 기본 브라우저로, 앱 내 탐색은 막는다
+  // 새 창은 열지 않는다. github.com 링크만 기본 브라우저로 보낸다(gh:openExternal 과 같은 허용 목록)
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https:\/\//.test(url)) void shell.openExternal(url)
+    if (allowedExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (e, url) => {
@@ -64,7 +69,8 @@ app.whenReady().then(() => {
   watcher = new RepoWatcher(repos, (repoId) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })
   })
-  registerIpc(config, repos, watcher)
+  gh = new GitHubService({ config, repos, store: new TokenStore(app.getPath('userData'), safeStorage) })
+  registerIpc(config, repos, watcher, gh)
 
   // 카메라·마이크 등 어떤 권한도 주지 않는다
   session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
@@ -87,5 +93,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   watcher?.dispose()
+  gh?.dispose()
   void repos?.dispose()
 })

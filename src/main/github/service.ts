@@ -1,0 +1,226 @@
+// GitHub 연동의 진입점. 토큰·로그인 상태·API 클라이언트를 소유하고 IPC 계층에는 가공된 결과만 돌려준다.
+// 토큰은 이 객체 밖으로 나가지 않는다 — 반환값은 GhAuthState(토큰 없음)와 API 응답을 변환한 공유 타입뿐이다.
+import type {
+  GhAuthState,
+  GhComment,
+  GhCommitSummary,
+  GhDeviceCode,
+  GhIssueDetail,
+  GhIssueSummary,
+  GhLabel,
+  GhListQuery,
+  GhListResult,
+  GhPullDetail,
+  GhPullFile,
+  GhPullSummary,
+  GhRepoRef,
+  GhUser
+} from '@shared/types'
+import { AbortError } from '../executors/GitExecutor'
+import * as api from './api'
+import { GitHubApiError, GitHubClient } from './client'
+import { DeviceFlow, MISSING_CLIENT_ID_MESSAGE, type DeviceSession, type SleepFn } from './deviceFlow'
+import type { TokenMethod, TokenStore } from './tokenStore'
+import { parsePat as parsePatInput } from './validate'
+
+export interface GitHubServiceDeps {
+  /** 설정(ui.githubClientId 만 읽는다) */
+  config: { get(): { ui: { githubClientId?: string | undefined } } }
+  repos: { ghRepo(repoId: string): Promise<GhRepoRef | null> }
+  store: TokenStore
+  fetchImpl?: typeof fetch
+  sleep?: SleepFn
+}
+
+export class GitHubService {
+  private token: string | null
+  private method: TokenMethod | undefined
+  private user: GhUser | null = null
+  /** 시작 시 읽은 토큰의 /user 검증(첫 gh:auth 호출에서 한 번, 동시 호출은 합친다) */
+  private validating: Promise<void> | null = null
+  private device: DeviceSession | null = null
+  private readonly requests = new Map<string, AbortController>()
+  private readonly flow: DeviceFlow
+  private readonly client: GitHubClient
+
+  constructor(private readonly deps: GitHubServiceDeps) {
+    const stored = deps.store.load()
+    this.token = stored?.token ?? null
+    this.method = stored?.method
+    this.client = new GitHubClient(deps.fetchImpl, () => this.token)
+    this.flow = new DeviceFlow(deps.fetchImpl, deps.sleep)
+  }
+
+  // ── 인증 ────────────────────────────────────────────
+
+  /** 현재 로그인 상태. 저장된 토큰이 있으면 첫 호출에서 GET /user 로 검증하고 사용자 정보를 캐시한다 */
+  async auth(): Promise<GhAuthState> {
+    if (this.token && !this.user) await this.validate()
+    return this.state()
+  }
+
+  private validate(): Promise<void> {
+    if (this.validating) return this.validating
+    const tok = this.token
+    this.validating = (async () => {
+      try {
+        const { data } = await this.client.get<{ login?: string; avatar_url?: string }>('/user')
+        if (this.token === tok) this.user = api.mapUser(data)
+      } catch (err) {
+        // 거부된 토큰은 쓸모없으니 버려 로그인 화면으로 돌린다. 네트워크 문제 등은 로그인 상태를 유지하고 다음 호출에서 다시 확인한다
+        if (err instanceof GitHubApiError && err.code === 'GH_AUTH' && this.token === tok) this.dropToken()
+      } finally {
+        this.validating = null
+      }
+    })()
+    return this.validating
+  }
+
+  private state(): GhAuthState {
+    const rate = this.client.rate
+    return {
+      signedIn: this.token !== null,
+      ...(this.token && this.user ? { user: this.user } : {}),
+      ...(this.token && this.method ? { method: this.method } : {}),
+      ...(rate ? { rateRemaining: rate.remaining, rateLimit: rate.limit, rateReset: rate.reset } : {}),
+      ...(this.deps.store.storageUnavailable ? { storageUnavailable: true } : {})
+    }
+  }
+
+  /** 이 토큰으로 GET /user 가 되는지 확인하고 사용자 정보를 돌려준다(저장 전 검증) */
+  private async verify(token: string, signal?: AbortSignal): Promise<GhUser> {
+    try {
+      const { data } = await this.client.get<{ login?: string; avatar_url?: string }>('/user', { token, ...(signal ? { signal } : {}) })
+      return api.mapUser(data)
+    } catch (err) {
+      if (err instanceof GitHubApiError && err.code === 'GH_AUTH') throw new Error('토큰이 올바르지 않거나 만료되었습니다')
+      throw err
+    }
+  }
+
+  private signIn(token: string, method: TokenMethod, user: GhUser): GhAuthState {
+    this.deps.store.save(token, method)
+    this.token = token
+    this.method = method
+    this.user = user
+    return this.state()
+  }
+
+  private dropToken(): void {
+    this.deps.store.clear()
+    this.token = null
+    this.method = undefined
+    this.user = null
+    this.client.rate = null
+    this.client.clearCache()
+  }
+
+  async loginPat(raw: string): Promise<GhAuthState> {
+    const token = parsePatInput(raw)
+    return this.signIn(token, 'pat', await this.verify(token))
+  }
+
+  /** Device Flow 시작. 이전에 진행 중이던 흐름은 버린다 */
+  async deviceStart(): Promise<GhDeviceCode> {
+    const clientId = this.clientId()
+    const { code, session } = await this.flow.start(clientId)
+    this.device = session
+    return code
+  }
+
+  /** 사용자가 승인할 때까지 폴링하고 로그인한다. 취소(AbortError)면 세션을 남겨 다시 폴링할 수 있다 */
+  devicePoll(requestId: string): Promise<GhAuthState> {
+    const session = this.device
+    if (!session) return Promise.reject(new Error('진행 중인 로그인이 없습니다. 다시 시작하세요'))
+    const clientId = this.clientId()
+    return this.withSignal(requestId, async (signal) => {
+      let token: string
+      try {
+        token = await this.flow.poll(clientId, session, signal)
+      } catch (err) {
+        // 만료·거부·실패한 세션은 다시 쓸 수 없다
+        if (!(err instanceof AbortError) && this.device === session) this.device = null
+        throw err
+      }
+      if (this.device === session) this.device = null
+      return this.signIn(token, 'device', await this.verify(token, signal))
+    })
+  }
+
+  private clientId(): string {
+    const id = this.deps.config.get().ui.githubClientId?.trim()
+    if (!id) throw new Error(MISSING_CLIENT_ID_MESSAGE)
+    return id
+  }
+
+  logout(): GhAuthState {
+    this.device = null
+    for (const ac of this.requests.values()) ac.abort()
+    this.requests.clear()
+    this.dropToken()
+    return this.state()
+  }
+
+  // ── 조회 ────────────────────────────────────────────
+
+  private async slug(repoId: string): Promise<api.Slug> {
+    const ref = await this.deps.repos.ghRepo(repoId)
+    if (!ref) throw new Error('이 저장소의 remote 가 GitHub(github.com) 저장소가 아닙니다')
+    return { owner: ref.owner, repo: ref.repo }
+  }
+
+  async pulls(repoId: string, query: GhListQuery): Promise<GhListResult<GhPullSummary>> {
+    return api.listPulls(this.client, await this.slug(repoId), query)
+  }
+
+  async pull(repoId: string, n: number): Promise<GhPullDetail> {
+    return api.getPull(this.client, await this.slug(repoId), n)
+  }
+
+  async pullFiles(repoId: string, n: number): Promise<GhPullFile[]> {
+    return api.getPullFiles(this.client, await this.slug(repoId), n)
+  }
+
+  async pullCommits(repoId: string, n: number): Promise<GhCommitSummary[]> {
+    return api.getPullCommits(this.client, await this.slug(repoId), n)
+  }
+
+  async issues(repoId: string, query: GhListQuery): Promise<GhListResult<GhIssueSummary>> {
+    return api.listIssues(this.client, await this.slug(repoId), query)
+  }
+
+  async issue(repoId: string, n: number): Promise<GhIssueDetail> {
+    return api.getIssue(this.client, await this.slug(repoId), n)
+  }
+
+  async comments(repoId: string, n: number): Promise<GhComment[]> {
+    return api.getComments(this.client, await this.slug(repoId), n)
+  }
+
+  async filters(repoId: string): Promise<{ labels: GhLabel[]; assignees: GhUser[] }> {
+    return api.getFilters(this.client, await this.slug(repoId))
+  }
+
+  // ── 요청 취소 ───────────────────────────────────────
+
+  /** req:cancel 에서 호출 — RepoService 와 requestId 공간을 공유하므로 없는 id 는 무시한다 */
+  cancel(requestId: string): void {
+    this.requests.get(requestId)?.abort()
+    this.requests.delete(requestId)
+  }
+
+  dispose(): void {
+    for (const ac of this.requests.values()) ac.abort()
+    this.requests.clear()
+  }
+
+  private async withSignal<T>(requestId: string, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const ac = new AbortController()
+    this.requests.set(requestId, ac)
+    try {
+      return await fn(ac.signal)
+    } finally {
+      if (this.requests.get(requestId) === ac) this.requests.delete(requestId)
+    }
+  }
+}

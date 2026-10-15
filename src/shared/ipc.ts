@@ -2,6 +2,20 @@
 import type {
   AddRepoInput,
   AppConfig,
+  GhAuthState,
+  GhComment,
+  GhCommitSummary,
+  GhDeviceCode,
+  GhIssueDetail,
+  GhIssueSummary,
+  GhLabel,
+  GhListQuery,
+  GhListResult,
+  GhPullDetail,
+  GhPullFile,
+  GhPullSummary,
+  GhRepoRef,
+  GhUser,
   RepoPatch,
   SshHostInfo,
   CommitDetail,
@@ -33,6 +47,30 @@ export interface IpcContract {
   'env:sshHosts': { args: []; result: SshHostInfo[] }
   /** 연결 테스트: 그 환경에서 git 이 실행되는지 확인하고 git 버전 문자열을 돌려준다 */
   'env:test': { args: [input: Omit<AddRepoInput, 'path' | 'group'>]; result: string }
+
+  // ── GitHub (API 는 환경과 무관하게 main 에서 직접 호출, 토큰은 main 에만 있다) ──
+  /** 저장소 remote 에서 GitHub owner/repo 추론. GitHub 저장소가 아니면 null */
+  'gh:repo': { args: [repoId: string]; result: GhRepoRef | null }
+  'gh:auth': { args: []; result: GhAuthState }
+  /** PAT 로 로그인(검증 후 safeStorage 로 암호화 저장) */
+  'gh:loginPat': { args: [token: string]; result: GhAuthState }
+  /** Device Flow 시작. 설정의 githubClientId 가 필요하다 */
+  'gh:deviceStart': { args: []; result: GhDeviceCode }
+  /** Device Flow 완료까지 폴링(사용자가 브라우저에서 승인). 취소는 req:cancel */
+  'gh:devicePoll': { args: [requestId: string]; result: GhAuthState }
+  'gh:logout': { args: []; result: GhAuthState }
+  'gh:pulls': { args: [repoId: string, query: GhListQuery]; result: GhListResult<GhPullSummary> }
+  'gh:pull': { args: [repoId: string, number: number]; result: GhPullDetail }
+  'gh:pullFiles': { args: [repoId: string, number: number]; result: GhPullFile[] }
+  'gh:pullCommits': { args: [repoId: string, number: number]; result: GhCommitSummary[] }
+  'gh:issues': { args: [repoId: string, query: GhListQuery]; result: GhListResult<GhIssueSummary> }
+  'gh:issue': { args: [repoId: string, number: number]; result: GhIssueDetail }
+  /** PR·이슈 댓글(이슈 댓글 API — PR 대화도 여기에 있다) */
+  'gh:comments': { args: [repoId: string, number: number]; result: GhComment[] }
+  /** 필터용 라벨·담당 가능 사용자 */
+  'gh:filters': { args: [repoId: string]; result: { labels: GhLabel[]; assignees: GhUser[] } }
+  /** GitHub 웹 페이지를 기본 브라우저로(https://github.com/ 만 허용) */
+  'gh:openExternal': { args: [url: string]; result: void }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
   'git:refs': { args: [repoId: string]; result: RefsSnapshot }
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
@@ -69,6 +107,21 @@ export const IPC_CHANNELS = [
   'env:wslDistros',
   'env:sshHosts',
   'env:test',
+  'gh:repo',
+  'gh:auth',
+  'gh:loginPat',
+  'gh:deviceStart',
+  'gh:devicePoll',
+  'gh:logout',
+  'gh:pulls',
+  'gh:pull',
+  'gh:pullFiles',
+  'gh:pullCommits',
+  'gh:issues',
+  'gh:issue',
+  'gh:comments',
+  'gh:filters',
+  'gh:openExternal',
   'git:refs',
   'git:search',
   'git:log',

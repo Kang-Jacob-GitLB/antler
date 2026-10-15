@@ -27,6 +27,8 @@ const searchQuery = opt('search', 'Merge branch')
 const injectCss = opt('inject-css', '')
 // 지정 시 diff 를 연 상태에서 첫 저장소에 빈 커밋을 만들어 자동 반영을 확인한다(임시 저장소에만 쓸 것)
 const externalCommit = args.includes('--external-commit') && args.splice(args.indexOf('--external-commit'), 1) && true
+// 지정 시 GitHub PR 목록·상세·파일 탭 시나리오를 돈다(첫 저장소의 origin 이 GitHub 공개 저장소일 때, 로그인 없이 읽기만)
+const githubScenario = args.includes('--github') && args.splice(args.indexOf('--github'), 1) && true
 // 저장소 지정: 로컬 경로 또는 'wsl:<배포판>:<리눅스 경로>' / 'ssh:<호스트>:<경로>'
 const repos = args.map((p) => {
   const m = /^(wsl|ssh):([^:]+):(.+)$/.exec(p)
@@ -174,6 +176,41 @@ try {
       await page.keyboard.press('Escape')
       await page.waitForSelector('.diff-view', { state: 'detached' })
       console.log('Esc → diff closed, graph visible:', await page.isVisible('.commit-list'))
+    }
+
+    // --github: 첫 저장소의 origin 이 GitHub 공개 저장소면 PR 목록·상세·파일 탭을 확인한다(로그인 없이 읽기만)
+    if (githubScenario) {
+      const t0gh = Date.now()
+      const hasSection = await page
+        .waitForFunction(() => [...document.querySelectorAll('.side-section__title')].some((e) => /풀 리퀘스트|Pull requests/.test(e.textContent ?? '')), null, { timeout: 15_000 })
+        .then(() => true)
+        .catch(() => false)
+      console.log(`github sections: ${hasSection} (+${Date.now() - t0gh} ms)`)
+      if (hasSection) {
+        // PR 섹션의 '전체 보기' → 목록, 상태 '전체'
+        await page.click('.side-section:has(.side-section__title:text-matches("풀 리퀘스트|Pull requests")) .side-section__extra .icon-btn')
+        await page.waitForSelector('.gh-view')
+        await page.click('.gh-filters .seg__btn:nth-child(3)')
+        await page.waitForSelector('.gh-row', { timeout: 15_000 }).catch(() => {})
+        const rows = await page.$$eval('.gh-row', (els) => els.map((e) => e.querySelector('.gh-row__text')?.textContent))
+        console.log(`github pulls (all): ${rows.length} — ${rows.slice(0, 3).join(' | ')}`)
+        await shot(`gh-list-${theme}`)
+        if (rows.length) {
+          await page.click('.gh-row >> nth=0')
+          await page.waitForSelector('.gh-comment', { timeout: 15_000 }).catch(() => {})
+          console.log(`github pull detail: "${(await page.textContent('.gh-head__title').catch(() => ''))?.trim()}"`)
+          await shot(`gh-pull-${theme}`)
+          await page.click('.gh-tab:nth-child(3)')
+          await page.waitForSelector('.gh-files .file-row', { timeout: 15_000 }).catch(() => {})
+          await page.waitForTimeout(800)
+          console.log(`github pull files: ${await page.$$eval('.gh-files .file-row', (e) => e.length)}, diff rows: ${await page.$$eval('.gh-files .diff-row', (e) => e.length)}`)
+          await shot(`gh-files-${theme}`)
+        }
+        await page.keyboard.press('Escape')
+        await page.keyboard.press('Escape')
+        await page.keyboard.press('Escape')
+        await page.waitForSelector('.gh-view', { state: 'detached', timeout: 5_000 }).catch(() => {})
+      }
     }
 
     // Ctrl+F 검색

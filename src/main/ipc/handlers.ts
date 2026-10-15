@@ -8,6 +8,9 @@ import { listWslDistros } from '../executors/WslExecutor'
 import type { ConfigStore } from '../services/ConfigStore'
 import { StaleLogError, type RepoService } from '../services/RepoService'
 import type { RepoWatcher } from '../services/RepoWatcher'
+import { GitHubApiError } from '../github/client'
+import type { GitHubService } from '../github/service'
+import { registerGithubIpc } from './github'
 
 type Handler<C extends IpcChannel> = (e: IpcMainInvokeEvent, ...args: IpcArgs<C>) => Promise<IpcResult<C>> | IpcResult<C>
 
@@ -22,9 +25,11 @@ function handle<C extends IpcChannel>(channel: C, fn: Handler<C>): void {
           ? 'ABORTED'
           : err instanceof StaleLogError
             ? 'STALE'
-            : err instanceof GitError
-              ? 'GIT'
-              : 'ERROR'
+            : err instanceof GitHubApiError
+              ? err.code
+              : err instanceof GitError
+                ? 'GIT'
+                : 'ERROR'
       return { ok: false, error: err instanceof Error ? err.message : String(err), code }
     }
   })
@@ -81,7 +86,7 @@ async function checkEnvInput(e: IpcMainInvokeEvent, input: unknown, withPath: bo
   }
 }
 
-export function registerIpc(config: ConfigStore, repos: RepoService, watcher: RepoWatcher): void {
+export function registerIpc(config: ConfigStore, repos: RepoService, watcher: RepoWatcher, gh: GitHubService): void {
   handle('config:get', () => config.get())
   handle('config:setUi', (_e, patch) => config.setUi(patch))
 
@@ -123,5 +128,9 @@ export function registerIpc(config: ConfigStore, repos: RepoService, watcher: Re
   handle('git:search', (_e, repoId, query, ref, requestId) => repos.search(repoId, query, ref, requestId))
   handle('git:commit', (_e, repoId, hash, requestId) => repos.commit(repoId, hash, requestId))
   handle('git:fileDiff', (_e, repoId, req, requestId) => repos.fileDiff(repoId, req, requestId))
-  handle('req:cancel', (_e, requestId) => repos.cancel(requestId))
+  registerGithubIpc(handle, gh, repos)
+  handle('req:cancel', (_e, requestId) => {
+    repos.cancel(requestId)
+    gh.cancel(requestId)
+  })
 }
