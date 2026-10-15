@@ -130,3 +130,38 @@ button.crumb:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* 새로고침 + 자동 fetch 주기 메뉴(셰브런)를 한 덩어리로 */
+.refresh-group {
+  display: flex;
+  align-items: center;
+}
+.refresh-group .menu-btn .icon-btn.icon-btn--chev {
+  width: 16px;
+  margin-left: -2px;
+}
+/* fetch 중에는 새로고침 아이콘이 돈다 */
+.icon-btn.is-spinning svg {
+  animation: fetch-spin 0.9s linear infinite;
+}
+@keyframes fetch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.is-spinning svg {
+    animation-duration: 2.7s;
+  }
+}
+/* fetch 실패·차단 표시 */
+.fetch-note {
+  max-width: 120px;
+  margin-right: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--removed);
+}

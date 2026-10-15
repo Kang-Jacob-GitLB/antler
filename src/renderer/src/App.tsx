@@ -11,6 +11,7 @@ import { Toolbar } from './components/Toolbar'
 import { useAppStore } from './stores/appStore'
 import { useDetailStore } from './stores/detailStore'
 import { useLogStore } from './stores/logStore'
+import { useFetchStore } from './stores/fetchStore'
 import { useSearchStore } from './stores/searchStore'
 import { refreshWip, useWipSync } from './stores/wipActions'
 import { useGithubStore } from './stores/githubStore'
@@ -40,13 +41,19 @@ export function App(): React.JSX.Element | null {
 
   useEffect(() => {
     void useAppStore.getState().init()
+    // 자동·수동 fetch 상태(진행 중·마지막 성공·오류·차단)를 main 이 알려 준다
+    const offFetch = window.antler.on('fetch:status', (s) => useFetchStore.getState().set(s))
     // 외부(터미널·IDE)에서 커밋·체크아웃·fetch 하면 main 감시자가 알려 준다 — 선택은 유지한 채 다시 읽는다
-    return window.antler.on('repo:changed', ({ repoId }) => {
+    const offChanged = window.antler.on('repo:changed', ({ repoId }) => {
       if (repoId !== useAppStore.getState().activeRepoId) return
       void useAppStore.getState().refreshRefs()
       void useLogStore.getState().softReload()
       refreshWip()
     })
+    return () => {
+      offFetch()
+      offChanged()
+    }
   }, [])
 
   // 작업 트리(WIP) 변경 상태: 저장소 선택·창 포커스·주기 폴링으로 최신으로 유지한다

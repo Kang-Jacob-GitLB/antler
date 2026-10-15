@@ -3,6 +3,7 @@ import type {
   AddRepoInput,
   AppConfig,
   CommitActivity,
+  FetchStatus,
   GhAuthState,
   GhAvatarQuery,
   GhAvatarResult,
@@ -100,6 +101,11 @@ export interface IpcContract {
   'git:wipStatus': { args: [repoId: string, requestId?: string]; result: WipStatus }
   /** 작업 트리 파일 하나의 diff(스테이지/작업 트리/추적 안 됨). 결과 형식은 git:fileDiff 와 같다 */
   'git:wipDiff': { args: [repoId: string, req: WipDiffRequest, requestId?: string]; result: FileDiff }
+  /**
+   * 원격 fetch(이 앱의 유일한 쓰기). manual 이면 사용자가 새로고침을 누른 것 — 저장소 설정이 위험하면 main 이 확인 창을 띄운다.
+   * 끝나면(또는 막히면) 상태를 돌려준다. 같은 저장소의 진행 중 fetch 가 있으면 그 결과를 공유한다
+   */
+  'git:fetch': { args: [repoId: string, manual: boolean]; result: FetchStatus }
   /** 진행 중인 요청 취소 */
   'req:cancel': { args: [requestId: string]; result: void }
   /** 앱 업데이트. 상태 변화는 'update:state' 이벤트로도 온다 */
@@ -125,6 +131,7 @@ export type IpcResult<C extends IpcChannel> = IpcContract[C]['result']
 /** main 이 renderer 로 밀어주는 이벤트 */
 export interface IpcEvents {
   'repo:changed': { repoId: string }
+  'fetch:status': FetchStatus
   'theme:system': { dark: boolean }
   'update:state': UpdateState
 }
@@ -168,6 +175,7 @@ export const IPC_CHANNELS = [
   'git:fileDiff',
   'git:wipStatus',
   'git:wipDiff',
+  'git:fetch',
   'req:cancel',
   'update:get',
   'update:check',
@@ -178,7 +186,7 @@ export const IPC_CHANNELS = [
   'win:setTitleBarTheme'
 ] as const satisfies readonly IpcChannel[]
 
-export const IPC_EVENTS = ['repo:changed', 'theme:system', 'update:state'] as const satisfies readonly IpcEvent[]
+export const IPC_EVENTS = ['repo:changed', 'fetch:status', 'theme:system', 'update:state'] as const satisfies readonly IpcEvent[]
 
 /** invoke 결과 래퍼. Electron 기본 에러 문자열("Error invoking remote method…")을 피하려고 쓴다. */
 export type IpcEnvelope<T> = { ok: true; data: T } | { ok: false; error: string; code?: string }

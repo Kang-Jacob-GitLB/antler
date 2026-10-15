@@ -87,6 +87,8 @@ export class StaleLogError extends Error {
 interface Runtime {
   exec: GitExecutor
   queue: ProcessQueue
+  /** fetch 전용 슬롯 하나. 최대 60초 걸리는 네트워크 작업이 조회용 큐를 점유하지 않고, 환경당 동시 fetch 도 하나로 제한한다 */
+  fetchQueue: ProcessQueue
 }
 
 /**
@@ -223,6 +225,12 @@ export class RepoService {
     const { repo, rt } = this.resolve(repoId)
     if (rt.exec.kind !== 'local') return null
     return rt.queue.run(() => git.gitDirs(rt.exec, repo.path))
+  }
+
+  /** FetchService 용: 저장소 경로와 실행기, fetch 전용 큐 */
+  fetchContext(repoId: string): { exec: GitExecutor; path: string; queue: ProcessQueue } {
+    const { repo, rt } = this.resolve(repoId)
+    return { exec: rt.exec, path: repo.path, queue: rt.fetchQueue }
   }
 
   repoKind(repoId: string): SourceKind | null {
@@ -505,7 +513,7 @@ export class RepoService {
   private runtime(source: Source): Runtime {
     let rt = this.runtimes.get(source.id)
     if (!rt) {
-      rt = { exec: createExecutor(source), queue: new ProcessQueue(CONCURRENCY[source.kind]) }
+      rt = { exec: createExecutor(source), queue: new ProcessQueue(CONCURRENCY[source.kind]), fetchQueue: new ProcessQueue(1) }
       this.runtimes.set(source.id, rt)
     }
     return rt

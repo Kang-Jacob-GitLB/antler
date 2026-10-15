@@ -8,6 +8,7 @@ import { TokenStore } from './github/tokenStore'
 import { registerIpc } from './ipc/handlers'
 import { allowedExternalUrl } from './github/validate'
 import { ConfigStore } from './services/ConfigStore'
+import { FetchService } from './services/FetchService'
 import { RepoService } from './services/RepoService'
 import { RepoWatcher } from './services/RepoWatcher'
 import { createAutoBackend } from './update/autoBackend'
@@ -32,6 +33,7 @@ let repos: RepoService
 let gh: GitHubService
 let watcher: RepoWatcher | undefined
 let updates: UpdateService | undefined
+let fetcher: FetchService | undefined
 
 /**
  * 창 아이콘. 패키지된 Windows·macOS 는 실행 파일·번들 아이콘을 쓰므로 지정하지 않는다.
@@ -70,7 +72,10 @@ function createWindow(): BrowserWindow {
   })
   win.once('ready-to-show', () => win.show())
   // 창이 뒤에 있을 때는 원격 폴링을 늦추고, 다시 앞으로 오면 바로 확인한다
-  win.on('focus', () => watcher?.setFocused(true))
+  win.on('focus', () => {
+    watcher?.setFocused(true)
+    fetcher?.onFocus()
+  })
   win.on('blur', () => watcher?.setFocused(false))
 
   // 외부 링크는 기본 브라우저로, 앱 내 탐색은 막는다
@@ -96,6 +101,18 @@ app.whenReady().then(() => {
   watcher = new RepoWatcher(repos, (repoId) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })
   })
+  fetcher = new FetchService(
+    config,
+    repos,
+    (status) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('fetch:status', status)
+    },
+    (repoId) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })
+    },
+    // 로컬 git 의 core.hooksPath 로 쓸 앱 소유의 빈 디렉터리(Windows 에서 /dev/null 은 드라이브 루트의 \dev\null 로 풀린다)
+    join(app.getPath('userData'), 'no-hooks')
+  )
   gh = new GitHubService({
     config,
     repos,
@@ -125,7 +142,7 @@ app.whenReady().then(() => {
     openPath: (p) => shell.openPath(p),
     showItem: (p) => shell.showItemInFolder(p)
   })
-  registerIpc(config, repos, watcher, gh, updates)
+  registerIpc(config, repos, watcher, gh, fetcher, updates)
   updates.start()
 
   // 카메라·마이크 등 어떤 권한도 주지 않는다
@@ -149,6 +166,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   watcher?.dispose()
+  fetcher?.dispose()
   gh?.dispose()
   updates?.dispose()
   void repos?.dispose()

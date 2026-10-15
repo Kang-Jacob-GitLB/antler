@@ -69,3 +69,21 @@ describe('악성 저장소 설정', () => {
     // git 프로세스를 여러 번 순차로 띄우므로 전체 테스트가 동시에 돌 때는 기본 5초를 넘길 수 있다
   }, 30_000)
 })
+
+describe('refs/replace 로 위조한 이력', () => {
+  it('GIT_NO_REPLACE_OBJECTS 로 실제 객체를 보여 준다(replace ref 는 저장소에 심어 둘 수 있다)', async () => {
+    const dir = join(root, 'replace')
+    const g = (...a: string[]) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' }).trim()
+    execFileSync('git', ['init', '-q', '-b', 'main', dir])
+    g('commit', '-q', '--allow-empty', '-m', 'fake history')
+    const fake = g('rev-parse', 'HEAD')
+    g('commit', '-q', '--allow-empty', '-m', 'real history')
+    const real = g('rev-parse', 'HEAD')
+    g('replace', real, fake) // real 을 가리키는 모든 조회가 fake 로 보이게 된다
+    // 대조: 보호 없이는 위조된 제목이 보인다
+    expect(g('log', '-1', '--format=%s', real)).toBe('fake history')
+    // executor(GIT_ENV 에 GIT_NO_REPLACE_OBJECTS=1)는 실제 이력을 보여 준다
+    const r = await exec.run(dir, ['log', '-1', '--format=%s', real])
+    expect(r.stdout.toString('utf8').trim()).toBe('real history')
+  })
+})

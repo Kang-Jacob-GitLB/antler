@@ -180,7 +180,8 @@ try {
     await shot(`graph-${theme}`)
 
     // 툴바 테마 메뉴(선택 팝오버) — 열어서 찍고 Esc 로 닫는다
-    const themeMenu = await page.$('.toolbar .menu-btn > button')
+    // 테마 메뉴: 툴바의 선택 메뉴 중 aria-label 이 테마인 것(새로고침 옆 자동 fetch 메뉴와 구분)
+    const themeMenu = await page.$('.toolbar .menu-btn > button[aria-label="' + (locale === 'en' ? 'Theme' : '테마') + '"]')
     if (themeMenu) {
       await themeMenu.click()
       await page.waitForSelector('.menu-btn__pop', { timeout: 2000 }).catch(() => {})

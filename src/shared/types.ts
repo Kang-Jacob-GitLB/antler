@@ -43,6 +43,26 @@ export interface UiPrefs {
   graphInitials?: boolean
   /** 사용자가 '이 버전 건너뛰기'를 고른 업데이트 버전(그 버전은 자동 알림에서 제외, 더 새 버전은 알림) */
   skippedUpdateVersion?: string
+  /** 활성 저장소를 자동으로 fetch 하는 주기(분). 0 이면 끔, 없으면 5분 */
+  autoFetchMinutes?: number
+}
+
+/** 저장소 fetch 상태(main 이 관리하고 renderer 로 밀어준다) */
+export interface FetchStatus {
+  repoId: string
+  fetching: boolean
+  /** 마지막으로 성공한 시각(epoch ms) */
+  lastOkAt: number | null
+  /** 마지막 시도의 오류 메시지 */
+  error: string | null
+  /** 저장소 설정 때문에 fetch 를 막았다면 그 항목들. confirmable 이면 수동 새로고침에서 사용자가 허용할 수 있다 */
+  blocked: { keys: string[]; confirmable: boolean } | null
+  /** 인증 실패로 자동 fetch 를 멈춘 상태(수동 새로고침으로 재개) */
+  authPaused: boolean
+  /** 자동 fetch 가 인증에 실패했는데 이 remote 는 아직 수동 fetch 로 승인되지 않았다 — 새로고침을 한 번 누르면 이후 자동으로 가져온다 */
+  needsManual: boolean
+  /** remote 가 하나도 없어 fetch 대상이 아님 */
+  noRemote: boolean
 }
 
 /**
@@ -87,6 +107,11 @@ export interface AppConfig {
   sources: Source[]
   repos: Repo[]
   ui: UiPrefs
+  /**
+   * main 전용: 사용자가 수동 fetch 로 한 번 성공시킨 저장소별 remote(이름+실제 URL) 지문. 이 지문이 같을 때만
+   * 자동 fetch 가 자격 증명 도우미를 쓴다. renderer 는 바꿀 수 없다(config:setUi·repos:update 는 이 키를 받지 않는다)
+   */
+  fetchApprovals?: Record<string, string>
 }
 
 export type RefKind = 'head' | 'local' | 'remote' | 'tag'
