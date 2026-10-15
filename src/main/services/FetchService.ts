@@ -106,7 +106,9 @@ export class FetchService {
     const id = this.active
     if (!id || !this.autoEnabled(id) || this.inflight.has(id)) return
     const s = this.state(id)
-    if (s.lastAttemptAt === null || Date.now() - s.lastAttemptAt >= nextDelayMs(this.minutes(), s.failures)) {
+    // 아직 한 번도 시도하지 않았으면 schedule() 의 첫 지연(FIRST_DELAY_MS)에 맡긴다 — 시작 직후 포커스로 조회와 겹치지 않게
+    if (s.lastAttemptAt === null) return
+    if (Date.now() - s.lastAttemptAt >= nextDelayMs(this.minutes(), s.failures)) {
       void this.fetch(id, { manual: false })
     }
   }

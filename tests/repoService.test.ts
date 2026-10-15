@@ -55,6 +55,42 @@ describe('RepoService.log', { timeout: 30_000 }, () => {
   })
 })
 
+describe('RepoService 첫 페이지 문', { timeout: 30_000 }, () => {
+  it('활성화하지 않은 저장소는 기다리지 않고, 활성화하면 첫 로그 페이지가 나간 뒤에 풀린다', async () => {
+    const { svc, repoId } = setup()
+    await svc.afterFirstPage(repoId) // 문이 없으면 즉시
+    svc.armFirstPage(repoId)
+    let opened = false
+    const waiting = svc.afterFirstPage(repoId).then(() => (opened = true))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(opened).toBe(false)
+    await svc.log(repoId, { skip: 0, count: 10 })
+    await waiting
+    expect(opened).toBe(true)
+  })
+
+  it('감시가 계산한 ref 시그니처를 활동 조회가 다시 계산하지 않고 쓴다', async () => {
+    const { svc, repoId } = setup()
+    const first = await svc.signature(repoId)
+    // 같은 값이 기억돼 있어, 동시 호출은 진행 중 계산과 합쳐져 같은 값을 돌려준다
+    expect(await Promise.all([svc.signature(repoId), svc.signature(repoId)])).toEqual([first, first])
+    const act = await svc.activity(repoId, undefined)
+    expect(act).toBeTruthy()
+  })
+
+  it('StaleLogError 로 이력이 바뀐 것을 알면 감시가 기억한 낡은 시그니처 대신 새로 계산해 활동을 돌려준다', async () => {
+    const { svc, repoId } = setup()
+    await svc.signature(repoId) // 감시의 기준 시그니처
+    const before = (await svc.activity(repoId, undefined)).total
+    await svc.log(repoId, { skip: 0, count: 100 })
+    await retireMainCursor(svc, repoId)
+    execFileSync('git', ['-C', repoPath, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'newer'])
+    // 감시는 아직 모르는 상태(기억한 시그니처가 낡았다)에서 renderer 가 이어 읽다가 이력 변경을 안다
+    await expect(svc.log(repoId, { skip: 100, count: 100 })).rejects.toBeInstanceOf(StaleLogError)
+    expect((await svc.activity(repoId, undefined)).total).toBe(before + 1)
+  })
+})
+
 describe('RepoService.addRepo (local)', () => {
   it('하위 폴더를 골라도 최상위 경로로 등록하고, 다시 추가하면 같은 항목을 돌려준다', async () => {
     const { svc } = setup()

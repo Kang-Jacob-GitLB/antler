@@ -33,6 +33,8 @@ export class RepoWatcher {
   private checkingGen: number | null = null
   private lastCheck = 0
   private pendingSince = 0
+  /** 기준 시그니처를 계산하는 중 — 이때 포커스로 확인을 또 돌리면 같은 for-each-ref 를 한 번 더 실행한다 */
+  private baselining = false
 
   constructor(
     private readonly repos: RepoService,
@@ -50,9 +52,18 @@ export class RepoWatcher {
     this.repoId = repoId
     const gen = ++this.generation
     if (!repoId) return
-    // 기준 시그니처를 먼저 잡아 둔다(감시 시작 전 상태와 비교)
-    this.lastSig = await this.repos.signature(repoId).catch(() => null)
-    if (gen !== this.generation) return
+    // 기준 시그니처를 먼저 잡아 둔다(감시 시작 전 상태와 비교). 첫 화면이 나온 뒤에 시작한다
+    this.baselining = true
+    try {
+      await this.repos.afterFirstPage(repoId)
+      if (gen !== this.generation) return
+      // signal 이 없는 호출은 제한 시간이 있는 공유 계산이다 — 멈춘 원격이어도 baselining 이 영영 남지 않는다
+      this.lastSig = await this.repos.signature(repoId).catch(() => null)
+      if (gen !== this.generation) return
+    } finally {
+      // 다른 저장소로 바뀌어 중단된 경우에는 새 감시의 상태를 건드리지 않는다
+      if (gen === this.generation) this.baselining = false
+    }
     const kind = this.repos.repoKind(repoId)
     if (kind === 'local') await this.watchLocal(repoId, gen)
     this.schedule(gen)
@@ -61,7 +72,7 @@ export class RepoWatcher {
   /** 창 포커스 변화. 다시 포커스를 얻으면 바로 한 번 확인한다(다른 도구에서 커밋하고 돌아온 경우) */
   setFocused(focused: boolean): void {
     this.focused = focused
-    if (focused && this.repoId) void this.check(this.generation)
+    if (focused && this.repoId && !this.baselining) void this.check(this.generation)
   }
 
   dispose(): void {
@@ -143,6 +154,7 @@ export class RepoWatcher {
 
   private stop(): void {
     this.generation++
+    this.baselining = false
     for (const w of this.watchers) w.close()
     this.watchers = []
     if (this.timer) clearTimeout(this.timer)

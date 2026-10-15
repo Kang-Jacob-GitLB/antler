@@ -213,6 +213,15 @@ export interface Stash {
   date: number
 }
 
+/**
+ * 첫 화면 뒤에 따로 받는 ref 부가 정보(비싸서 RefsSnapshot 에서 미룬다).
+ * tracking: 로컬 브랜치 전체 이름 → 업스트림 ahead/behind/gone(변화 없는 브랜치는 없음)
+ */
+export interface RefsDetails {
+  tracking: Record<string, { ahead?: number; behind?: number; upstreamGone?: boolean }>
+  submodules: SubmoduleInfo[]
+}
+
 /** 사이드바용 ref 스냅샷 */
 export interface RefsSnapshot {
   head: HeadInfo
@@ -221,7 +230,7 @@ export interface RefsSnapshot {
   tags: Tag[]
   worktrees: Worktree[]
   stashes: Stash[]
-  /** 최상위 서브모듈(중첩은 보지 않는다). 없으면 빈 배열 */
+  /** 최상위 서브모듈(중첩은 보지 않는다). 없으면 빈 배열. git:refs 는 비워 두고 git:refsDetails 가 채운다 */
   submodules: SubmoduleInfo[]
   /** 저장소의 기본 브랜치와 그 tip(그래프에서 굵게 그릴 줄기). 정할 수 없으면 없음 */
   defaultBranch?: DefaultBranch

@@ -79,6 +79,8 @@ export const useLogStore = create<LogState>((set, get) => ({
     const pending = get().pendingRequest
     if (pending) void api.invoke('req:cancel', pending)
     const generation = get().generation + 1
+    // 저장소가 바뀌면 이전 저장소의 기본 브랜치 tip 도 버린다
+    if (repoId !== get().repoId) graphEngine.clearDefaultTip()
     graphEngine.reset(generation)
     // 이전 저장소의 커밋은 즉시 버린다(비활성 저장소 메모리 해제)
     set({

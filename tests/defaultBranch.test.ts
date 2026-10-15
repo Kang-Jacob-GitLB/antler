@@ -78,3 +78,89 @@ describe('기본 브랜치 줄기 표시(LaneBuilder)', () => {
     for (const r of rows) for (let k = 3; k < r.segs.length; k += 4) expect(r.segs[k]!).toBeLessThan(8)
   })
 })
+
+describe('늦게 정해진 기본 브랜치 tip(graphEngine)', () => {
+  // laneWorker 를 같은 프로세스에서 돌리는 가짜 Worker — 메시지 순서·세대 규칙은 실제 worker 코드를 그대로 쓴다
+  type Handler = (e: { data: unknown }) => void
+  let toEngine: Handler | null = null
+  const toWorker: { type: string; start?: number }[] = []
+  const workerSelf: { onmessage: Handler | null; postMessage: (m: unknown) => void } = {
+    onmessage: null,
+    postMessage: (m) => queueMicrotask(() => toEngine?.({ data: m }))
+  }
+  class FakeWorker {
+    set onmessage(h: Handler) {
+      toEngine = h
+    }
+    postMessage(m: unknown): void {
+      toWorker.push(m as { type: string; start?: number })
+      queueMicrotask(() => workerSelf.onmessage?.({ data: m }))
+    }
+  }
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 10))
+  const mk = (list: ReturnType<typeof c>[]) => list.map((x) => ({ ...x, authorName: '', authorEmail: '' })) as never[]
+  const load = async () => {
+    Object.assign(globalThis, { self: workerSelf, Worker: FakeWorker })
+    await import('../src/renderer/src/workers/laneWorker')
+    return (await import('../src/renderer/src/graph/graphEngine')).graphEngine
+  }
+  const rowsOf = (e: Awaited<ReturnType<typeof load>>, n: number): GraphRow[] => Array.from({ length: n }, (_, i) => e.row(i)!)
+  const commits = mk([c('m', ['a', 'f']), c('f', ['a']), c('a', ['r']), c('r', [])])
+
+  it('로그를 다시 읽지 않고 읽어 둔 커밋으로 다시 계산해, 처음부터 tip 을 알았을 때와 같은 줄기가 된다', async () => {
+    const graphEngine = await load()
+    // 기준: tip 을 먼저 알고 시작
+    graphEngine.setDefaultTip('m', [])
+    graphEngine.reset(1)
+    graphEngine.append(1, 0, commits)
+    await settle()
+    const early = rowsOf(graphEngine, 4).map(boldSegs)
+    expect(early.flat().length).toBeGreaterThan(0)
+
+    // 늦은 tip: 첫 페이지를 tip 없이 계산한 뒤 tip 이 도착
+    graphEngine.clearDefaultTip()
+    graphEngine.reset(2)
+    graphEngine.append(2, 0, commits)
+    await settle()
+    expect(rowsOf(graphEngine, 4).flatMap(boldSegs)).toEqual([])
+    graphEngine.setDefaultTip('m', commits)
+    await settle()
+    expect(rowsOf(graphEngine, 4).map(boldSegs)).toEqual(early)
+    expect(graphEngine.count).toBe(commits.length)
+  })
+
+  it('저장소 전환 중(tip 이 없어지거나 다른 목록)에는 이전 저장소의 커밋을 다시 보내지 않는다', async () => {
+    const graphEngine = await load()
+    graphEngine.clearDefaultTip()
+    graphEngine.reset(3)
+    graphEngine.setDefaultTip('m', [])
+    graphEngine.append(3, 0, commits)
+    await settle()
+    const before = toWorker.length
+    // refs 가 비워져 tip 이 null 이 된다
+    graphEngine.setDefaultTip(null, commits)
+    // 새 저장소의 tip 이 왔지만 목록은 아직 이전 것(이번 세대에 보낸 수와 다르다)
+    graphEngine.setDefaultTip('x', commits.slice(0, 2))
+    await settle()
+    expect(toWorker.length).toBe(before)
+    expect(graphEngine.count).toBe(commits.length)
+  })
+
+  it('다시 계산하는 동안 이전 행을 유지하고, 5000행을 넘는 목록도 다 끝난 뒤 한 번에 바꾼다', async () => {
+    const graphEngine = await load()
+    const long = mk(Array.from({ length: 6000 }, (_, i) => c(`h${i}`, i < 5999 ? [`h${i + 1}`] : [])))
+    graphEngine.clearDefaultTip()
+    graphEngine.reset(4)
+    graphEngine.append(4, 0, long)
+    await settle()
+    expect(graphEngine.count).toBe(6000)
+    const seen: number[] = []
+    const off = graphEngine.subscribe(() => seen.push(graphEngine.count))
+    graphEngine.setDefaultTip('h0', long)
+    await settle()
+    off()
+    // 중간(5000행)만 보이는 상태 없이 곧바로 6000 으로 바뀐다
+    expect(seen).toEqual([6000])
+    expect(graphEngine.row(5999)).toBeDefined()
+  })
+})

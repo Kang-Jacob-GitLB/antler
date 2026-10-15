@@ -99,10 +99,39 @@ try {
     console.log(`cold start → empty state: ${Date.now() - t0} ms`)
     await shot(`empty-${theme}`)
   } else {
-    await page.waitForSelector('.commit-subject', { timeout: 15_000 })
+    // 프레임마다 확인해 첫 커밋 행이 처음 그려진 시각을 잡는다(기본 폴링 100ms 는 오차가 크다)
+    await page.waitForFunction(() => !!document.querySelector('.commit-subject'), null, { polling: 'raf', timeout: 15_000 })
+    const firstRowAt = Date.now()
     // 앱 기준 콜드 스타트: main 프로세스가 시작된 뒤 첫 커밋 행이 보일 때까지(Playwright 가 붙는 시간 제외)
     const appUptime = Math.round((await app.evaluate(() => process.uptime())) * 1000)
-    console.log(`cold start → first commit row: ${Date.now() - t0} ms (app process uptime ${appUptime} ms)`)
+    // 목록 안정 시각: 행 수·전체 높이·첫 행 제목·그래프 레인 계산 버전이 500ms 동안 바뀌지 않게 된 시점
+    // (목록이 비워졌다 다시 채워지거나 레인이 다시 계산되면 그만큼 늦어진다). 15초 안에 안정되지 않으면 'unstable' 로 보고한다
+    const lastChangeAt = await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const startedAt = Date.now()
+          const sig = () => {
+            const sc = document.querySelector('.commit-list__scroll')
+            const lanes = document.querySelector('.graph-canvas')?.getAttribute('data-lane-version') ?? ''
+            return `${document.querySelectorAll('.commit-row').length}|${sc?.scrollHeight ?? 0}|${document.querySelector('.commit-subject')?.textContent ?? ''}|${lanes}`
+          }
+          let last = sig()
+          let at = Date.now()
+          const tick = () => {
+            const cur = sig()
+            if (cur !== last) {
+              last = cur
+              at = Date.now()
+            }
+            if (Date.now() - at >= 500) resolve(at)
+            else if (Date.now() - startedAt > 15_000) resolve(null)
+            else requestAnimationFrame(tick)
+          }
+          tick()
+        })
+    )
+    const stable = lastChangeAt === null ? 'unstable (15 s+)' : `${Math.max(lastChangeAt, firstRowAt) - t0} ms`
+    console.log(`cold start → first commit row: ${firstRowAt - t0} ms (app uptime ${appUptime} ms) · list stable ${stable}`)
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
     if (updateFake) {
