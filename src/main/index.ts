@@ -37,6 +37,8 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     backgroundColor: dark ? BG.dark : BG.light,
+    // 패키지된 앱은 실행 파일·번들 아이콘을 쓴다. 개발 실행에서만 창 아이콘을 직접 지정한다
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../resources/icon.png') }),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

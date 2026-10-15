@@ -33,6 +33,8 @@ const githubScenario = args.includes('--github') && args.splice(args.indexOf('--
 const electronArgs = opt('electron-args', '').split(' ').filter(Boolean)
 // --idle-only: 첫 화면만 띄우고 조작 없이 N초 쉰 뒤 메모리를 잰다(유휴 메모리 측정)
 const idleOnly = Number(opt('idle-only', '0'))
+// --exe <경로>: 패키지된 실행 파일(dist/win-unpacked/Antler.exe 등)을 띄운다
+const exePath = opt('exe', '') || undefined
 // 저장소 지정: 로컬 경로 또는 'wsl:<배포판>:<리눅스 경로>' / 'ssh:<호스트>:<경로>'
 const repos = args.map((p) => {
   const m = /^(wsl|ssh):([^:]+):(.+)$/.exec(p)
@@ -61,8 +63,9 @@ writeFileSync(
 const t0 = Date.now()
 const app = await electron.launch({
   // require('electron') 는 실행 파일 경로를 돌려주며, 바이너리가 없으면 그때 내려받는다(Electron 44+)
-  executablePath: createRequire(import.meta.url)('electron'),
-  args: [...electronArgs, APP_DIR],
+  executablePath: exePath ?? createRequire(import.meta.url)('electron'),
+  // 패키지된 앱(--exe)은 앱 경로 인자 없이 실행한다(app.asar 를 스스로 읽는다)
+  args: exePath ? electronArgs : [...electronArgs, APP_DIR],
   env: { ...process.env, ANTLER_USER_DATA: userData },
   timeout: 30_000
 })

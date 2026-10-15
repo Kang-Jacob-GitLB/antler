@@ -1,0 +1,61 @@
+# Antler 패키징 설정(electron-builder)
+# 빌드: pnpm build && pnpm dist         (현재 OS 용)
+#       pnpm dist:win | dist:mac | dist:linux
+appId: com.antler.app
+productName: Antler
+copyright: Copyright © Antler
+directories:
+  output: dist
+  buildResources: resources
+# electron-vite 결과(out/)만 싣는다. renderer 라이브러리는 번들에 들어 있어 node_modules 에는 main 의 ssh2 만 남는다
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+extraResources:
+  - from: src/renderer/src/assets/fonts/jetendard/LICENSE.txt
+    to: licenses/Jetendard-LICENSE.txt
+asar: true
+# ssh2 의 네이티브 가속(cpu-features·sshcrypto)은 선택 사항이다 — 없으면 순수 JS 로 동작하므로 다시 빌드하지 않는다
+npmRebuild: false
+electronLanguages:
+  - ko
+  - en-US
+
+win:
+  icon: resources/icon.ico
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
+  shortcutName: Antler
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
+
+mac:
+  icon: resources/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  # 서명·공증은 배포 계정 설정 후(identity, notarize) 추가한다
+  identity: null
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+linux:
+  icon: resources/icons
+  category: Development
+  target:
+    - AppImage
+    - deb
+  maintainer: Antler
+  synopsis: 가벼운 크로스플랫폼 Git 조회 GUI
+appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}
