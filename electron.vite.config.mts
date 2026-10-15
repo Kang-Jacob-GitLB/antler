@@ -10,7 +10,8 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: https://avatars.githubusercontent.com",
+  // 아바타·PR 본문 이미지만 허용(github.com/user-attachments 는 private-user-images 로 넘어가고, 이모지는 githubassets). 다른 외부 이미지는 막는다
+  "img-src 'self' data: https://avatars.githubusercontent.com https://camo.githubusercontent.com https://user-images.githubusercontent.com https://private-user-images.githubusercontent.com https://github.com https://github.githubassets.com",
   "font-src 'self' data:",
   "worker-src 'self' blob:",
   "connect-src 'self'",

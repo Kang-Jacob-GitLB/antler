@@ -92,6 +92,30 @@ async function okOrEmpty(exec: GitExecutor, repoPath: string, args: string[], op
   return r.code === 0 ? r.stdout : Buffer.alloc(0)
 }
 
+/**
+ * remote 이름과 fetch URL 목록. `git config --get-regexp` 는 remote 가 없으면 종료 코드 1 이라 빈 목록으로 본다.
+ * 키는 `remote.<name>.url` — remote 이름에 점이 있을 수 있어(`my.fork`) 앞 `remote.` 와 마지막 `.url` 사이를 이름으로 쓴다.
+ * -z 출력은 `key\nvalue\0` 레코드라 URL 에 공백이 있어도 안전하다. 같은 remote 에 url 이 여러 개면 첫 값만 쓴다.
+ */
+export async function remotes(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<{ name: string; url: string }[]> {
+  const args = ['config', '--null', '--get-regexp', '^remote\\..*\\.url$']
+  const r = await exec.run(repoPath, args, opts)
+  if (r.code === 1) return []
+  if (r.code !== 0) throw new GitError(r.stderr.trim() || `git config failed (${r.code})`, r.code, r.stderr, args)
+  const seen = new Set<string>()
+  const out: { name: string; url: string }[] = []
+  for (const rec of r.stdout.toString('utf8').split('\0')) {
+    const nl = rec.indexOf('\n')
+    if (nl < 0) continue
+    const key = rec.slice(0, nl)
+    const name = key.slice('remote.'.length, key.length - '.url'.length)
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    out.push({ name, url: rec.slice(nl + 1) })
+  }
+  return out
+}
+
 /** 사이드바용 ref 스냅샷. 다섯 조회를 동시에 돌린다. */
 export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsSnapshot> {
   const [refsOut, remoteOut, worktreeOut, stashOut, headInfo] = await Promise.all([

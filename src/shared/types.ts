@@ -34,6 +34,8 @@ export interface UiPrefs {
   collapsed?: string[]
   /** diff 보기 방식 */
   diffMode?: 'unified' | 'split'
+  /** GitHub OAuth App client ID(Device Flow 로그인용). 비우면 PAT 로만 로그인 */
+  githubClientId?: string
   lastRepoId?: string
 }
 
@@ -158,6 +160,164 @@ export interface SearchResult {
   hashes: string[]
   /** 상한에 걸려 잘렸는지 */
   truncated: boolean
+}
+
+// ── M5: GitHub ───────────────────────────────────────
+
+/** 저장소 remote URL 에서 추론한 GitHub 저장소 */
+export interface GhRepoRef {
+  owner: string
+  repo: string
+  /** 추론에 쓴 remote 이름(origin 우선) */
+  remote: string
+}
+
+export interface GhUser {
+  login: string
+  avatarUrl: string
+}
+
+export interface GhLabel {
+  name: string
+  /** 6자리 hex(# 없음) — GitHub 가 정한 라벨 색. 화면에서는 토큰과 섞어 은은하게 쓴다 */
+  color: string
+}
+
+/** 로그인 상태. 토큰 값은 renderer 로 절대 넘기지 않는다 */
+export interface GhAuthState {
+  signedIn: boolean
+  user?: GhUser
+  /** 'pat' | 'device' */
+  method?: 'pat' | 'device'
+  /** 남은 API 호출 수(마지막 응답 기준) */
+  rateRemaining?: number
+  rateLimit?: number
+  /** epoch seconds */
+  rateReset?: number
+  /** safeStorage 를 쓸 수 없어 토큰을 저장하지 않는 환경(Linux 키링 없음 등) */
+  storageUnavailable?: boolean
+}
+
+/** Device Flow 시작 결과 — 사용자가 브라우저에서 user_code 를 입력한다 */
+export interface GhDeviceCode {
+  userCode: string
+  verificationUri: string
+  /** 만료까지 초 */
+  expiresIn: number
+  /** 폴링 간격(초) */
+  interval: number
+}
+
+export type GhCheckState = 'success' | 'failure' | 'pending' | 'neutral' | 'none'
+export type GhReviewState = 'approved' | 'changes_requested' | 'commented' | 'pending' | 'dismissed' | 'none'
+
+export interface GhPullSummary {
+  number: number
+  title: string
+  state: 'open' | 'closed' | 'merged'
+  draft: boolean
+  author: GhUser
+  labels: GhLabel[]
+  assignees: GhUser[]
+  headRef: string
+  baseRef: string
+  headSha: string
+  /** epoch seconds */
+  updatedAt: number
+  createdAt: number
+  comments: number
+  /** 목록 보강(로그인했을 때만). 없으면 아직 모름 */
+  review?: GhReviewState
+  checks?: GhCheckState
+  htmlUrl: string
+}
+
+export interface GhCheckRun {
+  name: string
+  state: GhCheckState
+  /** 상세 링크 */
+  url?: string
+}
+
+export interface GhReview {
+  author: GhUser
+  state: GhReviewState
+  /** epoch seconds */
+  submittedAt: number
+}
+
+export interface GhComment {
+  author: GhUser
+  /** GitHub 가 렌더링·정화한 HTML(renderer 에서 한 번 더 정화한다) */
+  bodyHtml: string
+  createdAt: number
+  htmlUrl: string
+}
+
+export interface GhCommitSummary {
+  sha: string
+  message: string
+  authorName: string
+  author?: GhUser
+  date: number
+}
+
+export interface GhPullFile {
+  path: string
+  oldPath?: string
+  status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged'
+  additions: number
+  deletions: number
+  /** GitHub 가 준 unified diff 조각. 큰 파일·바이너리는 없다 */
+  patch?: string
+}
+
+export interface GhPullDetail extends GhPullSummary {
+  bodyHtml: string
+  mergeable: boolean | null
+  additions: number
+  deletions: number
+  changedFiles: number
+  reviews: GhReview[]
+  checkRuns: GhCheckRun[]
+  requestedReviewers: GhUser[]
+}
+
+export interface GhIssueSummary {
+  number: number
+  title: string
+  state: 'open' | 'closed'
+  author: GhUser
+  labels: GhLabel[]
+  assignees: GhUser[]
+  comments: number
+  updatedAt: number
+  createdAt: number
+  htmlUrl: string
+}
+
+export interface GhIssueDetail extends GhIssueSummary {
+  bodyHtml: string
+  closedAt?: number
+}
+
+export interface GhListQuery {
+  state: 'open' | 'closed' | 'all'
+  /** 라벨 이름(하나) */
+  label?: string
+  /** 담당자 login, 'none' 은 담당자 없음 */
+  assignee?: string
+  page?: number
+}
+
+export interface GhListResult<T> {
+  items: T[]
+  hasMore: boolean
+  /**
+   * 필터링으로 빈 쪽을 건너뛰며 여러 쪽을 읽었을 때만 있다. 있으면 "더 보기"에서 이 쪽을 요청하고,
+   * 없으면 요청한 page + 1 을 요청한다
+   */
+  nextPage?: number
 }
 
 // ── M4: 원격 환경 ─────────────────────────────────────

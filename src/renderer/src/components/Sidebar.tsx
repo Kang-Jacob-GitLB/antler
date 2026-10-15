@@ -7,6 +7,8 @@ import { useAppStore } from '../stores/appStore'
 import { useLogStore, type LogFilter } from '../stores/logStore'
 import { EnvBadge } from './EnvBadge'
 import { RepoMenu } from './RepoMenu'
+import { ChecksBadge, GhStateIcon, prState } from './github/GhBits'
+import { useGithubStore } from '../stores/githubStore'
 import {
   IconCheck,
   IconChevronRight,
@@ -27,6 +29,8 @@ import './Sidebar.css'
 
 /** 기본으로 접어 둘 폴더 크기 */
 const AUTO_COLLAPSE = 30
+/** 사이드바에 보이는 PR·이슈 수(나머지는 '전체 보기') */
+const SIDEBAR_GH_MAX = 30
 
 // ── 접힘 상태 ─────────────────────────────────────────
 // ui.collapsed 에는 기본값과 다르게 바꾼 키만 저장한다: 'key' = 접음, '!key' = 펼침
@@ -210,6 +214,12 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const { isOpen, toggle } = useCollapse()
   /** 메뉴(그룹 지정·제거)를 연 저장소 */
   const [menuFor, setMenuFor] = useState<string | null>(null)
+  // GitHub: remote 가 GitHub 저장소일 때만 PR·이슈 섹션을 보인다
+  const ghRef = useGithubStore((s) => s.ref)
+  const ghPulls = useGithubStore((s) => s.sidePulls)
+  const ghIssues = useGithubStore((s) => s.sideIssues)
+  const ghView = useGithubStore((s) => s.view)
+  const ghShow = useGithubStore((s) => s.show)
   const allGroups = useMemo(
     () => [...new Set((config?.repos ?? []).map((r) => r.group).filter((g): g is string => !!g))].sort(),
     [config]
@@ -405,6 +415,73 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                 )
               })}
             </Section>
+
+            {ghRef && (
+              <>
+                <Section
+                  id="pulls"
+                  title={t('gh.pulls')}
+                  count={ghPulls.items.length}
+                  extra={
+                    <button className="icon-btn icon-btn--sm" title={t('gh.viewAll')} onClick={() => ghShow({ kind: 'pulls' })}>
+                      <IconMore size={13} />
+                    </button>
+                  }
+                >
+                  {ghPulls.error && <div className="sidebar__empty">{ghPulls.error}</div>}
+                  {!ghPulls.error && ghPulls.items.length === 0 && !ghPulls.loading && <div className="sidebar__empty">{t('gh.empty')}</div>}
+                  {ghPulls.items
+                    .filter((p) => matches(q, p.title, `#${p.number}`, p.author.login))
+                    .slice(0, SIDEBAR_GH_MAX)
+                    .map((p) => (
+                      <ItemRow
+                        key={p.number}
+                        depth={0}
+                        icon={<GhStateIcon kind="pull" state={prState(p)} size={13} />}
+                        label={p.title}
+                        title={`#${p.number} ${p.title} — ${p.author.login}`}
+                        active={ghView?.kind === 'pull' && ghView.number === p.number}
+                        onClick={() => ghShow({ kind: 'pull', number: p.number, tab: 'conversation' })}
+                        trailing={
+                          <>
+                            <ChecksBadge state={p.checks} />
+                            <span className="side-sub">#{p.number}</span>
+                          </>
+                        }
+                      />
+                    ))}
+                </Section>
+
+                <Section
+                  id="issues"
+                  title={t('gh.issues')}
+                  count={ghIssues.items.length}
+                  extra={
+                    <button className="icon-btn icon-btn--sm" title={t('gh.viewAll')} onClick={() => ghShow({ kind: 'issues' })}>
+                      <IconMore size={13} />
+                    </button>
+                  }
+                >
+                  {ghIssues.error && <div className="sidebar__empty">{ghIssues.error}</div>}
+                  {!ghIssues.error && ghIssues.items.length === 0 && !ghIssues.loading && <div className="sidebar__empty">{t('gh.empty')}</div>}
+                  {ghIssues.items
+                    .filter((i) => matches(q, i.title, `#${i.number}`, i.author.login))
+                    .slice(0, SIDEBAR_GH_MAX)
+                    .map((i) => (
+                      <ItemRow
+                        key={i.number}
+                        depth={0}
+                        icon={<GhStateIcon kind="issue" state={i.state} size={13} />}
+                        label={i.title}
+                        title={`#${i.number} ${i.title} — ${i.author.login}`}
+                        active={ghView?.kind === 'issue' && ghView.number === i.number}
+                        onClick={() => ghShow({ kind: 'issue', number: i.number })}
+                        trailing={<span className="side-sub">#{i.number}</span>}
+                      />
+                    ))}
+                </Section>
+              </>
+            )}
 
             <Section id="worktrees" title={t('sidebar.worktrees')} count={worktrees.length}>
               {worktrees.map((w: Worktree) => {

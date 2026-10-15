@@ -3,7 +3,7 @@
 Windows · WSL · SSH(원격 Ubuntu)의 git 저장소를 한 화면에서 살펴보는 가벼운 Git GUI.
 사슴뿔(antler)처럼 갈라져 뻗는 브랜치 구조에서 이름을 따왔다. 읽기(조회) 전용이다.
 
-> 현재 단계: **M4** — WSL·SSH 저장소(환경별 git 실행), 환경 관리 UI(추가·그룹·연결 테스트), 외부 변경 자동 반영
+> 현재 단계: **M5** — GitHub PR·이슈 연동(목록·필터·상세·변경 파일 diff, PAT·Device Flow 로그인, ETag 캐시)
 
 ## 실행
 
@@ -69,6 +69,11 @@ tests/           vitest + fixtures/
     `~/.ssh/config`(Host·HostName·User·Port·IdentityFile·ProxyJump·Include)를 따르고, 인증은 ssh-agent·키 파일만 —
     비밀번호는 저장하지도 묻지도 않는다. 호스트 키는 `known_hosts` 로 검증하며 모르는 키는 자동 등록하지 않는다.
   - 경로 `~/x` 는 셸 없이 실행되므로 두 실행기 모두 홈 디렉터리에서 실행해 상대 경로로 처리한다.
+- **GitHub 연동(M5)**: remote URL(origin 우선)에서 owner/repo 를 추론하고, API 는 환경(로컬·WSL·SSH)과 무관하게
+  main 이 직접 호출한다. 모든 GET 은 ETag 조건부 요청이라 다시 볼 때 304(호출 한도 차감 없음)로 끝난다.
+  로그인은 PAT 또는 Device Flow(설정에 OAuth App client ID 필요). 토큰은 Electron `safeStorage` 로 암호화해
+  저장하고 renderer 로는 절대 넘기지 않는다. PR·이슈 본문은 GitHub 가 렌더링한 HTML 을 앱에서 한 번 더 허용 목록으로
+  정화하고, 링크는 github.com 만 기본 브라우저로 연다(이미지는 CSP 로 *.githubusercontent.com 만).
 - **외부 변경 자동 반영**: 활성 저장소만 감시한다. 로컬은 `.git`(워크트리면 공통 디렉터리까지) 재귀 감시 → 디바운스,
   WSL 4초·SSH 30초 폴링(창이 뒤에 있으면 4배 느리게, 앞으로 오면 즉시 확인). HEAD 와 모든 ref 의 해시 요약이
   바뀐 경우에만 사이드바·그래프를 다시 읽고, 보던 커밋 선택은 유지한다.
@@ -99,6 +104,7 @@ tests/           vitest + fixtures/
 | highlight.js | diff syntax highlight — core 와 필요한 언어만 diff 를 열 때 지연 로드(언어별 청크) |
 | pretendard (dev) | UI 폰트 Pretendard Variable(OFL 1.1). woff2 하나만 renderer 자산으로 번들 |
 | d2coding (dev) | 코드 폰트 D2Coding Regular/Bold 전체 한글 글리프(OFL 1.1). woff2 만 번들 |
+| happy-dom (dev) | renderer 의 HTML 정화(sanitize) 테스트에 쓰는 가벼운 DOM 구현 — 테스트 전용 |
 
 ## 마일스톤
 
@@ -106,5 +112,5 @@ tests/           vitest + fixtures/
 - [x] **M2** 그래프 렌더링(레인 팔레트) + 브랜치/태그/워크트리 사이드바
 - [x] **M3** 커밋 상세, 변경 파일 리스트, diff 뷰어
 - [x] **M4** WslExecutor, SshExecutor + 환경 관리 UI
-- [ ] M5 GitHub PR/이슈 연동
+- [x] **M5** GitHub PR/이슈 연동
 - [ ] M6 아이콘/브랜딩, 성능 튜닝, 패키징

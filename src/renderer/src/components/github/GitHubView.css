@@ -1,0 +1,428 @@
+.gh-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  border-radius: var(--neu-radius);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-raised);
+  overflow: hidden;
+}
+
+/* ── 머리·필터 ── */
+.gh-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gh-head__repo {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.gh-head__spacer {
+  flex: 1;
+}
+.gh-head__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gh-head__num {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.gh-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gh-select {
+  height: 28px;
+  max-width: 200px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-inset-sm);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.gh-select:focus-visible {
+  box-shadow: var(--neu-inset-sm), 0 0 0 1px var(--accent);
+}
+
+.gh-notice {
+  padding: var(--space-4);
+  color: var(--text-secondary);
+}
+.gh-notice.is-error {
+  color: var(--removed-text);
+}
+.gh-muted {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* ── 목록 ── */
+.gh-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2) var(--space-3);
+}
+.gh-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.gh-row:hover {
+  background: var(--row-hover);
+}
+.gh-row__main {
+  flex: 1;
+  min-width: 0;
+}
+.gh-row__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.gh-row__text {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.gh-row__sub {
+  margin-top: 2px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gh-row__people {
+  display: flex;
+  gap: 2px;
+}
+.gh-row__count,
+.gh-row__when {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.gh-more {
+  display: flex;
+  margin: var(--space-3) auto;
+}
+
+/* ── 상태 아이콘·배지·라벨·아바타 ── */
+.gh-state {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.gh-state--open {
+  color: var(--added);
+}
+.gh-state--merged {
+  color: var(--velvet-text);
+}
+.gh-state--closed {
+  color: var(--removed);
+}
+.gh-state--draft {
+  color: var(--text-muted);
+}
+.gh-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  box-shadow: var(--neu-inset-sm);
+}
+.gh-badge--review-approved {
+  color: var(--added-text);
+}
+.gh-badge--review-changes_requested {
+  color: var(--removed-text);
+}
+.gh-badge--review-commented,
+.gh-badge--review-pending {
+  color: var(--text-muted);
+}
+.gh-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.gh-dot--success {
+  background: var(--added);
+}
+.gh-dot--failure {
+  background: var(--removed);
+}
+.gh-dot--pending {
+  background: var(--modified);
+}
+.gh-dot--neutral {
+  background: var(--text-muted);
+}
+.gh-label {
+  --label: var(--text-muted);
+  flex-shrink: 0;
+  padding: 0 7px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 9px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  /* 라벨 색은 GitHub 데이터 — 테마 글자색과 섞어 대비를 유지하고 배경은 옅게 */
+  color: color-mix(in srgb, var(--label) 55%, var(--text-primary));
+  background: color-mix(in srgb, var(--label) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--label) 45%, transparent);
+  white-space: nowrap;
+}
+.gh-avatar {
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.gh-avatar--blank {
+  display: inline-block;
+}
+
+/* ── 상세 ── */
+.gh-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gh-meta__people {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.gh-ref {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--neu-inset-sm);
+  color: var(--accent-text);
+}
+.gh-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gh-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 var(--space-3);
+  color: var(--text-secondary);
+  border-bottom: 2px solid transparent;
+}
+.gh-tab:hover {
+  color: var(--text-primary);
+}
+.gh-tab.is-on {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.gh-tab__n {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: var(--fs-xs);
+  box-shadow: var(--neu-inset-sm);
+}
+.gh-tabs__extra {
+  margin-left: auto;
+}
+.gh-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.gh-comment {
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--neu-radius-sm);
+  box-shadow: var(--neu-inset-sm);
+}
+.gh-comment__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  font-size: var(--fs-sm);
+}
+.gh-comment__when {
+  color: var(--text-muted);
+}
+.gh-status {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--neu-radius-sm);
+  box-shadow: var(--neu-inset-sm);
+}
+.gh-status__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 26px;
+  font-size: var(--fs-sm);
+}
+.gh-commit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+}
+.gh-commit:hover {
+  background: var(--row-hover);
+}
+.gh-commit__sha {
+  color: var(--accent-text);
+}
+.gh-commit__msg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.gh-files {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.gh-files__list {
+  width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: var(--space-2);
+  border-right: 1px solid var(--border);
+}
+.gh-files__list .file-row {
+  height: 26px;
+}
+.gh-files__diff {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── 정화된 본문(GitHub 마크다운 결과) ── */
+.gh-body {
+  font-size: var(--fs-md);
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.gh-body > :first-child {
+  margin-top: 0;
+}
+.gh-body > :last-child {
+  margin-bottom: 0;
+}
+.gh-body h1,
+.gh-body h2,
+.gh-body h3 {
+  margin: 1em 0 0.5em;
+  font-size: 1.1em;
+}
+.gh-body p,
+.gh-body ul,
+.gh-body ol,
+.gh-body pre,
+.gh-body blockquote,
+.gh-body table {
+  margin: 0 0 0.8em;
+}
+.gh-body code {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  box-shadow: var(--neu-inset-sm);
+}
+.gh-body pre {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  box-shadow: var(--neu-inset-sm);
+}
+.gh-body pre code {
+  padding: 0;
+  box-shadow: none;
+}
+.gh-body blockquote {
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.gh-body [data-href] {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.gh-body img {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+}
+.gh-body table {
+  border-collapse: collapse;
+}
+.gh-body th,
+.gh-body td {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+}
+.gh-body hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}

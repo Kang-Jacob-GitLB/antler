@@ -2,6 +2,7 @@ import { useT } from '../i18n'
 import { useActiveRepo, useAppStore } from '../stores/appStore'
 import { useLogStore } from '../stores/logStore'
 import { useSearchStore } from '../stores/searchStore'
+import { GhAuthButton } from './github/GhAuthButton'
 import { AntlerMark } from './brand'
 import { EnvBadge } from './EnvBadge'
 import {
@@ -69,6 +70,7 @@ export function Toolbar(): React.JSX.Element {
       <div className="toolbar__spacer" />
 
       <div className="toolbar__actions">
+        <GhAuthButton />
         {repo && (
           <button className="icon-btn" title={`${t('toolbar.search')} (${mod}F)`} onClick={() => useSearchStore.getState().show()}>
             <IconSearch />

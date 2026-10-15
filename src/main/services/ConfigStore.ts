@@ -44,6 +44,11 @@ export class ConfigStore {
   }
 
   setUi(patch: Partial<UiPrefs>): AppConfig {
+    // renderer 가 보낸 값이다 — main 이 그대로 쓰는 값은 형식을 확인한다
+    const cid = patch.githubClientId
+    if (cid !== undefined && (typeof cid !== 'string' || !/^[A-Za-z0-9._-]{1,100}$/.test(cid))) {
+      throw new Error('잘못된 OAuth App client ID 입니다(영문·숫자·._- 100자 이내)')
+    }
     return this.update({ ...this.config, ui: { ...this.config.ui, ...patch } })
   }
 

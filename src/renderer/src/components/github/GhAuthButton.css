@@ -1,0 +1,97 @@
+.gh-auth {
+  position: relative;
+}
+.gh-auth__btn.is-on {
+  color: var(--text-primary);
+}
+.gh-auth__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 45;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--neu-radius-sm);
+  background: var(--neu-bg);
+  box-shadow: var(--shadow-popover);
+  font-size: var(--fs-sm);
+}
+.gh-auth__title {
+  font-weight: 650;
+  font-size: var(--fs-md);
+}
+.gh-auth__who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.gh-auth__login {
+  font-weight: 650;
+}
+.gh-auth__sub {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+.gh-auth__label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.gh-auth__row {
+  display: flex;
+  gap: var(--space-2);
+}
+.gh-auth__input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--neu-bg);
+  box-shadow: var(--neu-inset-sm);
+  color: var(--text-primary);
+  outline: none;
+}
+.gh-auth__input:focus-visible {
+  box-shadow: var(--neu-inset-sm), 0 0 0 1px var(--accent);
+}
+.gh-auth__code {
+  align-self: center;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  box-shadow: var(--neu-inset-sm);
+  font-size: 20px;
+  letter-spacing: 0.15em;
+  color: var(--accent-text);
+}
+.gh-auth__sep {
+  height: 1px;
+  background: var(--border);
+}
+.gh-auth__adv summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+}
+.gh-auth__adv[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.gh-auth__warn {
+  color: var(--modified-text);
+  font-size: var(--fs-xs);
+}
+.gh-auth__err {
+  color: var(--removed-text);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

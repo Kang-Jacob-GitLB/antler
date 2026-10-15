@@ -3,6 +3,7 @@ import type {
   CommitDetail,
   FileDiff,
   FileDiffRequest,
+  GhRepoRef,
   LogPage,
   LogQuery,
   RefsSnapshot,
@@ -19,6 +20,7 @@ import { WslExecutor } from '../executors/WslExecutor'
 import { wslFromUnc } from '../executors/wslPaths'
 import * as git from '../git/commands'
 import { LogCursor } from '../git/logCursor'
+import { pickGithubRemote } from '../github/remoteUrl'
 import { LOCAL_SOURCE_ID, sourceFor, type ConfigStore } from './ConfigStore'
 import { LruCache } from './lru'
 
@@ -38,6 +40,8 @@ const DIFF_CACHE_BYTES = 32 * 1024 * 1024
 const DIFF_CACHE_ENTRIES = 500
 /** 연결 테스트 제한 시간(SSH 접속·WSL 배포판 기동 포함) */
 const ENV_TEST_TIMEOUT_MS = 25_000
+/** GitHub remote 추론 결과 캐시 시간 */
+const GH_REPO_TTL_MS = 60_000
 
 /** 같은 키의 진행 중 요청. 구독자(waiters)가 모두 취소했을 때만 git 을 끊는다 */
 interface Inflight<T> {
@@ -94,6 +98,7 @@ export class RepoService {
   private readonly commitCache = new LruCache<string, CommitDetail>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
   private readonly diffCache = new LruCache<string, FileDiff>(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES)
   private readonly inflight = new Map<string, Inflight<unknown>>()
+  private readonly ghRepoCache = new Map<string, { at: number; value: GhRepoRef | null }>()
   private readonly sweeper = setInterval(() => this.sweepIdleCursors(), CURSOR_SWEEP_MS)
 
   constructor(private readonly config: ConfigStore) {
@@ -213,6 +218,20 @@ export class RepoService {
   refs(repoId: string): Promise<RefsSnapshot> {
     const { repo, rt } = this.resolve(repoId)
     return rt.queue.run(() => git.refs(rt.exec, repo.path), { key: `refs:${repoId}` })
+  }
+
+  /**
+   * remote URL 에서 추론한 GitHub 저장소(GitHub 저장소가 아니면 null). remote 는 거의 안 바뀌므로
+   * 저장소별로 짧게(60초) 캐시한다 — 목록·상세 조회마다 git 을 띄우지 않기 위해서다.
+   */
+  async ghRepo(repoId: string): Promise<GhRepoRef | null> {
+    const hit = this.ghRepoCache.get(repoId)
+    if (hit && Date.now() - hit.at < GH_REPO_TTL_MS) return hit.value
+    const { repo, rt } = this.resolve(repoId)
+    const list = await rt.queue.run(() => git.remotes(rt.exec, repo.path), { key: `remotes:${repoId}` })
+    const value = pickGithubRemote(list)
+    this.ghRepoCache.set(repoId, { at: Date.now(), value })
+    return value
   }
 
   /**
@@ -388,6 +407,7 @@ export class RepoService {
     this.anchors.clear()
     this.commitCache.clear()
     this.diffCache.clear()
+    this.ghRepoCache.clear()
     for (const ac of this.requests.values()) ac.abort()
     await Promise.all([...this.runtimes.values()].map((r) => r.exec.dispose()))
     this.runtimes.clear()

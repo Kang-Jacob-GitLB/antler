@@ -32,7 +32,8 @@ function setup(): { svc: RepoService; repoId: string } {
 /** 다른 ref 로 요청해 기존 커서를 닫게 만든다(유휴 sweep 과 같은 효과) */
 const retireMainCursor = (s: RepoService, repoId: string) => s.log(repoId, { skip: 0, count: 1, ref: 'v1.0.0' })
 
-describe('RepoService.log', () => {
+// 실제 git 을 여러 번 실행한다 — 전체 테스트를 병렬로 돌릴 때 부하로 기본 5초를 넘길 수 있다
+describe('RepoService.log', { timeout: 30_000 }, () => {
   it('커서가 닫힌 뒤에도 이력이 그대로면 끊김 없이 이어 읽는다', async () => {
     const { svc, repoId } = setup()
     const all = (await svc.log(repoId, { skip: 0, count: 1000 })).commits

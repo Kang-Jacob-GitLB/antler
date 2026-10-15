@@ -12,6 +12,8 @@ import { useAppStore } from './stores/appStore'
 import { useDetailStore } from './stores/detailStore'
 import { useLogStore } from './stores/logStore'
 import { useSearchStore } from './stores/searchStore'
+import { useGithubStore } from './stores/githubStore'
+import { GitHubView } from './components/github/GitHubView'
 import './App.css'
 
 type Widths = [sidebar: number, detail: number]
@@ -56,6 +58,7 @@ export function App(): React.JSX.Element | null {
   useEffect(() => {
     useSearchStore.getState().close()
     useDetailStore.getState().reset()
+    void useGithubStore.getState().open(activeRepoId)
     useLogStore.getState().open(activeRepoId)
   }, [activeRepoId])
 
@@ -67,6 +70,8 @@ export function App(): React.JSX.Element | null {
     return () => clearTimeout(timer)
   }, [selectedHash])
   const diffOpen = useDetailStore((s) => s.file !== null)
+  // 중앙 화면 우선순위: 파일 diff → GitHub 화면 → 커밋 그래프(그래프는 항상 마운트해 스크롤·페이지 유지)
+  const ghOpen = useGithubStore((s) => s.view !== null)
 
   // 그래프 필터가 바뀌면 검색 결과도 그 범위로 다시 구한다(옛 범위의 일치 표시가 남지 않게)
   const filterRev = useLogStore((s) => s.filter?.rev)
@@ -89,6 +94,16 @@ export function App(): React.JSX.Element | null {
         if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
           e.preventDefault()
           detail.stepFile(e.key === 'ArrowDown' ? 1 : -1)
+          return
+        }
+      }
+      // GitHub 화면: Esc 로 상세 → 목록 → 그래프 순으로 물러난다
+      const gh = useGithubStore.getState()
+      if (gh.view && !detail.file && e.key === 'Escape' && !useAppStore.getState().switcherOpen) {
+        const tag = (e.target as HTMLElement | null)?.tagName
+        if (tag !== 'INPUT' && tag !== 'SELECT') {
+          e.preventDefault()
+          gh.show(gh.view.kind === 'pull' ? { kind: 'pulls' } : gh.view.kind === 'issue' ? { kind: 'issues' } : null)
           return
         }
       }
@@ -140,10 +155,10 @@ export function App(): React.JSX.Element | null {
         {activeRepoId ? (
           <>
             {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
-            <div className={`app__center${diffOpen ? ' is-hidden' : ''}`}>
+            <div className={`app__center${diffOpen || ghOpen ? ' is-hidden' : ''}`}>
               <CommitList />
             </div>
-            {diffOpen && <DiffView />}
+            {diffOpen ? <DiffView /> : ghOpen ? <GitHubView /> : null}
             <Splitter {...splitter(1)} />
             <DetailPanel width={widths[1]} />
           </>
