@@ -26,6 +26,16 @@ let repos: RepoService
 let gh: GitHubService
 let watcher: RepoWatcher | undefined
 
+/**
+ * 창 아이콘. 패키지된 Windows·macOS 는 실행 파일·번들 아이콘을 쓰므로 지정하지 않는다.
+ * Linux 는 실행 파일 아이콘이 없어(.desktop 없이 AppImage 를 바로 띄우는 경우 등) extraResources 의 icon.png 를 준다.
+ */
+function windowIcon(): { icon?: string } {
+  if (!app.isPackaged) return { icon: join(__dirname, '../../resources/icon.png') }
+  if (process.platform === 'linux') return { icon: join(process.resourcesPath, 'icon.png') }
+  return {}
+}
+
 function createWindow(): BrowserWindow {
   const pref = config.get().ui.theme
   const dark = pref === 'system' ? nativeTheme.shouldUseDarkColors : pref === 'dark'
@@ -37,8 +47,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     backgroundColor: dark ? BG.dark : BG.light,
-    // 패키지된 앱은 실행 파일·번들 아이콘을 쓴다. 개발 실행에서만 창 아이콘을 직접 지정한다
-    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../resources/icon.png') }),
+    ...windowIcon(),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

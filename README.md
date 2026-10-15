@@ -60,7 +60,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 | OS | 타깃 |
 |---|---|
 | Windows | NSIS 설치 프로그램(x64, arm64) + portable(x64) |
-| macOS | dmg(x64, arm64) — **미서명**(`identity: null`), 서명·공증은 배포 계정 설정 후 추가 |
+| macOS | dmg(x64, arm64) — ad-hoc 서명(`identity: '-'`, hardened runtime 끔). 개발자 ID 서명·공증은 배포 계정 설정 후 추가 |
 | Linux | AppImage + deb |
 
 검증 상태:
@@ -195,6 +195,7 @@ tests/           vitest + fixtures/
 | `node scripts/bench-log.mjs <repo>` | git log 옵션 조합별 소요 시간 |
 | `node scripts/check-contrast.mjs` | 디자인 토큰 WCAG 대비 검사(미달 시 exit 1) |
 | `pnpm icons` (`scripts/gen-icons.mjs`) | `resources/` 아이콘 재생성 |
+| `pnpm notices` (`scripts/gen-notices.mjs`) | renderer 번들 라이브러리 라이선스 고지를 `resources/licenses/THIRD_PARTY_NOTICES.txt` 로 재생성(의존성 갱신 후) |
 
 `drive.mjs` 옵션(저장소는 로컬 경로 또는 `wsl:<배포판>:<경로>` / `ssh:<호스트>:<경로>`):
 
@@ -241,7 +242,7 @@ tests/           vitest + fixtures/
 - 원격 URL 이 바뀌어도 저장소를 다시 선택해야 GitHub 연동에 반영된다.
 - SSH 원격의 로그인 셸이 cmd/PowerShell 이면 지원하지 않는다.
 - macOS·Linux 패키지는 이 저장소 작업 환경에서 검증하지 못했다.
-- 빌드는 코드 서명이 없다(Windows·macOS 모두 미서명 경고가 뜰 수 있다).
+- 개발자 ID 코드 서명이 없다(Windows 는 SmartScreen, macOS 는 ad-hoc 서명이라 Gatekeeper 경고가 뜬다).
 
 ## 마일스톤
 
@@ -257,5 +258,6 @@ tests/           vitest + fixtures/
 앱 자체의 라이선스는 아직 정하지 않았다(LICENSE 파일 없음). 번들 폰트는 SIL OFL 1.1 이다.
 
 - Pretendard — OFL 1.1
-- Jetendard — OFL 1.1. 라이선스 파일은 `src/renderer/src/assets/fonts/jetendard/LICENSE.txt`,
-  패키지에는 `resources/licenses/Jetendard-LICENSE.txt` 로 동봉된다.
+- Jetendard — OFL 1.1 (원본 `src/renderer/src/assets/fonts/jetendard/LICENSE.txt`)
+
+라이선스 고지는 `resources/licenses/`(Pretendard·Jetendard 폰트, 번들 라이브러리 `THIRD_PARTY_NOTICES.txt`)에 있고, 패키지에는 `resources/licenses/` 로 동봉된다. ssh2 와 그 의존 패키지는 `app.asar` 의 node_modules 에 각자의 LICENSE 와 함께 실린다.

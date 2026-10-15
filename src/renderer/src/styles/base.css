@@ -142,3 +142,35 @@ input {
   background: var(--badge-ssh-bg);
   color: var(--badge-ssh-fg);
 }
+
+/* 코드 폰트(Jetendard)의 합자를 끈다 — PR 본문 코드·경로도 diff 와 같은 글자로 보이게 */
+code,
+pre,
+kbd,
+samp,
+.repo-menu__path {
+  font-variant-ligatures: none;
+}
+
+/* 눌린(토글 켜짐) 아이콘 버튼 — 팝오버가 열린 툴바 버튼 등 */
+.icon-btn[aria-pressed='true'] {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+/* 키보드 포커스 링은 선택 상태 테두리(box-shadow)보다 우선한다 */
+.icon-btn:focus-visible,
+.btn:focus-visible,
+.seg__btn:focus-visible,
+.seg__btn.is-on:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .icon-btn,
+  .seg__btn {
+    transition: none;
+  }
+  .icon-btn:active {
+    transform: none;
+  }
+}
