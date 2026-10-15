@@ -117,6 +117,19 @@ try {
     await page.waitForTimeout(300)
     await shot(`graph-${theme}`)
 
+    // 툴바 테마 메뉴(선택 팝오버) — 열어서 찍고 Esc 로 닫는다
+    const themeMenu = await page.$('.toolbar .menu-btn > button')
+    if (themeMenu) {
+      await themeMenu.click()
+      await page.waitForSelector('.menu-btn__pop', { timeout: 2000 }).catch(() => {})
+      const items = await page.$$eval('.menu-btn__pop [role="menuitemradio"]', (els) =>
+        els.map((e) => `${e.textContent?.trim()}${e.getAttribute('aria-checked') === 'true' ? '✓' : ''}`)
+      )
+      console.log(`theme menu: ${items.join(' | ')}`)
+      await shot(`theme-menu-${theme}`)
+      await page.keyboard.press('Escape')
+    }
+
     // 브랜치 클릭 → 그래프에서 그 커밋으로 이동
     const branch = await page.$$eval('.side-section:nth-of-type(2) .side-item:not(.side-item--folder)', (els) =>
       els.map((e) => e.textContent?.trim()).filter(Boolean)

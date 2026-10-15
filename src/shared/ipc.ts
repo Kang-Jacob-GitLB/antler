@@ -85,6 +85,9 @@ export interface IpcContract {
   'git:fileDiff': { args: [repoId: string, req: FileDiffRequest, requestId?: string]; result: FileDiff }
   /** 진행 중인 요청 취소 */
   'req:cancel': { args: [requestId: string]; result: void }
+  /** 제목 표시줄 오버레이(Windows·Linux 창 컨트롤) 색을 현재 테마에 맞춘다. macOS 는 no-op */
+  /** dim: 모달 배경막이 떠 있음(창 컨트롤도 같은 정도로 어둡게) */
+  'win:setTitleBarTheme': { args: [theme: { dark: boolean; dim?: boolean }]; result: void }
 }
 
 export type IpcChannel = keyof IpcContract
@@ -131,7 +134,8 @@ export const IPC_CHANNELS = [
   'git:log',
   'git:commit',
   'git:fileDiff',
-  'req:cancel'
+  'req:cancel',
+  'win:setTitleBarTheme'
 ] as const satisfies readonly IpcChannel[]
 
 export const IPC_EVENTS = ['repo:changed', 'theme:system'] as const satisfies readonly IpcEvent[]

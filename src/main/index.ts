@@ -7,6 +7,7 @@ import { allowedExternalUrl } from './github/validate'
 import { ConfigStore } from './services/ConfigStore'
 import { RepoService } from './services/RepoService'
 import { RepoWatcher } from './services/RepoWatcher'
+import { TOOLBAR_HEIGHT, titleBarOverlay } from './titleBar'
 
 app.setName('Antler')
 // 테스트·자동화용으로 설정 저장 위치를 바꿀 수 있다(실사용 설정을 건드리지 않기 위해)
@@ -49,6 +50,10 @@ function createWindow(): BrowserWindow {
     backgroundColor: dark ? BG.dark : BG.light,
     ...windowIcon(),
     autoHideMenuBar: true,
+    // 앱 툴바가 제목 표시줄을 겸한다. mac 은 신호등 버튼을 툴바 세로 중앙에, 나머지는 창 컨트롤 오버레이
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hidden' as const, trafficLightPosition: { x: 16, y: (TOOLBAR_HEIGHT - 14) / 2 } }
+      : { titleBarStyle: 'hidden' as const, titleBarOverlay: titleBarOverlay(dark) }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
