@@ -1,4 +1,4 @@
-import type { Branch, RemoteGroup, Tag } from '@shared/types'
+import type { Branch, RefsDetails, RemoteGroup, Tag } from '@shared/types'
 
 /** `git for-each-ref` 에 붙일 출력 형식. 필드는 NUL(%00), ref 하나는 한 줄 */
 export const REFS_FORMAT =
@@ -7,6 +7,37 @@ export const REFS_FORMAT =
 
 /** `git for-each-ref` 전체 인자 */
 export const REFS_ARGS = ['for-each-ref', `--format=${REFS_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags']
+
+/**
+ * 첫 화면용 인자: ahead/behind 필드(%(upstream:track))를 비워 둔다(필드 위치는 그대로).
+ * 느슨한 ref 가 수천 개인 저장소에서 track 계산만으로 for-each-ref 가 0.5초 가까이 느려진다 — REFS_TRACK_ARGS 로 따로 읽는다.
+ */
+export const REFS_ARGS_LITE = [
+  'for-each-ref',
+  `--format=${REFS_FORMAT.replace('%(upstream:track,nobracket)', '')}`,
+  'refs/heads',
+  'refs/remotes',
+  'refs/tags'
+]
+
+/** 로컬 브랜치의 업스트림 ahead/behind 만 읽는 인자 */
+export const REFS_TRACK_ARGS = ['for-each-ref', '--format=%(refname)%00%(upstream:track,nobracket)', 'refs/heads']
+
+/** REFS_TRACK_ARGS 출력 → 브랜치 전체 이름별 ahead/behind/gone(변화 없는 브랜치는 넣지 않는다) */
+export function parseTracking(buf: Buffer | string): RefsDetails['tracking'] {
+  const out: RefsDetails['tracking'] = {}
+  for (const line of buf.toString('utf8').split('\n')) {
+    const [fullName, track = ''] = line.split('\0')
+    if (!fullName || !track.trim()) continue
+    const t = parseTrack(track)
+    const e: RefsDetails['tracking'][string] = {}
+    if (t.gone) e.upstreamGone = true
+    if (t.ahead !== undefined) e.ahead = t.ahead
+    if (t.behind !== undefined) e.behind = t.behind
+    out[fullName] = e
+  }
+  return out
+}
 
 export interface ParsedRefs {
   local: Branch[]

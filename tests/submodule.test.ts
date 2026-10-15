@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
-import { refs, submodules } from '../src/main/git/commands'
+import { refs, refsDetails, submodules } from '../src/main/git/commands'
 import { parseGitlinks, parseGitmodules, parseProbe, submoduleStatus } from '../src/main/git/parsers/submodule'
 
 const SHA_A = 'a'.repeat(40)
@@ -120,6 +120,11 @@ describe('submodules (실제 저장소)', () => {
   it('refs() 스냅샷에 포함되고, 서브모듈이 없으면 빈 배열', async () => {
     expect((await refs(exec, parent)).submodules).toHaveLength(2)
     expect((await refs(exec, join(root, 'lib'))).submodules).toEqual([])
+  })
+
+  it('refs(lite) 는 서브모듈을 비워 두고 refsDetails 가 채운다', async () => {
+    expect((await refs(exec, parent, undefined, true)).submodules).toEqual([])
+    expect((await refsDetails(exec, parent)).submodules).toHaveLength(2)
   })
 })
 

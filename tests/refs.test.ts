@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { parseRefs, parseRemoteNames, parseTrack } from '../src/main/git/parsers/refs'
+import { parseRefs, parseRemoteNames, parseTrack, parseTracking } from '../src/main/git/parsers/refs'
 import { parseStashes } from '../src/main/git/parsers/stash'
 import { parseWorktrees } from '../src/main/git/parsers/worktree'
 
@@ -14,6 +14,17 @@ describe('parseTrack', () => {
     expect(parseTrack('behind 1')).toEqual({ behind: 1 })
     expect(parseTrack('gone')).toEqual({ gone: true })
     expect(parseTrack('')).toEqual({})
+  })
+})
+
+describe('parseTracking', () => {
+  it('변화 없는 브랜치는 빼고 ahead/behind/gone 만 브랜치 전체 이름별로 돌려준다', () => {
+    const out = parseTracking('refs/heads/a\0ahead 1, behind 2\nrefs/heads/b\0\nrefs/heads/c\0gone\nrefs/heads/d\0behind 4\n')
+    expect(out).toEqual({
+      'refs/heads/a': { ahead: 1, behind: 2 },
+      'refs/heads/c': { upstreamGone: true },
+      'refs/heads/d': { behind: 4 }
+    })
   })
 })
 

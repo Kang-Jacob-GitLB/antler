@@ -3,6 +3,7 @@ import type {
   CommitActivity,
   RemoteDirListing,
   CommitDetail,
+  RefsDetails,
   FileDiff,
   FileDiffRequest,
   GhRepoRef,
@@ -48,6 +49,14 @@ const DIFF_CACHE_ENTRIES = 500
 const ENV_TEST_TIMEOUT_MS = 25_000
 /** 커밋 활동 캐시 항목 수 */
 const ACTIVITY_CACHE_ENTRIES = 8
+/**
+ * 저장소를 활성화한 뒤 첫 로그 페이지가 전달되기를 백그라운드 조회가 기다리는 최대 시간.
+ * 첫 화면 전에 git 프로세스(Windows 에서는 spawn 한 번이 메인 스레드를 8~15ms 막는다)가 몰리지 않게 하는 문이며,
+ * 로그가 오지 않는 경우(오류·빈 저장소)에도 조회가 영영 막히지 않도록 시간 제한을 둔다.
+ */
+const FIRST_PAGE_GRACE_MS = 1_500
+/** 공유 시그니처 계산(감시 기준·활동 조회)의 제한 시간. 멈춘 원격이 큐 슬롯과 감시를 붙잡지 않게 한다 */
+const SIGNATURE_TIMEOUT_MS = 20_000
 /** GitHub remote 추론 결과 캐시 시간 */
 const GH_REPO_TTL_MS = 60_000
 
@@ -111,6 +120,15 @@ export class RepoService {
   /** 커밋 활동 집계 캐시: 저장소+ref 별로 ref 시그니처와 함께 보관한다(시그니처가 같으면 이력이 같다) */
   private readonly activityCache = new Map<string, { sig: string; value: CommitActivity }>()
   private readonly ghRepoCache = new Map<string, { at: number; value: GhRepoRef | null }>()
+  /** 활성화됐지만 첫 로그 페이지가 아직 안 나간 저장소의 문(열리면 목록에서 빠진다) */
+  private readonly firstPageGates = new Map<string, { promise: Promise<void>; open: () => void }>()
+  /** 가장 최근에 계산한 ref 시그니처(활성 저장소의 변경 감시·활동 캐시가 같은 값을 쓴다) */
+  private readonly knownSigs = new Map<string, string>()
+  /** 공유 시그니처 계산의 진행 중 요청(감시의 기준 계산과 활동 조회가 합쳐진다. 자체 제한 시간이 있다) */
+  private readonly sigInflight = new Map<string, Promise<string>>()
+  /** 시그니처 계산 시작 순번. 늦게 끝난 오래된 계산이 더 새로운 값을 덮어쓰지 못하게 한다 */
+  private sigCounter = 0
+  private readonly sigApplied = new Map<string, number>()
   private readonly sweeper = setInterval(() => this.sweepIdleCursors(), CURSOR_SWEEP_MS)
 
   constructor(private readonly config: ConfigStore) {
@@ -212,12 +230,96 @@ export class RepoService {
     if (sourceId !== LOCAL_SOURCE_ID && !this.config.source(sourceId)) void this.releaseRuntime(sourceId)
   }
 
-  /** 변경 감지용 시그니처: HEAD 와 모든 ref 가 가리키는 해시를 요약한 값 */
+  /**
+   * 저장소가 활성화됐다 — 첫 로그 페이지가 전달될 때(또는 FIRST_PAGE_GRACE_MS 뒤)까지 afterFirstPage 가 기다리게 한다.
+   * 다시 활성화된 저장소의 이전 시그니처는 낡았을 수 있어 버린다.
+   */
+  armFirstPage(repoId: string): void {
+    this.invalidateSignature(repoId)
+    if (this.firstPageGates.has(repoId)) return
+    let open!: () => void
+    const promise = new Promise<void>((resolve) => (open = resolve))
+    const timer = setTimeout(() => this.openFirstPage(repoId), FIRST_PAGE_GRACE_MS)
+    timer.unref?.()
+    this.firstPageGates.set(repoId, {
+      promise,
+      open: () => {
+        clearTimeout(timer)
+        open()
+      }
+    })
+  }
+
+  /** 첫 화면에 필요 없는 백그라운드 조회(활동·WIP·GitHub·감시 기준 등)는 이것을 기다린 뒤 git 을 띄운다 */
+  afterFirstPage(repoId: string): Promise<void> {
+    return this.firstPageGates.get(repoId)?.promise ?? Promise.resolve()
+  }
+
+  private openFirstPage(repoId: string): void {
+    const gate = this.firstPageGates.get(repoId)
+    if (!gate) return
+    this.firstPageGates.delete(repoId)
+    gate.open()
+  }
+
+  /**
+   * 변경 감지용 시그니처: HEAD 와 모든 ref 가 가리키는 해시를 요약한 값.
+   * 계산한 값은 기억해 두고(activity 가 재사용), signal 이 없는 요청은 진행 중인 계산과 합친다(계산 자체에 제한 시간이 있다).
+   * 시간 제한(signal)을 거는 호출(감시 확인·fetch 전후 비교)은 합치지 않고 따로 계산한다 — 진행 중이던 계산이 ref 변경 전
+   * 값일 수 있어 합치면 변화를 놓친다.
+   */
   signature(repoId: string, signal?: AbortSignal): Promise<string> {
+    return signal ? this.computeSignature(repoId, signal) : this.sharedSignature(repoId)
+  }
+
+  private computeSignature(repoId: string, signal: AbortSignal): Promise<string> {
     const { repo, rt } = this.resolve(repoId)
-    // 시간 제한(signal)을 걸 수 있어야 멈춘 원격이 감시를 붙잡지 않는다. 취소 가능한 요청이라 중복 합치기는 하지 않는다
-    const opts = signal ? { signal } : {}
-    return rt.queue.run(() => git.refsSignature(rt.exec, repo.path, opts), opts)
+    const seq = ++this.sigCounter
+    const opts = { signal }
+    return rt.queue.run(() => git.refsSignature(rt.exec, repo.path, opts), opts).then((sig) => {
+      // 더 나중에 시작한 계산(또는 무효화)이 이미 반영됐으면 이 값은 낡았다
+      if (seq > (this.sigApplied.get(repoId) ?? 0)) {
+        this.sigApplied.set(repoId, seq)
+        this.knownSigs.set(repoId, sig)
+      }
+      return sig
+    })
+  }
+
+  /** 진행 중인 계산에 합류한다. 호출자의 signal 은 기다림만 끊는다(계산은 자체 제한 시간까지 간다) */
+  private sharedSignature(repoId: string, signal?: AbortSignal): Promise<string> {
+    let p = this.sigInflight.get(repoId)
+    if (!p) {
+      const created: Promise<string> = this.computeSignature(repoId, AbortSignal.timeout(SIGNATURE_TIMEOUT_MS)).finally(() => {
+        if (this.sigInflight.get(repoId) === created) this.sigInflight.delete(repoId)
+      })
+      this.sigInflight.set(repoId, created)
+      p = created
+    }
+    if (!signal) return p
+    const shared = p
+    return new Promise<string>((resolve, reject) => {
+      if (signal.aborted) return reject(new AbortError())
+      const onAbort = (): void => reject(new AbortError())
+      signal.addEventListener('abort', onAbort, { once: true })
+      shared.then(
+        (v) => {
+          signal.removeEventListener('abort', onAbort)
+          resolve(v)
+        },
+        (err) => {
+          signal.removeEventListener('abort', onAbort)
+          reject(err)
+        }
+      )
+    })
+  }
+
+  /** 기억한 시그니처를 버리고, 그 전에 시작한 계산이 다시 기록하지 못하게 한다(이력이 바뀐 것을 알았을 때) */
+  private invalidateSignature(repoId: string): void {
+    this.knownSigs.delete(repoId)
+    this.sigInflight.delete(repoId)
+    this.sigApplied.set(repoId, ++this.sigCounter)
   }
 
   /** 로컬 저장소의 .git 디렉터리들(워크트리는 git-dir 과 공통 디렉터리가 다르다). 원격 환경이면 null */
@@ -251,9 +353,17 @@ export class RepoService {
     await rt.exec.dispose().catch(() => {})
   }
 
+  /** 사이드바 ref 스냅샷(첫 화면용: 업스트림 ahead/behind·서브모듈은 refsDetails 로 따로 받는다) */
   refs(repoId: string): Promise<RefsSnapshot> {
     const { repo, rt } = this.resolve(repoId)
-    return rt.queue.run(() => git.refs(rt.exec, repo.path), { key: `refs:${repoId}` })
+    return rt.queue.run(() => git.refs(rt.exec, repo.path, undefined, true), { key: `refs:${repoId}` })
+  }
+
+  /** refs 에서 미룬 부가 정보. 비싼 조회이므로 첫 로그 페이지가 나간 뒤에 시작한다 */
+  async refsDetails(repoId: string): Promise<RefsDetails> {
+    await this.afterFirstPage(repoId)
+    const { repo, rt } = this.resolve(repoId)
+    return rt.queue.run(() => git.refsDetails(rt.exec, repo.path), { key: `refsDetails:${repoId}` })
   }
 
   /**
@@ -263,6 +373,7 @@ export class RepoService {
   async ghRepo(repoId: string): Promise<GhRepoRef | null> {
     const hit = this.ghRepoCache.get(repoId)
     if (hit && Date.now() - hit.at < GH_REPO_TTL_MS) return hit.value
+    await this.afterFirstPage(repoId)
     const { repo, rt } = this.resolve(repoId)
     const list = await rt.queue.run(() => git.remotes(rt.exec, repo.path), { key: `remotes:${repoId}` })
     const value = pickGithubRemote(list)
@@ -291,7 +402,9 @@ export class RepoService {
     const key = `${repoId}\0${ref ?? ''}`
     return this.shared(`activity\0${key}`, requestId, async (signal) => {
       const opts = { signal }
-      const sig = await rt.queue.run(() => git.refsSignature(rt.exec, repo.path, opts), opts)
+      await this.afterFirstPage(repoId)
+      // 감시가 이미 계산한 시그니처를 쓴다(for-each-ref 전체를 한 번 더 돌리지 않는다). 없으면 진행 중인 계산에 합류한다
+      const sig = this.knownSigs.get(repoId) ?? (await this.sharedSignature(repoId, signal))
       const hit = this.activityCache.get(key)
       if (hit && hit.sig === sig) return hit.value
       const value = await rt.queue.run(() => commitActivity(rt.exec, repo.path, ref, opts), opts)
@@ -335,9 +448,10 @@ export class RepoService {
    */
   wipStatus(repoId: string, requestId?: string): Promise<WipStatus> {
     const { repo, rt } = this.resolve(repoId)
-    return this.shared(`wip\0${repoId}`, requestId, (signal) =>
-      rt.queue.run(() => wip.wipStatus(rt.exec, repo.path, { signal }), { signal })
-    )
+    return this.shared(`wip\0${repoId}`, requestId, async (signal) => {
+      await this.afterFirstPage(repoId)
+      return rt.queue.run(() => wip.wipStatus(rt.exec, repo.path, { signal }), { signal })
+    })
   }
 
   /** 작업 트리 파일 하나의 diff. 파일이 계속 바뀔 수 있어 캐시하지 않는다 */
@@ -432,11 +546,15 @@ export class RepoService {
             // 그 사이 ref 가 움직였다 — 이어 붙이면 중복·누락이 생기므로 renderer 가 처음부터 다시 읽게 한다
             this.retire(key, active)
             this.anchors.delete(key)
+            // 기억해 둔 시그니처도 낡았다 — 감시가 알아채기 전에 활동 조회가 낡은 캐시를 쓰지 않게 한다
+            this.invalidateSignature(repoId)
             throw new StaleLogError()
           }
         }
         return active.read(count)
       })()
+      // 첫 페이지가 나가면 백그라운드 조회를 풀어 준다(실패해도 풀어 준다 — 오류 화면에서 다른 조회가 막히면 안 된다)
+      if (skip === 0) page.then(() => this.openFirstPage(repoId), () => this.openFirstPage(repoId))
       if (!signal) return page
       return Promise.race([
         page,
@@ -483,6 +601,11 @@ export class RepoService {
     this.cursors.clear()
     this.anchors.clear()
     this.activityCache.clear()
+    for (const g of this.firstPageGates.values()) g.open()
+    this.firstPageGates.clear()
+    this.knownSigs.clear()
+    this.sigInflight.clear()
+    this.sigApplied.clear()
     this.commitCache.clear()
     this.diffCache.clear()
     this.ghRepoCache.clear()

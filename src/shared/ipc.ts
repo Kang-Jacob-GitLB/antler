@@ -28,6 +28,7 @@ import type {
   FileDiffRequest,
   LogPage,
   LogQuery,
+  RefsDetails,
   RefsSnapshot,
   Repo,
   SearchResult,
@@ -88,6 +89,8 @@ export interface IpcContract {
   'gh:openExternal': { args: [url: string]; result: void }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
   'git:refs': { args: [repoId: string]; result: RefsSnapshot }
+  /** git:refs 에서 미룬 부가 정보(업스트림 ahead/behind·서브모듈). 첫 로그 페이지가 나간 뒤에 조회한다 */
+  'git:refsDetails': { args: [repoId: string]; result: RefsDetails }
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
   /** 메시지·작성자·해시 검색. ref 를 주면 그 ref 기준 이력에서만 찾는다 */
   'git:search': { args: [repoId: string, query: string, ref?: string, requestId?: string]; result: SearchResult }
@@ -168,6 +171,7 @@ export const IPC_CHANNELS = [
   'gh:avatars',
   'gh:openExternal',
   'git:refs',
+  'git:refsDetails',
   'git:search',
   'git:log',
   'git:activity',

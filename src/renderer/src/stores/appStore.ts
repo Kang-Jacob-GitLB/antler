@@ -11,6 +11,7 @@ import type {
   UiPrefs
 } from '@shared/types'
 import { api, errorMessage } from '../lib/api'
+import { carryDetails, withDetails } from '../lib/refsDetails'
 import { setTitleBarDark } from '../lib/titleBarSync'
 
 type ResolvedTheme = 'dark' | 'light'
@@ -94,8 +95,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     const id = get().activeRepoId
     if (!id) return
     try {
-      const refs = await api.invoke('git:refs', id)
-      if (get().activeRepoId === id) set({ refs, head: refs.head })
+      const prev = get().refs
+      const fresh = await api.invoke('git:refs', id)
+      if (get().activeRepoId !== id) return
+      // 첫 화면에 필요한 스냅샷을 먼저 보여 주고, 비싼 부가 정보는 나중에 합친다
+      const refs = carryDetails(fresh, prev)
+      set({ refs, head: refs.head })
+      void api
+        .invoke('git:refsDetails', id)
+        .then((d) => {
+          // 이전 스냅샷의 값이 아니라 방금 읽은 스냅샷에 합친다(push 로 동기화된 브랜치의 낡은 ↑ 가 남지 않게)
+          if (get().activeRepoId === id && get().refs === refs) set({ refs: withDetails(fresh, d) })
+        })
+        .catch(() => {})
     } catch (err) {
       set({ error: errorMessage(err) })
     }

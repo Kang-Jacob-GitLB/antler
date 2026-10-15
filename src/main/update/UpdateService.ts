@@ -11,7 +11,8 @@ export interface AutoBackend {
   check(): Promise<string | null>
   download(onProgress: (percent: number) => void): Promise<void>
   cancel(): void
-  quitAndInstall(): void
+  /** 설치를 시작하고 앱을 끝낸다. 모듈을 지연 로드하므로 실패할 수 있다 */
+  quitAndInstall(): void | Promise<void>
 }
 
 export interface UpdateDeps {
@@ -212,7 +213,15 @@ export class UpdateService {
 
   async install(): Promise<void> {
     if (this.fake || this.state.status !== 'downloaded') return
-    if (this.mode === 'auto') return this.backend?.quitAndInstall()
+    if (this.mode === 'auto') {
+      try {
+        await this.backend?.quitAndInstall()
+      } catch (e) {
+        // 설치를 시작하지 못했다 — 받아 둔 상태에서 멈춰 있지 않게 오류로 알린다
+        this.set(this.base('error', { ...(this.state.version ? { version: this.state.version } : {}), error: sanitizeError(e) }))
+      }
+      return
+    }
     if (!this.openedPath || !this.pending) return
     // 다시 열기 전에 해시를 한 번 더 확인한다(받은 뒤 파일이 바뀌었을 수 있다)
     const v = await verifyFile(this.openedPath, this.pending.expected)

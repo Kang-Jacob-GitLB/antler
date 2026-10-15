@@ -1,6 +1,6 @@
 // git 조회 명령 모음. executor 위에서 동작하며 환경과 무관하다.
 import { createHash } from 'node:crypto'
-import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
+import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsDetails, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { pickDefaultBranch } from './defaultBranch'
 import { parseChanges } from './parsers/changes'
@@ -8,7 +8,7 @@ import { COMMIT_FORMAT_ARGS, parseCommitMeta } from './parsers/commit'
 import { DiffParser } from './parsers/diff'
 import { LOG_FORMAT_ARGS } from './parsers/log'
 import { NulRecordSplitter } from './parsers/nulRecords'
-import { parseRefs, parseRemoteNames, REFS_ARGS } from './parsers/refs'
+import { parseRefs, parseRemoteNames, parseTracking, REFS_ARGS, REFS_ARGS_LITE, REFS_TRACK_ARGS } from './parsers/refs'
 import { GITLINK_ARGS, GITMODULES_ARGS, parseGitlinks, parseGitmodules, parseProbe, submoduleStatus } from './parsers/submodule'
 import { parseStashes, STASH_ARGS } from './parsers/stash'
 import { parseWorktrees, WORKTREE_ARGS } from './parsers/worktree'
@@ -179,10 +179,13 @@ export async function submodules(exec: GitExecutor, repoPath: string, opts?: Run
   return result
 }
 
-/** 사이드바용 ref 스냅샷. 다섯 조회를 동시에 돌린다. */
-export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsSnapshot> {
+/**
+ * 사이드바용 ref 스냅샷. 여러 조회를 동시에 돌린다.
+ * lite 면 비싼 부가 정보(업스트림 ahead/behind·서브모듈)를 빼고 돌려준다 — refsDetails 가 따로 채운다.
+ */
+export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts, lite = false): Promise<RefsSnapshot> {
   const [refsOut, remoteOut, worktreeOut, stashOut, headInfo, originHead, subs] = await Promise.all([
-    ok(exec, repoPath, REFS_ARGS, opts),
+    ok(exec, repoPath, lite ? REFS_ARGS_LITE : REFS_ARGS, opts),
     okOrEmpty(exec, repoPath, ['remote'], opts),
     okOrEmpty(exec, repoPath, WORKTREE_ARGS, opts),
     // 스태시가 없거나 reflog 가 없는 저장소는 빈 목록이다
@@ -191,7 +194,7 @@ export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts):
     // origin/HEAD 가 없으면(clone 이 아니거나 git remote set-head 를 안 한 저장소) 실패 코드로 끝난다 — 기본 브랜치는 대체 규칙으로 정한다
     exec.run(repoPath, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], opts).then((r) => (r.code === 0 ? r.stdout.toString('utf8') : null)),
     // 서브모듈은 부가 정보라 실패해도 ref 스냅샷을 막지 않는다
-    submodules(exec, repoPath, opts).catch(() => [])
+    lite ? Promise.resolve([]) : submodules(exec, repoPath, opts).catch(() => [])
   ])
   const { local, remotes, tags } = parseRefs(refsOut, parseRemoteNames(remoteOut))
   const defaultBranch = pickDefaultBranch(originHead, local, remotes)
@@ -205,6 +208,15 @@ export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts):
     submodules: subs,
     ...(defaultBranch ? { defaultBranch } : {})
   }
+}
+
+/** refs(lite) 에서 미룬 부가 정보: 로컬 브랜치의 업스트림 ahead/behind 와 서브모듈. 둘 다 실패해도 빈 값이다 */
+export async function refsDetails(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsDetails> {
+  const [trackOut, subs] = await Promise.all([
+    okOrEmpty(exec, repoPath, REFS_TRACK_ARGS, opts),
+    submodules(exec, repoPath, opts).catch(() => [])
+  ])
+  return { tracking: parseTracking(trackOut), submodules: subs }
 }
 
 /**

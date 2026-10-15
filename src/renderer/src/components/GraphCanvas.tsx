@@ -274,10 +274,12 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits, topOffs
     }
   }, [scrollEl])
 
-  // 기본 브랜치 tip 이 정해지면 그래프에 알린다. 이미 계산한 뒤에 정해졌다면 로그를 한 번 다시 읽어 굵은 줄기를 반영한다
+  // 기본 브랜치 tip 이 정해지면 그래프에 알린다. 이미 계산한 뒤에 정해졌다면 읽어 둔 커밋으로 레인만 다시 계산해 굵은 줄기를 반영한다(로그는 다시 읽지 않는다)
   const defaultTip = useAppStore((s) => s.refs?.defaultBranch?.hash ?? null)
   useEffect(() => {
-    if (graphEngine.setDefaultTip(defaultTip)) useLogStore.getState().reload(true)
+    // 목록이 지금 활성 저장소의 것일 때만 넘긴다(저장소 전환 중에는 이전 저장소의 커밋을 다시 계산하지 않는다)
+    const log = useLogStore.getState()
+    graphEngine.setDefaultTip(defaultTip, log.repoId === useAppStore.getState().activeRepoId ? log.commits : [])
   }, [defaultTip])
 
   // 아바타 주소가 해석되거나 이미지가 도착하면 다시 그린다(도착은 프레임당 한 번으로 합쳐 온다)
@@ -322,5 +324,6 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits, topOffs
   // 데이터·폭·커밋 목록 변화
   useEffect(schedule, [version, width, commits, avatars, topOffset])
 
-  return <canvas ref={canvasRef} className="graph-canvas" style={{ left }} aria-hidden="true" />
+  // data-lane-version: 레인 계산 결과가 바뀔 때마다 증가(자동 측정 스크립트가 그래프까지 안정됐는지 보는 신호)
+  return <canvas ref={canvasRef} className="graph-canvas" style={{ left }} aria-hidden="true" data-lane-version={version} />
 }

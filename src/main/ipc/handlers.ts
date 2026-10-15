@@ -176,6 +176,8 @@ export function registerIpc(
   })
   handle('repos:watch', (_e, repoId) => {
     fetcher.setActive(repoId && config.repo(repoId) ? repoId : null)
+    // 첫 로그 페이지가 나갈 때까지 백그라운드 조회(활동·WIP·감시 기준 등)를 미룬다
+    if (repoId && config.repo(repoId)) repos.armFirstPage(repoId)
     return watcher.watch(repoId)
   })
 
@@ -195,6 +197,7 @@ export function registerIpc(
   })
 
   handle('git:refs', (_e, repoId) => repos.refs(repoId))
+  handle('git:refsDetails', (_e, repoId) => repos.refsDetails(repoId))
   handle('git:log', (_e, repoId, query, requestId) => repos.log(repoId, query, requestId))
   handle('git:activity', (_e, repoId, ref, requestId) => repos.activity(repoId, ref, requestId))
   handle('git:search',(_e, repoId, query, ref, requestId) => repos.search(repoId, query, ref, requestId))
