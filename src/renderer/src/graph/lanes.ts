@@ -77,16 +77,18 @@ export class LaneBuilder {
   add(c: GraphCommit): GraphRow {
     const segs: number[] = []
     const before = this.lanes.length
-    let lane = this.lanes.indexOf(c.hash)
+    // 이 커밋을 기다리는 레인이 여럿이면(갈라진 지점) main 색 레인을 이어 가서 main 줄기가 앰버를 유지하게 한다
+    let lane = -1
+    for (let j = 0; j < before; j++) {
+      if (this.lanes[j] !== c.hash) continue
+      if (lane === -1 || (this.colors[j] === MAIN_COLOR && this.colors[lane] !== MAIN_COLOR)) lane = j
+    }
     const continued = lane !== -1
 
     if (!continued) {
       lane = this.freeLane()
       this.lanes[lane] = c.hash
       this.colors[lane] = tipColor(c.refs) ?? this.pickColor(lane)
-    } else if (hasMainRef(c.refs)) {
-      // 다른 브랜치가 갈라져 나온 main 커밋: 이 아래로는 main 레인이므로 앰버로 바꾼다
-      this.colors[lane] = MAIN_COLOR
     }
 
     // ── 위 절반: 지나가는 레인과 노드로 모여드는 레인 ──
@@ -102,6 +104,9 @@ export class LaneBuilder {
     for (let j = 0; j < this.lanes.length; j++) {
       if (j !== lane && this.lanes[j] === c.hash) this.lanes[j] = null
     }
+    // 다른 브랜치가 갈라져 나온 main 커밋: 이 아래로는 main 레인이므로 앰버로 바꾼다.
+    // 위쪽 선분을 다 그린 뒤에 바꿔야 윗행에서 내려오는 선과 색이 이어진다
+    if (continued && hasMainRef(c.refs)) this.colors[lane] = MAIN_COLOR
 
     const color = this.colors[lane]!
 

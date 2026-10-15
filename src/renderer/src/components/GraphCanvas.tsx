@@ -6,11 +6,19 @@ import { LANE_COUNT } from '../lib/laneColor'
 
 export const LANE_W = 14
 export const GRAPH_PAD = 8
+const MAX_GRAPH_W = 260
+const MIN_LANE_W = 4
 const NODE_R = 4.5
+
+/** 레인 간격(px). 레인이 많아 상한 폭을 넘으면 간격을 줄여 모든 레인이 컬럼 안에 들어오게 한다 */
+export function laneWidth(maxLanes: number): number {
+  const fit = (MAX_GRAPH_W - GRAPH_PAD * 2) / Math.max(1, maxLanes)
+  return Math.max(MIN_LANE_W, Math.min(LANE_W, fit))
+}
 
 /** 그래프 컬럼 폭(px). 지금까지 본 최대 레인 수에 맞추되 상한을 둔다 */
 export function graphWidth(maxLanes: number): number {
-  return Math.min(260, Math.max(48, GRAPH_PAD * 2 + maxLanes * LANE_W))
+  return Math.min(MAX_GRAPH_W, Math.max(56, GRAPH_PAD * 2 + maxLanes * laneWidth(maxLanes)))
 }
 
 export function useGraphVersion(): number {
@@ -77,7 +85,11 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
     const top = scrollEl.scrollTop
     const first = Math.max(0, Math.floor(top / rowHeight))
     const last = Math.min(graphEngine.count - 1, Math.ceil((top + h) / rowHeight))
-    const x = (lane: number): number => GRAPH_PAD + lane * LANE_W + LANE_W / 2
+    const lw = laneWidth(graphEngine.maxWidth)
+    // 레인 간격이 좁아지면 노드·선도 함께 줄인다
+    const r = Math.min(NODE_R, lw / 2 - 0.5)
+    const stroke = lw < 10 ? 1.5 : 2
+    const x = (lane: number): number => GRAPH_PAD + lane * lw + lw / 2
 
     // 선: 색별로 Path2D 에 모아 한 번씩 stroke 한다
     const paths = Array.from({ length: LANE_COUNT }, () => new Path2D())
@@ -103,7 +115,7 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
         }
       }
     }
-    ctx.lineWidth = 2
+    ctx.lineWidth = stroke
     ctx.lineCap = 'round'
     paths.forEach((p, i) => {
       ctx.strokeStyle = pal.lanes[i]!
@@ -119,12 +131,12 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
       const cy = i * rowHeight - top + rowHeight / 2
       const color = pal.lanes[row.color % LANE_COUNT]!
       ctx.beginPath()
-      ctx.arc(cx, cy, NODE_R, 0, Math.PI * 2)
+      ctx.arc(cx, cy, r, 0, Math.PI * 2)
       if (row.merge) {
         // merge 커밋은 속이 빈 링
         ctx.fillStyle = pal.bg
         ctx.fill()
-        ctx.lineWidth = 2
+        ctx.lineWidth = stroke
         ctx.strokeStyle = color
         ctx.stroke()
       } else {
@@ -134,7 +146,7 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
       if (list[i]?.refs.some((r) => r.kind === 'head')) {
         // HEAD 는 앰버 외곽선
         ctx.beginPath()
-        ctx.arc(cx, cy, NODE_R + 3, 0, Math.PI * 2)
+        ctx.arc(cx, cy, r + 3, 0, Math.PI * 2)
         ctx.lineWidth = 1.5
         ctx.strokeStyle = pal.accent
         ctx.stroke()
@@ -171,6 +183,23 @@ export function GraphCanvas({ scrollEl, rowHeight, left, width, commits }: Props
     })
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
     return () => mo.disconnect()
+  }, [])
+
+  // 창을 다른 배율의 모니터로 옮기면 devicePixelRatio 가 바뀐다 — 흐려지지 않게 다시 그린다.
+  // matchMedia 는 현재 배율에 대해서만 change 를 알리므로 바뀔 때마다 새로 건다
+  useEffect(() => {
+    let mq: MediaQueryList | null = null
+    const watch = (): void => {
+      mq?.removeEventListener('change', onChange)
+      mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+      mq.addEventListener('change', onChange)
+    }
+    const onChange = (): void => {
+      watch()
+      schedule()
+    }
+    watch()
+    return () => mq?.removeEventListener('change', onChange)
   }, [])
 
   // 데이터·폭·커밋 목록 변화

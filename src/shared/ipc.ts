@@ -11,7 +11,7 @@ export interface IpcContract {
   'git:refs': { args: [repoId: string]; result: RefsSnapshot }
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
   /** 메시지·작성자·해시 검색. ref 를 주면 그 ref 기준 이력에서만 찾는다 */
-  'git:search': { args: [repoId: string, query: string, ref?: string]; result: SearchResult }
+  'git:search': { args: [repoId: string, query: string, ref?: string, requestId?: string]; result: SearchResult }
   /** 진행 중인 요청 취소 */
   'req:cancel': { args: [requestId: string]; result: void }
 }

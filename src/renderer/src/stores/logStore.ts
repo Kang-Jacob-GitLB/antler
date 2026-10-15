@@ -2,12 +2,14 @@ import { create } from 'zustand'
 import type { Commit } from '@shared/types'
 import { graphEngine } from '../graph/graphEngine'
 import { api, errorMessage, isAbort, isStale, newRequestId } from '../lib/api'
+import { useAppStore } from './appStore'
 
 /** 한 번에 가져오는 커밋 수. 보이는 영역 끝에서 PREFETCH 행 전에 다음 페이지를 요청한다. */
 export const PAGE_SIZE = 1000
 export const PREFETCH = 300
 /** 멀리 있는 커밋을 찾아갈 때 쓰는 큰 페이지 */
 const REVEAL_PAGE_SIZE = 5000
+let revealToken = 0
 
 /** 그래프를 특정 ref 기준으로만 보는 필터 */
 export interface LogFilter {
@@ -110,8 +112,10 @@ export const useLogStore = create<LogState>((set, get) => ({
     } catch (err) {
       if (get().generation !== generation) return
       if (isStale(err)) {
-        // 페이지를 넘기는 사이 이력이 바뀌었다 — 이어 붙이면 중복·누락이 생기므로 처음부터 다시 읽는다
+        // 페이지를 넘기는 사이 이력이 바뀌었다 — 이어 붙이면 중복·누락이 생기므로 처음부터 다시 읽는다.
+        // ref 도 움직였을 것이므로 사이드바 스냅샷도 갱신한다
         get().reload()
+        void useAppStore.getState().refreshRefs()
         return
       }
       // 취소는 오류가 아니다. 다음 스크롤에서 다시 요청할 수 있게 hasMore 를 유지한다
@@ -128,9 +132,11 @@ export const useLogStore = create<LogState>((set, get) => ({
 
   async reveal(hash) {
     const generation = get().generation
+    // 더 나중에 요청된 reveal 이 있으면 이 루프는 물러난다(먼 커밋을 찾는 동안 다른 항목을 클릭한 경우)
+    const token = ++revealToken
     for (;;) {
       const s = get()
-      if (s.generation !== generation) return false
+      if (s.generation !== generation || token !== revealToken) return false
       const i = s.index.get(hash)
       if (i !== undefined) {
         set({ selected: i, scrollRequest: { index: i, seq: (s.scrollRequest?.seq ?? 0) + 1 } })

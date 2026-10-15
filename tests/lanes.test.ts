@@ -15,19 +15,21 @@ function build(commits: ReturnType<typeof c>[]): GraphRow[] {
 }
 
 /** 행 i 의 아래쪽에서 끝나는 레인 집합과 행 i+1 의 위쪽에서 시작하는 레인 집합이 같아야 선이 끊기지 않는다 */
+/** 레인 집합뿐 아니라 색도 행 경계에서 이어져야 한다(선이 경계에서 색을 바꾸면 안 된다) */
 function assertContinuous(rows: GraphRow[]): void {
   for (let i = 0; i + 1 < rows.length; i++) {
-    const bottom = new Set<number>()
-    const top = new Set<number>()
+    const bottom = new Map<number, number>()
+    const top = new Map<number, number>()
     const a = rows[i]!.segs
     for (let s = 0; s < a.length; s += 4) {
-      if (a[s] === SEG_FULL || a[s] === SEG_BOTTOM) bottom.add(a[s + 2]!)
+      if (a[s] === SEG_FULL || a[s] === SEG_BOTTOM) bottom.set(a[s + 2]!, a[s + 3]!)
     }
     const b = rows[i + 1]!.segs
     for (let s = 0; s < b.length; s += 4) {
-      if (b[s] === SEG_FULL || b[s] === SEG_TOP) top.add(b[s + 1]!)
+      if (b[s] === SEG_FULL || b[s] === SEG_TOP) top.set(b[s + 1]!, b[s + 3]!)
     }
-    expect([...top].sort(), `row ${i + 1}`).toEqual([...bottom].sort())
+    const sorted = (m: Map<number, number>) => [...m.entries()].sort((x, y) => x[0] - y[0])
+    expect(sorted(top), `row ${i + 1}`).toEqual(sorted(bottom))
   }
 }
 
@@ -71,6 +73,20 @@ describe('LaneBuilder', () => {
     expect(r1[1]!.color).toBe(0) // feature 아래 main 커밋은 앰버로 바뀐다
     expect(r1[0]!.color).toBe(r2[0]!.color)
     expect(r1[0]!.color).not.toBe(0)
+  })
+
+  it('feature 가 main tip 보다 새로워도 갈라진 지점 아래 main 줄기는 앰버를 유지한다', () => {
+    // f(feat) 가 가장 새롭고, M(main) 과 공통 부모 a, 그 아래 r
+    const rows = build([
+      c('f', ['a'], { refs: [{ kind: 'local', name: 'feat' }] }),
+      c('M', ['a'], { refs: [{ kind: 'local', name: 'main' }] }),
+      c('a', ['r']),
+      c('r', [])
+    ])
+    expect(rows[1]!.color).toBe(0)
+    expect(rows[2]!.color).toBe(0)
+    expect(rows[3]!.color).toBe(0)
+    assertContinuous(rows)
   })
 
   it('merge 제목에서 브랜치 이름을 읽어 두 번째 부모 레인 색을 정한다', () => {

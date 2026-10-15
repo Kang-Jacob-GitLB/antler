@@ -226,7 +226,14 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const stashes = useMemo(() => (refs?.stashes ?? []).filter((s) => matches(q, s.message, s.ref)), [refs, q])
   const worktrees = useMemo(() => (refs?.worktrees ?? []).filter((w) => matches(q, w.path, w.branch ?? undefined)), [refs, q])
 
-  const reveal = (hash: string): void => void useLogStore.getState().reveal(hash)
+  // 필터로 다른 ref 만 보는 중이면 찾는 커밋이 목록에 없을 수 있으므로 전체 보기로 돌아간 뒤 찾아간다
+  const reveal = (hash: string): void => {
+    const log = useLogStore.getState()
+    if (log.filter) log.setFilter(null)
+    void useLogStore.getState().reveal(hash)
+  }
+  // 폴더·리모트 접힘 키는 저장소마다 따로 둔다
+  const scoped = (key: string): string => `${activeRepoId}:${key}`
   const solo = (f: LogFilter): void => useLogStore.getState().setFilter(f)
   const isFiltered = (rev: string): boolean => filter?.rev === rev
 
@@ -330,12 +337,12 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
         {refs && (
           <>
             <Section id="local" title={t('sidebar.local')} count={local.length}>
-              <Tree node={buildTree(local.map((b) => ({ name: b.name, value: b })))} scope="local" depth={0} renderItem={(it, d) => branchRow(it.value, it.label, d, false)} />
+              <Tree node={buildTree(local.map((b) => ({ name: b.name, value: b })))} scope={scoped("local")} depth={0} renderItem={(it, d) => branchRow(it.value, it.label, d, false)} />
             </Section>
 
             <Section id="remote" title={t('sidebar.remote')} count={remotes.reduce((n, r) => n + r.branches.length, 0)}>
               {remotes.map((r) => {
-                const key = `remote:${r.name}`
+                const key = scoped(`remote:${r.name}`)
                 const open = isOpen(key) || !!q
                 return (
                   <div key={r.name}>
@@ -396,7 +403,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
             <Section id="tags" title={t('sidebar.tags')} count={tags.length}>
               <Tree
                 node={buildTree(tags.map((x) => ({ name: x.name, value: x })))}
-                scope="tags"
+                scope={scoped("tags")}
                 depth={0}
                 renderItem={(it: { label: string; value: Tag }, d) => (
                   <ItemRow
@@ -406,8 +413,9 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     label={it.label}
                     title={it.value.name}
                     active={isFiltered(it.value.fullName)}
-                    onClick={() => reveal(it.value.hash)}
-                    onFilter={() => solo({ rev: it.value.fullName, label: it.value.name })}
+                    muted={!it.value.targetsCommit}
+                    onClick={() => it.value.targetsCommit && reveal(it.value.hash)}
+                    onFilter={it.value.targetsCommit ? () => solo({ rev: it.value.fullName, label: it.value.name }) : undefined}
                   />
                 )}
               />

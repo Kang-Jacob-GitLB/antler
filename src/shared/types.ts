@@ -113,6 +113,8 @@ export interface Tag {
   /** 태그가 가리키는 커밋(annotated 태그는 peel 한 커밋 해시) */
   hash: string
   annotated: boolean
+  /** 최종 대상이 커밋인지(트리·블롭·중첩 태그면 false — 그래프에서 찾아갈 수 없다) */
+  targetsCommit: boolean
 }
 
 export interface Worktree {

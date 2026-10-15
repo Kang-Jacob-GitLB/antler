@@ -1,7 +1,9 @@
 import type { Branch, RemoteGroup, Tag } from '@shared/types'
 
 /** `git for-each-ref` 에 붙일 출력 형식. 필드는 NUL(%00), ref 하나는 한 줄 */
-export const REFS_FORMAT = '%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)'
+export const REFS_FORMAT =
+  '%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)' +
+  '%00%(symref)%00%(objecttype)%00%(*objecttype)'
 
 /** `git for-each-ref` 전체 인자 */
 export const REFS_ARGS = ['for-each-ref', `--format=${REFS_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags']
@@ -52,7 +54,17 @@ export function parseRefs(buf: Buffer | string, remoteNames: string[]): ParsedRe
     if (!line) continue
     const f = line.split('\0')
     if (f.length < 4) continue
-    const [fullName, hash, peeled, headMark, upstream = '', track = ''] = f as [string, string, string, string, string?, string?]
+    const [fullName, hash, peeled, headMark, upstream = '', track = '', symref = '', type = '', peeledType = ''] = f as [
+      string,
+      string,
+      string,
+      string,
+      string?,
+      string?,
+      string?,
+      string?,
+      string?
+    ]
 
     if (fullName.startsWith('refs/heads/')) {
       const b: Branch = { name: fullName.slice(11), fullName, hash, isHead: headMark === '*' }
@@ -66,8 +78,8 @@ export function parseRefs(buf: Buffer | string, remoteNames: string[]): ParsedRe
       local.push(b)
     } else if (fullName.startsWith('refs/remotes/')) {
       const short = fullName.slice(13)
-      // origin/HEAD 같은 심볼릭 리모트 HEAD 는 목록에서 뺀다
-      if (short.endsWith('/HEAD')) continue
+      // origin/HEAD 같은 심볼릭 ref 는 목록에서 뺀다(이름이 우연히 x/HEAD 인 실제 브랜치는 남긴다)
+      if (symref) continue
       const slash = short.indexOf('/')
       const remote = names.find((n) => short.startsWith(`${n}/`)) ?? (slash === -1 ? short : short.slice(0, slash))
       let list = groups.get(remote)
@@ -75,7 +87,9 @@ export function parseRefs(buf: Buffer | string, remoteNames: string[]): ParsedRe
       list.push({ name: short, fullName, hash, isHead: false })
     } else if (fullName.startsWith('refs/tags/')) {
       // annotated 태그는 %(*objectname) 이 가리키는 커밋 해시를 쓴다
-      tags.push({ name: fullName.slice(10), fullName, hash: peeled || hash, annotated: peeled !== '' })
+      // 트리·블롭을 가리키거나(v2.6.11-tree) 태그를 가리키는 태그는 그래프에서 찾아갈 커밋이 없다
+      const targetsCommit = peeled ? peeledType === 'commit' : type === 'commit'
+      tags.push({ name: fullName.slice(10), fullName, hash: peeled || hash, annotated: peeled !== '', targetsCommit })
     }
   }
 

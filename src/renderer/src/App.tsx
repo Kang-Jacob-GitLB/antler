@@ -48,6 +48,13 @@ export function App(): React.JSX.Element | null {
     useLogStore.getState().open(activeRepoId)
   }, [activeRepoId])
 
+  // 그래프 필터가 바뀌면 검색 결과도 그 범위로 다시 구한다(옛 범위의 일치 표시가 남지 않게)
+  const filterRev = useLogStore((s) => s.filter?.rev)
+  useEffect(() => {
+    const search = useSearchStore.getState()
+    if (search.open && search.ranQuery) void search.run()
+  }, [filterRev])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return

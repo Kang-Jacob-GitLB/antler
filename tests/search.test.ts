@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -86,6 +86,25 @@ describe('search', () => {
     expect((await search(exec, repo, '--force', undefined)).hashes).toEqual([hashes[2]])
     expect((await search(exec, repo, '--output=x', undefined)).hashes).toEqual([])
     expect((await search(exec, repo, '-1', undefined)).hashes).toEqual([])
+  })
+
+  it('ref 필터 밖의 커밋은 해시로 찾아도 빠진다(그래프에서 찾아갈 수 없으므로)', async () => {
+    const sideOnly = hashes[3]!
+    expect((await search(exec, repo, sideOnly.slice(0, 12), 'refs/heads/main')).hashes).not.toContain(sideOnly)
+    expect((await search(exec, repo, sideOnly.slice(0, 12), 'refs/heads/side')).hashes[0]).toBe(sideOnly)
+  })
+
+  it('스태시처럼 어느 브랜치에서도 닿지 않는 커밋은 해시로 찾아도 빠진다', async () => {
+    const dir = join(root, 'stash-repo')
+    execFileSync('git', ['init', '-q', '-b', 'main', dir])
+    git(dir, 'alice', 'commit', '-q', '--allow-empty', '-m', 'base')
+    writeFileSync(join(dir, 'f.txt'), 'x')
+    git(dir, 'alice', 'add', 'f.txt')
+    git(dir, 'alice', 'stash', 'push', '-q', '-m', 'wip')
+    const stash = git(dir, 'alice', 'rev-parse', 'refs/stash')
+    expect((await search(exec, dir, stash.slice(0, 10), undefined)).hashes).not.toContain(stash)
+    // 그 스태시만 보는 필터에서는 찾아진다
+    expect((await search(exec, dir, stash.slice(0, 10), stash)).hashes[0]).toBe(stash)
   })
 
   it('커밋이 없는 저장소는 빈 결과다', async () => {

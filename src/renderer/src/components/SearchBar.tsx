@@ -13,9 +13,10 @@ export function SearchBar(): React.JSX.Element | null {
   const inputRef = useRef<HTMLInputElement>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
+  // 열 때와 Ctrl/Cmd+F 를 다시 누를 때마다 입력창을 선택한다
   useEffect(() => {
     if (s.open) inputRef.current?.select()
-  }, [s.open])
+  }, [s.open, s.focusSeq])
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -25,7 +26,7 @@ export function SearchBar(): React.JSX.Element | null {
     ? t('search.searching')
     : s.error
       ? s.error
-      : s.query.trim()
+      : s.query.trim() && s.query.trim() === s.ranQuery
         ? s.hits.length
           ? t('search.position', { n: s.cursor + 1, total: `${s.hits.length}${s.truncated ? '+' : ''}` })
           : t('search.none')
@@ -52,9 +53,9 @@ export function SearchBar(): React.JSX.Element | null {
           } else if (e.key === 'Enter') {
             e.preventDefault()
             clearTimeout(timer.current)
-            // 입력 직후 Enter 는 검색 실행, 결과가 있으면 다음/이전으로 이동
-            if (!s.hits.length && !s.loading) void s.run()
-            else s.step(e.shiftKey ? -1 : 1)
+            // 입력이 마지막으로 실행한 질의와 다르면 새로 검색, 같으면(검색이 끝났을 때) 다음/이전 일치로 이동
+            if (s.query.trim() !== s.ranQuery) void s.run()
+            else if (!s.loading) s.step(e.shiftKey ? -1 : 1)
           }
         }}
       />

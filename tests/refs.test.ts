@@ -41,14 +41,20 @@ describe('parseRefs (fixture)', () => {
     expect(by('wt-branch').upstream).toBeUndefined()
   })
 
-  it("'/' 가 들어간 리모트 이름도 올바르게 묶고 origin/HEAD 는 뺀다", () => {
+  it("'/' 가 들어간 리모트 이름도 올바르게 묶고 심볼릭 origin/HEAD 만 뺀다", () => {
     expect(remotes.map((r) => r.name)).toEqual(['origin', 'team/upstream'])
-    expect(remotes[0]!.branches.map((b) => b.name)).toEqual(['origin/diverged', 'origin/main'])
+    // origin/team/HEAD 는 이름만 /HEAD 로 끝나는 실제 브랜치라 남는다
+    expect(remotes[0]!.branches.map((b) => b.name)).toEqual(['origin/diverged', 'origin/main', 'origin/team/HEAD'])
     expect(remotes[1]!.branches.map((b) => b.name)).toEqual(['team/upstream/feature/x', 'team/upstream/main'])
   })
 
+  it('트리를 가리키는 태그는 targetsCommit=false', () => {
+    expect(tags.find((t) => t.name === 'tree-tag')?.targetsCommit).toBe(false)
+    expect(tags.filter((t) => t.name !== 'tree-tag').every((t) => t.targetsCommit)).toBe(true)
+  })
+
   it('태그는 자연 정렬하고 annotated 는 peel 한 커밋 해시를 쓴다', () => {
-    expect(tags.map((t) => t.name)).toEqual(['v0.1.0', 'v0.2.0', 'v0.9.0', 'v0.10.0'])
+    expect(tags.map((t) => t.name)).toEqual(['tree-tag', 'v0.1.0', 'v0.2.0', 'v0.9.0', 'v0.10.0'])
     const v1 = tags.find((t) => t.name === 'v0.1.0')!
     const v2 = tags.find((t) => t.name === 'v0.2.0')!
     expect(v1.annotated).toBe(false)

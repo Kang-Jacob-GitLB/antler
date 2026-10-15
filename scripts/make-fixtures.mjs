@@ -70,7 +70,6 @@ try {
   mkdirSync(OUT, { recursive: true })
   const dump = (name, ...args) => writeFileSync(join(OUT, name), git(...args))
   dump('log.bin', 'log', '-z', '--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s', '--decorate=full', '--date-order', '--branches', '--remotes', '--tags', 'HEAD')
-  dump('show-ref.bin', 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)', 'refs/heads', 'refs/remotes', 'refs/tags')
   dump('name-status-merge.bin', 'show', '-z', '--format=', '--name-status', '-M', 'HEAD~1', '--first-parent')
   dump('name-status-rename.bin', 'show', '-z', '--format=', '--name-status', '-M', 'feature/이름-변경~1')
   dump('numstat-rename.bin', 'show', '-z', '--format=', '--numstat', '-M', 'feature/이름-변경~1')
@@ -112,7 +111,11 @@ try {
   write('src/main app.ts', 'export const a = 1\nexport const b = 4\n')
   git('stash', 'push', '-q', '-m', 'second stash')
 
-  dump('for-each-ref.bin', 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)', 'refs/heads', 'refs/remotes', 'refs/tags')
+  // 트리를 가리키는 태그(linux.git 의 v2.6.11-tree 같은 경우)와, 이름이 /HEAD 로 끝나는 실제 리모트 브랜치
+  git('tag', 'tree-tag', 'HEAD^{tree}')
+  git('update-ref', 'refs/remotes/origin/team/HEAD', 'HEAD')
+
+  dump('for-each-ref.bin', 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(symref)%00%(objecttype)%00%(*objecttype)', 'refs/heads', 'refs/remotes', 'refs/tags')
   dump('remotes.txt', 'remote')
   dump('worktree.bin', 'worktree', 'list', '--porcelain', '-z')
   dump('stash.bin', 'stash', 'list', '-z', '--format=%H%x1f%gd%x1f%ct%x1f%gs')
