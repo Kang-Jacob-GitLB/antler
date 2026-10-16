@@ -18,6 +18,7 @@ import { refreshWip, useWipSync } from './stores/wipActions'
 import { useGithubStore } from './stores/githubStore'
 import { GitHubView } from './components/github/GitHubView'
 import { UpdateSnackbar } from './components/UpdateSnackbar'
+import { syncGroupColors } from './lib/groupColor'
 import './App.css'
 
 type Widths = [sidebar: number, detail: number]
@@ -67,6 +68,16 @@ export function App(): React.JSX.Element | null {
       setWidths(config.ui.paneWidths)
     }
   }, [config])
+
+  // 저장소 그룹 칩 색: 새로 생긴 그룹에 겹치지 않는 색을 주고, 없어진 그룹의 색은 지운다
+  const groupKey = config ? [...new Set(config.repos.map((r) => r.group).filter((g): g is string => !!g))].sort().join('\0') : null
+  useEffect(() => {
+    const cfg = useAppStore.getState().config
+    if (!cfg) return
+    const groups = [...new Set(cfg.repos.map((r) => r.group).filter((g): g is string => !!g))]
+    const next = syncGroupColors(groups, cfg.ui.groupColors)
+    if (next) void useAppStore.getState().setUi({ groupColors: next })
+  }, [groupKey])
 
   // 활성 저장소가 바뀌면 커밋 목록을 새로 연다
   useEffect(() => {

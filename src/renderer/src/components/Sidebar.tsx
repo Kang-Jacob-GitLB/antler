@@ -26,6 +26,7 @@ import {
   IconTag,
   IconWorktree
 } from './icons'
+import { GroupChip } from './GroupChip'
 import './Sidebar.css'
 
 /** 기본으로 접어 둘 폴더 크기 */
@@ -140,6 +141,31 @@ function FolderRow({ depth, name, count, open, onToggle }: { depth: number; name
       <IconChevronRight size={12} className={`side-chev${open ? ' is-open' : ''}`} />
       <IconFolder size={13} className="side-item__icon" />
       <span className="side-item__label">{name}</span>
+      <span className="side-count">{count}</span>
+    </div>
+  )
+}
+
+/** 저장소 그룹 폴더 행: 폴더 아이콘·이름 대신 그룹 칩(이름별 색) */
+function GroupRow({ name, count, open, onToggle }: { name: string; count: number; open: boolean; onToggle(): void }): React.JSX.Element {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      className="side-item side-item--folder side-item--group"
+      style={{ paddingLeft: 8 }}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onToggle()
+        }
+      }}
+    >
+      <IconChevronRight size={12} className={`side-chev${open ? ' is-open' : ''}`} />
+      <GroupChip name={name} />
+      <span className="side-item__spacer" />
       <span className="side-count">{count}</span>
     </div>
   )
@@ -405,7 +431,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     const open = isOpen(key)
                     return (
                       <div key={group}>
-                        <FolderRow depth={0} name={group} count={items.length} open={open} onToggle={() => toggle(key)} />
+                        <GroupRow name={group} count={items.length} open={open} onToggle={() => toggle(key)} />
                         {open && items.map((r) => repoRow(r, 1))}
                       </div>
                     )

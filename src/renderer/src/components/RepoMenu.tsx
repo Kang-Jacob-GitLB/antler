@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Repo } from '@shared/types'
 import { useT } from '../i18n'
+import { GroupPicker } from './GroupChip'
 import './RepoMenu.css'
 
 interface Props {
@@ -57,26 +58,21 @@ export function RepoMenu({ repo, groups, onClose, onGroup, onRemove }: Props): R
       <label className="repo-menu__label" htmlFor={`${listId}-input`}>
         {t('repoMenu.group')}
       </label>
-      <div className="repo-menu__row">
-        <input
-          id={`${listId}-input`}
-          className="repo-menu__input"
-          list={listId}
-          value={group}
-          placeholder={t('repoMenu.groupPlaceholder')}
-          autoFocus
-          onChange={(e) => setGroup(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && save()}
-        />
-        <datalist id={listId}>
-          {groups.map((g) => (
-            <option key={g} value={g} />
-          ))}
-        </datalist>
-        <button className="btn btn--sm" onClick={save}>
-          {t('repoMenu.save')}
-        </button>
-      </div>
+      <GroupPicker
+        inputId={`${listId}-input`}
+        inputClassName="repo-menu__input"
+        groups={groups}
+        value={group}
+        placeholder={t('repoMenu.groupPlaceholder')}
+        autoFocus
+        onChange={setGroup}
+        onEnter={save}
+        trailing={
+          <button className="btn btn--sm" onClick={save}>
+            {t('repoMenu.save')}
+          </button>
+        }
+      />
       <div className="repo-menu__sep" />
       {confirm ? (
         <div className="repo-menu__row">

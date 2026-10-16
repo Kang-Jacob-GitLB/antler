@@ -34,6 +34,8 @@ interface Chip {
   remote: boolean
   head: boolean
   lane: number
+  /** 더블클릭하면 이 rev 로 그래프를 거른다(로컬 브랜치가 있으면 그것, 없으면 리모트, 태그는 태그) */
+  rev: string
 }
 
 function toChips(refs: RefLabel[]): Chip[] {
@@ -42,7 +44,7 @@ function toChips(refs: RefLabel[]): Chip[] {
   for (const r of refs) {
     if (r.kind === 'head') continue
     if (r.kind === 'tag') {
-      map.set(`t:${r.name}`, { key: `t:${r.name}`, label: r.name, kind: 'tag', local: false, remote: false, head: false, lane: -1 })
+      map.set(`t:${r.name}`, { key: `t:${r.name}`, label: r.name, kind: 'tag', local: false, remote: false, head: false, lane: -1, rev: `refs/tags/${r.name}` })
       continue
     }
     const name = branchKey(r.name, r.kind === 'remote')
@@ -54,12 +56,17 @@ function toChips(refs: RefLabel[]): Chip[] {
       local: false,
       remote: false,
       head: false,
-      lane: laneIndexFor(name)
+      lane: laneIndexFor(name),
+      rev: ''
     }
     if (r.kind === 'local') {
       chip.local = true
       chip.head = r.name === headBranch
-    } else chip.remote = true
+      chip.rev = `refs/heads/${r.name}`
+    } else {
+      chip.remote = true
+      if (!chip.local && !chip.rev) chip.rev = `refs/remotes/${r.name}`
+    }
     map.set(key, chip)
   }
   // HEAD 브랜치 → 로컬 → 리모트 → 태그 순
@@ -67,11 +74,21 @@ function toChips(refs: RefLabel[]): Chip[] {
 }
 const rank = (c: Chip): number => (c.head ? 0 : c.kind === 'tag' ? 3 : c.local ? 1 : 2)
 
-const RefChip = ({ chip }: { chip: Chip }): React.JSX.Element => (
+/** 칩을 더블클릭하면 그 브랜치·태그에서 닿는 커밋만 보이게 거른다(사이드바 더블클릭과 같은 필터) */
+function filterByChip(chip: Chip): void {
+  const label = chip.kind === 'branch' && !chip.local ? chip.rev.replace(/^refs\/remotes\//, '') : chip.label
+  useLogStore.getState().setFilter({ rev: chip.rev, label })
+}
+
+const RefChip = ({ chip, filterTitle }: { chip: Chip; filterTitle: string }): React.JSX.Element => (
   <span
     className={`ref-chip ref-chip--${chip.kind}${chip.head ? ' is-head' : ''}`}
     style={chip.kind === 'branch' ? ({ '--chip': laneVar(chip.lane) } as React.CSSProperties) : undefined}
-    title={chip.label}
+    title={`${chip.label}\n${filterTitle}`}
+    onDoubleClick={(e) => {
+      e.stopPropagation()
+      filterByChip(chip)
+    }}
   >
     {chip.kind === 'tag' ? (
       <IconTag size={12} className="ref-chip__icon" />
@@ -144,7 +161,7 @@ const Row = memo(function Row({
       aria-selected={selected}
     >
       <div className="cell cell--refs">
-        {firstChip && <RefChip chip={firstChip} />}
+        {firstChip && <RefChip chip={firstChip} filterTitle={t('list.chipFilter')} />}
         {chips.length > 1 && (
           <span className="ref-more" title={chips.slice(1).map((c) => c.label).join('\n')}>
             +{chips.length - 1}
