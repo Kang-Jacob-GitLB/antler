@@ -5,6 +5,7 @@ import { api, errorMessage } from '../lib/api'
 import { useAppStore } from '../stores/appStore'
 import { IconCheck, IconFolder, IconMonitor, IconServer, IconTerminal } from './icons'
 import { RemoteFolderPicker } from './RemoteFolderPicker'
+import { GroupPicker } from './GroupChip'
 import './AddRepoDialog.css'
 
 const isWindows = window.antler.platform === 'win32'
@@ -233,21 +234,19 @@ export function AddRepoDialog(): React.JSX.Element | null {
           {kind !== 'local' && <span className="field__hint">{t('add.remotePathHint')}</span>}
         </label>
 
-        <label className="field">
-          <span className="field__label">{t('add.group')}</span>
-          <input
-            className="field__input"
-            list="repo-groups"
+        <div className="field">
+          <label className="field__label" htmlFor="add-repo-group">
+            {t('add.group')}
+          </label>
+          <GroupPicker
+            inputId="add-repo-group"
+            inputClassName="field__input"
+            groups={groups}
             value={group}
             placeholder={t('repoMenu.groupPlaceholder')}
-            onChange={(e) => setGroup(e.target.value)}
+            onChange={setGroup}
           />
-          <datalist id="repo-groups">
-            {groups.map((g) => (
-              <option key={g} value={g} />
-            ))}
-          </datalist>
-        </label>
+        </div>
 
         {error && (
           <div className="add-dialog__msg is-error" role="alert">
