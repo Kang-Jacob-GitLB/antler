@@ -1,7 +1,8 @@
 name: release
 
 # semver 태그(v0.1.0, 프리릴리스 v0.2.0-rc.1)를 푸시하면 세 OS 설치본을 빌드해 GitHub Release 에 첨부한다.
-# 태그 버전은 package.json 의 version 과 같아야 한다(다르면 실패 — 버전은 PR 로 올린 뒤 태그한다).
+# 버전의 기준은 태그 하나다: 저장소의 package.json 은 0.0.0 으로 고정하고, 빌드 직전에 태그 버전을 넣는다(커밋하지 않음).
+# 그래서 릴리스마다 버전 올리는 커밋·PR 이 필요 없다.
 # 주의: tags 필터는 정규식이 아니라 glob 이다.
 on:
   push:
@@ -68,16 +69,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: 태그·package.json 버전 확인
-        if: github.ref_type == 'tag'
+      # 태그(v1.2.3, v1.2.3-rc.1)에서 버전을 얻어 package.json 에 넣는다(이 러너 안에서만, 커밋하지 않음).
+      # electron-builder(설치본 이름·latest*.yml)와 앱의 __APP_VERSION__(electron.vite.config.mts)이 모두 이 값을 읽는다.
+      # 수동 실행(태그 없음)은 0.0.0-ci.<실행 번호> 로 빌드한다.
+      - name: 버전 결정(태그 → package.json)
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION="$(node -p "require('./package.json').version")"
-          echo "태그=$GITHUB_REF_NAME / package.json=$PKG_VERSION"
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::태그 버전($TAG_VERSION)과 package.json 버전($PKG_VERSION)이 다릅니다"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-ci.${{ github.run_number }}"
+          fi
+          # semver(MAJOR.MINOR.PATCH[-pre]) 가 아니면 실패한다 — 설치본 이름·업데이트 비교가 이 값에 기대므로
+          if ! echo "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::semver 가 아닌 버전입니다: $VERSION ($GITHUB_REF_NAME)"
             exit 1
           fi
+          npm pkg set version="$VERSION"
+          echo "버전=$VERSION"
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
