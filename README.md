@@ -67,6 +67,17 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 
 버전의 기준은 git 태그 하나다. 저장소의 `package.json` 은 `0.0.0` 으로 고정해 두고, 릴리스 CI 가 빌드 직전에 태그 버전을 넣는다(커밋하지 않음) — 그래서 릴리스마다 버전을 올리는 커밋·PR 이 필요 없다. 로컬 빌드는 가장 가까운 태그로 `<태그>-dev`(예: `0.2.0-dev`)를 버전으로 쓴다. semver 태그(`v0.1.0`, 프리릴리스는 `v0.2.0-rc.1`)를 annotated 태그로 push 하면 `.github/workflows/release.yml` 이 Windows·macOS·Ubuntu 러너에서 설치본을 빌드해 GitHub Release 에 첨부한다. 릴리스 노트는 태그 메시지에서 가져온다. PR 은 `build.yml`(타입 검사·테스트·빌드·대비 검사)을 통과해야 main 에 squash 머지된다.
 
+**야간 자동 릴리스** — `.github/workflows/nightly-release.yml` 이 매일 00:00(KST) 마지막 정식 태그 이후 main 의 새 커밋을 본다. squash 머지라 커밋 제목이 곧 PR 제목이므로 **PR 제목을 Conventional Commits 로 쓴다**.
+
+| PR 제목 | 다음 버전 |
+|---|---|
+| `feat: …` | minor (1.0.0 → 1.1.0) |
+| `fix: …` · `perf: …` · `style: …` | patch (1.0.0 → 1.0.1) |
+| `feat!: …` 또는 본문에 `BREAKING CHANGE:` | major |
+| `ci:` · `docs:` · `chore:` · `test:` · `refactor:` 만 있음 | 릴리스하지 않음 |
+
+릴리스할 변경이 있으면 커밋을 종류별로 묶은 노트로 annotated 태그를 만들고 `release.yml` 을 그 태그로 실행한다. Actions 탭에서 수동 실행할 수도 있다(올림 단계 지정, `dry_run` 으로 계산만). 로컬 점검: `node scripts/next-version.mjs [--since vX.Y.Z]`.
+
 검증 상태:
 
 - 확인함(이 Windows 머신): 풀린 빌드(`dist:dir`) 실행, NSIS x64 설치 파일 빌드(`Antler-Setup-0.1.0-x64.exe`, 약 110MB)
