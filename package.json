@@ -1,7 +1,7 @@
 {
   "name": "antler",
   "productName": "Antler",
-  "version": "0.2.0",
+  "version": "0.0.0",
   "description": "Windows / WSL / SSH 저장소를 한 화면에서 보는 가벼운 Git GUI",
   "main": "./out/main/index.js",
   "license": "UNLICENSED",

@@ -1,11 +1,25 @@
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// 앱 버전은 package.json 에서 빌드 때 주입한다(개발 실행에서 app.getVersion() 은 Electron 버전을 돌려준다)
-const appVersion = (JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }).version
+// 앱 버전은 빌드 때 주입한다(개발 실행에서 app.getVersion() 은 Electron 버전을 돌려준다).
+// 저장소의 package.json 은 0.0.0 으로 고정하고 릴리스 CI 가 태그 버전을 넣는다. 0.0.0 그대로인 로컬 빌드는
+// 가장 가까운 태그로 "<태그>-dev" 를 쓴다(태그가 없으면 0.0.0-dev).
+function appVersionOf(): string {
+  const v = (JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }).version
+  if (v !== '0.0.0') return v
+  try {
+    const tag = execFileSync('git', ['describe', '--tags', '--abbrev=0', '--match', 'v[0-9]*'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    if (/^v\d+\.\d+\.\d+/.test(tag)) return `${tag.slice(1)}-dev`
+  } catch {
+    // git 이 없거나 태그가 없는 복사본
+  }
+  return '0.0.0-dev'
+}
+const appVersion = appVersionOf()
 
 const shared = { '@shared': resolve('src/shared') }
 
