@@ -1,0 +1,99 @@
+name: nightly-release
+
+# 매일 00:00(KST)에 마지막 정식 태그 이후 main 의 새 커밋을 보고 자동으로 릴리스한다.
+#   feat → minor · fix/perf/style → patch · type!/BREAKING CHANGE → major · 그 밖(ci/docs/chore/test/refactor)만 있으면 건너뜀
+#   판단은 scripts/next-version.mjs(테스트: tests/nextVersion.test.ts). main 은 squash 머지만 쓰므로 커밋 제목 = PR 제목이다.
+# 버전은 태그로만 정한다(package.json 은 0.0.0 고정 — release.yml 이 태그 버전을 넣는다). 버전 커밋을 만들지 않는다.
+# GITHUB_TOKEN 으로 push 한 태그는 다른 워크플로를 깨우지 않으므로, 태그를 만든 뒤 release.yml 을 그 태그로 직접 실행한다
+# (workflow_dispatch 는 GITHUB_TOKEN 으로도 실행된다).
+# 주의: GitHub 의 예약 실행은 부하에 따라 수 분~수십 분 늦게 시작될 수 있다.
+on:
+  schedule:
+    - cron: "0 15 * * *" # 15:00 UTC = 00:00 KST
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "올림 단계(auto = 커밋 제목으로 판단)"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      dry_run:
+        description: "계산만 하고 태그·릴리스는 만들지 않음"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# 겹쳐 실행되면 같은 버전을 두 번 만들 수 있다
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 새 커밋 확인·자동 릴리스
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 태그 push
+      actions: write # release.yml 실행(workflow_dispatch)
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0 # 태그와 전체 이력이 있어야 마지막 태그 이후 커밋을 센다
+
+      - name: Node 설정
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # main 의 최신 커밋이 PR 게이트(build.yml)를 통과한 커밋인지는 룰셋(PR + 필수 체크)이 보장한다
+      - name: 다음 버전 계산
+        id: next
+        run: |
+          node scripts/next-version.mjs --bump "${{ inputs.bump || 'auto' }}" --json > next.json
+          cat next.json
+          node -e '
+            const r = require("./next.json")
+            const fs = require("fs")
+            const out = process.env.GITHUB_OUTPUT
+            fs.appendFileSync(out, `release=${r.release}\n`)
+            fs.appendFileSync(out, `last=${r.last}\n`)
+            if (r.release) {
+              fs.appendFileSync(out, `version=${r.next}\n`)
+              fs.writeFileSync("notes.md", r.notes + "\n")
+            }
+          '
+
+      - name: 요약
+        run: |
+          {
+            echo "### 야간 릴리스"
+            if [ "${{ steps.next.outputs.release }}" = "true" ]; then
+              echo "${{ steps.next.outputs.last }} → **v${{ steps.next.outputs.version }}**"
+              echo
+              cat notes.md
+            else
+              echo "${{ steps.next.outputs.last }} 이후 릴리스할 변경이 없어 건너뜀"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 태그 만들기·push
+        if: steps.next.outputs.release == 'true' && inputs.dry_run != true
+        run: |
+          TAG="v${{ steps.next.outputs.version }}"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG 태그가 이미 있습니다"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -F notes.md
+          git push origin "$TAG"
+
+      - name: 릴리스 워크플로 실행
+        if: steps.next.outputs.release == 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --repo "${{ github.repository }}" --ref "v${{ steps.next.outputs.version }}"
