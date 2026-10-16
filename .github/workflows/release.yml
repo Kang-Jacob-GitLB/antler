@@ -1,16 +1,32 @@
 name: release
 
-# semver 태그(v0.1.0, 프리릴리스 v0.2.0-rc.1)를 푸시하면 세 OS 설치본을 빌드해 GitHub Release 에 첨부한다.
-# 버전의 기준은 태그 하나다: 저장소의 package.json 은 0.0.0 으로 고정하고, 빌드 직전에 태그 버전을 넣는다(커밋하지 않음).
-# 그래서 릴리스마다 버전 올리는 커밋·PR 이 필요 없다.
+# 세 OS 설치본을 빌드해 GitHub Release 에 첨부한다. 세 가지로 실행된다:
+#   1) 사람이 semver 태그(v0.1.0, 프리릴리스 v0.2.0-rc.1)를 push — 태그가 이미 있고, 노트는 그 태그 메시지
+#   2) nightly-release.yml 이 재사용 워크플로로 호출(workflow_call) — 버전·대상 커밋·노트를 입력으로 받고,
+#      세 OS 빌드가 모두 성공한 뒤 발행 잡에서 annotated 태그를 만든다(빌드가 실패하면 태그도 남지 않는다)
+#   3) 수동 실행(workflow_dispatch) — 태그 없이 설치본만 빌드해 아티팩트로 올린다(점검용, 발행하지 않음)
+# 버전의 기준은 태그 하나다: 저장소의 package.json 은 0.0.0 으로 고정하고, 빌드 직전에 버전을 넣는다(커밋하지 않음).
 # 주의: tags 필터는 정규식이 아니라 glob 이다.
 on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
       - "v[0-9]+.[0-9]+.[0-9]+-*"
-  # 수동 실행: 태그 없이 세 OS 설치본만 빌드해 아티팩트로 올린다(릴리스 전 패키징 점검용, 발행하지 않음)
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        description: "릴리스할 버전(접두사 v 없이, 예: 1.1.0)"
+        type: string
+        required: true
+      sha:
+        description: "빌드·태그할 커밋"
+        type: string
+        required: true
+      notes:
+        description: "릴리스 노트(마크다운, 첫 줄은 태그 제목)"
+        type: string
+        required: true
 
 permissions:
   contents: read # 쓰기 권한은 Release 를 만드는 release 잡에만 준다
@@ -67,14 +83,20 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # 재사용 호출이면 계산한 그 커밋을, 아니면 이 실행의 ref(태그 등)를 빌드한다
+          ref: ${{ inputs.sha || github.ref }}
           persist-credentials: false
 
-      # 태그(v1.2.3, v1.2.3-rc.1)에서 버전을 얻어 package.json 에 넣는다(이 러너 안에서만, 커밋하지 않음).
+      # 버전을 package.json 에 넣는다(이 러너 안에서만, 커밋하지 않음).
       # electron-builder(설치본 이름·latest*.yml)와 앱의 __APP_VERSION__(electron.vite.config.mts)이 모두 이 값을 읽는다.
-      # 수동 실행(태그 없음)은 0.0.0-ci.<실행 번호> 로 빌드한다.
-      - name: 버전 결정(태그 → package.json)
+      # 재사용 호출은 입력 버전, 태그 push 는 태그 버전, 수동 실행은 0.0.0-ci.<실행 번호>.
+      - name: 버전 결정 → package.json
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.ref_type }}" = "tag" ]; then
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
             VERSION="0.0.0-ci.${{ github.run_number }}"
@@ -127,15 +149,21 @@ jobs:
   release:
     name: 릴리스 발행
     needs: build # 세 OS 빌드가 모두 성공해야 발행(반쪽짜리 릴리스 방지)
-    if: github.ref_type == 'tag'
+    # 태그 push 이거나 재사용 호출일 때만 발행한다(수동 실행은 빌드 점검만)
+    if: github.ref_type == 'tag' || inputs.version
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # 발행할 태그 이름: 재사용 호출이면 v<입력 버전>, 태그 push 면 그 태그
+      TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.sha || github.ref }}
           fetch-depth: 0
-          persist-credentials: false
+          # 재사용 호출만 태그를 push 해야 해서 자격 증명이 필요하다
+          persist-credentials: ${{ inputs.version && 'true' || 'false' }}
 
       - name: 설치본 아티팩트 다운로드
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -147,11 +175,28 @@ jobs:
       - name: 첨부할 설치본 목록
         run: ls -la installers
 
+      # 재사용 호출: 빌드가 모두 성공한 지금에서야 annotated 태그를 만든다(노트 = 태그 메시지).
+      # 노트는 커밋 제목에서 만든 문자열이라 셸에 직접 끼워 넣지 않고 환경 변수로 넘긴다.
+      - name: 태그 만들기·push (재사용 호출)
+        if: inputs.version
+        env:
+          NOTES: ${{ inputs.notes }}
+          SHA: ${{ inputs.sha }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG 태그가 이미 있습니다"
+            exit 1
+          fi
+          printf '%s\n' "$NOTES" > tag_message.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -F tag_message.md "$SHA"
+          git push origin "refs/tags/$TAG"
+
       # 릴리스 노트: annotated 태그 메시지. 없으면 GitHub 자동 생성 노트로 대신한다
       - name: 릴리스 노트 추출
         id: notes
         run: |
-          TAG="${GITHUB_REF_NAME}"
           git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" || true
           : > release_notes.md
           if [ "$(git cat-file -t "$TAG" 2>/dev/null)" = "tag" ]; then
@@ -166,11 +211,12 @@ jobs:
       - name: 릴리스 생성 + 설치본 첨부 (Windows / macOS / Ubuntu)
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          name: ${{ github.ref_name }}
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.TAG }}
           body_path: release_notes.md
           generate_release_notes: ${{ steps.notes.outputs.fallback == 'true' }}
           # 하이픈이 든 태그(v0.2.0-rc.1)는 프리릴리스로 표시
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(env.TAG, '-') }}
           fail_on_unmatched_files: true
           files: |
             installers/*
