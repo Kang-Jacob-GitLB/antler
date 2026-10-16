@@ -57,6 +57,11 @@ export const IconClose = (p: P) => (
     <path d="M4 4l8 8M12 4l-8 8" />
   </Svg>
 )
+export const IconArrowLeft = (p: P) => (
+  <Svg {...p}>
+    <path d="M13 8H3.5M7.5 4 3.5 8l4 4" />
+  </Svg>
+)
 export const IconCopy = (p: P) => (
   <Svg {...p}>
     <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />

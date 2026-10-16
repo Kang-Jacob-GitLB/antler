@@ -292,3 +292,29 @@
 .diff-code .hljs-strong {
   font-weight: 700;
 }
+
+/* 커밋 목록으로 돌아가기(마우스 뒤로가기 버튼·Esc 와 같은 동작) */
+.diff-head__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+  height: var(--control-h-sm, 26px);
+  margin-left: calc(-1 * var(--space-1));
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.diff-head__back:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.diff-head__back:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

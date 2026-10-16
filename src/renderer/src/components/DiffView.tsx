@@ -9,7 +9,7 @@ import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
 import { useWipStore, wipEntries } from '../stores/wipStore'
 import { FileStatusIcon } from './FileStatusIcon'
-import { IconChevronDown, IconClose } from './icons'
+import { IconArrowLeft, IconChevronDown } from './icons'
 import './DiffView.css'
 
 const ROW_H = 20
@@ -238,6 +238,10 @@ export function DiffView(): React.JSX.Element | null {
   return (
     <section className="diff-view">
       <header className="diff-head">
+        <button className="diff-head__back" title={`${t('diff.back')} (Esc)`} onClick={closeFile}>
+          <IconArrowLeft size={14} />
+          <span>{t('diff.back')}</span>
+        </button>
         <FileStatusIcon status={file.status} />
         <div className="diff-head__path" title={file.path}>
           {file.oldPath && <span className="diff-head__from">{file.oldPath} →</span>}
@@ -265,9 +269,6 @@ export function DiffView(): React.JSX.Element | null {
           onClick={() => stepFile(1)}
         >
           <IconChevronDown size={14} />
-        </button>
-        <button className="icon-btn icon-btn--sm" title={`${t('diff.close')} (Esc)`} onClick={closeFile}>
-          <IconClose size={13} />
         </button>
       </header>
 

@@ -33,3 +33,28 @@ body.is-resizing * {
 body.is-resizing .splitter {
   pointer-events: auto;
 }
+
+/* 가로 분할선(위아래 영역 사이) */
+.splitter--h {
+  width: auto;
+  height: 1px;
+  cursor: row-resize;
+}
+.splitter--h::before {
+  inset: -4px 0;
+}
+.splitter--h::after {
+  inset: -1px 0;
+}
+body.is-resizing-h .splitter--h:active::after {
+  opacity: 1;
+}
+body.is-resizing-h {
+  cursor: row-resize;
+}
+body.is-resizing-h * {
+  pointer-events: none;
+}
+body.is-resizing-h .splitter--h {
+  pointer-events: auto;
+}

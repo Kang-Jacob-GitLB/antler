@@ -4,8 +4,9 @@ import { useT } from '../i18n'
 import { api, newRequestId } from '../lib/api'
 import { useAppStore } from '../stores/appStore'
 import { useLogStore } from '../stores/logStore'
+import { useSearchStore } from '../stores/searchStore'
 import { cancelJump, jumpToTime, useJumpStore } from '../stores/timeJump'
-import { IconChevronDown } from './icons'
+import { IconChevronDown, IconSearch } from './icons'
 import './CommitMinimap.css'
 
 const CHART_H = 52
@@ -89,6 +90,7 @@ interface Props {
  */
 export function CommitMinimap({ scrollEl, rowHeight, topOffset = 0 }: Props): React.JSX.Element {
   const t = useT()
+  const mod = window.antler.platform === 'darwin' ? '⌘' : 'Ctrl+'
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
   const collapsed = useAppStore((s) => s.config?.ui.minimapCollapsed === true)
   const initialsOn = useAppStore((s) => s.config?.ui.graphInitials !== false)
@@ -298,6 +300,14 @@ export function CommitMinimap({ scrollEl, rowHeight, topOffset = 0 }: Props): Re
         {!collapsed && data && <span className="minimap__total">{data.total.toLocaleString(locale)}</span>}
         {jumping && <span className="minimap__spinner" role="status" aria-label={t('minimap.jumping')} title={t('minimap.jumping')} />}
         <span className="minimap__spacer" />
+        <button
+          className="minimap__btn"
+          title={`${t('toolbar.search')} (${mod}F)`}
+          aria-label={t('toolbar.search')}
+          onClick={() => useSearchStore.getState().show()}
+        >
+          <IconSearch size={13} />
+        </button>
         <button
           className={`minimap__btn${initialsOn ? ' is-on' : ''}`}
           aria-pressed={initialsOn}

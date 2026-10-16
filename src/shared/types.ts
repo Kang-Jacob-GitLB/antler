@@ -37,6 +37,8 @@ export interface UiPrefs {
   /** GitHub OAuth App client ID(Device Flow 로그인용). 비우면 PAT 로만 로그인 */
   githubClientId?: string
   lastRepoId?: string
+  /** 상세 패널에서 커밋 내용(머리 부분)의 높이(px). 없으면 내용에 맞추되 패널의 46% 까지 */
+  detailMetaHeight?: number
   /** 커밋 활동 미니맵을 접었는지 */
   minimapCollapsed?: boolean
   /** 그래프 노드에 작성자 이니셜을 그릴지(없으면 켜짐) */

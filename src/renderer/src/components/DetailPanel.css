@@ -18,7 +18,11 @@
   max-height: 46%;
   overflow-y: auto;
   padding: var(--space-3) var(--space-4) var(--space-3);
-  border-bottom: 1px solid var(--border);
+}
+/* 분할선으로 높이를 정했으면 그 높이를 쓰되, 창이 줄어도 파일 목록 몫(90px)은 남긴다 */
+.detail__meta-block.is-sized {
+  max-height: calc(100% - 90px);
+  min-height: 60px;
 }
 
 .detail__sha-row {

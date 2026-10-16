@@ -133,8 +133,20 @@ export function App(): React.JSX.Element | null {
         useSearchStore.getState().show()
       }
     }
+    // 마우스 뒤로가기 버튼(X1, button 3): diff 를 보고 있으면 커밋 목록으로 돌아간다
+    const onMouseBack = (e: MouseEvent): void => {
+      if (e.button !== 3 || useAppStore.getState().switcherOpen) return
+      const detail = useDetailStore.getState()
+      if (!detail.file) return
+      e.preventDefault()
+      detail.closeFile()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('mouseup', onMouseBack)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('mouseup', onMouseBack)
+    }
   }, [])
 
   if (!config) return null
