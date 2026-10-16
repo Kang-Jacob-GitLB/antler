@@ -9,6 +9,7 @@ import { useLogStore } from '../stores/logStore'
 import { useWipStore, wipDirty } from '../stores/wipStore'
 import { AuthorAvatar } from './AuthorAvatar'
 import { FileRow } from './FileRow'
+import { Splitter, type SplitterHandlers } from './Splitter'
 import { WipPanel } from './WipPanel'
 import { markdownToHtml } from '../lib/markdown'
 import { HtmlBody } from './github/GhBits'
@@ -16,6 +17,14 @@ import { IconCopy } from './icons'
 import './DetailPanel.css'
 
 const FILE_ROW_H = 26
+/** 커밋 내용 영역의 최소 높이, 그리고 그 아래 파일 목록에 남길 최소 높이(px) */
+const META_MIN_H = 60
+const FILES_MIN_H = 90
+
+export function clampMetaHeight(h: number, panelH: number): number {
+  const max = Math.max(META_MIN_H, panelH - FILES_MIN_H)
+  return Math.round(Math.min(max, Math.max(META_MIN_H, h)))
+}
 
 /** 커밋 메시지 본문 — 마크다운으로 렌더링한다(정화·링크 처리는 HtmlBody) */
 const CommitBody = memo(function CommitBody({ body }: { body: string }) {
@@ -107,6 +116,13 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
   const { detail, loading, error } = useDetailStore()
   const [copied, setCopied] = useState(false)
   const wipSelected = useWipStore((s) => s.selected && wipDirty(s.status))
+  const savedMetaH = useAppStore((s) => s.config?.ui.detailMetaHeight)
+  // 드래그 중에는 지역 상태로만 바꾸고, 놓을 때 설정에 저장한다
+  const [dragMetaH, setDragMetaH] = useState<number | null>(null)
+  const metaRef = useRef<HTMLDivElement>(null)
+  const dragBase = useRef(0)
+  const dragH = useRef<number | null>(null)
+  const metaH = dragMetaH ?? savedMetaH
 
   useEffect(() => setCopied(false), [commit?.hash])
 
@@ -128,9 +144,36 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
     setCopied(true)
   }
 
+  /** 커밋 내용 ↔ 변경 파일 목록 사이 분할선. 높이는 패널 안에 들어오도록 자른다(파일 목록 최소 몫을 남김) */
+  const metaSplitter: SplitterHandlers = {
+    onDragStart: () => {
+      dragBase.current = metaRef.current?.offsetHeight ?? 0
+    },
+    onDrag: (dy) => {
+      const panelH = metaRef.current?.parentElement?.clientHeight ?? 0
+      dragH.current = clampMetaHeight(dragBase.current + dy, panelH)
+      setDragMetaH(dragH.current)
+    },
+    onDragEnd: () => {
+      const h = dragH.current
+      dragH.current = null
+      if (h !== null) void useAppStore.getState().setUi({ detailMetaHeight: h })
+      setDragMetaH(null)
+    },
+    onReset: () => {
+      dragH.current = null
+      setDragMetaH(null)
+      void useAppStore.getState().setUi({ detailMetaHeight: undefined })
+    }
+  }
+
   return (
     <aside className="detail" style={{ width }}>
-      <div className="detail__meta-block">
+      <div
+        ref={metaRef}
+        className={`detail__meta-block${metaH !== undefined ? ' is-sized' : ''}`}
+        style={metaH !== undefined ? { height: metaH } : undefined}
+      >
         <div className="detail__sha-row">
           <span className="detail__sha mono selectable">{commit.hash.slice(0, 10)}</span>
           <button className="icon-btn icon-btn--sm" title={t('detail.copy')} onClick={() => void copy()}>
@@ -167,6 +210,8 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      <Splitter horizontal {...metaSplitter} />
 
       {d ? (
         <FileList detail={d} />

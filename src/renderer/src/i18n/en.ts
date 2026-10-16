@@ -202,6 +202,7 @@ export const en: Messages = {
   'diff.prevFile': 'Previous file',
   'diff.nextFile': 'Next file',
   'diff.close': 'Close',
+  'diff.back': 'Commits',
   'diff.binary': 'Binary file — contents are not compared',
   'diff.noContent': 'No content changes (mode or name only)',
   'diff.truncated': 'Showing {shown} of {total} lines',

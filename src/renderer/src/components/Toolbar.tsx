@@ -5,7 +5,6 @@ import { fetchDetail } from '../lib/fetchText'
 import { useActiveRepo, useAppStore } from '../stores/appStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useLogStore } from '../stores/logStore'
-import { useSearchStore } from '../stores/searchStore'
 import { GhAuthButton } from './github/GhAuthButton'
 import { AntlerMark } from './brand'
 import { EnvBadge } from './EnvBadge'
@@ -15,8 +14,7 @@ import {
   IconChevronDown,
   IconClose,
   IconFunnel,
-  IconRefresh,
-  IconSearch
+  IconRefresh
 } from './icons'
 import './Toolbar.css'
 
@@ -77,11 +75,6 @@ export function Toolbar(): React.JSX.Element {
 
       <div className="toolbar__actions">
         <GhAuthButton />
-        {repo && (
-          <button className="icon-btn" title={`${t('toolbar.search')} (${mod}F)`} onClick={() => useSearchStore.getState().show()}>
-            <IconSearch />
-          </button>
-        )}
         {repo && (
           <div className="refresh-group">
             <button

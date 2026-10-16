@@ -200,6 +200,7 @@ export const ko = {
   'diff.prevFile': '이전 파일',
   'diff.nextFile': '다음 파일',
   'diff.close': '닫기',
+  'diff.back': '커밋 목록',
   'diff.binary': '바이너리 파일이라 내용을 비교해 표시하지 않습니다',
   'diff.noContent': '내용 변경 없음(모드·이름만 바뀜)',
   'diff.truncated': '전체 {total}줄 중 {shown}줄만 표시했습니다',

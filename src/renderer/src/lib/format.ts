@@ -26,15 +26,17 @@ function dtf(locale: Locale): Intl.DateTimeFormat {
   return f
 }
 
-/** 일주일 이내는 상대 시간, 그 이전은 절대 시각 */
+/** 상대 시간으로 보여 줄 범위(초). 이보다 오래되면 날짜와 시각으로 */
+const RELATIVE_MAX_SEC = 3 * 3600
+
+/** 3시간 이내는 상대 시간(방금·n분 전·n시간 전), 그보다 오래되면 날짜와 시각 */
 export function formatDate(epochSec: number, locale: Locale, now = Date.now()): string {
   const diff = (epochSec * 1000 - now) / 1000
   const abs = Math.abs(diff)
+  if (abs >= RELATIVE_MAX_SEC) return dtf(locale).format(epochSec * 1000)
   if (abs < 60) return rtf(locale).format(Math.round(diff), 'second')
   if (abs < 3600) return rtf(locale).format(Math.round(diff / 60), 'minute')
-  if (abs < 86400) return rtf(locale).format(Math.round(diff / 3600), 'hour')
-  if (abs < 7 * 86400) return rtf(locale).format(Math.round(diff / 86400), 'day')
-  return dtf(locale).format(epochSec * 1000)
+  return rtf(locale).format(Math.round(diff / 3600), 'hour')
 }
 
 export function formatAbsolute(epochSec: number, locale: Locale): string {
