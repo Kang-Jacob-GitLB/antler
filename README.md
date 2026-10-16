@@ -76,7 +76,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 | `feat!: …` 또는 본문에 `BREAKING CHANGE:` | major |
 | `ci:` · `docs:` · `chore:` · `test:` · `refactor:` 만 있음 | 릴리스하지 않음 |
 
-릴리스할 변경이 있으면 커밋을 종류별로 묶은 노트로 annotated 태그를 만들고 `release.yml` 을 그 태그로 실행한다. Actions 탭에서 수동 실행할 수도 있다(올림 단계 지정, `dry_run` 으로 계산만). 로컬 점검: `node scripts/next-version.mjs [--since vX.Y.Z]`.
+릴리스할 변경이 있으면 같은 실행 안에서 `release.yml` 을 재사용 워크플로(`workflow_call`)로 불러 세 OS 빌드 → (모두 성공하면) 커밋을 종류별로 묶은 노트로 annotated 태그 → Release 발행까지 한다. 빌드가 실패하면 태그도 남지 않으며, 실패한 잡만 다시 실행하면 된다. Actions 탭에서 수동 실행할 수도 있다(올림 단계 지정, `dry_run` 으로 계산만). 로컬 점검: `node scripts/next-version.mjs [--since vX.Y.Z]`.
 
 검증 상태:
 
