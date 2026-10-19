@@ -62,6 +62,22 @@ export const IconArrowLeft = (p: P) => (
     <path d="M13 8H3.5M7.5 4 3.5 8l4 4" />
   </Svg>
 )
+/** 왼쪽 패널 토글: 창 테두리 + 왼쪽 띠(켜져 있으면 띠를 채운다) */
+export const IconPanelLeft = ({ on, ...p }: P & { on?: boolean }) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="12" height="10" rx="1.5" />
+    <path d="M6 3v10" />
+    {on && <rect x="2.7" y="3.7" width="2.6" height="8.6" rx="0.6" fill="currentColor" stroke="none" />}
+  </Svg>
+)
+/** 오른쪽 패널 토글 */
+export const IconPanelRight = ({ on, ...p }: P & { on?: boolean }) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="12" height="10" rx="1.5" />
+    <path d="M10 3v10" />
+    {on && <rect x="10.7" y="3.7" width="2.6" height="8.6" rx="0.6" fill="currentColor" stroke="none" />}
+  </Svg>
+)
 export const IconCopy = (p: P) => (
   <Svg {...p}>
     <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
