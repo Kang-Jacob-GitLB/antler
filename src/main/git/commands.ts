@@ -292,7 +292,7 @@ async function mergeInGraphOrder(
   return out
 }
 
-function assertHex(value: string | undefined, what: string): asserts value is string {
+export function assertHex(value: string | undefined, what: string): asserts value is string {
   if (typeof value !== 'string' || !HEX_RE.test(value)) throw new Error(`invalid ${what}`)
 }
 

@@ -557,6 +557,74 @@ export interface FileDiffRequest {
   full?: boolean
 }
 
+/** 파일 히스토리 요청(`git log --follow` 상당). rev 를 생략하면 HEAD 부터 거슬러 올라간다 */
+export interface FileHistoryRequest {
+  path: string
+  /** 이 커밋부터 거슬러 올라간다(커밋 해시만). 생략하면 HEAD */
+  rev?: string
+  skip: number
+  count: number
+}
+
+/** 파일을 바꾼 커밋 하나. path/oldPath 는 그 커밋에서의 이름(이름 변경을 따라간 결과) */
+export interface FileHistoryEntry {
+  hash: string
+  parents: string[]
+  authorName: string
+  authorEmail: string
+  /** epoch seconds */
+  authorDate: number
+  subject: string
+  /** name-status 첫 글자: A 추가 · M 수정 · D 삭제 · R 이름 변경 · C 복사 · T 타입 변경 */
+  status: string
+  path: string
+  oldPath?: string
+}
+
+export interface FileHistoryPage {
+  entries: FileHistoryEntry[]
+  hasMore: boolean
+}
+
+/** Blame 요청. rev 를 생략하면 HEAD 시점의 파일 */
+export interface BlameRequest {
+  path: string
+  rev?: string
+}
+
+export interface BlameCommit {
+  hash: string
+  authorName: string
+  authorEmail: string
+  /** epoch seconds */
+  authorDate: number
+  summary: string
+  /** 이력의 끝(루트)이라 더 거슬러 갈 수 없는 커밋 */
+  boundary: boolean
+}
+
+/** 같은 커밋이 연속으로 만든 줄 묶음. start 는 lines 의 0 기반 위치 */
+export interface BlameGroup {
+  hash: string
+  start: number
+  count: number
+}
+
+export interface BlameResult {
+  /** 실제로 blame 한 커밋(요청에 rev 가 없었다면 해석한 HEAD) */
+  rev: string
+  path: string
+  /** 바이너리라 줄 단위로 보여 주지 않는다 */
+  binary: boolean
+  /** 크기 상한을 넘어 blame 하지 않았다 */
+  tooLarge: boolean
+  /** 그 시점 파일 크기(바이트) */
+  size: number
+  commits: Record<string, BlameCommit>
+  groups: BlameGroup[]
+  lines: string[]
+}
+
 /** diff 한 줄: ' ' 문맥 · '+' 추가 · '-' 삭제 · '\\' "No newline at end of file" */
 export interface DiffLine {
   t: ' ' | '+' | '-' | '\\'

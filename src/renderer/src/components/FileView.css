@@ -1,0 +1,209 @@
+/* 파일 히스토리·Blame 화면(머리줄·본문은 DiffView.css 를 함께 쓴다) */
+.file-view .seg__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ── 히스토리: 왼쪽 커밋 목록 + 오른쪽 그 커밋의 파일 diff ── */
+.fh {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.fh-list {
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--panel-bg);
+}
+.fh-list__scroll {
+  flex: 1;
+  overflow-y: auto;
+  outline: none;
+  padding: var(--space-1);
+}
+.fh-list__slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+}
+.fh-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 100%;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.fh-entry:hover {
+  background: var(--row-hover);
+}
+.fh-entry.is-active {
+  background: var(--row-selected);
+  box-shadow: inset 2px 0 0 var(--row-selected-edge);
+}
+.fh-entry__text {
+  flex: 1;
+  min-width: 0;
+}
+.fh-entry__subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.fh-entry__meta {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fh-entry__author {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fh-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+.fh-note.is-error {
+  flex-direction: column;
+  align-items: flex-start;
+  color: var(--removed-text);
+}
+
+.fh-detail {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fh-detail__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+.fh-detail__text {
+  flex: 1;
+  min-width: 0;
+}
+.fh-detail__subject {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fh-detail__meta {
+  display: flex;
+  gap: var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.fh-detail__rename {
+  color: var(--renamed-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fh-detail__head .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+/* ── Blame ── */
+.bl {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.bl-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.bl-bar__note {
+  color: var(--text-muted);
+}
+.bl-row {
+  display: grid;
+  height: 100%;
+  line-height: 20px;
+  white-space: pre;
+  user-select: text;
+  cursor: text;
+}
+.bl-row.is-alt {
+  background: color-mix(in srgb, var(--text-muted) 6%, transparent);
+}
+.bl-row.is-first {
+  box-shadow: inset 0 1px 0 var(--border);
+}
+.bl-cell {
+  min-width: 0;
+  overflow: hidden;
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+.bl-gutter {
+  display: grid;
+  grid-template-columns: 7ch minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  width: 100%;
+  height: 100%;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+.bl-gutter:hover {
+  background: var(--row-hover);
+}
+.bl-gutter__hash {
+  color: var(--accent-text);
+}
+.bl-gutter__author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bl-gutter__date {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.bl-row .diff-no {
+  padding-left: 8px;
+}

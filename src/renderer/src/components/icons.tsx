@@ -190,3 +190,17 @@ export const IconSubmodule = (p: P) => (
     <path d="M2.7 5 8 8l5.3-3M8 8v6" />
   </Svg>
 )
+
+/** 파일 히스토리: 시계 */
+export const IconHistory = (p: P) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5.5" />
+    <path d="M8 4.8V8l2.2 1.4" />
+  </Svg>
+)
+/** Blame: 줄 목록 + 왼쪽 작성자 표시 */
+export const IconBlame = (p: P) => (
+  <Svg {...p}>
+    <path d="M2.5 4h2M2.5 8h2M2.5 12h2M7 4h6.5M7 8h6.5M7 12h4.5" />
+  </Svg>
+)

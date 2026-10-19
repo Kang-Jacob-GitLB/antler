@@ -26,6 +26,10 @@ import type {
   CommitDetail,
   FileDiff,
   FileDiffRequest,
+  FileHistoryPage,
+  FileHistoryRequest,
+  BlameRequest,
+  BlameResult,
   LogPage,
   LogQuery,
   RefsDetails,
@@ -100,6 +104,10 @@ export interface IpcContract {
   'git:commit': { args: [repoId: string, hash: string, requestId?: string]; result: CommitDetail }
   /** 파일 하나의 diff. 크기 상한을 넘으면 앞부분만 담고 truncated=true(req.full 로 전체) */
   'git:fileDiff': { args: [repoId: string, req: FileDiffRequest, requestId?: string]; result: FileDiff }
+  /** 파일 하나를 바꾼 커밋 목록(`git log --follow`, 이름 변경 추적). skip/count 로 페이지 단위 로딩 */
+  'git:fileHistory': { args: [repoId: string, req: FileHistoryRequest, requestId?: string]; result: FileHistoryPage }
+  /** 지정 커밋(생략하면 HEAD) 시점 파일의 줄별 blame. 읽기 전용 */
+  'git:blame': { args: [repoId: string, req: BlameRequest, requestId?: string]; result: BlameResult }
   /** 작업 트리 상태(WIP): 스테이지됨·변경됨·추적 안 됨 파일. 읽기 전용이며 캐시하지 않는다 */
   'git:wipStatus': { args: [repoId: string, requestId?: string]; result: WipStatus }
   /** 작업 트리 파일 하나의 diff(스테이지/작업 트리/추적 안 됨). 결과 형식은 git:fileDiff 와 같다 */
@@ -177,6 +185,8 @@ export const IPC_CHANNELS = [
   'git:activity',
   'git:commit',
   'git:fileDiff',
+  'git:fileHistory',
+  'git:blame',
   'git:wipStatus',
   'git:wipDiff',
   'git:fetch',

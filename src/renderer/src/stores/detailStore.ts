@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CommitDetail, FileChange, FileDiff, WipArea } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { useFileViewStore } from './fileViewStore'
 import { useWipStore, wipEntries } from './wipStore'
 
 /** renderer 쪽 커밋 상세 캐시(커밋은 불변이라 해시만으로 충분하다). ↑↓ 로 오갈 때 즉시 보이게 한다 */
@@ -80,7 +81,8 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     if (s.repoId === repoId && s.hash === hash) return
     cancel(s.pendingDetail)
     cancel(s.pendingDiff)
-    // 다른 커밋으로 옮기면 열려 있던 diff 는 닫는다(그 커밋에 같은 파일이 없을 수 있다)
+    // 다른 커밋으로 옮기면 열려 있던 diff 는 닫는다(그 커밋에 같은 파일이 없을 수 있다). 파일 히스토리·Blame 도 마찬가지
+    useFileViewStore.getState().close()
     set({ repoId, hash, file: null, wipArea: null, diff: null, diffLoading: false, diffError: null, diffFull: false, fullError: null, pendingDiff: null })
     if (!repoId || !hash) {
       set({ detail: null, loading: false, error: null, pendingDetail: null })
@@ -109,6 +111,8 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     const { repoId, detail, pendingDiff } = get()
     if (!repoId || !detail) return
     cancel(pendingDiff)
+    // 다른 파일 diff 를 열면 위에 떠 있던 파일 히스토리·Blame 은 닫는다(가려진 diff 를 열지 않게)
+    useFileViewStore.getState().close()
     const requestId = newRequestId('diff')
     // "전체 불러오기"는 받는 동안 이미 보이던 부분 diff 를 그대로 둔다
     set({ file, wipArea: null, diffLoading: true, diffError: null, fullError: null, pendingDiff: requestId, ...(full ? {} : { diff: null, diffFull: false }) })
@@ -140,6 +144,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
     const { repoId, pendingDiff } = get()
     if (!repoId) return
     cancel(pendingDiff)
+    useFileViewStore.getState().close()
     const requestId = newRequestId('diff')
     set({ file, wipArea: area, diffLoading: true, diffError: null, fullError: null, pendingDiff: requestId, ...(full ? {} : { diff: null, diffFull: false }) })
     try {
@@ -177,12 +182,14 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 
   closeFile() {
     cancel(get().pendingDiff)
+    useFileViewStore.getState().close()
     set({ file: null, wipArea: null, diff: null, diffLoading: false, diffError: null, diffFull: false, fullError: null, pendingDiff: null })
   },
 
   reset() {
     cancel(get().pendingDetail)
     cancel(get().pendingDiff)
+    useFileViewStore.getState().close()
     set({
       repoId: null,
       hash: null,
