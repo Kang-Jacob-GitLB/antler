@@ -1,25 +1,27 @@
 // 브랜드 심볼과 빈 화면 일러스트. 갈라진 사슴뿔 가지 = git 레인, 가지 끝 점 = 앰버 노드.
 
-/** 앱 로고 마크(툴바용). resources/icon.svg 와 같은 모양(한쪽에 세 가닥)·같은 좌표를 바탕 없이 잘라 쓴다. */
+/** 앱 로고 마크(툴바용). resources/icon.svg 와 같은 모양(큰 두 갈래 + 갈래마다 작은 갈래 둘)·같은 좌표를 바탕 없이 쓴다. 뿔이 위아래 가운데 오도록 viewBox 를 내렸다. */
 export function AntlerMark({ size = 20 }: { size?: number }): React.JSX.Element {
   return (
-    <svg width={size} height={size} viewBox="140 150 744 744" fill="none" aria-hidden="true">
-      <g stroke="var(--text-primary)" strokeWidth={64} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M512 880 V560" />
-        <path d="M512 560 C512 430 380 400 330 260" />
-        <path d="M404 404 C330 400 268 368 232 300" />
-        <path d="M403 376 C420 330 440 290 448 252" />
-        <path d="M512 560 C512 430 644 400 694 260" />
-        <path d="M620 404 C694 400 756 368 792 300" />
-        <path d="M621 376 C604 330 584 290 576 252" />
+    <svg width={size} height={size} viewBox="0 -2.8 24 24" fill="none" aria-hidden="true">
+      <g stroke="var(--text-primary)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 17V14" />
+        <path d="M12 14C12 10 8 8.5 6.5 3" />
+        <path d="M12 14C12 10 16 8.5 17.5 3" />
+      </g>
+      <g stroke="var(--text-primary)" strokeWidth={1.2} strokeLinecap="round">
+        <path d="M10.81 10.44L7.21 9.44" />
+        <path d="M13.19 10.44L16.79 9.44" />
+        <path d="M8.35 7.05L4.75 6.05" />
+        <path d="M15.65 7.05L19.25 6.05" />
       </g>
       <g fill="var(--accent)">
-        <circle cx="330" cy="234" r="56" />
-        <circle cx="694" cy="234" r="56" />
-        <circle cx="214" cy="277" r="52" />
-        <circle cx="810" cy="277" r="52" />
-        <circle cx="451" cy="229" r="50" />
-        <circle cx="573" cy="229" r="50" />
+        <circle cx="6.29" cy="2.23" r="1.9" />
+        <circle cx="17.71" cy="2.23" r="1.9" />
+        <circle cx="6.45" cy="9.23" r="1.45" />
+        <circle cx="17.55" cy="9.23" r="1.45" />
+        <circle cx="3.98" cy="5.84" r="1.45" />
+        <circle cx="20.02" cy="5.84" r="1.45" />
       </g>
     </svg>
   )
