@@ -33,6 +33,7 @@ import {
   IconWorktree
 } from './icons'
 import { GroupChip } from './GroupChip'
+import { Collapse } from './Collapse'
 import './Sidebar.css'
 
 /** 기본으로 접어 둘 폴더 크기 */
@@ -266,7 +267,9 @@ function Section({
           </span>
         )}
       </div>
-      {open && <div className="side-section__body">{children}</div>}
+      <Collapse open={open}>
+        <div className="side-section__body">{children}</div>
+      </Collapse>
     </section>
   )
 }
@@ -283,7 +286,9 @@ function Tree<T>({ node, scope, depth, renderItem }: { node: TreeNode<T>; scope:
         return (
           <div key={child.path}>
             <FolderRow depth={depth} name={child.name} count={child.count} open={open} onToggle={() => toggle(key, def)} />
-            {open && <Tree node={child} scope={scope} depth={depth + 1} renderItem={renderItem} />}
+            <Collapse open={open}>
+              <Tree node={child} scope={scope} depth={depth + 1} renderItem={renderItem} />
+            </Collapse>
           </div>
         )
       })}
@@ -643,7 +648,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                   <span className="source-card__label">{source.label}</span>
                   <span className="side-count">{repos.length}</span>
                 </div>
-                {srcOpen && (
+                <Collapse open={srcOpen}>
                   <div className="source-card__body">
                 {[...grouped.entries()]
                   .sort(([a], [b]) => a.localeCompare(b))
@@ -653,13 +658,13 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     return (
                       <div key={group}>
                         <GroupRow name={group} count={items.length} open={open} onToggle={() => toggle(key)} />
-                        {open && items.map((r) => repoRow(r, 1))}
+                        <Collapse open={open}>{items.map((r) => repoRow(r, 1))}</Collapse>
                       </div>
                     )
                   })}
                 {loose.map((r) => repoRow(r, 0))}
                   </div>
-                )}
+                </Collapse>
               </div>
             )
           })}
@@ -678,14 +683,14 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                 return (
                   <div key={r.name}>
                     <RemoteRow name={r.name} count={r.branches.length} open={open} onToggle={() => toggle(key)} onContextMenu={ctxOf(remoteAllRef(r.name))} />
-                    {open && (
+                    <Collapse open={open}>
                       <Tree
                         node={buildTree(r.branches.map((b) => ({ name: b.name.slice(r.name.length + 1), value: b })))}
                         scope={key}
                         depth={1}
                         renderItem={(it, d) => branchRow(it.value, it.label, d, true)}
                       />
-                    )}
+                    </Collapse>
                   </div>
                 )
               })}
