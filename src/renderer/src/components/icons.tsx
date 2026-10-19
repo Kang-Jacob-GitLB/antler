@@ -202,13 +202,18 @@ export const IconUser = (p: P) => (
     <path d="M3 13.5c.6-2.6 2.6-4 5-4s4.4 1.4 5 4" />
   </Svg>
 )
-/** Jira 화면(이슈 트래커): 겹친 마름모 — 공식 로고가 아닌 일반 기호 */
-export const IconJira = (p: P) => (
-  <Svg {...p}>
-    <path d="M8 1.8l3.2 3.2L8 8.2 4.8 5z" />
-    <path d="M8 7.8l3.2 3.2L8 14.2 4.8 11z" />
-    <path d="M11.2 5l3 3-3 3M4.8 5l-3 3 3 3" />
-  </Svg>
+/**
+ * Jira 공식 아이콘(Atlassian @atlaskit/logo 23.3.1 의 jira/icon, 브랜드 파랑 #1868DB 타일). Jira 연동 화면을 가리키는 용도로만 쓰고
+ * Atlassian 브랜드 지침대로 모양·색을 바꾸지 않는다(그래서 currentColor 를 따르지 않는다)
+ */
+export const IconJira = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="#1868DB" d="M0 6a6 6 0 0 1 6-6h12a6 6 0 0 1 6 6v12a6 6 0 0 1-6 6H6a6 6 0 0 1-6-6z" />
+    <path
+      fill="#FFFFFF"
+      d="M9.051 15.434H7.734c-1.988 0-3.413-1.218-3.413-3h7.085c.367 0 .605.26.605.63v7.13c-1.772 0-2.96-1.435-2.96-3.434zm3.5-3.543h-1.318c-1.987 0-3.413-1.196-3.413-2.978h7.085c.367 0 .627.239.627.608v7.13c-1.772 0-2.981-1.435-2.981-3.434zm3.52-3.522h-1.317c-1.987 0-3.413-1.217-3.413-3h7.085c.367 0 .605.262.605.61v7.129c-1.771 0-2.96-1.435-2.96-3.434z"
+    />
+  </svg>
 )
 export const IconTerminal = (p: P) => (
   <Svg {...p}>

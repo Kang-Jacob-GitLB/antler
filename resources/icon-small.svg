@@ -1,24 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 1024 1024">
   <!--
     16·24·32px 용. icon.svg 와 같은 모양(한쪽에 세 가닥)을 더 굵은 선·큰 노드로 그려 작은 크기에서도 뭉개지지 않게 한다.
-    좌표는 icon.svg 와 같은 1024 격자다. 색은 icon.svg 와 같다.
+    좌표는 icon.svg 와 같은 1024 격자다(뿌리 노드는 작은 크기에서 뭉개져 뺀다). 색은 icon.svg 와 같다.
   -->
   <rect x="16" y="16" width="992" height="992" rx="224" fill="#14110F"/>
-  <g fill="none" stroke="#EDE6D8" stroke-width="80" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M512 880 V620"/>
-    <path d="M512 620 C470 540 300 520 220 300"/>
-    <path d="M430 547 C420 470 410 400 420 300"/>
-    <path d="M338 478 C320 420 300 360 310 260"/>
-    <path d="M512 620 C554 540 724 520 804 300"/>
-    <path d="M594 547 C604 470 614 400 604 300"/>
-    <path d="M686 478 C704 420 724 360 714 260"/>
+  <g fill="none" stroke="#EDE6D8" stroke-width="68" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M512 880 V560"/>
+    <path d="M512 560 C512 430 380 400 330 260"/>
+    <path d="M404 404 C330 400 268 368 232 300"/>
+    <path d="M403 376 C420 330 440 290 448 252"/>
+    <path d="M512 560 C512 430 644 400 694 260"/>
+    <path d="M620 404 C694 400 756 368 792 300"/>
+    <path d="M621 376 C604 330 584 290 576 252"/>
   </g>
   <g fill="#D9A441">
-    <circle cx="210" cy="272" r="54"/>
-    <circle cx="814" cy="272" r="54"/>
-    <circle cx="311" cy="224" r="54"/>
-    <circle cx="713" cy="224" r="54"/>
-    <circle cx="421" cy="270" r="54"/>
-    <circle cx="603" cy="270" r="54"/>
+    <circle cx="330" cy="232" r="54"/>
+    <circle cx="694" cy="232" r="54"/>
+    <circle cx="212" cy="276" r="50"/>
+    <circle cx="812" cy="276" r="50"/>
+    <circle cx="452" cy="226" r="46"/>
+    <circle cx="572" cy="226" r="46"/>
   </g>
 </svg>

@@ -3,23 +3,23 @@
 /** 앱 로고 마크(툴바용). resources/icon.svg 와 같은 모양(한쪽에 세 가닥)·같은 좌표를 바탕 없이 잘라 쓴다. */
 export function AntlerMark({ size = 20 }: { size?: number }): React.JSX.Element {
   return (
-    <svg width={size} height={size} viewBox="140 160 744 744" fill="none" aria-hidden="true">
+    <svg width={size} height={size} viewBox="140 150 744 744" fill="none" aria-hidden="true">
       <g stroke="var(--text-primary)" strokeWidth={64} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M512 880 V620" />
-        <path d="M512 620 C470 540 300 520 220 300" />
-        <path d="M430 547 C420 470 410 400 420 300" />
-        <path d="M338 478 C320 420 300 360 310 260" />
-        <path d="M512 620 C554 540 724 520 804 300" />
-        <path d="M594 547 C604 470 614 400 604 300" />
-        <path d="M686 478 C704 420 724 360 714 260" />
+        <path d="M512 880 V560" />
+        <path d="M512 560 C512 430 380 400 330 260" />
+        <path d="M404 404 C330 400 268 368 232 300" />
+        <path d="M403 376 C420 330 440 290 448 252" />
+        <path d="M512 560 C512 430 644 400 694 260" />
+        <path d="M620 404 C694 400 756 368 792 300" />
+        <path d="M621 376 C604 330 584 290 576 252" />
       </g>
       <g fill="var(--accent)">
-        <circle cx="212" cy="278" r="52" />
-        <circle cx="812" cy="278" r="52" />
-        <circle cx="311" cy="232" r="52" />
-        <circle cx="713" cy="232" r="52" />
-        <circle cx="421" cy="276" r="52" />
-        <circle cx="603" cy="276" r="52" />
+        <circle cx="330" cy="234" r="56" />
+        <circle cx="694" cy="234" r="56" />
+        <circle cx="214" cy="277" r="52" />
+        <circle cx="810" cy="277" r="52" />
+        <circle cx="451" cy="229" r="50" />
+        <circle cx="573" cy="229" r="50" />
       </g>
     </svg>
   )
