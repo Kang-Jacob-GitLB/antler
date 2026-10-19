@@ -73,3 +73,46 @@ describe('WIP filter 드라이버 무력화', () => {
     expect(args).toContain('filter.lfs.clean=')
   })
 })
+
+describe('이름에 "=" 가 든 filter 드라이버', () => {
+  let d2: string
+  let m2: string
+  const g2 = (...a: string[]): string =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@e.x', '-c', 'commit.gpgsign=false', ...a], { cwd: d2, encoding: 'utf8' })
+  const touch2 = (body: string, ahead: number): void => {
+    writeFileSync(join(d2, 'a.txt'), body)
+    const t = new Date(Date.now() + ahead)
+    utimesSync(join(d2, 'a.txt'), t, t)
+  }
+
+  beforeAll(() => {
+    d2 = mkdtempSync(join(tmpdir(), 'antler-wipfilter-eq-'))
+    m2 = join(d2, '..', `pwned-eq-${process.pid}-${Date.now()}`).replace(/\\/g, '/')
+    g2('init', '-q', '-b', 'main')
+    writeFileSync(join(d2, 'a.txt'), 'hello\n')
+    // gitattributes 는 값을 첫 공백까지 읽으므로 `a=b` 가 드라이버 이름이 된다
+    writeFileSync(join(d2, '.gitattributes'), '*.txt filter=a=b\n')
+    g2('add', '.')
+    g2('commit', '-q', '-m', 'init')
+    g2('config', 'filter.a=b.clean', `touch "${m2}"; cat`)
+  })
+  afterAll(() => {
+    rmSync(d2, { recursive: true, force: true })
+    rmSync(m2, { force: true })
+  })
+
+  it('대조군: `-c filter.a=b.clean=` 로는 덮어 쓰이지 않아 명령이 실행된다', () => {
+    touch2('jello\n', 5000)
+    g2('-c', 'filter.a=b.clean=', 'status', '--porcelain')
+    expect(existsSync(m2)).toBe(true)
+    rmSync(m2, { force: true })
+  })
+
+  it('wipStatus·wipFileDiff 는 실행하지 않고 거부한다', async () => {
+    const exec = new LocalExecutor()
+    touch2('hellp\n', 10000)
+    await expect(wipStatus(exec, d2)).rejects.toThrow(/=/)
+    await expect(wipFileDiff(exec, d2, { area: 'unstaged', path: 'a.txt' })).rejects.toThrow(/=/)
+    expect(existsSync(m2)).toBe(false)
+  })
+})
