@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { LAUNCHPAD_KEY_RE, MAX_LAUNCHPAD_PINS, MAX_LAUNCHPAD_SNOOZES } from '@shared/launchpad'
-import type { AppConfig, Profile, ProfileSaveInput, Repo, RepoPatch, Source, SourceKind, UiPrefs } from '@shared/types'
+import type { AppConfig, Profile, ProfileSaveInput, Repo, RepoPatch, Source, SourceKind, UiPrefs, WindowState } from '@shared/types'
+import { sanitizeWindowState } from '../windowState'
 import {
   MAX_PROFILES,
   applySettings,
@@ -182,6 +183,15 @@ export class ConfigStore {
     return this.update({ ...this.config, ui, profiles: profiles.filter((p) => p.id !== id) })
   }
 
+  /** main 전용: 창 위치·크기(IPC 로 노출하지 않는다). 같은 값이면 쓰지 않는다 */
+  setWindowState(state: WindowState): void {
+    const next = sanitizeWindowState(state)
+    if (!next) return
+    const cur = this.config.window
+    if (cur && cur.x === next.x && cur.y === next.y && cur.width === next.width && cur.height === next.height && !!cur.maximized === !!next.maximized) return
+    this.update({ ...this.config, window: next })
+  }
+
   /** main 전용: 사용자가 '이 버전 건너뛰기'를 고른 업데이트 버전(IPC 로 노출하지 않는다) */
   setSkippedUpdateVersion(version: string): AppConfig {
     if (typeof version !== 'string' || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]{1,40})?$/.test(version)) throw new Error('잘못된 버전입니다')
@@ -260,13 +270,15 @@ export class ConfigStore {
       const ui: UiPrefs = { ...base.ui, ...raw.ui }
       // 없어진 프로필을 가리키는 표시는 지운다
       if (ui.activeProfileId !== undefined && !profiles.some((p) => p.id === ui.activeProfileId)) delete ui.activeProfileId
+      const win = sanitizeWindowState(raw.window)
       return {
         version: 1,
         sources,
         repos: raw.repos ?? [],
         ui,
         ...(profiles.length ? { profiles } : {}),
-        ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {})
+        ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {}),
+        ...(win ? { window: win } : {})
       }
     } catch {
       // 손상된 설정은 덮어쓰기 전에 보존해 둔다(사용자가 저장소 목록을 복구할 수 있게)

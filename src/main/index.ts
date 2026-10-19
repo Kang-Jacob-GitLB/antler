@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { app, BrowserWindow, nativeTheme, safeStorage, session, shell } from 'electron'
+import { app, BrowserWindow, nativeTheme, safeStorage, screen, session, shell } from 'electron'
 import { AVATAR_CACHE_FILE } from './github/avatars'
 import { createDevFakeFetch } from './github/devFake'
 import { GitHubService } from './github/service'
@@ -17,6 +17,7 @@ import { RepoWatcher } from './services/RepoWatcher'
 import { createAutoBackend } from './update/autoBackend'
 import { UpdateService } from './update/UpdateService'
 import { TOOLBAR_HEIGHT, titleBarOverlay } from './titleBar'
+import { DEFAULT_WINDOW, MIN_WINDOW, restoreBounds } from './windowState'
 
 app.setName('Antler')
 // 테스트·자동화용으로 설정 저장 위치를 바꿀 수 있다(실사용 설정을 건드리지 않기 위해)
@@ -49,15 +50,44 @@ function windowIcon(): { icon?: string } {
   return {}
 }
 
+/**
+ * 창 위치·크기를 설정에 기억한다. 최대화·최소화·전체 화면 중에는 그 전의 보통 크기(getNormalBounds)를 남긴다.
+ * 옮기는 동안 계속 쓰지 않게 잠시 모았다가 쓰고, 닫을 때 한 번 더 쓴다.
+ */
+function trackWindowState(win: BrowserWindow): void {
+  let timer: NodeJS.Timeout | undefined
+  const save = (): void => {
+    clearTimeout(timer)
+    timer = undefined
+    if (win.isDestroyed() || win.isMinimized()) return
+    try {
+      config.setWindowState({ ...win.getNormalBounds(), maximized: win.isMaximized() || win.isFullScreen() })
+    } catch (err) {
+      console.error('창 위치 저장 실패:', err)
+    }
+  }
+  const later = (): void => {
+    clearTimeout(timer)
+    timer = setTimeout(save, 500)
+  }
+  win.on('resize', later)
+  win.on('move', later)
+  win.on('maximize', later)
+  win.on('unmaximize', later)
+  win.on('close', save)
+}
+
 function createWindow(): BrowserWindow {
   const pref = config.get().ui.theme
   const dark = pref === 'system' ? nativeTheme.shouldUseDarkColors : pref === 'dark'
+  // 지난번 창 위치·크기로 연다(그 사이 모니터 구성이 바뀌었으면 지금 화면 안으로 맞춘다)
+  const saved = config.get().window
+  const bounds = restoreBounds(saved, screen.getAllDisplays().map((d) => d.workArea))
   const win = new BrowserWindow({
     title: 'Antler',
-    width: 1440,
-    height: 900,
-    minWidth: 960,
-    minHeight: 600,
+    ...(bounds ?? DEFAULT_WINDOW),
+    minWidth: MIN_WINDOW.width,
+    minHeight: MIN_WINDOW.height,
     show: false,
     backgroundColor: dark ? BG.dark : BG.light,
     ...windowIcon(),
@@ -74,7 +104,11 @@ function createWindow(): BrowserWindow {
       spellcheck: false
     }
   })
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    if (saved?.maximized) win.maximize()
+    win.show()
+  })
+  trackWindowState(win)
   // 창이 뒤에 있을 때는 원격 폴링을 늦추고, 다시 앞으로 오면 바로 확인한다
   win.on('focus', () => {
     watcher?.setFocused(true)
