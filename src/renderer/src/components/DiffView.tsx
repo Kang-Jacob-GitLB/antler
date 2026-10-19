@@ -6,6 +6,7 @@ import { splitRows, unifiedRows, type Span, type SplitCell, type SplitRow, type 
 import { escapeHtml, highlightLine, languageFor, loadHighlighter } from '../diff/highlight'
 import { useT } from '../i18n'
 import { useAppStore } from '../stores/appStore'
+import { useCompareStore } from '../stores/compareStore'
 import { useDetailStore } from '../stores/detailStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useWipStore, wipEntries } from '../stores/wipStore'
@@ -224,15 +225,19 @@ export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.El
   const { file, wipArea, diff, diffLoading, diffError, detail, diffFull, fullError, repoId } = useDetailStore()
   const { closeFile, stepFile, openFile, openWipFile } = useDetailStore.getState()
   const wipStatus = useWipStore((s) => s.status)
+  // 두 커밋 비교 모드면 파일 위치(n / 전체)를 비교 결과의 목록에서 센다
+  const compare = useCompareStore((s) => s.result)
 
   const current = diff && file && diff.path === file.path ? diff : null
   const lineCount = useMemo(() => current?.hunks.reduce((n, h) => n + h.lines.length, 0) ?? 0, [current])
 
-  if (!file || (!detail && !wipArea)) return null
+  if (!file || (!detail && !wipArea && !compare)) return null
   // 작업 트리(WIP) 파일이면 패널에 보이는 순서의 목록에서, 커밋 파일이면 커밋의 파일 목록에서 위치를 센다
   const wipList = wipArea ? wipEntries(wipStatus) : null
-  const total = wipList ? wipList.length : detail!.files.length
-  const index = wipList ? wipList.findIndex((e) => e.area === wipArea && e.file.path === file.path) : detail!.files.indexOf(file)
+  // 작업 트리(WIP) 경로에서는 detail 이 없을 수 있어 읽지 않는다
+  const files = wipList ? [] : (compare?.files ?? detail!.files)
+  const total = wipList ? wipList.length : files.length
+  const index = wipList ? wipList.findIndex((e) => e.area === wipArea && e.file.path === file.path) : files.indexOf(file)
   const slash = file.path.lastIndexOf('/')
   const dir = slash < 0 ? '' : file.path.slice(0, slash + 1)
   const base = file.path.slice(slash + 1)
@@ -254,6 +259,11 @@ export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.El
           <span className="diff-head__base">{base}</span>
         </div>
         {wipArea && <span className="diff-head__area">{t(`wip.area.${wipArea}`)}</span>}
+        {compare && !wipArea && (
+          <span className="diff-head__area mono" title={t('compare.diffTitle')}>
+            {compare.from.slice(0, 7)}..{compare.to.slice(0, 7)}
+          </span>
+        )}
         {!file.binary && !wipArea && (
           <span className="diff-head__stat">
             <span className="is-add">+{file.additions ?? 0}</span>

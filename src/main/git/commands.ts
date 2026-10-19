@@ -1,6 +1,6 @@
 // git 조회 명령 모음. executor 위에서 동작하며 환경과 무관하다.
 import { createHash } from 'node:crypto'
-import type { CommitDetail, FileDiff, FileDiffRequest, HeadInfo, RefsDetails, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
+import type { CommitDetail, CompareResult, FileChange, FileDiff, FileDiffRequest, HeadInfo, RefsDetails, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { pickDefaultBranch } from './defaultBranch'
 import { parseChanges } from './parsers/changes'
@@ -314,7 +314,12 @@ export async function commitDetail(exec: GitExecutor, repoPath: string, hash: st
     ok(exec, repoPath, [...base, '--name-status', ...range, '--'], opts),
     ok(exec, repoPath, [...base, '--numstat', ...range, '--'], opts)
   ])
-  const all = parseChanges(nameStatus, numstat)
+  const { files, additions, deletions, truncated } = summarizeChanges(parseChanges(nameStatus, numstat))
+  return { ...meta, baseParent, files, additions, deletions, truncated }
+}
+
+/** 변경 파일 목록에 +/- 합계를 매기고 상한(COMMIT_FILES_LIMIT)에서 자른다. 합계는 잘리기 전 전체 기준이다 */
+function summarizeChanges(all: FileChange[]): { files: FileChange[]; additions: number; deletions: number; truncated: boolean } {
   let additions = 0
   let deletions = 0
   for (const f of all) {
@@ -323,7 +328,23 @@ export async function commitDetail(exec: GitExecutor, repoPath: string, hash: st
     deletions += f.deletions ?? 0
   }
   const truncated = all.length > COMMIT_FILES_LIMIT
-  return { ...meta, baseParent, files: truncated ? all.slice(0, COMMIT_FILES_LIMIT) : all, additions, deletions, truncated }
+  return { files: truncated ? all.slice(0, COMMIT_FILES_LIMIT) : all, additions, deletions, truncated }
+}
+
+/**
+ * 두 커밋 사이(from → to)의 변경 파일 목록. `git diff from to` 와 같은 트리 대 트리 비교이며
+ * 커밋 상세와 같은 파서·상한을 쓴다. 두 값 모두 hex 해시만 받아 옵션으로 해석될 수 없다.
+ * 파일 하나의 diff 는 fileDiff 에 hash=to, parent=from 으로 요청하면 같은 비교가 된다.
+ */
+export async function compareCommits(exec: GitExecutor, repoPath: string, from: string, to: string, opts?: RunOpts): Promise<CompareResult> {
+  assertHex(from, 'from hash')
+  assertHex(to, 'to hash')
+  const base = ['diff-tree', '-r', '-z', '-M', '--no-commit-id', '--no-ext-diff']
+  const [nameStatus, numstat] = await Promise.all([
+    ok(exec, repoPath, [...base, '--name-status', from, to, '--'], opts),
+    ok(exec, repoPath, [...base, '--numstat', from, to, '--'], opts)
+  ])
+  return { from, to, ...summarizeChanges(parseChanges(nameStatus, numstat)) }
 }
 
 /**

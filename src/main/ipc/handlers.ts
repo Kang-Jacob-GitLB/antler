@@ -202,6 +202,7 @@ export function registerIpc(
   handle('git:activity', (_e, repoId, ref, requestId) => repos.activity(repoId, ref, requestId))
   handle('git:search',(_e, repoId, query, ref, requestId) => repos.search(repoId, query, ref, requestId))
   handle('git:commit', (_e, repoId, hash, requestId) => repos.commit(repoId, hash, requestId))
+  handle('git:compare', (_e, repoId, from, to, requestId) => repos.compare(repoId, from, to, requestId))
   handle('git:fileDiff', (_e, repoId, req, requestId) => repos.fileDiff(repoId, req, requestId))
   handle('git:fileHistory', (_e, repoId, req, requestId) => repos.fileHistory(repoId, req, requestId))
   handle('git:blame', (_e, repoId, req, requestId) => repos.blame(repoId, req, requestId))

@@ -547,6 +547,17 @@ export interface CommitDetail {
   truncated: boolean
 }
 
+/** 두 커밋 비교 결과: from → to 로 바뀐 파일 목록(+/- 통계). 파일 diff 는 FileDiffRequest 의 hash=to, parent=from 으로 연다 */
+export interface CompareResult {
+  from: string
+  to: string
+  files: FileChange[]
+  additions: number
+  deletions: number
+  /** 파일 수 상한에 걸려 목록이 잘렸는지 */
+  truncated: boolean
+}
+
 export interface FileDiffRequest {
   hash: string
   path: string

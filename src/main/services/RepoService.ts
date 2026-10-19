@@ -3,6 +3,7 @@ import type {
   CommitActivity,
   RemoteDirListing,
   CommitDetail,
+  CompareResult,
   RefsDetails,
   FileDiff,
   FileDiffRequest,
@@ -90,6 +91,13 @@ export function estimateCommitBytes(d: CommitDetail): number {
   return n
 }
 
+/** 비교 결과가 차지하는 메모리 추정치(바이트) */
+export function estimateCompareBytes(d: CompareResult): number {
+  let n = 256
+  for (const f of d.files) n += 96 + (f.path.length + (f.oldPath?.length ?? 0)) * 2
+  return n
+}
+
 /** 이어 읽으려던 위치의 커밋이 바뀌었다 — renderer 는 처음부터 다시 읽어야 한다 */
 export class StaleLogError extends Error {
   constructor() {
@@ -120,6 +128,7 @@ export class RepoService {
   private readonly anchors = new Map<string, { position: number; hash: string }>()
   /** 커밋 해시 기준이라 불변이다 — 무효화하지 않는다 */
   private readonly commitCache = new LruCache<string, CommitDetail>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
+  private readonly compareCache = new LruCache<string, CompareResult>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
   private readonly diffCache = new LruCache<string, FileDiff>(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES)
   private readonly inflight = new Map<string, Inflight<unknown>>()
   /** 커밋 활동 집계 캐시: 저장소+ref 별로 ref 시그니처와 함께 보관한다(시그니처가 같으면 이력이 같다) */
@@ -452,6 +461,19 @@ export class RepoService {
     })
   }
 
+  /** 두 커밋 사이의 변경 파일 목록. 해시 쌍 기준이라 불변이므로 캐시하고 진행 중 요청은 공유한다 */
+  compare(repoId: string, from: string, to: string, requestId?: string): Promise<CompareResult> {
+    const { repo, rt } = this.resolve(repoId)
+    const key = `compare\0${repoId}\0${String(from).toLowerCase()}\0${String(to).toLowerCase()}`
+    const cached = this.compareCache.get(key)
+    if (cached) return Promise.resolve(cached)
+    return this.shared(key, requestId, async (signal) => {
+      const result = await rt.queue.run(() => git.compareCommits(rt.exec, repo.path, from, to, { signal }), { signal })
+      this.compareCache.set(key, result, estimateCompareBytes(result))
+      return result
+    })
+  }
+
   /** 파일 하나의 diff. 상한을 넘으면 truncated, req.full 이면 전체(별도 캐시 항목) */
   fileDiff(repoId: string, req: FileDiffRequest, requestId?: string): Promise<FileDiff> {
     const { repo, rt } = this.resolve(repoId)
@@ -646,6 +668,7 @@ export class RepoService {
     this.sigInflight.clear()
     this.sigApplied.clear()
     this.commitCache.clear()
+    this.compareCache.clear()
     this.diffCache.clear()
     this.ghRepoCache.clear()
     for (const ac of this.requests.values()) ac.abort()

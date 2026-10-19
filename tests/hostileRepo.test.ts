@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
-import { commitDetail, logArgs, refs, refsSignature } from '../src/main/git/commands'
+import { commitDetail, compareCommits, logArgs, refs, refsSignature } from '../src/main/git/commands'
 import { wipStatus } from '../src/main/git/wip'
 
 let root: string
@@ -62,6 +62,7 @@ describe('악성 저장소 설정', () => {
     await refsSignature(exec, repo).catch(() => {})
     await exec.run(repo, logArgs(undefined, 0)).catch(() => {})
     await commitDetail(exec, repo, MISSING).catch(() => {})
+    await compareCommits(exec, repo, MISSING, MISSING).catch(() => {})
     await exec.run(repo, ['cat-file', '-t', MISSING]).catch(() => {})
     // 작업 트리 조회(WIP)도 같은 설정을 읽는다
     await wipStatus(exec, repo).catch(() => {})
