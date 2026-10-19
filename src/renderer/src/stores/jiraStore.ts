@@ -4,12 +4,12 @@ import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
 import { useAppStore } from './appStore'
 import { useGithubStore } from './githubStore'
 
-/** 사이드바 "나에게 할당" 과 중앙 목록이 쓰는 JQL(고정) */
+/** "나에게 할당"(Jira 화면 왼쪽 목록 개수 · Launchpad)과 그 목록이 쓰는 JQL(고정) */
 export const MINE_JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC'
 const MAX_RECENT = 15
 const MAX_FILTERS = 50
 
-/** 중앙에 띄우는 Jira 화면. 목록은 'mine'(나에게 할당), 저장 필터의 인덱스, 'custom'(직접 입력한 JQL) */
+/** Jira 화면(창 전체를 덮는 작업 공간, null 이면 닫힘). 목록은 'mine'(나에게 할당), 저장 필터의 인덱스, 'custom'(직접 입력한 JQL) */
 export type JiraView = { kind: 'list'; source: 'mine' | 'custom' | number } | { kind: 'issue'; key: string; from: JiraView | null }
 
 export interface JiraList {
@@ -37,7 +37,7 @@ interface JiraState {
   authLoaded: boolean
   dialogOpen: boolean
   view: JiraView | null
-  /** 사이드바의 "나에게 할당" */
+  /** "나에게 할당"(Jira 화면 왼쪽 개수 · Launchpad) */
   mine: JiraList
   /** 중앙 목록 */
   list: JiraList
@@ -177,7 +177,8 @@ export const useJiraStore = create<JiraState>((set, get) => {
       issueSeq++
       listSeq.mine++
       listSeq.list++
-      set({ auth, view: null, issue: null, mine: emptyList(MINE_JQL), list: emptyList(MINE_JQL) })
+      // Jira 화면은 열어 둔 채 '연결 안 됨' 안내로 바꾼다
+      set({ auth, view: get().view ? { kind: 'list', source: 'mine' } : null, issue: null, mine: emptyList(MINE_JQL), list: emptyList(MINE_JQL) })
     },
 
     setDialogOpen(dialogOpen) {
@@ -185,9 +186,9 @@ export const useJiraStore = create<JiraState>((set, get) => {
     },
 
     show(view) {
-      if (view) {
-        // 중앙에는 GitHub 화면과 Jira 화면 중 하나만 둔다
-        if (useGithubStore.getState().view) useGithubStore.getState().show(null)
+      // Jira 화면은 창 전체를 덮는다 — 아래 화면(그래프·GitHub·Launchpad)은 그대로 두어 뒤로가기로 돌아간다.
+      // 연결 전에는 불러오지 않고 연결 안내만 보인다
+      if (view && get().auth.connected) {
         if (view.kind === 'issue') {
           void loadIssue(view.key)
         } else if (view.source !== 'custom') {
@@ -196,7 +197,7 @@ export const useJiraStore = create<JiraState>((set, get) => {
           if (!jql) return
           if (get().list.jql !== jql || get().list.items.length === 0) void fetchList('list', jql, false)
         }
-      } else {
+      } else if (!view) {
         issueSeq++
         cancelIssueReqs()
       }
@@ -224,12 +225,15 @@ export const useJiraStore = create<JiraState>((set, get) => {
       if (!site) return
       saveSiteData(site, { ...siteData(), filters: (siteData().filters ?? []).filter((_, i) => i !== index) })
       const v = get().view
-      if (v?.kind === 'list' && typeof v.source === 'number') get().show(null)
+      // 보고 있던 필터를 지웠으면 '나에게 할당'으로(Jira 화면은 닫지 않는다)
+      if (v?.kind === 'list' && v.source === index) get().show({ kind: 'list', source: 'mine' })
+      // 뒤쪽 필터를 보고 있었으면 번호가 하나 당겨진다
+      else if (v?.kind === 'list' && typeof v.source === 'number' && v.source > index) set({ view: { kind: 'list', source: v.source - 1 } })
     }
   }
 })
 
-// GitHub 화면이 열리면(사이드바의 PR·이슈 선택 등) Jira 화면은 닫는다
+// GitHub 화면이 열리면(커맨드 팔레트의 PR·이슈 열기 등) Jira 화면은 닫아 그 화면이 보이게 한다
 useGithubStore.subscribe((s, prev) => {
   if (s.view && !prev.view && useJiraStore.getState().view) useJiraStore.getState().show(null)
 })

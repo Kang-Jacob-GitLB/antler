@@ -196,6 +196,20 @@ export const IconGear = (p: P) => (
     <circle cx="8" cy="8" r="4.4" />
   </Svg>
 )
+export const IconUser = (p: P) => (
+  <Svg {...p}>
+    <circle cx="8" cy="5.5" r="2.5" />
+    <path d="M3 13.5c.6-2.6 2.6-4 5-4s4.4 1.4 5 4" />
+  </Svg>
+)
+/** Jira 화면(이슈 트래커): 겹친 마름모 — 공식 로고가 아닌 일반 기호 */
+export const IconJira = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 1.8l3.2 3.2L8 8.2 4.8 5z" />
+    <path d="M8 7.8l3.2 3.2L8 14.2 4.8 11z" />
+    <path d="M11.2 5l3 3-3 3M4.8 5l-3 3 3 3" />
+  </Svg>
+)
 export const IconTerminal = (p: P) => (
   <Svg {...p}>
     <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.6" />

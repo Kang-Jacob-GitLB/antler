@@ -5,6 +5,7 @@ import { fetchDetail } from '../lib/fetchText'
 import { toggleDetail, toggleSidebar, useActiveRepo, useAppStore } from '../stores/appStore'
 import { showExternalMenuAt, useExternalMenuStore } from '../stores/externalMenuStore'
 import { useFetchStore } from '../stores/fetchStore'
+import { useJiraStore } from '../stores/jiraStore'
 import { useLaunchpadStore } from '../stores/launchpadStore'
 import { GhAuthButton } from './github/GhAuthButton'
 import { AntlerMark } from './brand'
@@ -17,6 +18,7 @@ import {
   IconLaunchpad,
   IconClose,
   IconFunnel,
+  IconJira,
   IconMore,
   IconPanelLeft,
   IconPanelRight,
@@ -37,6 +39,7 @@ export function Toolbar(): React.JSX.Element {
   // 툴팁의 "n분 전"은 마우스를 올릴 때 갱신한다(타이머 없이)
   const [now, setNow] = useState(() => Date.now())
   const launchpadOpen = useLaunchpadStore((s) => s.open)
+  const jiraOpen = useJiraStore((s) => s.view !== null)
 
   const fetchTitle = (s: FetchStatus | undefined, at: number): string => {
     const base = t('toolbar.refresh')
@@ -136,6 +139,16 @@ export function Toolbar(): React.JSX.Element {
             </MenuButton>
           </div>
         )}
+        {/* Jira 화면(창 전체). 저장소가 없어도 연다 — 누르면 열고, 열려 있으면 뒤로(아래 화면으로) */}
+        <button
+          className="icon-btn"
+          aria-pressed={jiraOpen}
+          title={jiraOpen ? t('jira.back') : t('jira.open')}
+          aria-label={t('jira.open')}
+          onClick={() => useJiraStore.getState().show(jiraOpen ? null : { kind: 'list', source: 'mine' })}
+        >
+          <IconJira />
+        </button>
         {repo && (
           <div className="panel-toggles panel-toggles--right">
             <button

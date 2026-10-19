@@ -4,7 +4,7 @@ import { useT } from '../../i18n'
 import { api } from '../../lib/api'
 import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
-import { IconClose, IconRefresh } from '../icons'
+import { IconRefresh } from '../icons'
 import { isoToEpoch, issueSub, JiraStatus } from './JiraBits'
 import '../github/GitHubView.css'
 import './JiraView.css'
@@ -12,7 +12,7 @@ import './JiraView.css'
 const NO_FILTERS: JiraSavedFilter[] = []
 const openOnJira = (url: string): void => void api.invoke('jira:openExternal', url).catch(() => {})
 
-/** 중앙의 Jira 화면(이슈 목록 / 이슈 상세). GitHub 화면과 같은 레이아웃·클래스를 쓴다 */
+/** Jira 작업 공간(JiraWorkspace)의 본문: 이슈 목록 / 이슈 상세. GitHub 화면과 같은 레이아웃·클래스를 쓴다 */
 export function JiraView(): React.JSX.Element | null {
   const view = useJiraStore((s) => s.view)
   if (!view) return null
@@ -24,7 +24,7 @@ export function JiraView(): React.JSX.Element | null {
 function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JSX.Element {
   const t = useT()
   const list = useJiraStore((s) => s.list)
-  const { show, openIssue, loadList, saveFilter } = useJiraStore.getState()
+  const { openIssue, loadList, saveFilter } = useJiraStore.getState()
   const filters = useJiraSiteData().filters ?? NO_FILTERS
   const saved = typeof view.source === 'number' ? filters[view.source] : undefined
   const title = view.source === 'mine' ? t('jira.mine') : saved ? saved.name : t('jira.customJql')
@@ -46,9 +46,6 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
         <h2 className="gh-head__title">Jira · {title}</h2>
         <button className="icon-btn icon-btn--sm" title={t('toolbar.refresh')} onClick={run}>
           <IconRefresh size={14} />
-        </button>
-        <button className="icon-btn icon-btn--sm" title={`${t('diff.close')} (Esc)`} onClick={() => show(null)}>
-          <IconClose size={13} />
         </button>
       </header>
 
@@ -144,9 +141,6 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
             {t('jira.openInBrowser')}
           </button>
         )}
-        <button className="icon-btn icon-btn--sm" title={`${t('diff.close')} (Esc)`} onClick={() => show(null)}>
-          <IconClose size={13} />
-        </button>
       </header>
 
       {d && (

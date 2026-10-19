@@ -20,7 +20,7 @@ import { refreshWip, useWipSync } from './stores/wipActions'
 import { useGithubStore } from './stores/githubStore'
 import { GitHubView } from './components/github/GitHubView'
 import { JiraConnectDialog } from './components/jira/JiraConnectDialog'
-import { JiraView } from './components/jira/JiraView'
+import { JiraWorkspace } from './components/jira/JiraWorkspace'
 import { useJiraStore } from './stores/jiraStore'
 import { LaunchpadView } from './components/launchpad/LaunchpadView'
 import { useLaunchpadStore } from './stores/launchpadStore'
@@ -144,6 +144,19 @@ export function App(): React.JSX.Element | null {
     const onKey = (e: KeyboardEvent): void => {
       // 팔레트·단축키 목록·저장소 전환·저장소 추가가 열려 있으면 그쪽이 자기 키를 처리한다
       if (isOverlayOpen()) return
+      // Jira 화면(창 전체를 덮음): Esc 로 이슈 → 목록 → 닫기(아래 화면으로). 가려진 화면의 키(diff 닫기 등)는 건드리지 않고
+      // 팔레트·저장소 전환 같은 전역 단축키만 받는다. 입력 칸의 Esc 는 그쪽이 쓴다
+      const jira = useJiraStore.getState()
+      if (jira.view && !useAppStore.getState().switcherOpen) {
+        const tag = (e.target as HTMLElement | null)?.tagName
+        if (e.key === 'Escape' && tag !== 'INPUT' && tag !== 'SELECT') {
+          e.preventDefault()
+          jira.show(jira.view.kind === 'issue' ? jira.view.from : null)
+          return
+        }
+        if (runShortcut(e)) e.preventDefault()
+        return
+      }
       // Launchpad 가 열려 있으면 Esc 는 Launchpad 만 처리한다(숨겨진 diff·파일 보기를 닫지 않게). 입력 칸의 Esc 는 그쪽이 쓴다
       if (useLaunchpadStore.getState().open && e.key === 'Escape' && !useAppStore.getState().switcherOpen) {
         if ((e.target as HTMLElement | null)?.tagName !== 'INPUT') {
@@ -186,16 +199,6 @@ export function App(): React.JSX.Element | null {
           return
         }
       }
-      // Jira 화면: Esc 로 이슈 → 목록 → 그래프 순으로 물러난다
-      const jira = useJiraStore.getState()
-      if (jira.view && !detail.file && !gh.view && e.key === 'Escape' && !useAppStore.getState().switcherOpen) {
-        const tag = (e.target as HTMLElement | null)?.tagName
-        if (tag !== 'INPUT' && tag !== 'SELECT') {
-          e.preventDefault()
-          jira.show(jira.view.kind === 'issue' ? jira.view.from : null)
-          return
-        }
-      }
       // 명령 레지스트리에 단축키가 정의된 명령(Ctrl+B/Ctrl+Alt+B 패널, Ctrl+P 저장소 전환, Ctrl+F 검색,
       // Ctrl+Shift+P 팔레트, Ctrl+/ 단축키 목록)은 팔레트와 같은 함수를 실행한다. 입력 중에도 동작한다
       if (runShortcut(e)) e.preventDefault()
@@ -203,6 +206,13 @@ export function App(): React.JSX.Element | null {
     // 마우스 뒤로가기 버튼(X1, button 3): diff 를 보고 있으면 커밋 목록으로 돌아간다
     const onMouseBack = (e: MouseEvent): void => {
       if (e.button !== 3 || isOverlayOpen()) return
+      // Jira 화면이 맨 위다: 이슈 → 목록 → 닫기
+      const jira = useJiraStore.getState()
+      if (jira.view) {
+        e.preventDefault()
+        jira.show(jira.view.kind === 'issue' ? jira.view.from : null)
+        return
+      }
       // Launchpad 가 열려 있으면 뒤로가기는 Launchpad 만 닫는다
       if (useLaunchpadStore.getState().open) {
         e.preventDefault()
@@ -264,23 +274,22 @@ export function App(): React.JSX.Element | null {
           {activeRepoId ? (
             <>
               {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
-              <div className={`app__center${diffOpen || fileViewOpen || ghOpen || jiraOpen ? ' is-hidden' : ''}`}>
+              <div className={`app__center${diffOpen || fileViewOpen || ghOpen ? ' is-hidden' : ''}`}>
                 <CommitList />
               </div>
               {fileViewOpen && <FileView />}
-              {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : jiraOpen && !fileViewOpen ? <JiraView /> : null}
+              {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : null}
               {detailShown && <Splitter {...splitter(1)} />}
               <SidePane open={detailShown} width={widths[1]} side="right">
                 <DetailPanel width={widths[1]} />
               </SidePane>
             </>
-          ) : jiraOpen ? (
-            // 저장소가 없어도 Launchpad 에서 연 Jira 이슈는 볼 수 있다
-            <JiraView />
           ) : (
             <EmptyState />
           )}
         </div>
+        {/* Jira 화면은 사이드바까지 창 전체를 덮는다. 아래 화면은 마운트한 채 두어 뒤로가기로 그대로 돌아온다 */}
+        {jiraOpen && <JiraWorkspace />}
       </div>
       <StatusBar />
       {error && (
