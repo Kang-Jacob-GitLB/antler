@@ -259,3 +259,11 @@ export const IconSnooze = (p: P) => (
     <path d="M8 5.8v2.9l1.9 1.2M3 3l2-1.3M13 3l-2-1.3" />
   </Svg>
 )
+export const IconPalette = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 2a6 6 0 1 0 0 12c.9 0 1.4-.6 1.4-1.3 0-.4-.2-.7-.4-1-.2-.3-.4-.6-.4-1 0-.7.6-1.3 1.3-1.3h1.6A2.5 2.5 0 0 0 14 6.9C14 4.2 11.3 2 8 2z" />
+    <circle cx="5" cy="7.5" r=".9" fill="currentColor" stroke="none" />
+    <circle cx="7.2" cy="4.8" r=".9" fill="currentColor" stroke="none" />
+    <circle cx="10.4" cy="5.3" r=".9" fill="currentColor" stroke="none" />
+  </Svg>
+)

@@ -335,6 +335,35 @@
   padding-bottom: var(--space-1);
   border-top: 1px solid var(--border);
 }
+/* 카드 머리의 색 바꾸기 버튼: 그룹 행처럼 hover·포커스 때 보이고, 팝오버는 머리 아래로 펼친다 */
+.source-card__head {
+  position: relative;
+}
+.source-card__head:hover .side-item__action,
+.source-card__head:focus-within .side-item__action {
+  opacity: 1;
+}
+
+/* 끌어서 순서 바꾸기: 끄는 항목은 흐리게, 놓을 자리는 위·아래 강조선 */
+.source-card.is-dragging,
+.side-group.is-dragging,
+.side-item.is-dragging {
+  opacity: 0.45;
+}
+.source-card.is-drop-before {
+  box-shadow: 0 -2px 0 0 var(--accent);
+}
+.source-card.is-drop-after {
+  box-shadow: 0 2px 0 0 var(--accent);
+}
+.side-group.is-drop-before > .side-item--group,
+.side-item.is-drop-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.side-group.is-drop-after,
+.side-item.is-drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
 .side-ctx__item--icon {
   display: flex;
   align-items: center;

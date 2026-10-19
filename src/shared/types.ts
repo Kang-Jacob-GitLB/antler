@@ -42,6 +42,14 @@ export interface UiPrefs {
   detailHidden?: boolean
   /** 저장소 그룹 이름 → 칩 색(hue). 그룹이 처음 생길 때 겹치지 않는 색을 골라 저장한다 */
   groupColors?: Record<string, number>
+  /** 환경(소스 id) → 환경 배지 색(hue). 없으면 환경 종류의 기본색 */
+  sourceColors?: Record<string, number>
+  /** 사이드바 저장소 목록의 환경 카드 순서(소스 id). 목록에 없는 환경은 뒤에 붙는다 */
+  sourceOrder?: string[]
+  /** 환경(소스 id)별 그룹 순서. 목록에 없는 그룹은 이름순으로 뒤에 붙는다 */
+  groupOrder?: Record<string, string[]>
+  /** 저장소 순서(저장소 id). 그룹 안·그룹 없는 저장소 모두 이 순서를 따르고, 없는 저장소는 이름순으로 뒤에 붙는다 */
+  repoOrder?: string[]
   /** 상세 패널에서 커밋 내용(머리 부분)의 높이(px). 없으면 내용에 맞추되 패널의 46% 까지 */
   detailMetaHeight?: number
   /** 커밋 활동 미니맵을 접었는지 */

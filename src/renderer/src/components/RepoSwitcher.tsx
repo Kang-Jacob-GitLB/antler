@@ -79,7 +79,7 @@ export function RepoSwitcher(): React.JSX.Element | null {
               onMouseEnter={() => setCursor(i)}
               onClick={() => pick(i)}
             >
-              {source && <EnvBadge kind={source.kind} />}
+              {source && <EnvBadge kind={source.kind} sourceId={source.id} />}
               <span className="switcher__name">{repo.name}</span>
               <span className="switcher__path">{repo.path}</span>
             </li>

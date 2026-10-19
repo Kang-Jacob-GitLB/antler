@@ -59,6 +59,25 @@ function checkLaunchpadPrefs(patch: Partial<UiPrefs>): void {
   if (entries.length > MAX_LAUNCHPAD_SNOOZES || !entries.every(([k, until]) => LAUNCHPAD_KEY_RE.test(k) && Number.isSafeInteger(until) && until > 0)) bad()
 }
 
+/** renderer 가 저장하려는 저장소 목록 순서·색(그룹 칩·환경 배지)의 모양과 크기를 확인한다 */
+function checkRepoListPrefs(patch: Partial<UiPrefs>): void {
+  const bad = (): never => {
+    throw new Error('잘못된 저장소 목록 설정입니다')
+  }
+  const isName = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 200 && !v.includes('\0')
+  const isList = (v: unknown, max: number): boolean => Array.isArray(v) && v.length <= max && v.every(isName) && new Set(v).size === v.length
+  const isMap = (v: unknown, max: number): v is Record<string, unknown> =>
+    !!v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length <= max && Object.keys(v).every(isName)
+  const isHue = (v: unknown): boolean => Number.isInteger(v) && (v as number) >= 0 && (v as number) < 360
+  const { groupColors, sourceColors, sourceOrder, groupOrder, repoOrder } = patch
+  for (const colors of [groupColors, sourceColors]) {
+    if (colors !== undefined && (!isMap(colors, 500) || !Object.values(colors).every(isHue))) bad()
+  }
+  if (sourceOrder !== undefined && !isList(sourceOrder, 500)) bad()
+  if (repoOrder !== undefined && !isList(repoOrder, 5000)) bad()
+  if (groupOrder !== undefined && (!isMap(groupOrder, 500) || !Object.values(groupOrder).every((g) => isList(g, 500)))) bad()
+}
+
 function defaults(): AppConfig {
   return {
     version: 1,
@@ -104,6 +123,7 @@ export class ConfigStore {
     if (patch.visibleGroups !== undefined) checkVisibleGroups(patch.visibleGroups)
     checkJiraPrefs(patch)
     checkLaunchpadPrefs(patch)
+    checkRepoListPrefs(patch)
     const ui = { ...this.config.ui, ...patch }
     // 보일 그룹이 빈 목록이면 제한 없음이다(패치로는 키를 지울 수 없어 빈 목록으로 알린다)
     if (ui.visibleGroups?.length === 0) delete ui.visibleGroups
