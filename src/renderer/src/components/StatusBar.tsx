@@ -5,10 +5,12 @@ import { fetchDetail } from '../lib/fetchText'
 import { useActiveRepo, useAppStore } from '../stores/appStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useLogStore } from '../stores/logStore'
+import { shortcutText } from '../lib/shortcuts'
+import { usePaletteStore } from '../stores/paletteStore'
 import { useUpdateStore } from '../stores/updateStore'
 import { EnvBadge } from './EnvBadge'
 import { MenuButton } from './MenuButton'
-import { IconBranch, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun } from './icons'
+import { IconBranch, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun, IconTerminal } from './icons'
 import './StatusBar.css'
 
 const RELEASES_URL = 'https://github.com/Kang-Jacob-GitLB/antler/releases'
@@ -78,6 +80,14 @@ export function StatusBar(): React.JSX.Element {
 
       <div className="statusbar__right">
         {appVersion && <span className="statusbar__ver">v{appVersion}</span>}
+        <button
+          className="statusbar__btn"
+          title={`${t('palette.open')} (${shortcutText({ code: 'KeyP', shift: true }, window.antler.platform === 'darwin')})`}
+          aria-label={t('palette.open')}
+          onClick={() => usePaletteStore.getState().setPaletteOpen(true)}
+        >
+          <IconTerminal size={13} />
+        </button>
         <button className="statusbar__btn" onClick={() => void useUpdateStore.getState().check()}>
           <IconRefresh size={12} />
           {t('update.check')}

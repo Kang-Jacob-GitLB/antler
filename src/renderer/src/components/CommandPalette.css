@@ -1,0 +1,122 @@
+/* 명령 팔레트(.switcher 틀 재사용)와 단축키 목록, 키캡 */
+.palette {
+  width: min(600px, calc(100vw - 32px));
+}
+.palette__item {
+  cursor: default;
+}
+.palette__check {
+  flex: none;
+  width: 14px;
+  display: inline-flex;
+  color: var(--accent-text);
+}
+.palette__title {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.palette__hit {
+  background: none;
+  color: var(--accent-text);
+  font-weight: 650;
+}
+.palette__cat {
+  flex: none;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.keys {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.keys__cap {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+
+/* 단축키 목록 */
+.shortcuts {
+  width: min(680px, calc(100vw - 32px));
+  max-height: 78vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+  outline: none;
+  animation: pop-in var(--dur-med) var(--ease);
+}
+.shortcuts:focus-visible {
+  box-shadow: var(--shadow-popover);
+}
+.shortcuts__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.shortcuts__title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 650;
+}
+.shortcuts__body {
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+}
+.shortcuts__group {
+  margin: var(--space-3) 0 var(--space-1);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+.shortcuts__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.shortcuts__table tr + tr {
+  border-top: 1px solid var(--border);
+}
+.shortcuts__table th,
+.shortcuts__table td {
+  padding: 6px 0;
+  font-weight: 400;
+  text-align: left;
+  vertical-align: middle;
+}
+.shortcuts__table td {
+  text-align: right;
+}
+.shortcuts__alt {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shortcuts {
+    animation: none;
+  }
+}

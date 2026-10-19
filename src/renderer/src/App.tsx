@@ -9,7 +9,7 @@ import { Sidebar } from './components/Sidebar'
 import { Splitter, type SplitterHandlers } from './components/Splitter'
 import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
-import { toggleDetail, toggleSidebar, useAppStore } from './stores/appStore'
+import { useAppStore } from './stores/appStore'
 import { useDetailStore } from './stores/detailStore'
 import { useLogStore } from './stores/logStore'
 import { useFetchStore } from './stores/fetchStore'
@@ -18,6 +18,10 @@ import { refreshWip, useWipSync } from './stores/wipActions'
 import { useGithubStore } from './stores/githubStore'
 import { GitHubView } from './components/github/GitHubView'
 import { UpdateSnackbar } from './components/UpdateSnackbar'
+import { CommandPalette } from './components/CommandPalette'
+import { ShortcutsDialog } from './components/ShortcutsDialog'
+import { runShortcut } from './lib/commands'
+import { isOverlayOpen } from './stores/paletteStore'
 import { syncGroupColors } from './lib/groupColor'
 import './App.css'
 
@@ -109,6 +113,8 @@ export function App(): React.JSX.Element | null {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
+      // 팔레트·단축키 목록·저장소 전환·저장소 추가가 열려 있으면 그쪽이 자기 키를 처리한다
+      if (isOverlayOpen()) return
       const detail = useDetailStore.getState()
       // diff 보기: Esc 닫기, Alt+↑/↓ 이전/다음 파일 (팝업·검색 입력 중에는 그쪽이 Esc 를 쓴다)
       if (detail.file && !useAppStore.getState().switcherOpen) {
@@ -134,29 +140,13 @@ export function App(): React.JSX.Element | null {
           return
         }
       }
-      // Ctrl+B 왼쪽 사이드바, Ctrl+Alt+B 오른쪽 상세 패널 보이기/숨기기(입력 중에도 동작 — 글자 입력 키가 아니다)
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyB') {
-        e.preventDefault()
-        if (e.altKey) {
-          if (useAppStore.getState().activeRepoId) toggleDetail()
-        } else toggleSidebar()
-        return
-      }
-      if (!(e.ctrlKey || e.metaKey) || e.altKey) return
-      const key = e.key.toLowerCase()
-      if (key === 'p') {
-        e.preventDefault()
-        useAppStore.getState().setSwitcherOpen(true)
-      } else if (key === 'f' && useAppStore.getState().activeRepoId) {
-        e.preventDefault()
-        // 검색 바는 커밋 그래프 쪽에 있으므로 diff 를 보고 있었다면 닫고 연다
-        useDetailStore.getState().closeFile()
-        useSearchStore.getState().show()
-      }
+      // 명령 레지스트리에 단축키가 정의된 명령(Ctrl+B/Ctrl+Alt+B 패널, Ctrl+P 저장소 전환, Ctrl+F 검색,
+      // Ctrl+Shift+P 팔레트, Ctrl+/ 단축키 목록)은 팔레트와 같은 함수를 실행한다. 입력 중에도 동작한다
+      if (runShortcut(e)) e.preventDefault()
     }
     // 마우스 뒤로가기 버튼(X1, button 3): diff 를 보고 있으면 커밋 목록으로 돌아간다
     const onMouseBack = (e: MouseEvent): void => {
-      if (e.button !== 3 || useAppStore.getState().switcherOpen) return
+      if (e.button !== 3 || isOverlayOpen()) return
       const detail = useDetailStore.getState()
       if (!detail.file) return
       e.preventDefault()
@@ -228,6 +218,8 @@ export function App(): React.JSX.Element | null {
         </div>
       )}
       <RepoSwitcher />
+      <CommandPalette />
+      <ShortcutsDialog />
       <AddRepoDialog />
       <UpdateSnackbar />
     </div>
