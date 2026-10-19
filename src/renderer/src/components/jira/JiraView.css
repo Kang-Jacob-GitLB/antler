@@ -99,10 +99,6 @@
 .jira-dialog {
   min-height: 0;
 }
-.jira-dialog .field input {
-  width: 100%;
-  box-sizing: border-box;
-}
 .jira-conn {
   display: flex;
   flex-direction: column;
