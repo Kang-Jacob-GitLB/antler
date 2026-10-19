@@ -64,3 +64,18 @@ export function pickGithubRemote(remotes: { name: string; url: string }[]): GhRe
   const hit = parsed.find((r) => r.name === 'origin') ?? parsed.find((r) => r.name === 'upstream') ?? parsed[0]
   return hit ? { owner: hit.owner, repo: hit.repo, remote: hit.name } : null
 }
+
+/** 모든 GitHub remote(origin·upstream 등)의 저장소. 같은 저장소(대소문자 무시)는 먼저 나온 remote 하나만 둔다 */
+export function pickGithubRemotes(remotes: { name: string; url: string }[]): GhRepoRef[] {
+  const seen = new Set<string>()
+  const out: GhRepoRef[] = []
+  for (const r of remotes) {
+    const slug = parseGithubRemote(r.url)
+    if (!slug) continue
+    const key = `${slug.owner}/${slug.repo}`.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ owner: slug.owner, repo: slug.repo, remote: r.name })
+  }
+  return out
+}

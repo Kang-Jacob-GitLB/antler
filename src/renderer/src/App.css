@@ -10,6 +10,14 @@
   min-height: 0;
 }
 
+/* 저장소 화면 묶음. 레이아웃에는 끼지 않고(contents), Launchpad 가 열리면 통째로 숨긴다 */
+.app__main {
+  display: contents;
+}
+.app__main.is-hidden {
+  display: none;
+}
+
 .app__center {
   display: flex;
   flex: 1;

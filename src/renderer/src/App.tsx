@@ -22,6 +22,8 @@ import { GitHubView } from './components/github/GitHubView'
 import { JiraConnectDialog } from './components/jira/JiraConnectDialog'
 import { JiraView } from './components/jira/JiraView'
 import { useJiraStore } from './stores/jiraStore'
+import { LaunchpadView } from './components/launchpad/LaunchpadView'
+import { useLaunchpadStore } from './stores/launchpadStore'
 import { UpdateSnackbar } from './components/UpdateSnackbar'
 import { CommandPalette } from './components/CommandPalette'
 import { ShortcutsDialog } from './components/ShortcutsDialog'
@@ -117,6 +119,8 @@ export function App(): React.JSX.Element | null {
   // 중앙 화면 우선순위: 파일 diff → GitHub 화면 → 커밋 그래프(그래프는 항상 마운트해 스크롤·페이지 유지)
   const ghOpen = useGithubStore((s) => s.view !== null)
   const jiraOpen = useJiraStore((s) => s.view !== null)
+  // Launchpad 는 저장소가 없어도 열린다. 열려 있는 동안 저장소 화면은 마운트한 채 숨긴다
+  const launchpadOpen = useLaunchpadStore((s) => s.open)
 
   // 그래프 보기 범위(Solo/Hide)가 바뀌면 검색 결과도 그 범위로 다시 구한다(옛 범위의 일치 표시가 남지 않게)
   const scopeSig = useLogStore((s) => s.scopeSig)
@@ -129,6 +133,14 @@ export function App(): React.JSX.Element | null {
     const onKey = (e: KeyboardEvent): void => {
       // 팔레트·단축키 목록·저장소 전환·저장소 추가가 열려 있으면 그쪽이 자기 키를 처리한다
       if (isOverlayOpen()) return
+      // Launchpad 가 열려 있으면 Esc 는 Launchpad 만 처리한다(숨겨진 diff·파일 보기를 닫지 않게). 입력 칸의 Esc 는 그쪽이 쓴다
+      if (useLaunchpadStore.getState().open && e.key === 'Escape' && !useAppStore.getState().switcherOpen) {
+        if ((e.target as HTMLElement | null)?.tagName !== 'INPUT') {
+          e.preventDefault()
+          useLaunchpadStore.getState().show(false)
+        }
+        return
+      }
       const detail = useDetailStore.getState()
       // 파일 히스토리·Blame: Esc 로 한 단계 물러난다(아래 diff 가 있으면 diff 로, 없으면 커밋 목록으로)
       const fileView = useFileViewStore.getState()
@@ -180,6 +192,12 @@ export function App(): React.JSX.Element | null {
     // 마우스 뒤로가기 버튼(X1, button 3): diff 를 보고 있으면 커밋 목록으로 돌아간다
     const onMouseBack = (e: MouseEvent): void => {
       if (e.button !== 3 || isOverlayOpen()) return
+      // Launchpad 가 열려 있으면 뒤로가기는 Launchpad 만 닫는다
+      if (useLaunchpadStore.getState().open) {
+        e.preventDefault()
+        useLaunchpadStore.getState().show(false)
+        return
+      }
       const detail = useDetailStore.getState()
       const fileView = useFileViewStore.getState()
       if (fileView.tab) {
@@ -232,24 +250,30 @@ export function App(): React.JSX.Element | null {
             <Splitter {...splitter(0)} />
           </>
         )}
-        {activeRepoId ? (
-          <>
-            {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
-            <div className={`app__center${diffOpen || fileViewOpen || ghOpen || jiraOpen ? ' is-hidden' : ''}`}>
-              <CommitList />
-            </div>
-            {fileViewOpen && <FileView />}
-            {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : jiraOpen && !fileViewOpen ? <JiraView /> : null}
-            {detailShown && (
-              <>
-                <Splitter {...splitter(1)} />
-                <DetailPanel width={widths[1]} />
-              </>
-            )}
-          </>
-        ) : (
-          <EmptyState />
-        )}
+        {launchpadOpen && <LaunchpadView />}
+        <div className={`app__main${launchpadOpen ? ' is-hidden' : ''}`}>
+          {activeRepoId ? (
+            <>
+              {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
+              <div className={`app__center${diffOpen || fileViewOpen || ghOpen || jiraOpen ? ' is-hidden' : ''}`}>
+                <CommitList />
+              </div>
+              {fileViewOpen && <FileView />}
+              {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : jiraOpen && !fileViewOpen ? <JiraView /> : null}
+              {detailShown && (
+                <>
+                  <Splitter {...splitter(1)} />
+                  <DetailPanel width={widths[1]} />
+                </>
+              )}
+            </>
+          ) : jiraOpen ? (
+            // 저장소가 없어도 Launchpad 에서 연 Jira 이슈는 볼 수 있다
+            <JiraView />
+          ) : (
+            <EmptyState />
+          )}
+        </div>
       </div>
       <StatusBar />
       {error && (

@@ -58,6 +58,10 @@ export interface UiPrefs {
   jiraProjectKeys?: string[]
   /** 연결한 Jira 사이트(origin+경로)별 저장 필터·최근 본 이슈. 연결을 해제하면 그 사이트 항목을 지운다 */
   jiraSites?: Record<string, JiraSiteData>
+  /** Launchpad 고정(핀) 항목 키(`owner/repo#번호` 또는 `jira:KEY`). 맨 위에 보인다 */
+  launchpadPins?: string[]
+  /** Launchpad 스누즈: 항목 키 → 숨김이 끝나는 시각(epoch ms) */
+  launchpadSnoozes?: Record<string, number>
 }
 
 export interface JiraSiteData {
@@ -561,6 +565,49 @@ export interface GhListResult<T> {
    * 없으면 요청한 page + 1 을 요청한다
    */
   nextPage?: number
+}
+
+// ── Launchpad: 여러 저장소의 내 PR·리뷰 요청·할당 이슈를 한 번에 ─────────────
+
+/** authored: 내가 연 PR / review: 내게 리뷰 요청된 PR / issues: 내게 할당된 이슈 */
+export type GhLaunchpadSection = 'authored' | 'review' | 'issues'
+
+export interface GhLaunchpadItem {
+  section: GhLaunchpadSection
+  kind: 'pull' | 'issue'
+  /** 이 GitHub 저장소를 remote(origin·upstream 등)로 가진, 앱에 등록된 저장소들(등록 순서) */
+  repoIds: string[]
+  owner: string
+  repo: string
+  number: number
+  title: string
+  state: 'open' | 'closed' | 'merged'
+  draft: boolean
+  author: GhUser
+  labels: GhLabel[]
+  comments: number
+  /** epoch seconds */
+  updatedAt: number
+  createdAt: number
+  htmlUrl: string
+  /** 검색 결과에는 체크 정보가 없어 지금은 채우지 않는다(있으면 화면이 배지를 보인다) */
+  checks?: GhCheckState
+}
+
+export interface GhLaunchpadResult {
+  items: GhLaunchpadItem[]
+  /** epoch ms */
+  fetchedAt: number
+  /** 로그인하지 않아 조회하지 않았다(@me 검색은 로그인이 필요하다) */
+  needsLogin: boolean
+  /** 페이지·호출 상한 또는 검색 한계로 일부가 빠졌을 수 있다 */
+  incomplete: boolean
+  /** GitHub remote 가 없어 대상에서 뺀 저장소 수 */
+  skipped: number
+  /** remote 를 읽지 못한 저장소 수(꺼진 SSH 호스트 등 — 시간 초과·오류). 이번 결과에서는 빠졌다 */
+  unresolved: number
+  /** 일부 검색이 실패한 이유(한도 초과 등). 나머지 결과는 그대로 담긴다 */
+  errors: string[]
 }
 
 // ── M4: 원격 환경 ─────────────────────────────────────

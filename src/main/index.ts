@@ -130,7 +130,8 @@ app.whenReady().then(() => {
     store: ghStore,
     ...(devFake ? { fetchImpl: createDevFakeFetch(devFake) } : {}),
     cli: createGhCli(),
-    ...(devFake ? {} : { avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE) })
+    ...(devFake ? {} : { avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE) }),
+    ...fakeGithubApi()
   })
   jira = new JiraService({
     store: new TokenStore(app.getPath('userData'), safeStorage, process.platform, { token: JIRA_TOKEN_FILE, meta: JIRA_META_FILE }),
@@ -189,6 +190,16 @@ app.on('before-quit', () => {
   updates?.dispose()
   void repos?.dispose()
 })
+
+/**
+ * 화면 확인용 가짜 GitHub API: 패키지되지 않은 실행에서 ANTLER_GH_API_BASE 가 루프백 주소(http://127.0.0.1:포트)일 때만
+ * api.github.com 요청을 그쪽으로 돌린다. 패키지된 앱에서는 환경 변수가 있어도 무시한다(실제 GitHub 만 쓴다).
+ */
+function fakeGithubApi(): { fetchImpl?: typeof fetch } {
+  const base = process.env['ANTLER_GH_API_BASE']
+  if (app.isPackaged || !base || !/^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(base)) return {}
+  return { fetchImpl: (input, init) => fetch(String(input).replace(/^https:\/\/api\.github\.com(?=\/)/, base), init) }
+}
 
 /** resources/package-type(deb·rpm·pacman 패키지에만 있다)을 읽는다. 없으면 빈 객체 */
 function packageTypeProbe(): { packageType?: string } {

@@ -16,6 +16,7 @@ import type {
   GhIssueSummary,
   GhJob,
   GhLabel,
+  GhLaunchpadResult,
   GhListQuery,
   GhListResult,
   GhPullDetail,
@@ -113,6 +114,11 @@ export interface IpcContract {
   /** 워크플로 실행 한 건의 잡 목록 */
   'gh:runJobs': { args: [repoId: string, runId: number]; result: GhJob[] }
   'gh:openExternal': { args: [url: string]; result: void }
+  /**
+   * Launchpad: 내 PR·리뷰 요청·할당 이슈를 사용자 기준 검색으로 가져와 등록된 저장소의 GitHub remote 와 맞춘다(main 이 저장소 목록을 안다).
+   * 로그인하지 않았으면 needsLogin. fresh 면 저장소 remote 캐시도 새로 읽는다. requestId 로 취소
+   */
+  'gh:launchpad': { args: [requestId: string, fresh?: boolean]; result: GhLaunchpadResult }
 
   // ── Jira (읽기 전용, 자격 증명은 main 에만 있다) ──
   'jira:auth': { args: []; result: JiraAuthState }
@@ -222,6 +228,7 @@ export const IPC_CHANNELS = [
   'gh:runs',
   'gh:runJobs',
   'gh:openExternal',
+  'gh:launchpad',
   'jira:auth',
   'jira:connect',
   'jira:disconnect',

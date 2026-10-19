@@ -15,8 +15,10 @@ import type {
   GhRepoRef,
   GhUser
 } from '@shared/types'
+import { translate } from '../i18n'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
 import { useActionsStore } from './actionsStore'
+import { useAppStore } from './appStore'
 import { resetAvatarSession } from './avatarStore'
 import { resetChecksSession } from './checksStore'
 import { useDetailStore } from './detailStore'
@@ -79,6 +81,8 @@ interface GithubState {
   pullFile: string | null
 
   open(repoId: string | null): Promise<void>
+  /** 저장소를 전환하고(이미 그 저장소면 바로) 그 저장소의 GitHub 화면을 연다. Launchpad 같은 다른 화면에서 쓴다 */
+  openAt(repoId: string, view: GhView): void
   /** 로그인·로그아웃 뒤: 보고 있던 화면은 그대로 두고 목록·상세를 다시 받는다 */
   reload(): void
   refreshAuth(): Promise<void>
@@ -103,6 +107,14 @@ const listSeq: Record<ListKey, number> = { pulls: 0, issues: 0, sidePulls: 0, si
 const anonNotFound = new Map<string, string>()
 /** main 의 GH_NOT_FOUND 메시지에 들어 있는 문구(에러 코드는 IPC 를 건너오지 않는다) */
 const NOT_FOUND_HINT = '로그인 필요'
+/** 저장소 전환이 끝나면(open) 열 화면. 전환 때 open 이 view 를 비우므로 그 뒤에 연다 */
+let pendingView: { repoId: string; view: GhView } | null = null
+
+/** 저장소 전환 뒤 열려던 GitHub 화면을 열 수 없을 때(GitHub 저장소가 아님·remote 를 읽지 못함) 토스트로 알린다 */
+function notGithub(): void {
+  const app = useAppStore.getState()
+  useAppStore.setState({ error: translate(app.config?.ui.locale ?? 'ko', 'launchpad.notGithub') })
+}
 
 export const useGithubStore = create<GithubState>((set, get) => {
   const current = (g: number, repoId: string | null): boolean => g === gen && get().repoId === repoId
@@ -225,6 +237,7 @@ export const useGithubStore = create<GithubState>((set, get) => {
     async open(repoId) {
       const g = ++gen
       useActionsStore.getState().reset()
+      if (pendingView && pendingView.repoId !== repoId) pendingView = null
       set({
         repoId,
         ref: undefined,
@@ -244,9 +257,28 @@ export const useGithubStore = create<GithubState>((set, get) => {
         if (!current(g, repoId)) return
         set({ ref })
         if (ref) loadSide()
+        if (pendingView?.repoId === repoId) {
+          const view = pendingView.view
+          pendingView = null
+          if (ref) get().show(view)
+          else notGithub()
+        }
       } catch {
-        if (current(g, repoId)) set({ ref: null })
+        if (!current(g, repoId)) return
+        set({ ref: null })
+        if (pendingView?.repoId === repoId) {
+          pendingView = null
+          notGithub()
+        }
       }
+    },
+
+    openAt(repoId, view) {
+      if (get().repoId === repoId && get().ref) return get().show(view)
+      pendingView = { repoId, view }
+      const app = useAppStore.getState()
+      if (app.activeRepoId === repoId) void get().open(repoId)
+      else app.selectRepo(repoId)
     },
 
     reload() {

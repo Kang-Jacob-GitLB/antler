@@ -229,3 +229,22 @@ export const IconSwap = (p: P) => (
     <path d="M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5" />
   </Svg>
 )
+/** Launchpad: 발사대(로켓) */
+export const IconLaunchpad = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 1.8c2.2 1.5 3.3 3.7 3.3 6.1v2.3H4.7V7.9C4.7 5.5 5.8 3.3 8 1.8z" />
+    <circle cx="8" cy="6.4" r="1.1" />
+    <path d="M4.7 8.8 2.8 10.9v1.9l1.9-1.1M11.3 8.8l1.9 2.1v1.9l-1.9-1.1M8 11.6v2.6" />
+  </Svg>
+)
+export const IconPin = ({ filled, ...p }: P & { filled?: boolean }) => (
+  <Svg {...p} {...(filled ? { fill: 'currentColor' } : {})}>
+    <path d="M9.6 1.9l4.5 4.5-1.6.5-2.2 2.2.2 3-1 1-2.9-2.9-3.7 3.7-.7-.7 3.7-3.7L3 6.6l1-1 3 .2 2.2-2.2z" />
+  </Svg>
+)
+export const IconSnooze = (p: P) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8.5" r="5" />
+    <path d="M8 5.8v2.9l1.9 1.2M3 3l2-1.3M13 3l-2-1.3" />
+  </Svg>
+)

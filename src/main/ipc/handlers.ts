@@ -170,8 +170,12 @@ export function registerIpc(
     await checkEnvInput(e, input, true)
     return repos.addRepo(input)
   })
-  handle('repos:update', (_e, repoId, patch) => config.updateRepo(repoId, patch))
+  handle('repos:update', (_e, repoId, patch) => {
+    repos.invalidateGhRemotes(repoId)
+    return config.updateRepo(repoId, patch)
+  })
   handle('repos:remove', async (_e, repoId) => {
+    repos.invalidateGhRemotes(repoId)
     const next = config.removeRepo(repoId)
     fetcher.forget(repoId)
     if (watcher.current === repoId) void watcher.watch(null)

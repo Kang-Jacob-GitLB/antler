@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { LAUNCHPAD_KEY_RE, MAX_LAUNCHPAD_PINS, MAX_LAUNCHPAD_SNOOZES } from '@shared/launchpad'
 import type { AppConfig, Repo, RepoPatch, Source, SourceKind, UiPrefs } from '@shared/types'
 
 export const LOCAL_SOURCE_ID = 'local'
@@ -31,6 +32,19 @@ function checkJiraPrefs(patch: Partial<UiPrefs>): void {
     if (filters !== undefined && (!Array.isArray(filters) || filters.length > 50 || !filters.every((f) => f && isStr(f.name, 100) && isStr(f.jql, 2000)))) bad()
     if (recent !== undefined && (!Array.isArray(recent) || recent.length > 30 || !recent.every((r) => r && typeof r.key === 'string' && /^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$/.test(r.key) && isStr(r.summary, 500)))) bad()
   }
+}
+
+/** renderer 가 저장하려는 Launchpad 핀·스누즈의 모양과 크기를 확인한다 */
+function checkLaunchpadPrefs(patch: Partial<UiPrefs>): void {
+  const bad = (): never => {
+    throw new Error('잘못된 Launchpad 설정입니다')
+  }
+  const { launchpadPins: pins, launchpadSnoozes: snoozes } = patch
+  if (pins !== undefined && (!Array.isArray(pins) || pins.length > MAX_LAUNCHPAD_PINS || !pins.every((k) => typeof k === 'string' && LAUNCHPAD_KEY_RE.test(k)))) bad()
+  if (snoozes === undefined) return
+  if (!snoozes || typeof snoozes !== 'object' || Array.isArray(snoozes)) bad()
+  const entries = Object.entries(snoozes)
+  if (entries.length > MAX_LAUNCHPAD_SNOOZES || !entries.every(([k, until]) => LAUNCHPAD_KEY_RE.test(k) && Number.isSafeInteger(until) && until > 0)) bad()
 }
 
 function defaults(): AppConfig {
@@ -73,6 +87,7 @@ export class ConfigStore {
     const af = patch.autoFetchMinutes
     if (af !== undefined && (!Number.isInteger(af) || af < 0 || af > 1440)) throw new Error('잘못된 자동 fetch 주기입니다(0~1440분)')
     checkJiraPrefs(patch)
+    checkLaunchpadPrefs(patch)
     return this.update({ ...this.config, ui: { ...this.config.ui, ...patch } })
   }
 

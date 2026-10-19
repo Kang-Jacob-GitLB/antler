@@ -38,7 +38,7 @@ import * as fileInsight from '../git/fileInsight'
 import { LogCursor } from '../git/logCursor'
 import * as extras from '../git/repoExtras'
 import * as wip from '../git/wip'
-import { pickGithubRemote } from '../github/remoteUrl'
+import { pickGithubRemote, pickGithubRemotes } from '../github/remoteUrl'
 import { LOCAL_SOURCE_ID, sourceFor, type ConfigStore } from './ConfigStore'
 import { LruCache } from './lru'
 
@@ -70,6 +70,8 @@ const FIRST_PAGE_GRACE_MS = 1_500
 const SIGNATURE_TIMEOUT_MS = 20_000
 /** GitHub remote 추론 결과 캐시 시간 */
 const GH_REPO_TTL_MS = 60_000
+/** 모든 GitHub remote 목록(Launchpad) 캐시 시간 */
+const GH_REMOTES_TTL_MS = 10 * 60_000
 
 /** 같은 키의 진행 중 요청. 구독자(waiters)가 모두 취소했을 때만 git 을 끊는다 */
 interface Inflight<T> {
@@ -139,6 +141,7 @@ export class RepoService {
   /** 커밋 활동 집계 캐시: 저장소+ref 별로 ref 시그니처와 함께 보관한다(시그니처가 같으면 이력이 같다) */
   private readonly activityCache = new Map<string, { sig: string; value: CommitActivity }>()
   private readonly ghRepoCache = new Map<string, { at: number; value: GhRepoRef | null }>()
+  private readonly ghRemotesCache = new Map<string, { at: number; value: GhRepoRef[] }>()
   /** 활성화됐지만 첫 로그 페이지가 아직 안 나간 저장소의 문(열리면 목록에서 빠진다) */
   private readonly firstPageGates = new Map<string, { promise: Promise<void>; open: () => void }>()
   /** 가장 최근에 계산한 ref 시그니처(활성 저장소의 변경 감시·활동 캐시가 같은 값을 쓴다) */
@@ -398,6 +401,26 @@ export class RepoService {
     const value = pickGithubRemote(list)
     this.ghRepoCache.set(repoId, { at: Date.now(), value })
     return value
+  }
+
+  /**
+   * 모든 GitHub remote(origin·upstream 등)의 저장소 — Launchpad 가 검색 결과를 저장소와 맞출 때 쓴다(포크는 upstream 도 포함).
+   * remote 는 거의 안 바뀌므로 오래(10분) 캐시하고, 저장소 목록이 바뀌거나 사용자가 새로고침하면 invalidateGhRemotes 로 비운다.
+   */
+  async ghRemotes(repoId: string, signal?: AbortSignal): Promise<GhRepoRef[]> {
+    const hit = this.ghRemotesCache.get(repoId)
+    if (hit && Date.now() - hit.at < GH_REMOTES_TTL_MS) return hit.value
+    const { repo, rt } = this.resolve(repoId)
+    const list = await rt.queue.run(() => git.remotes(rt.exec, repo.path), { key: `remotes:${repoId}`, ...(signal ? { signal } : {}) })
+    const value = pickGithubRemotes(list)
+    this.ghRemotesCache.set(repoId, { at: Date.now(), value })
+    return value
+  }
+
+  /** ghRemotes 캐시를 비운다(repoId 가 없으면 전부) */
+  invalidateGhRemotes(repoId?: string): void {
+    if (repoId) this.ghRemotesCache.delete(repoId)
+    else this.ghRemotesCache.clear()
   }
 
   /**
@@ -692,6 +715,7 @@ export class RepoService {
     this.compareCache.clear()
     this.diffCache.clear()
     this.ghRepoCache.clear()
+    this.ghRemotesCache.clear()
     for (const ac of this.requests.values()) ac.abort()
     await Promise.all([...this.runtimes.values()].map((r) => r.exec.dispose()))
     this.runtimes.clear()
