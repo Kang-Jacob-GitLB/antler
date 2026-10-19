@@ -50,6 +50,18 @@ export function Toolbar(): React.JSX.Element {
         <span className="toolbar__name">Antler</span>
       </div>
 
+      {/* 왼쪽 사이드바 토글은 사이드바가 있는 왼쪽에, 오른쪽 패널 토글은 오른쪽 끝에 둔다 */}
+      <div className="panel-toggles panel-toggles--left">
+        <button
+          className="icon-btn"
+          aria-pressed={sidebarShown}
+          title={`${t(sidebarShown ? 'toolbar.hideSidebar' : 'toolbar.showSidebar')} (${mod}B)`}
+          onClick={() => toggleSidebar()}
+        >
+          <IconPanelLeft on={sidebarShown} />
+        </button>
+      </div>
+
       {repo && (
         <div className="toolbar__crumbs">
           <button
@@ -105,16 +117,8 @@ export function Toolbar(): React.JSX.Element {
             </MenuButton>
           </div>
         )}
-        <div className="panel-toggles">
-          <button
-            className="icon-btn"
-            aria-pressed={sidebarShown}
-            title={`${t(sidebarShown ? 'toolbar.hideSidebar' : 'toolbar.showSidebar')} (${mod}B)`}
-            onClick={() => toggleSidebar()}
-          >
-            <IconPanelLeft on={sidebarShown} />
-          </button>
-          {repo && (
+        {repo && (
+          <div className="panel-toggles panel-toggles--right">
             <button
               className="icon-btn"
               aria-pressed={detailShown}
@@ -123,8 +127,8 @@ export function Toolbar(): React.JSX.Element {
             >
               <IconPanelRight on={detailShown} />
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </header>
   )
