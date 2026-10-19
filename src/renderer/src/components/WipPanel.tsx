@@ -1,8 +1,10 @@
 import { useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import type { FileChange } from '@shared/types'
 import { useT } from '../i18n'
 import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
+import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useWipStore, wipEntries, type WipEntry } from '../stores/wipStore'
 import { FileRow } from './FileRow'
 import './DetailPanel.css'
@@ -29,6 +31,7 @@ export function WipPanel({ width }: { width: number }): React.JSX.Element {
   const activeFile = useDetailStore((s) => s.file)
   const activeArea = useDetailStore((s) => s.wipArea)
   const openWipFile = useDetailStore((s) => s.openWipFile)
+  const repoId = useAppStore((s) => s.activeRepoId)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const entries = useMemo(() => wipEntries(status), [status])
@@ -107,6 +110,12 @@ export function WipPanel({ width }: { width: number }): React.JSX.Element {
                       active={isActive(row.entry)}
                       {...(row.entry.area === 'untracked' ? { tag: t('wip.untracked') } : {})}
                       onOpen={(f) => void openWipFile(f, row.entry.area)}
+                      {...(repoId && fileViewAvailability(row.entry.file, row.entry.area).history
+                        ? { onHistory: (f: FileChange) => openFileView('history', repoId, f, null) }
+                        : {})}
+                      {...(repoId && fileViewAvailability(row.entry.file, row.entry.area).blame
+                        ? { onBlame: (f: FileChange) => openFileView('blame', repoId, f, null) }
+                        : {})}
                     />
                   )}
                 </div>

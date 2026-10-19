@@ -10,6 +10,9 @@
   color: var(--text-muted);
 }
 
+.diff-view.is-hidden {
+  display: none;
+}
 .diff-view {
   display: flex;
   flex-direction: column;

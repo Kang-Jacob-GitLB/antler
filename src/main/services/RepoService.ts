@@ -6,6 +6,10 @@ import type {
   RefsDetails,
   FileDiff,
   FileDiffRequest,
+  FileHistoryPage,
+  FileHistoryRequest,
+  BlameRequest,
+  BlameResult,
   GhRepoRef,
   LogPage,
   LogQuery,
@@ -25,6 +29,7 @@ import { WslExecutor } from '../executors/WslExecutor'
 import { wslFromUnc } from '../executors/wslPaths'
 import { commitActivity } from '../git/activity'
 import * as git from '../git/commands'
+import * as fileInsight from '../git/fileInsight'
 import { LogCursor } from '../git/logCursor'
 import * as wip from '../git/wip'
 import { pickGithubRemote } from '../github/remoteUrl'
@@ -458,6 +463,22 @@ export class RepoService {
       this.diffCache.set(key, diff, estimateDiffBytes(diff))
       return diff
     })
+  }
+
+  /** 파일 하나를 바꾼 커밋 목록(페이지 단위). HEAD 가 움직일 수 있어 캐시하지 않는다 */
+  fileHistory(repoId: string, req: FileHistoryRequest, requestId?: string): Promise<FileHistoryPage> {
+    const { repo, rt } = this.resolve(repoId)
+    return this.withSignal(requestId, (signal) =>
+      rt.queue.run(() => fileInsight.fileHistory(rt.exec, repo.path, req, signal ? { signal } : {}), signal ? { signal } : {})
+    )
+  }
+
+  /** 지정 커밋 시점 파일의 blame */
+  blame(repoId: string, req: BlameRequest, requestId?: string): Promise<BlameResult> {
+    const { repo, rt } = this.resolve(repoId)
+    return this.withSignal(requestId, (signal) =>
+      rt.queue.run(() => fileInsight.fileBlame(rt.exec, repo.path, req, signal ? { signal } : {}), signal ? { signal } : {})
+    )
   }
 
   /**

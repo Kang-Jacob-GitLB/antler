@@ -4,6 +4,7 @@ import { DetailPanel } from './components/DetailPanel'
 import { AddRepoDialog } from './components/AddRepoDialog'
 import { DiffView } from './components/DiffView'
 import { EmptyState } from './components/EmptyState'
+import { FileView } from './components/FileView'
 import { RepoSwitcher } from './components/RepoSwitcher'
 import { Sidebar } from './components/Sidebar'
 import { Splitter, type SplitterHandlers } from './components/Splitter'
@@ -11,6 +12,7 @@ import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
 import { useAppStore } from './stores/appStore'
 import { useDetailStore } from './stores/detailStore'
+import { useFileViewStore } from './stores/fileViewStore'
 import { useLogStore } from './stores/logStore'
 import { useFetchStore } from './stores/fetchStore'
 import { useSearchStore } from './stores/searchStore'
@@ -99,6 +101,7 @@ export function App(): React.JSX.Element | null {
     return () => clearTimeout(timer)
   }, [selectedHash])
   const diffOpen = useDetailStore((s) => s.file !== null)
+  const fileViewOpen = useFileViewStore((s) => s.tab !== null)
   const sidebarShown = useAppStore((s) => s.config?.ui.sidebarHidden !== true)
   const detailShown = useAppStore((s) => s.config?.ui.detailHidden !== true)
   // 중앙 화면 우선순위: 파일 diff → GitHub 화면 → 커밋 그래프(그래프는 항상 마운트해 스크롤·페이지 유지)
@@ -116,8 +119,17 @@ export function App(): React.JSX.Element | null {
       // 팔레트·단축키 목록·저장소 전환·저장소 추가가 열려 있으면 그쪽이 자기 키를 처리한다
       if (isOverlayOpen()) return
       const detail = useDetailStore.getState()
+      // 파일 히스토리·Blame: Esc 로 한 단계 물러난다(아래 diff 가 있으면 diff 로, 없으면 커밋 목록으로)
+      const fileView = useFileViewStore.getState()
+      if (fileView.tab && !useAppStore.getState().switcherOpen) {
+        if (e.key === 'Escape' && (e.target as HTMLElement | null)?.tagName !== 'INPUT') {
+          e.preventDefault()
+          fileView.close()
+          return
+        }
+      }
       // diff 보기: Esc 닫기, Alt+↑/↓ 이전/다음 파일 (팝업·검색 입력 중에는 그쪽이 Esc 를 쓴다)
-      if (detail.file && !useAppStore.getState().switcherOpen) {
+      if (detail.file && !fileView.tab && !useAppStore.getState().switcherOpen) {
         const typing = (e.target as HTMLElement | null)?.tagName === 'INPUT'
         if (e.key === 'Escape' && !typing) {
           e.preventDefault()
@@ -148,6 +160,12 @@ export function App(): React.JSX.Element | null {
     const onMouseBack = (e: MouseEvent): void => {
       if (e.button !== 3 || isOverlayOpen()) return
       const detail = useDetailStore.getState()
+      const fileView = useFileViewStore.getState()
+      if (fileView.tab) {
+        e.preventDefault()
+        fileView.close()
+        return
+      }
       if (!detail.file) return
       e.preventDefault()
       detail.closeFile()
@@ -196,10 +214,11 @@ export function App(): React.JSX.Element | null {
         {activeRepoId ? (
           <>
             {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
-            <div className={`app__center${diffOpen || ghOpen ? ' is-hidden' : ''}`}>
+            <div className={`app__center${diffOpen || fileViewOpen || ghOpen ? ' is-hidden' : ''}`}>
               <CommitList />
             </div>
-            {diffOpen ? <DiffView /> : ghOpen ? <GitHubView /> : null}
+            {fileViewOpen && <FileView />}
+            {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : null}
             {detailShown && (
               <>
                 <Splitter {...splitter(1)} />

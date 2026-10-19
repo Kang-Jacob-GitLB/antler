@@ -1,10 +1,11 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { Commit, CommitDetail } from '@shared/types'
+import type { Commit, CommitDetail, FileChange } from '@shared/types'
 import { useT } from '../i18n'
 import { formatAbsolute } from '../lib/format'
 import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
+import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useLogStore } from '../stores/logStore'
 import { useWipStore, wipDirty } from '../stores/wipStore'
 import { AuthorAvatar } from './AuthorAvatar'
@@ -51,6 +52,7 @@ function FileList({ detail }: { detail: CommitDetail }): React.JSX.Element {
   const t = useT()
   const scrollRef = useRef<HTMLDivElement>(null)
   const active = useDetailStore((s) => s.file)
+  const repoId = useDetailStore((s) => s.repoId)
   const openFile = useDetailStore((s) => s.openFile)
   const v = useVirtualizer({
     count: detail.files.length,
@@ -97,7 +99,13 @@ function FileList({ detail }: { detail: CommitDetail }): React.JSX.Element {
             const f = detail.files[vi.index]!
             return (
               <div key={vi.key} className="file-list__slot" style={{ transform: `translateY(${vi.start}px)`, height: FILE_ROW_H }}>
-                <FileRow file={f} active={f === active} onOpen={(x) => void openFile(x)} />
+                <FileRow
+                  file={f}
+                  active={f === active}
+                  onOpen={(x) => void openFile(x)}
+                  {...(repoId && fileViewAvailability(f, null).history ? { onHistory: (x: FileChange) => openFileView('history', repoId, x, detail.hash) } : {})}
+                  {...(repoId && fileViewAvailability(f, null).blame ? { onBlame: (x: FileChange) => openFileView('blame', repoId, x, detail.hash) } : {})}
+                />
               </div>
             )
           })}

@@ -224,6 +224,15 @@
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
 }
+.file-row__actions {
+  display: none;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.file-row:hover .file-row__actions,
+.file-row:focus-within .file-row__actions {
+  display: inline-flex;
+}
 .file-row__bin {
   flex-shrink: 0;
   font-size: var(--fs-xs);

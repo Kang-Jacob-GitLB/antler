@@ -2,6 +2,7 @@ import { memo } from 'react'
 import type { FileChange } from '@shared/types'
 import { useT } from '../i18n'
 import { FileStatusIcon } from './FileStatusIcon'
+import { IconBlame, IconHistory } from './icons'
 
 /** 경로를 (디렉터리, 파일 이름)으로 나눈다 */
 export function splitPath(path: string): [dir: string, base: string] {
@@ -14,13 +15,18 @@ export const FileRow = memo(function FileRow({
   file,
   active,
   tag,
-  onOpen
+  onOpen,
+  onHistory,
+  onBlame
 }: {
   file: FileChange
   active: boolean
   /** 이름 옆에 붙는 작은 표지(예: 추적 안 됨) */
   tag?: string
   onOpen(f: FileChange): void
+  /** 있으면 마우스를 올릴 때 파일 히스토리·Blame 버튼을 보여 준다 */
+  onHistory?(f: FileChange): void
+  onBlame?(f: FileChange): void
 }) {
   const t = useT()
   const [dir, base] = splitPath(file.path)
@@ -39,6 +45,20 @@ export const FileRow = memo(function FileRow({
         {file.oldPath && <span className="file-row__from">← {splitPath(file.oldPath)[1]}</span>}
       </span>
       {tag && <span className="file-row__tag">{tag}</span>}
+      {(onHistory || onBlame) && (
+        <span className="file-row__actions" onClick={(e) => e.stopPropagation()}>
+          {onHistory && (
+            <button className="icon-btn icon-btn--sm" title={t('fileView.openHistory')} onClick={() => onHistory(file)}>
+              <IconHistory size={13} />
+            </button>
+          )}
+          {onBlame && (
+            <button className="icon-btn icon-btn--sm" title={t('fileView.openBlame')} onClick={() => onBlame(file)}>
+              <IconBlame size={13} />
+            </button>
+          )}
+        </span>
+      )}
       {file.binary ? (
         <span className="file-row__bin">{t('detail.binary')}</span>
       ) : (

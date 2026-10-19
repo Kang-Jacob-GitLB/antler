@@ -7,16 +7,17 @@ import { escapeHtml, highlightLine, languageFor, loadHighlighter } from '../diff
 import { useT } from '../i18n'
 import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
+import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useWipStore, wipEntries } from '../stores/wipStore'
 import { FileStatusIcon } from './FileStatusIcon'
-import { IconArrowLeft, IconChevronDown } from './icons'
+import { IconArrowLeft, IconBlame, IconChevronDown, IconHistory } from './icons'
 import './DiffView.css'
 
-const ROW_H = 20
+export const ROW_H = 20
 /** 이보다 긴 diff 는 강조 없이 그린다(줄 단위 강조라도 수만 줄이면 스크롤이 무거워진다) */
 const HIGHLIGHT_MAX_LINES = 20_000
 
-interface Hl {
+export interface Hl {
   hljs: HLJSApi
   lang: string
 }
@@ -29,7 +30,7 @@ const LONG_LINE = 4000
 const TOOLTIP_MAX = 500
 
 /** 줄 HTML: 언어 강조 + 줄 안 바뀐 구간 <mark>. highlight.js 와 escapeHtml 모두 이스케이프한 결과만 넣는다 */
-function codeHtml(text: string, span: Span | undefined, hl: Hl | null): string {
+export function codeHtml(text: string, span: Span | undefined, hl: Hl | null): string {
   if (text.length > LONG_LINE) {
     return `${escapeHtml(text.slice(0, LONG_LINE))}<span class="diff-long">… (+${(text.length - LONG_LINE).toLocaleString()})</span>`
   }
@@ -123,7 +124,7 @@ function widestLine(diff: FileDiff): number {
   return max
 }
 
-function useHighlighter(path: string | undefined, lines: number): Hl | null {
+export function useHighlighter(path: string | undefined, lines: number): Hl | null {
   const [hl, setHl] = useState<Hl | null>(null)
   useEffect(() => {
     setHl(null)
@@ -217,9 +218,10 @@ export function DiffBody({ diff, loading = false, error = null, resetKey }: Diff
   )
 }
 
-export function DiffView(): React.JSX.Element | null {
+/** hidden: 파일 히스토리·Blame 이 위에 떠 있는 동안 숨겨 둔다(언마운트하면 스크롤 위치가 사라진다) */
+export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.Element | null {
   const t = useT()
-  const { file, wipArea, diff, diffLoading, diffError, detail, diffFull, fullError } = useDetailStore()
+  const { file, wipArea, diff, diffLoading, diffError, detail, diffFull, fullError, repoId } = useDetailStore()
   const { closeFile, stepFile, openFile, openWipFile } = useDetailStore.getState()
   const wipStatus = useWipStore((s) => s.status)
 
@@ -234,9 +236,12 @@ export function DiffView(): React.JSX.Element | null {
   const slash = file.path.lastIndexOf('/')
   const dir = slash < 0 ? '' : file.path.slice(0, slash + 1)
   const base = file.path.slice(slash + 1)
+  const view = fileViewAvailability(file, wipArea)
+  // 커밋의 파일이면 그 커밋 시점, 작업 트리 파일이면 HEAD 기준
+  const viewRev = wipArea ? null : detail!.hash
 
   return (
-    <section className="diff-view">
+    <section className={`diff-view${hidden ? ' is-hidden' : ''}`}>
       <header className="diff-head">
         <button className="diff-head__back" title={`${t('diff.back')} (Esc)`} onClick={closeFile}>
           <IconArrowLeft size={14} />
@@ -254,6 +259,16 @@ export function DiffView(): React.JSX.Element | null {
             <span className="is-add">+{file.additions ?? 0}</span>
             <span className="is-del">−{file.deletions ?? 0}</span>
           </span>
+        )}
+        {repoId && view.history && (
+          <button className="icon-btn icon-btn--sm" title={t('fileView.openHistory')} onClick={() => openFileView('history', repoId, file, viewRev)}>
+            <IconHistory size={14} />
+          </button>
+        )}
+        {repoId && view.blame && (
+          <button className="icon-btn icon-btn--sm" title={t('fileView.openBlame')} onClick={() => openFileView('blame', repoId, file, viewRev)}>
+            <IconBlame size={14} />
+          </button>
         )}
         <DiffModeToggle />
         <span className="diff-head__pos">
