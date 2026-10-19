@@ -25,6 +25,7 @@
 }
 .crumb,
 .view-chip,
+.crumb-more,
 .filter-chip,
 .toolbar__actions {
   -webkit-app-region: no-drag;

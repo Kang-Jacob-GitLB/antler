@@ -8,12 +8,13 @@ import { useT } from '../i18n'
 import { useAppStore } from '../stores/appStore'
 import { useCompareStore } from '../stores/compareStore'
 import { useDetailStore } from '../stores/detailStore'
+import { showExternalMenuAt } from '../stores/externalMenuStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useWipStore, wipEntries } from '../stores/wipStore'
 import { lfsFromDiff } from '../diff/lfsDiff'
 import { FileStatusIcon } from './FileStatusIcon'
 import { LfsBadge, LfsCard } from './LfsBadge'
-import { IconArrowLeft, IconBlame, IconChevronDown, IconHistory } from './icons'
+import { IconArrowLeft, IconBlame, IconChevronDown, IconHistory, IconMore } from './icons'
 import './DiffView.css'
 
 export const ROW_H = 20
@@ -286,6 +287,17 @@ export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.El
         {repoId && view.blame && (
           <button className="icon-btn icon-btn--sm" title={t('fileView.openBlame')} onClick={() => openFileView('blame', repoId, file, viewRev)}>
             <IconBlame size={14} />
+          </button>
+        )}
+        {repoId && (
+          <button
+            className="icon-btn icon-btn--sm"
+            title={t('ext.menu')}
+            aria-label={t('ext.menu')}
+            aria-haspopup="menu"
+            onClick={(e) => showExternalMenuAt(e.currentTarget, repoId, file.path)}
+          >
+            <IconMore size={14} />
           </button>
         )}
         <DiffModeToggle />

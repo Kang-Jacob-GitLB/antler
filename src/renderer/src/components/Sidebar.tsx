@@ -394,11 +394,16 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
     if (!config) return []
     const bySource = new Map<string, { source: Source; repos: Repo[] }>()
     for (const s of config.sources) bySource.set(s.id, { source: s, repos: [] })
-    for (const r of config.repos) bySource.get(r.sourceId)?.repos.push(r)
+    // 프로필의 '보일 그룹': 목록에 없는 그룹의 저장소는 숨긴다(그룹 없는 저장소와 지금 열어 둔 저장소는 항상 보인다)
+    const visible = config.ui.visibleGroups
+    for (const r of config.repos) {
+      if (visible?.length && r.group && !visible.includes(r.group) && r.id !== activeRepoId) continue
+      bySource.get(r.sourceId)?.repos.push(r)
+    }
     return [...bySource.values()]
       .filter((g) => g.repos.length)
       .map((g) => ({ ...g, repos: [...g.repos].sort((a, b) => a.name.localeCompare(b.name)) }))
-  }, [config])
+  }, [config, activeRepoId])
 
   const local = useMemo(() => (refs?.local ?? []).filter((b) => matches(q, b.name)), [refs, q])
   const remotes = useMemo(
@@ -603,6 +608,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     {menuFor === repo.id && (
                       <RepoMenu
                         repo={repo}
+                        sourceKind={source.kind}
                         groups={allGroups}
                         onClose={() => setMenuFor(null)}
                         onGroup={(group) => void updateRepo(repo.id, { group })}

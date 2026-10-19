@@ -2,7 +2,18 @@ import { randomUUID } from 'node:crypto'
 import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { LAUNCHPAD_KEY_RE, MAX_LAUNCHPAD_PINS, MAX_LAUNCHPAD_SNOOZES } from '@shared/launchpad'
-import type { AppConfig, Repo, RepoPatch, Source, SourceKind, UiPrefs } from '@shared/types'
+import type { AppConfig, Profile, ProfileSaveInput, Repo, RepoPatch, Source, SourceKind, UiPrefs } from '@shared/types'
+import {
+  MAX_PROFILES,
+  applySettings,
+  checkEditor,
+  checkProfileName,
+  checkVisibleGroups,
+  sameName,
+  sanitizeProfiles,
+  snapshotSettings,
+  validateSettings
+} from './profiles'
 
 export const LOCAL_SOURCE_ID = 'local'
 
@@ -86,9 +97,89 @@ export class ConfigStore {
     if ('skippedUpdateVersion' in patch) throw new Error('이 설정은 직접 바꿀 수 없습니다')
     const af = patch.autoFetchMinutes
     if (af !== undefined && (!Number.isInteger(af) || af < 0 || af > 1440)) throw new Error('잘못된 자동 fetch 주기입니다(0~1440분)')
+    // 에디터 실행 파일·적용된 프로필은 main 만 정한다 — renderer 가 임의 프로그램을 가리키거나 프로필 표시를 위조하지 못하게 한다
+    if ('editorExePath' in patch || 'activeProfileId' in patch) throw new Error('이 설정은 직접 바꿀 수 없습니다')
+    if (patch.editor !== undefined) checkEditor(patch.editor)
+    if (patch.visibleGroups !== undefined) checkVisibleGroups(patch.visibleGroups)
     checkJiraPrefs(patch)
     checkLaunchpadPrefs(patch)
-    return this.update({ ...this.config, ui: { ...this.config.ui, ...patch } })
+    const ui = { ...this.config.ui, ...patch }
+    // 보일 그룹이 빈 목록이면 제한 없음이다(패치로는 키를 지울 수 없어 빈 목록으로 알린다)
+    if (ui.visibleGroups?.length === 0) delete ui.visibleGroups
+    return this.update({ ...this.config, ui })
+  }
+
+  /** main 전용: 사용자가 파일 선택 창에서 고른 에디터 실행 파일(호출자가 checkChosenExe 로 검증한다). IPC 로 직접 노출하지 않는다 */
+  setEditorExePath(path: string): AppConfig {
+    if (typeof path !== 'string' || !path || path.length > 4096 || path.includes('\0')) throw new Error('잘못된 실행 파일 경로입니다')
+    return this.update({ ...this.config, ui: { ...this.config.ui, editorExePath: path } })
+  }
+
+  // ── 프로필 ──
+
+  /**
+   * 새 프로필(id 없음) 또는 기존 프로필의 이름 변경·설정 덮어쓰기(id 있음). settings 를 주지 않으면 현재 설정에서 만든다.
+   * 토큰은 프로필에 들어가지 않는다(PROFILE_KEYS 참고).
+   */
+  saveProfile(input: ProfileSaveInput): AppConfig {
+    if (!input || typeof input !== 'object' || Object.keys(input).some((k) => !['id', 'name', 'settings'].includes(k))) {
+      throw new Error('잘못된 프로필 입력입니다')
+    }
+    const profiles = this.config.profiles ?? []
+    const settings = input.settings !== undefined ? validateSettings(input.settings) : undefined
+    if (input.id === undefined) {
+      if (profiles.length >= MAX_PROFILES) throw new Error(`프로필은 최대 ${MAX_PROFILES}개까지 만들 수 있습니다`)
+      const name = checkProfileName(input.name)
+      if (profiles.some((p) => sameName(p.name, name))) throw new Error('같은 이름의 프로필이 있습니다')
+      const profile: Profile = { id: randomUUID(), name, settings: settings ?? snapshotSettings(this.config.ui) }
+      // 현재 설정으로 만든 프로필은 곧바로 그 프로필을 쓰는 중이다
+      const ui = settings ? this.config.ui : { ...this.config.ui, activeProfileId: profile.id }
+      return this.update({ ...this.config, ui, profiles: [...profiles, profile] })
+    }
+    const cur = profiles.find((p) => p.id === input.id)
+    if (!cur) throw new Error('프로필을 찾을 수 없습니다')
+    const name = input.name !== undefined ? checkProfileName(input.name) : cur.name
+    if (profiles.some((p) => p.id !== cur.id && sameName(p.name, name))) throw new Error('같은 이름의 프로필이 있습니다')
+    const next: Profile = {
+      id: cur.id,
+      name,
+      settings: settings ?? (input.name === undefined ? snapshotSettings(this.config.ui) : cur.settings)
+    }
+    return this.update({ ...this.config, profiles: profiles.map((p) => (p.id === cur.id ? next : p)) })
+  }
+
+  /** 지금 쓰는 프로필을 현재 설정으로 갱신해 두고, 선택한 프로필의 설정으로 바꾼다 */
+  applyProfile(id: string): AppConfig {
+    const profiles = this.config.profiles ?? []
+    const target = profiles.find((p) => p.id === id)
+    if (!target) throw new Error('프로필을 찾을 수 없습니다')
+    const outgoingId = this.config.ui.activeProfileId
+    const saved =
+      outgoingId && outgoingId !== id
+        ? profiles.map((p) => (p.id === outgoingId ? { ...p, settings: snapshotSettings(this.config.ui) } : p))
+        : profiles
+    const ui = { ...applySettings(this.config.ui, target.settings), activeProfileId: id }
+    return this.update({ ...this.config, ui, profiles: saved })
+  }
+
+  duplicateProfile(id: string, name: string): AppConfig {
+    const profiles = this.config.profiles ?? []
+    const src = profiles.find((p) => p.id === id)
+    if (!src) throw new Error('프로필을 찾을 수 없습니다')
+    if (profiles.length >= MAX_PROFILES) throw new Error(`프로필은 최대 ${MAX_PROFILES}개까지 만들 수 있습니다`)
+    const clean = checkProfileName(name)
+    if (profiles.some((p) => sameName(p.name, clean))) throw new Error('같은 이름의 프로필이 있습니다')
+    // 지금 쓰는 프로필을 복제하면 아직 저장 전인 변경도 담도록 현재 설정에서 만든다
+    const settings = this.config.ui.activeProfileId === id ? snapshotSettings(this.config.ui) : structuredClone(src.settings)
+    return this.update({ ...this.config, profiles: [...profiles, { id: randomUUID(), name: clean, settings }] })
+  }
+
+  deleteProfile(id: string): AppConfig {
+    const profiles = this.config.profiles ?? []
+    if (!profiles.some((p) => p.id === id)) throw new Error('프로필을 찾을 수 없습니다')
+    const { activeProfileId, ...rest } = this.config.ui
+    const ui = activeProfileId === id ? rest : this.config.ui
+    return this.update({ ...this.config, ui, profiles: profiles.filter((p) => p.id !== id) })
   }
 
   /** main 전용: 사용자가 '이 버전 건너뛰기'를 고른 업데이트 버전(IPC 로 노출하지 않는다) */
@@ -165,7 +256,18 @@ export class ConfigStore {
       const raw = JSON.parse(text) as Partial<AppConfig>
       const sources = raw.sources?.length ? raw.sources : base.sources
       if (!sources.some((s) => s.id === LOCAL_SOURCE_ID)) sources.unshift(base.sources[0]!)
-      return { version: 1, sources, repos: raw.repos ?? [], ui: { ...base.ui, ...raw.ui }, ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {}) }
+      const profiles = sanitizeProfiles(raw.profiles)
+      const ui: UiPrefs = { ...base.ui, ...raw.ui }
+      // 없어진 프로필을 가리키는 표시는 지운다
+      if (ui.activeProfileId !== undefined && !profiles.some((p) => p.id === ui.activeProfileId)) delete ui.activeProfileId
+      return {
+        version: 1,
+        sources,
+        repos: raw.repos ?? [],
+        ui,
+        ...(profiles.length ? { profiles } : {}),
+        ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {})
+      }
     } catch {
       // 손상된 설정은 덮어쓰기 전에 보존해 둔다(사용자가 저장소 목록을 복구할 수 있게)
       try {

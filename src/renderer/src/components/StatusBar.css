@@ -108,3 +108,9 @@
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-sm);
 }
+
+.statusbar__profile {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

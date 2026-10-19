@@ -24,5 +24,5 @@ export const usePaletteStore = create<PaletteState>((set) => ({
 export function isOverlayOpen(): boolean {
   const app = useAppStore.getState()
   const p = usePaletteStore.getState()
-  return app.switcherOpen || app.addOpen || p.paletteOpen || p.shortcutsOpen || useJiraStore.getState().dialogOpen
+  return app.switcherOpen || app.addOpen || app.settingsOpen || p.paletteOpen || p.shortcutsOpen || useJiraStore.getState().dialogOpen
 }
