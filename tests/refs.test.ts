@@ -64,8 +64,10 @@ describe('parseRefs (fixture)', () => {
     expect(tags.filter((t) => t.name !== 'tree-tag').every((t) => t.targetsCommit)).toBe(true)
   })
 
-  it('태그는 자연 정렬하고 annotated 는 peel 한 커밋 해시를 쓴다', () => {
-    expect(tags.map((t) => t.name)).toEqual(['tree-tag', 'v0.1.0', 'v0.2.0', 'v0.9.0', 'v0.10.0'])
+  it('태그는 최신순(만든 시각 내림차순)이고 시각이 없으면 맨 아래, annotated 는 peel 한 커밋 해시를 쓴다', () => {
+    // v0.9.0 은 v0.10.0 보다 나중에 만든 annotated 태그다. 트리 태그는 시각이 없다
+    expect(tags.map((t) => t.name)).toEqual(['v0.9.0', 'v0.10.0', 'v0.2.0', 'v0.1.0', 'tree-tag'])
+    expect(tags.find((t) => t.name === 'v0.1.0')?.date).toBe(1700000180)
     const v1 = tags.find((t) => t.name === 'v0.1.0')!
     const v2 = tags.find((t) => t.name === 'v0.2.0')!
     expect(v1.annotated).toBe(false)
@@ -74,6 +76,14 @@ describe('parseRefs (fixture)', () => {
     const raw = fixture('for-each-ref.bin').toString('utf8').split('\n').find((l) => l.startsWith('refs/tags/v0.2.0'))!.split('\0')
     expect(raw[1]).not.toBe(v2.hash)
     expect(v2.hash).toBe(raw[2])
+  })
+})
+
+describe('parseRefs 태그 순서', () => {
+  it('같은 시각이거나 시각이 없으면 이름 역순(자연 정렬)으로 놓는다', () => {
+    const line = (name: string, date: string): string => `refs/tags/${name}\0${'a'.repeat(40)}\0\0 \0\0\0\0commit\0\0${date}`
+    const out = parseRefs([line('v1.2.0', '100'), line('v1.10.0', '100'), line('old', ''), line('new', '200')].join('\n'), [])
+    expect(out.tags.map((t) => t.name)).toEqual(['new', 'v1.10.0', 'v1.2.0', 'old'])
   })
 })
 

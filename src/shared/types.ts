@@ -303,6 +303,8 @@ export interface Tag {
   annotated: boolean
   /** 최종 대상이 커밋인지(트리·블롭·중첩 태그면 false — 그래프에서 찾아갈 수 없다) */
   targetsCommit: boolean
+  /** 만든 시각(unix 초). annotated 는 태그 시각, lightweight 는 커밋 시각 */
+  date?: number
 }
 
 export interface Worktree {

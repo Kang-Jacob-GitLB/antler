@@ -115,7 +115,7 @@ try {
   git('tag', 'tree-tag', 'HEAD^{tree}')
   git('update-ref', 'refs/remotes/origin/team/HEAD', 'HEAD')
 
-  dump('for-each-ref.bin', 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(symref)%00%(objecttype)%00%(*objecttype)', 'refs/heads', 'refs/remotes', 'refs/tags')
+  dump('for-each-ref.bin', 'for-each-ref', '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(symref)%00%(objecttype)%00%(*objecttype)%00%(creatordate:unix)', 'refs/heads', 'refs/remotes', 'refs/tags')
   dump('remotes.txt', 'remote')
   dump('worktree.bin', 'worktree', 'list', '--porcelain', '-z')
   dump('stash.bin', 'stash', 'list', '-z', '--format=%H%x1f%gd%x1f%ct%x1f%gs')
