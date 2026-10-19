@@ -12,7 +12,7 @@ import { useUpdateStore } from '../stores/updateStore'
 import { LfsBadge } from './LfsBadge'
 import { EnvBadge } from './EnvBadge'
 import { MenuButton } from './MenuButton'
-import { IconBranch, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun, IconTerminal } from './icons'
+import { IconBranch, IconGear, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun, IconTerminal } from './icons'
 import './StatusBar.css'
 
 const RELEASES_URL = 'https://github.com/Kang-Jacob-GitLB/antler/releases'
@@ -101,6 +101,10 @@ export function StatusBar(): React.JSX.Element {
           onClick={() => usePaletteStore.getState().setPaletteOpen(true)}
         >
           <IconTerminal size={13} />
+        </button>
+        {/* 설정 창(외부 도구 · 보일 저장소 그룹) */}
+        <button className="statusbar__btn" title={t('settings.title')} aria-label={t('settings.title')} onClick={() => useAppStore.getState().openSettings(true)}>
+          <IconGear size={13} />
         </button>
         <button className="statusbar__btn" onClick={() => void useUpdateStore.getState().check()}>
           <IconRefresh size={12} />
