@@ -22,8 +22,6 @@ export interface CommandCtx {
   /** 활성 저장소의 환경(외부 도구로 열기에서 SSH 는 에디터만 가능) */
   sourceKind: SourceKind | undefined
   editor: EditorKind
-  activeProfileId: string | undefined
-  profiles: { id: string; name: string }[]
 }
 
 export interface CommandLike {

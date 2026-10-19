@@ -4,7 +4,6 @@ import type {
   AppConfig,
   HeadInfo,
   Locale,
-  ProfileSaveInput,
   RefsSnapshot,
   Repo,
   RepoPatch,
@@ -27,7 +26,7 @@ interface AppState {
   error: string | null
   switcherOpen: boolean
   addOpen: boolean
-  /** 설정(외부 도구·프로필) 대화상자 */
+  /** 설정(외부 도구·보일 그룹) 대화상자 */
   settingsOpen: boolean
 
   init(): Promise<void>
@@ -43,11 +42,6 @@ interface AppState {
   setLocale(locale: Locale): void
   setSwitcherOpen(open: boolean): void
   openSettings(open?: boolean): void
-  /** 프로필 저장(새로 만들기·이름 변경·덮어쓰기)·적용·복제·삭제. 실패하면 오류를 띄우고 false */
-  saveProfile(input: ProfileSaveInput): Promise<boolean>
-  applyProfile(id: string): Promise<boolean>
-  duplicateProfile(id: string, name: string): Promise<boolean>
-  deleteProfile(id: string): Promise<boolean>
   /** 에디터 실행 파일 선택 창(JetBrains·사용자 지정) */
   pickEditorExe(): Promise<void>
   clearError(): void
@@ -192,11 +186,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ settingsOpen: open })
   },
 
-  saveProfile: (input) => profileOp(() => api.invoke('profile:save', input), set, get),
-  applyProfile: (id) => profileOp(() => api.invoke('profile:apply', id), set, get),
-  duplicateProfile: (id, name) => profileOp(() => api.invoke('profile:duplicate', id, name), set, get),
-  deleteProfile: (id) => profileOp(() => api.invoke('profile:delete', id), set, get),
-
   async pickEditorExe() {
     try {
       const config = await api.invoke('external:pickEditorExe')
@@ -210,26 +199,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ error: null })
   }
 }))
-
-/**
- * 프로필 IPC 공통 처리: 돌려받은 설정으로 화면(테마·언어)까지 바꾼다. 패널 폭·숨김·diff 방식은 설정을 구독하는 쪽이 따라간다.
- */
-async function profileOp(
-  call: () => Promise<AppConfig>,
-  set: (p: Partial<AppState>) => void,
-  get: () => AppState
-): Promise<boolean> {
-  try {
-    const config = await call()
-    set({ config })
-    applyTheme(config.ui.theme, get().systemDark)
-    document.documentElement.lang = config.ui.locale
-    return true
-  } catch (err) {
-    set({ error: errorMessage(err) })
-    return false
-  }
-}
 
 export function useActiveRepo(): Repo | null {
   return useAppStore((s) => s.config?.repos.find((r) => r.id === s.activeRepoId) ?? null)

@@ -153,15 +153,6 @@ export function registerIpc(
     if (patch.autoFetchMinutes !== undefined) fetcher.onPrefsChanged()
     return next
   })
-  // 프로필: 설정 묶음의 스냅샷은 main 이 현재 설정에서 만든다. 자동 fetch 주기가 바뀔 수 있어 스케줄을 다시 잡는다
-  handle('profile:save', (_e, input) => config.saveProfile(input))
-  handle('profile:apply', (_e, id) => {
-    const next = config.applyProfile(id)
-    fetcher.onPrefsChanged()
-    return next
-  })
-  handle('profile:duplicate', (_e, id, name) => config.duplicateProfile(id, name))
-  handle('profile:delete', (_e, id) => config.deleteProfile(id))
   registerExternalIpc(handle, config)
 
   handle('dialog:pickFolder', async (e, defaultPath) => {

@@ -74,49 +74,15 @@ export interface UiPrefs {
   editor?: EditorKind
   /**
    * main 전용: 사용자가 파일 선택 창에서 직접 고른 에디터 실행 파일(JetBrains·사용자 지정). renderer 는 바꿀 수 없다
-   * (config:setUi 는 이 키를 받지 않는다) — 프로필에도 담기지 않는다
+   * (config:setUi 는 이 키를 받지 않는다)
    */
   editorExePath?: string
   /** 저장소 목록에 보일 그룹(없으면 전부, config:setUi 에 빈 목록을 보내면 지운다). 그룹 없는 저장소는 항상 보인다 */
   visibleGroups?: string[]
-  /** main 전용: 마지막으로 적용한 프로필(config:setUi 는 이 키를 받지 않는다) */
-  activeProfileId?: string
 }
 
 export type EditorKind = 'vscode' | 'cursor' | 'jetbrains' | 'custom'
 
-/**
- * 프로필에 담기는 설정 묶음(UiPrefs 의 부분집합). 토큰·자격 증명(GitHub·Jira)과 앱 전체 설정(OAuth client ID,
- * Jira 사이트, 에디터 실행 파일 경로, 마지막 저장소 등)은 담지 않는다 — 모든 프로필이 공유한다
- */
-export interface ProfileSettings {
-  theme?: ThemePref
-  locale?: Locale
-  paneWidths?: [number, number]
-  diffMode?: 'unified' | 'split'
-  sidebarHidden?: boolean
-  detailHidden?: boolean
-  detailMetaHeight?: number
-  minimapCollapsed?: boolean
-  graphInitials?: boolean
-  autoFetchMinutes?: number
-  editor?: EditorKind
-  visibleGroups?: string[]
-}
-
-export interface Profile {
-  id: string
-  name: string
-  settings: ProfileSettings
-}
-
-/** profile:save 입력: id 없음 = 새 프로필(name 필수), id 있음 = 이름 변경·설정 덮어쓰기(둘 다 없으면 현재 설정으로 덮어씀) */
-export interface ProfileSaveInput {
-  id?: string
-  name?: string
-  /** 없으면 main 이 현재 설정에서 만든다 */
-  settings?: ProfileSettings
-}
 
 /** 외부 도구로 열기: 저장소 폴더 또는 그 안의 파일(저장소 루트 기준 '/' 경로) */
 export type ExternalAction = 'fileManager' | 'editor' | 'terminal'
@@ -215,8 +181,6 @@ export interface AppConfig {
   sources: Source[]
   repos: Repo[]
   ui: UiPrefs
-  /** 이름 붙인 설정 묶음(최대 20개). 토큰은 담지 않는다 */
-  profiles?: Profile[]
   /**
    * main 전용: 사용자가 수동 fetch 로 한 번 성공시킨 저장소별 remote(이름+실제 URL) 지문. 이 지문이 같을 때만
    * 자동 fetch 가 자격 증명 도우미를 쓴다. renderer 는 바꿀 수 없다(config:setUi·repos:update 는 이 키를 받지 않는다)

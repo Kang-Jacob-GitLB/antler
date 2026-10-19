@@ -60,9 +60,7 @@ export function readCommandCtx(): CommandCtx {
     sidebarShown: ui?.sidebarHidden !== true,
     detailShown: ui?.detailHidden !== true,
     sourceKind: sourceKindOf(app.activeRepoId),
-    editor: ui?.editor ?? 'vscode',
-    activeProfileId: ui?.activeProfileId,
-    profiles: (app.config?.profiles ?? []).map((p) => ({ id: p.id, name: p.name }))
+    editor: ui?.editor ?? 'vscode'
   }
 }
 
@@ -180,7 +178,7 @@ export const COMMAND_DEFS: CommandDef[] = [
     id: 'settings.open',
     category: 'general',
     title: (t) => t('cmd.settings'),
-    keywords: 'settings preferences profile editor external tools',
+    keywords: 'settings preferences editor external tools',
     run: () => useAppStore.getState().openSettings(true)
   },
   {
@@ -332,7 +330,6 @@ function isChecked(id: string, c: CommandCtx): boolean {
   if (id.startsWith('locale.')) return c.locale === id.slice(7)
   if (id.startsWith('autofetch.')) return c.autoFetch === Number(id.slice(10))
   if (id.startsWith('editor.')) return c.editor === id.slice(7)
-  if (id.startsWith('profile.apply:')) return c.activeProfileId === id.slice(14)
   if (id === 'diff.unified') return c.diffMode === 'unified'
   if (id === 'diff.split') return c.diffMode === 'split'
   return false
@@ -340,20 +337,6 @@ function isChecked(id: string, c: CommandCtx): boolean {
 
 /** 레지스트리를 현재 언어·상태로 풀어 낸다. 숨겨야 할 명령도 available=false 로 남긴다(단축키 목록은 전부 보여 준다) */
 export function resolveCommands(t: T, ctx: CommandCtx): ResolvedCommand[] {
-  // 저장된 프로필마다 전환 명령을 만든다(프로필 이름이 곧 명령 이름)
-  const profileCommands: ResolvedCommand[] = ctx.profiles.map((p) => ({
-    id: `profile.apply:${p.id}`,
-    category: 'general',
-    label: t('cmd.profileApply', { name: p.name }),
-    keywords: 'profile switch',
-    available: true,
-    checked: isChecked(`profile.apply:${p.id}`, ctx),
-    run: () => void useAppStore.getState().applyProfile(p.id)
-  }))
-  return [...resolveDefs(t, ctx), ...profileCommands]
-}
-
-function resolveDefs(t: T, ctx: CommandCtx): ResolvedCommand[] {
   return COMMAND_DEFS.map((d) => ({
     id: d.id,
     category: d.category,
