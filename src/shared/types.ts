@@ -797,3 +797,36 @@ export interface JiraSearchResult {
   /** 더 있으면 다음 요청에 넘길 표지(상한에 닿으면 없음) */
   nextCursor?: string
 }
+
+// ── Git LFS · Gitflow 표시 ─────────────────────────────
+
+export type GitflowPrefixKind = 'feature' | 'release' | 'hotfix' | 'bugfix' | 'support'
+
+/** 저장소 git config 의 gitflow.* 값(표시 전용 데이터). 설정에 없는 항목은 비어 있다 */
+export interface GitflowConfig {
+  master?: string
+  develop?: string
+  prefixes: Partial<Record<GitflowPrefixKind, string>>
+}
+
+/** 화면에 쓰는 Gitflow 정보: 설정(config) 또는 기본 접두사 사용 감지(detected) */
+export interface GitflowInfo {
+  source: 'config' | 'detected'
+  /** 설정된 master 이름. 없으면 master/main 을 모두 본다 */
+  master: string | null
+  develop: string
+  prefixes: Record<GitflowPrefixKind, string>
+}
+
+/** 저장소 단위 부가 정보(읽기 전용): LFS 사용 여부와 gitflow 설정 */
+export interface RepoExtras {
+  /** HEAD 의 루트 .gitattributes 에 filter=lfs 규칙이 있는지 */
+  lfs: boolean
+  gitflow: GitflowConfig | null
+}
+
+/** filter=lfs 속성인 경로를 묻는다. rev 가 있으면 그 커밋의 .gitattributes 기준, 없으면 작업 트리 기준 */
+export interface LfsPathsRequest {
+  rev?: string
+  paths: string[]
+}

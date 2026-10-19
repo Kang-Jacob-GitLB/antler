@@ -7,7 +7,9 @@ import { useFetchStore } from '../stores/fetchStore'
 import { useLogStore } from '../stores/logStore'
 import { shortcutText } from '../lib/shortcuts'
 import { usePaletteStore } from '../stores/paletteStore'
+import { useGitflow, useRepoUsesLfs } from '../stores/repoExtrasStore'
 import { useUpdateStore } from '../stores/updateStore'
+import { LfsBadge } from './LfsBadge'
 import { EnvBadge } from './EnvBadge'
 import { MenuButton } from './MenuButton'
 import { IconBranch, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun, IconTerminal } from './icons'
@@ -32,7 +34,9 @@ export function StatusBar(): React.JSX.Element {
   const fetchStatus = useFetchStore((s) => (repo ? s.status[repo.id] : undefined))
   const count = useLogStore((s) => s.commits.length)
   const hasMore = useLogStore((s) => s.hasMore)
-  const appVersion = useUpdateStore((s) => s.state?.currentVersion ?? '')
+  const usesLfs = useRepoUsesLfs()
+  const flow = useGitflow()
+  const appVersion =useUpdateStore((s) => s.state?.currentVersion ?? '')
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), TICK_MS)
@@ -64,6 +68,16 @@ export function StatusBar(): React.JSX.Element {
             <span className="statusbar__item statusbar__count">
               {t('list.count', { n: count.toLocaleString(locale), more: hasMore ? '+' : '' })}
             </span>
+            {usesLfs && (
+              <span className="statusbar__item">
+                <LfsBadge title={t('lfs.repo')} />
+              </span>
+            )}
+            {flow && (
+              <span className="statusbar__item" title={t(flow.source === 'config' ? 'flow.statusConfig' : 'flow.statusDetected')}>
+                <span className="statusbar__text">Gitflow</span>
+              </span>
+            )}
             {fetchShort && (
               <span
                 className={`statusbar__item statusbar__fetch${bad ? ' is-bad' : ''}`}

@@ -14,6 +14,8 @@ import type {
   GhRepoRef,
   LogPage,
   LogQuery,
+  LfsPathsRequest,
+  RepoExtras,
   RefsSnapshot,
   Repo,
   SearchResult,
@@ -32,6 +34,7 @@ import { commitActivity } from '../git/activity'
 import * as git from '../git/commands'
 import * as fileInsight from '../git/fileInsight'
 import { LogCursor } from '../git/logCursor'
+import * as extras from '../git/repoExtras'
 import * as wip from '../git/wip'
 import { pickGithubRemote } from '../github/remoteUrl'
 import { LOCAL_SOURCE_ID, sourceFor, type ConfigStore } from './ConfigStore'
@@ -500,6 +503,20 @@ export class RepoService {
     const { repo, rt } = this.resolve(repoId)
     return this.withSignal(requestId, (signal) =>
       rt.queue.run(() => fileInsight.fileBlame(rt.exec, repo.path, req, signal ? { signal } : {}), signal ? { signal } : {})
+    )
+  }
+
+  /** LFS 사용 여부·gitflow 설정(표시 전용). 설정이 바뀔 수 있어 캐시하지 않는다 */
+  repoExtras(repoId: string): Promise<RepoExtras> {
+    const { repo, rt } = this.resolve(repoId)
+    return rt.queue.run(() => extras.repoExtras(rt.exec, repo.path))
+  }
+
+  /** 경로 중 filter=lfs 속성인 것(git check-attr — 필터·LFS 는 실행하지 않는다) */
+  lfsPaths(repoId: string, req: LfsPathsRequest, requestId?: string): Promise<string[]> {
+    const { repo, rt } = this.resolve(repoId)
+    return this.withSignal(requestId, (signal) =>
+      rt.queue.run(() => extras.lfsPaths(rt.exec, repo.path, req, signal ? { signal } : {}), signal ? { signal } : {})
     )
   }
 

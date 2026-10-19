@@ -48,3 +48,17 @@ export function initials(name: string): string {
   // 그래프 노드와 같은 규칙을 쓴다
   return authorInitials(name)
 }
+
+/** 바이트 수를 B·KB·MB·GB 로 줄여 보여 준다(1024 단위, 소수 첫째 자리) */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '?'
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = bytes / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(1)} ${units[i]}`
+}

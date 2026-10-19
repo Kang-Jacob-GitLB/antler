@@ -10,7 +10,9 @@ import { useCompareStore } from '../stores/compareStore'
 import { useDetailStore } from '../stores/detailStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useWipStore, wipEntries } from '../stores/wipStore'
+import { lfsFromDiff } from '../diff/lfsDiff'
 import { FileStatusIcon } from './FileStatusIcon'
+import { LfsBadge, LfsCard } from './LfsBadge'
 import { IconArrowLeft, IconBlame, IconChevronDown, IconHistory } from './icons'
 import './DiffView.css'
 
@@ -178,6 +180,8 @@ export function DiffBody({ diff, loading = false, error = null, resetKey }: Diff
     [diff, mode]
   )
   const widest = useMemo(() => (diff ? widestLine(diff) : 0), [diff])
+  // LFS 포인터 파일이면 포인터 텍스트 diff 대신 요약 카드를 보여 준다
+  const lfs = useMemo(() => lfsFromDiff(diff), [diff])
   const hl = useHighlighter(diff?.path, lineCount)
   const v = useVirtualizer({
     count: rows.length,
@@ -199,6 +203,8 @@ export function DiffBody({ diff, loading = false, error = null, resetKey }: Diff
         <div className="diff-notice is-error">{t('error.generic', { msg: error })}</div>
       ) : !diff ? (
         <div className="diff-notice">{loading ? t('list.loading') : ''}</div>
+      ) : lfs ? (
+        <LfsCard lfs={lfs} />
       ) : diff.binary ? (
         <div className="diff-notice">{t('diff.binary')}</div>
       ) : rows.length === 0 ? (
@@ -230,6 +236,7 @@ export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.El
 
   const current = diff && file && diff.path === file.path ? diff : null
   const lineCount = useMemo(() => current?.hunks.reduce((n, h) => n + h.lines.length, 0) ?? 0, [current])
+  const lfsDiff = useMemo(() => lfsFromDiff(current), [current])
 
   if (!file || (!detail && !wipArea && !compare)) return null
   // 작업 트리(WIP) 파일이면 패널에 보이는 순서의 목록에서, 커밋 파일이면 커밋의 파일 목록에서 위치를 센다
@@ -253,6 +260,7 @@ export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.El
           <span>{t('diff.back')}</span>
         </button>
         <FileStatusIcon status={file.status} />
+        {lfsDiff && <LfsBadge />}
         <div className="diff-head__path" title={file.path}>
           {file.oldPath && <span className="diff-head__from">{file.oldPath} →</span>}
           <span className="diff-head__dir">{dir}</span>

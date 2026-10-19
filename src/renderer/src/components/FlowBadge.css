@@ -1,0 +1,47 @@
+/* Gitflow 범주 색: 의미 토큰만 쓴다(다크·라이트 모두 토큰이 대비를 맞춰 둔다) */
+.flow-badge--feature {
+  --flow: var(--added-text);
+}
+.flow-badge--release {
+  --flow: var(--modified-text);
+}
+.flow-badge--hotfix {
+  --flow: var(--removed-text);
+}
+.flow-badge--bugfix {
+  --flow: var(--renamed-text);
+}
+.flow-badge--support {
+  --flow: var(--velvet-text);
+}
+.flow-badge--develop {
+  --flow: var(--renamed-text);
+}
+.flow-badge--master {
+  --flow: var(--accent-text);
+}
+
+.flow-badge {
+  flex-shrink: 0;
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--flow) 16%, transparent);
+  color: var(--flow);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+.flow-badge.is-main {
+  background: var(--flow);
+  color: var(--bg-base);
+}
+
+.flow-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--flow);
+}

@@ -1,0 +1,56 @@
+.lfs-badge {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--velvet) 45%, transparent);
+  color: var(--velvet-text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  letter-spacing: 0.04em;
+}
+
+.lfs-card {
+  margin: var(--space-4);
+  max-width: 640px;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+}
+.lfs-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.lfs-card__state {
+  color: var(--added-text);
+  font-size: var(--fs-sm);
+}
+.lfs-card__state.is-del {
+  color: var(--removed-text);
+}
+.lfs-card__grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.lfs-card__grid dt {
+  color: var(--text-secondary);
+}
+.lfs-card__grid dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+.lfs-card__note {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}

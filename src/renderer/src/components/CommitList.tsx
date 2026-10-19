@@ -18,6 +18,7 @@ import { GraphCanvas, graphWidth, useGraphVersion } from './GraphCanvas'
 import { AuthorAvatar } from './AuthorAvatar'
 import { AvatarBlockNotice } from './AvatarBlockNotice'
 import { CommitMinimap } from './CommitMinimap'
+import { ChipFlowDot } from './FlowBadge'
 import { IconCloud, IconMonitor, IconTag } from './icons'
 import { SearchBar } from './SearchBar'
 import { WipGraph } from './WipGraph'
@@ -98,6 +99,7 @@ const RefChip = ({ chip, filterTitle }: { chip: Chip; filterTitle: string }): Re
         {chip.remote && <IconCloud size={12} className="ref-chip__icon" />}
       </>
     )}
+    {chip.kind === 'branch' && <ChipFlowDot label={chip.label} />}
     <span className="ref-chip__label">{chip.label}</span>
   </span>
 )

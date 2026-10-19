@@ -8,6 +8,7 @@ import { useCompareStore } from '../stores/compareStore'
 import { useDetailStore } from '../stores/detailStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useLogStore } from '../stores/logStore'
+import { useLfsPaths } from '../stores/repoExtrasStore'
 import { useWipStore, wipDirty } from '../stores/wipStore'
 import { AuthorAvatar } from './AuthorAvatar'
 import { FileRow } from './FileRow'
@@ -61,6 +62,7 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
   const active = useDetailStore((s) => s.file)
   const repoId = useDetailStore((s) => s.repoId)
   const openFile = useDetailStore((s) => s.openFile)
+  const lfsPaths = useLfsPaths(repoId, detail.hash, detail.files)
   const v = useVirtualizer({
     count: detail.files.length,
     getScrollElement: () => scrollRef.current,
@@ -109,6 +111,7 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
                 <FileRow
                   file={f}
                   active={f === active}
+                  lfs={lfsPaths.has(f.path)}
                   onOpen={(x) => void openFile(x)}
                   {...(repoId && fileViewAvailability(f, null).history ? { onHistory: (x: FileChange) => openFileView('history', repoId, x, detail.hash) } : {})}
                   {...(repoId && fileViewAvailability(f, null).blame ? { onBlame: (x: FileChange) => openFileView('blame', repoId, x, detail.hash) } : {})}
