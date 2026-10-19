@@ -12,12 +12,10 @@ import { useUpdateStore } from '../stores/updateStore'
 import { LfsBadge } from './LfsBadge'
 import { EnvBadge } from './EnvBadge'
 import { MenuButton } from './MenuButton'
-import { IconBranch, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun, IconTerminal, IconUser } from './icons'
+import { IconBranch, IconGear, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun, IconTerminal } from './icons'
 import './StatusBar.css'
 
 const RELEASES_URL = 'https://github.com/Kang-Jacob-GitLB/antler/releases'
-/** 프로필 메뉴의 마지막 항목(프로필 관리 대화상자) 값 */
-const MANAGE_PROFILES = '__manage__'
 /** "n분 전" 표시를 갱신하는 주기 */
 const TICK_MS = 30_000
 
@@ -33,9 +31,6 @@ export function StatusBar(): React.JSX.Element {
   const theme = useAppStore((s) => s.config?.ui.theme ?? 'system')
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
   const { setTheme, setLocale } = useAppStore.getState()
-  const profiles = useAppStore((s) => s.config?.profiles)
-  const activeProfileId = useAppStore((s) => s.config?.ui.activeProfileId)
-  const activeProfile = profiles?.find((p) => p.id === activeProfileId)
   const fetchStatus = useFetchStore((s) => (repo ? s.status[repo.id] : undefined))
   const count = useLogStore((s) => s.commits.length)
   const hasMore = useLogStore((s) => s.hasMore)
@@ -107,6 +102,10 @@ export function StatusBar(): React.JSX.Element {
         >
           <IconTerminal size={13} />
         </button>
+        {/* 설정 창(외부 도구 · 보일 저장소 그룹) */}
+        <button className="statusbar__btn" title={t('settings.title')} aria-label={t('settings.title')} onClick={() => useAppStore.getState().openSettings(true)}>
+          <IconGear size={13} />
+        </button>
         <button className="statusbar__btn" onClick={() => void useUpdateStore.getState().check()}>
           <IconRefresh size={12} />
           {t('update.check')}
@@ -118,24 +117,6 @@ export function StatusBar(): React.JSX.Element {
           <IconGlobe size={12} />
           {t('update.notes')}
         </button>
-        <MenuButton<string>
-          label={t('profile.menu')}
-          value={activeProfileId ?? ''}
-          onChange={(v) => {
-            // 마지막 항목은 프로필이 아니라 관리 대화상자를 여는 항목이다
-            if (v === MANAGE_PROFILES) useAppStore.getState().openSettings(true)
-            else void useAppStore.getState().applyProfile(v)
-          }}
-          placement="top"
-          className="statusbar__btn"
-          options={[
-            ...(profiles ?? []).map((p) => ({ value: p.id, label: p.name })),
-            { value: MANAGE_PROFILES, label: t('profile.manage') }
-          ]}
-        >
-          <IconUser size={13} />
-          <span className="statusbar__profile">{activeProfile?.name ?? t('profile.none')}</span>
-        </MenuButton>
         <MenuButton<ThemePref>
           label={t('toolbar.themeMenu')}
           value={theme}

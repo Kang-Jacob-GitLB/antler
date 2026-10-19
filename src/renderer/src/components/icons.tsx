@@ -189,10 +189,11 @@ export const IconCode = (p: P) => (
     <path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5M9 3l-2 10" />
   </Svg>
 )
-export const IconUser = (p: P) => (
+export const IconGear = (p: P) => (
   <Svg {...p}>
-    <circle cx="8" cy="5.5" r="2.5" />
-    <path d="M3 13.5c.6-2.6 2.6-4 5-4s4.4 1.4 5 4" />
+    <circle cx="8" cy="8" r="2" />
+    <path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" />
+    <circle cx="8" cy="8" r="4.4" />
   </Svg>
 )
 export const IconTerminal = (p: P) => (
