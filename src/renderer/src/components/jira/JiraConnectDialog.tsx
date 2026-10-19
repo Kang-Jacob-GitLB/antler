@@ -110,7 +110,7 @@ function Dialog(): React.JSX.Element {
             <label className="field">
               <span className="field__label">{t('jira.site')}</span>
               <input
-                className="jira-input mono"
+                className="field__input mono"
                 value={siteUrl}
                 autoFocus
                 spellCheck={false}
@@ -122,12 +122,12 @@ function Dialog(): React.JSX.Element {
             {kind === 'cloud' && (
               <label className="field">
                 <span className="field__label">{t('jira.email')}</span>
-                <input className="jira-input" type="email" value={email} autoComplete="off" spellCheck={false} placeholder="you@example.com" onChange={(e) => setEmail(e.target.value)} />
+                <input className="field__input" type="email" value={email} autoComplete="off" spellCheck={false} placeholder="you@example.com" onChange={(e) => setEmail(e.target.value)} />
               </label>
             )}
             <label className="field">
               <span className="field__label">{kind === 'cloud' ? t('jira.apiToken') : t('jira.pat')}</span>
-              <input className="jira-input mono" type="password" value={token} autoComplete="off" spellCheck={false} onChange={(e) => setToken(e.target.value)} />
+              <input className="field__input mono" type="password" value={token} autoComplete="off" spellCheck={false} onChange={(e) => setToken(e.target.value)} />
               <span className="field__hint">{t(kind === 'cloud' ? 'jira.apiTokenHint' : 'jira.patHint')}</span>
             </label>
           </>
@@ -135,7 +135,7 @@ function Dialog(): React.JSX.Element {
 
         <label className="field">
           <span className="field__label">{t('jira.projectKeys')}</span>
-          <input className="jira-input mono" value={keys} spellCheck={false} placeholder="ABC, DEF" onChange={(e) => setKeys(e.target.value)} onBlur={saveKeys} />
+          <input className="field__input mono" value={keys} spellCheck={false} placeholder="ABC, DEF" onChange={(e) => setKeys(e.target.value)} onBlur={saveKeys} />
           <span className="field__hint">{t('jira.projectKeysHint')}</span>
         </label>
 
