@@ -135,6 +135,7 @@ const Row = memo(function Row({
   selected,
   locale,
   mark,
+  compared,
   showPr,
   prBase,
   onSelect
@@ -144,10 +145,12 @@ const Row = memo(function Row({
   selected: boolean
   locale: Locale
   mark: SearchMark
+  /** 두 커밋 비교에서 선택 행과 짝이 되는 행 */
+  compared: boolean
   showPr: boolean
   /** `https://github.com/o/r/pull/` — GitHub remote 가 없으면 null */
   prBase: string | null
-  onSelect(i: number): void
+  onSelect(i: number, e: React.MouseEvent): void
 }) {
   const t = useT()
   const chips = useMemo(() => toChips(commit.refs), [commit.refs])
@@ -155,10 +158,10 @@ const Row = memo(function Row({
   const firstChip = chips[0]
   return (
     <div
-      className={`commit-row${selected ? ' is-selected' : ''}${mark === 'none' ? '' : ` is-${mark}`}`}
-      onMouseDown={() => onSelect(index)}
+      className={`commit-row${selected ? ' is-selected' : ''}${compared ? ' is-compared' : ''}${mark === 'none' ? '' : ` is-${mark}`}`}
+      onMouseDown={(e) => onSelect(index, e)}
       role="row"
-      aria-selected={selected}
+      aria-selected={selected || compared}
     >
       <div className="cell cell--refs">
         {firstChip && <RefChip chip={firstChip} filterTitle={t('list.chipFilter')} />}
@@ -184,10 +187,26 @@ const Row = memo(function Row({
   )
 })
 
-/** 커밋 행 선택: WIP 선택을 풀고 그 커밋을 고른다 */
-function selectCommit(i: number): void {
+/**
+ * 커밋 행 선택: WIP 선택을 풀고 그 커밋을 고른다.
+ * Ctrl(⌘)·Shift+클릭은 이미 선택한 커밋이 있을 때 그 커밋과의 두 커밋 비교 모드로 연다.
+ */
+function selectCommit(i: number, e?: React.MouseEvent): void {
+  const log = useLogStore.getState()
+  if (e && (e.ctrlKey || e.metaKey || e.shiftKey) && log.selected >= 0 && !useWipStore.getState().selected) {
+    // Shift+클릭이 글자 범위 선택으로 번지지 않게 한다
+    e.preventDefault()
+    log.compareWith(i)
+    return
+  }
   selectWip(false)
-  useLogStore.getState().select(i)
+  log.select(i)
+}
+
+/** WIP 행 선택: 비교 모드는 끝낸다 */
+function selectWipRow(): void {
+  useLogStore.getState().clearCompare()
+  selectWip(true)
 }
 
 /** 맨 위 "// WIP" 행 — 커밋하지 않은 작업 트리 변경(수정 ✎ n · 추가 + n). 그래프의 점선 노드는 WipGraph 가 그린다 */
@@ -200,7 +219,7 @@ function WipRow({ selected, showPr }: { selected: boolean; showPr: boolean }): R
   return (
     <div
       className={`commit-row commit-row--wip${selected ? ' is-selected' : ''}`}
-      onMouseDown={() => selectWip(true)}
+      onMouseDown={selectWipRow}
       role="row"
       aria-selected={selected}
       title={t('wip.rowTitle', { n: total.toLocaleString() })}
@@ -238,7 +257,7 @@ function WipRow({ selected, showPr }: { selected: boolean; showPr: boolean }): R
 export function CommitList(): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
-  const { commits, hasMore, loading, error, selected, scrollRequest, filter, repoId: logRepoId } = useLogStore()
+  const { commits, hasMore, loading, error, selected, scrollRequest, filter, repoId: logRepoId, compareHash } = useLogStore()
   const { loadMore } = useLogStore.getState()
   const search = useSearchStore()
   // WIP 행: 변경이 있고 전체 그래프(ref 필터 없음)를 볼 때 맨 위에 둔다. 커밋 행은 그만큼 아래로 밀린다
@@ -328,10 +347,15 @@ export function CommitList(): React.JSX.Element {
       Home: 0,
       End: commits.length - 1
     }
+    if (e.key === 'Escape' && compareHash) {
+      e.preventDefault()
+      useLogStore.getState().clearCompare()
+      return
+    }
     const next = moves[e.key]
     if (next === undefined) return
     e.preventDefault()
-    if (showWip && next < 0 && (e.key === 'ArrowUp' || e.key === 'PageUp')) selectWip(true)
+    if (showWip && next < 0 && (e.key === 'ArrowUp' || e.key === 'PageUp')) selectWipRow()
     else selectCommit(next)
   }
 
@@ -395,6 +419,7 @@ export function CommitList(): React.JSX.Element {
                     selected={!wipOn && vi.index === selected}
                     locale={locale}
                     mark={markOf(commit)}
+                    compared={!!compareHash && commit.hash === compareHash}
                     showPr={showPr}
                     prBase={prBase}
                     onSelect={selectCommit}

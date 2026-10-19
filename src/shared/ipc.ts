@@ -24,6 +24,7 @@ import type {
   RepoPatch,
   SshHostInfo,
   CommitDetail,
+  CompareResult,
   FileDiff,
   FileDiffRequest,
   FileHistoryPage,
@@ -102,6 +103,8 @@ export interface IpcContract {
   'git:activity': { args: [repoId: string, ref?: string, requestId?: string]; result: CommitActivity }
   /** 커밋 메타데이터 + 첫 부모 대비 변경 파일 목록(+/- 통계). 커밋 해시 기준 불변 캐시 */
   'git:commit': { args: [repoId: string, hash: string, requestId?: string]; result: CommitDetail }
+  /** 두 커밋(해시) 사이의 변경 파일 목록(+/- 통계). from → to 방향, 읽기 전용. 해시 쌍 기준 불변 캐시 */
+  'git:compare': { args: [repoId: string, from: string, to: string, requestId?: string]; result: CompareResult }
   /** 파일 하나의 diff. 크기 상한을 넘으면 앞부분만 담고 truncated=true(req.full 로 전체) */
   'git:fileDiff': { args: [repoId: string, req: FileDiffRequest, requestId?: string]; result: FileDiff }
   /** 파일 하나를 바꾼 커밋 목록(`git log --follow`, 이름 변경 추적). skip/count 로 페이지 단위 로딩 */
@@ -184,6 +187,7 @@ export const IPC_CHANNELS = [
   'git:log',
   'git:activity',
   'git:commit',
+  'git:compare',
   'git:fileDiff',
   'git:fileHistory',
   'git:blame',

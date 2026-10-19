@@ -125,10 +125,13 @@
 .commit-row:hover {
   background: var(--row-hover);
 }
-.commit-row.is-selected {
+/* is-compared: 두 커밋 비교에서 선택 행과 짝이 되는 행 */
+.commit-row.is-selected,
+.commit-row.is-compared {
   background: var(--row-selected);
 }
-.commit-row.is-selected::before {
+.commit-row.is-selected::before,
+.commit-row.is-compared::before {
   content: '';
   position: absolute;
   left: 0;

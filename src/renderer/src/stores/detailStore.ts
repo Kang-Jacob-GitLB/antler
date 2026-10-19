@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CommitDetail, FileChange, FileDiff, WipArea } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { useCompareStore } from './compareStore'
 import { useFileViewStore } from './fileViewStore'
 import { useWipStore, wipEntries } from './wipStore'
 
@@ -109,7 +110,10 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 
   async openFile(file, full = false) {
     const { repoId, detail, pendingDiff } = get()
-    if (!repoId || !detail) return
+    // 두 커밋 비교 모드면 그 쌍(from → to)의 diff 를 연다. 아니면 선택한 커밋의 첫 부모 대비
+    const cmp = useCompareStore.getState().result
+    const base = cmp ? { hash: cmp.to, parent: cmp.from } : detail ? { hash: detail.hash, ...(detail.baseParent ? { parent: detail.baseParent } : {}) } : null
+    if (!repoId || !base) return
     cancel(pendingDiff)
     // 다른 파일 diff 를 열면 위에 떠 있던 파일 히스토리·Blame 은 닫는다(가려진 diff 를 열지 않게)
     useFileViewStore.getState().close()
@@ -121,10 +125,9 @@ export const useDetailStore = create<DetailState>((set, get) => ({
         'git:fileDiff',
         repoId,
         {
-          hash: detail.hash,
+          ...base,
           path: file.path,
           ...(file.oldPath ? { oldPath: file.oldPath } : {}),
-          ...(detail.baseParent ? { parent: detail.baseParent } : {}),
           full
         },
         requestId
@@ -174,9 +177,10 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       if (i >= 0 && next) void get().openWipFile(next.file, next.area)
       return
     }
-    if (!detail) return
-    const i = detail.files.indexOf(file)
-    const next = detail.files[i + dir]
+    const files = useCompareStore.getState().result?.files ?? detail?.files
+    if (!files) return
+    const i = files.indexOf(file)
+    const next = files[i + dir]
     if (next) void get().openFile(next)
   },
 

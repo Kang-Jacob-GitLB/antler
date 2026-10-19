@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Branch, Repo, Source, Stash, SubmoduleInfo, Tag, Worktree } from '@shared/types'
 import { useT } from '../i18n'
 import { formatDate } from '../lib/format'
@@ -98,9 +98,10 @@ interface RowProps {
   trailing?: ReactNode
   onClick?(): void
   onFilter?(): void
+  onContextMenu?(e: React.MouseEvent): void
 }
 
-function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing, onClick, onFilter }: RowProps): React.JSX.Element {
+function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing, onClick, onFilter, onContextMenu }: RowProps): React.JSX.Element {
   const t = useT()
   return (
     <div
@@ -112,6 +113,7 @@ function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing,
       title={title ?? label}
       onClick={onClick}
       onDoubleClick={onFilter}
+      onContextMenu={onContextMenu}
       onKeyDown={(e) => {
         if (e.key === 'Enter') onClick?.()
       }}
@@ -227,6 +229,60 @@ function Tree<T>({ node, scope, depth, renderItem }: { node: TreeNode<T>; scope:
   )
 }
 
+/** 브랜치·태그 행 우클릭 메뉴: 현재 HEAD 와 비교. onClose(restore): restore 면 메뉴를 연 행으로 포커스를 돌려준다 */
+function CompareMenu({ x, y, disabled, hint, onPick, onClose }: { x: number; y: number; disabled: boolean; hint?: string; onPick(): void; onClose(restore: boolean): void }): React.JSX.Element {
+  const t = useT()
+  const ref = useRef<HTMLDivElement>(null)
+  // 뷰포트 밖으로 나가지 않게 실제 크기로 좌표를 보정한다
+  const [pos, setPos] = useState({ left: x, top: y })
+  useLayoutEffect(() => {
+    const r = ref.current?.getBoundingClientRect()
+    if (!r) return
+    setPos({ left: Math.max(4, Math.min(x, window.innerWidth - r.width - 4)), top: Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) })
+  }, [x, y])
+  useEffect(() => {
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose(false)
+    }
+    // Esc·Tab 은 메뉴만 닫는다 — window 로 올라가면 열려 있던 diff 까지 닫힌다
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' || e.key === 'Tab') {
+        e.preventDefault()
+        e.stopPropagation()
+        onClose(true)
+      }
+    }
+    const onScroll = (): void => onClose(false)
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    // 사이드바 목록이 스크롤되면 기준 행이 움직이므로 닫는다(scroll 은 버블링하지 않아 capture)
+    document.addEventListener('scroll', onScroll, true)
+    window.addEventListener('blur', onScroll)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('blur', onScroll)
+    }
+  }, [onClose])
+  return (
+    <div
+      ref={ref}
+      className="side-ctx"
+      role="menu"
+      style={pos}
+      onContextMenu={(e) => e.preventDefault()}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose(false)
+      }}
+    >
+      <button className="side-ctx__item" role="menuitem" disabled={disabled} title={hint} autoFocus onClick={onPick}>
+        {t('compare.withHead')}
+      </button>
+    </div>
+  )
+}
+
 // ── 사이드바 ─────────────────────────────────────────
 
 function matches(q: string, ...texts: (string | undefined)[]): boolean {
@@ -309,6 +365,29 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
     }).catch((err: unknown) => useAppStore.setState({ error: err instanceof Error ? err.message : String(err) }))
   }
   const solo = (f: LogFilter): void => useLogStore.getState().setFilter(f)
+  // 브랜치·태그 우클릭 메뉴(현재 HEAD 와 비교): 두 쪽 모두 커밋 해시로 해석된 값을 쓴다
+  const [ctx, setCtx] = useState<{ x: number; y: number; hash: string; row: HTMLElement } | null>(null)
+  const closeCtx = useCallback(
+    (restore: boolean) =>
+      setCtx((c) => {
+        if (restore) c?.row.focus()
+        return null
+      }),
+    []
+  )
+  const headHash = refs?.head.hash ?? null
+  const ctxOf = (hash: string) => (e: React.MouseEvent): void => {
+    e.preventDefault()
+    setCtx({ x: e.clientX, y: e.clientY, hash, row: e.currentTarget as HTMLElement })
+  }
+  const compareWithHead = (hash: string): void => {
+    closeCtx(false)
+    if (!headHash) return
+    // 필터로 다른 ref 만 보는 중이면 두 커밋이 목록에 없을 수 있으므로 전체 보기로 돌아간 뒤 연다
+    const log = useLogStore.getState()
+    if (log.filter) log.setFilter(null)
+    void useLogStore.getState().compareHashes(hash, headHash)
+  }
   const isFiltered = (rev: string): boolean => filter?.rev === rev
 
   const branchRow = (b: Branch, label: string, depth: number, remote: boolean): ReactNode => {
@@ -341,6 +420,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
         trailing={tracking}
         onClick={() => reveal(b.hash)}
         onFilter={() => solo({ rev: b.fullName, label: b.name })}
+        onContextMenu={ctxOf(b.hash)}
       />
     )
   }
@@ -591,6 +671,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     muted={!it.value.targetsCommit}
                     onClick={() => it.value.targetsCommit && reveal(it.value.hash)}
                     onFilter={it.value.targetsCommit ? () => solo({ rev: it.value.fullName, label: it.value.name }) : undefined}
+                    onContextMenu={it.value.targetsCommit ? ctxOf(it.value.hash) : undefined}
                   />
                 )}
               />
@@ -633,6 +714,16 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
           </>
         )}
       </div>
+      {ctx && (
+        <CompareMenu
+          x={ctx.x}
+          y={ctx.y}
+          disabled={!headHash || ctx.hash === headHash}
+          hint={!headHash ? t('compare.noHead') : ctx.hash === headHash ? t('compare.headSame') : undefined}
+          onPick={() => compareWithHead(ctx.hash)}
+          onClose={closeCtx}
+        />
+      )}
     </aside>
   )
 }

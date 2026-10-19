@@ -4,6 +4,7 @@ import type { Commit, CommitDetail, FileChange } from '@shared/types'
 import { useT } from '../i18n'
 import { formatAbsolute } from '../lib/format'
 import { useAppStore } from '../stores/appStore'
+import { useCompareStore } from '../stores/compareStore'
 import { useDetailStore } from '../stores/detailStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useLogStore } from '../stores/logStore'
@@ -14,7 +15,9 @@ import { Splitter, type SplitterHandlers } from './Splitter'
 import { WipPanel } from './WipPanel'
 import { markdownToHtml } from '../lib/markdown'
 import { HtmlBody } from './github/GhBits'
-import { IconCopy } from './icons'
+import { orderCompare } from '../lib/compare'
+import { IconClose, IconCopy, IconSwap } from './icons'
+import './ComparePanel.css'
 import './DetailPanel.css'
 
 const FILE_ROW_H = 26
@@ -48,7 +51,10 @@ function ChangeBar({ add, del }: { add: number; del: number }): React.JSX.Elemen
   )
 }
 
-function FileList({ detail }: { detail: CommitDetail }): React.JSX.Element {
+/** 파일 목록이 필요로 하는 값. 커밋 상세와 두 커밋 비교(ComparePanel)가 함께 쓴다 */
+type FileListData = Pick<CommitDetail, 'hash' | 'files' | 'additions' | 'deletions' | 'truncated'> & { parents?: string[] }
+
+function FileList({ detail, title, empty }: { detail: FileListData; title?: string; empty?: string }): React.JSX.Element {
   const t = useT()
   const scrollRef = useRef<HTMLDivElement>(null)
   const active = useDetailStore((s) => s.file)
@@ -83,17 +89,17 @@ function FileList({ detail }: { detail: CommitDetail }): React.JSX.Element {
   return (
     <div className="file-list">
       <div className="file-list__head">
-        <span>{t('detail.files', { n: detail.files.length.toLocaleString() })}</span>
+        <span>{title ?? t('detail.files', { n: detail.files.length.toLocaleString() })}</span>
         <span className="file-list__totals">
           <span className="is-add">+{detail.additions.toLocaleString()}</span>
           <span className="is-del">−{detail.deletions.toLocaleString()}</span>
           <ChangeBar add={detail.additions} del={detail.deletions} />
         </span>
       </div>
-      {detail.parents.length > 1 && <div className="file-list__note">{t('detail.mergeBase')}</div>}
+      {(detail.parents?.length ?? 0) > 1 && <div className="file-list__note">{t('detail.mergeBase')}</div>}
       {detail.truncated && <div className="file-list__note">{t('detail.filesTruncated')}</div>}
       <div ref={scrollRef} className="file-list__scroll" tabIndex={0} onKeyDown={onKeyDown}>
-        {detail.files.length === 0 && <div className="file-list__empty">{t('detail.noFiles')}</div>}
+        {detail.files.length === 0 && <div className="file-list__empty">{empty ?? t('detail.noFiles')}</div>}
         <div style={{ height: v.getTotalSize(), position: 'relative' }}>
           {v.getVirtualItems().map((vi) => {
             const f = detail.files[vi.index]!
@@ -124,6 +130,7 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
   const { detail, loading, error } = useDetailStore()
   const [copied, setCopied] = useState(false)
   const wipSelected = useWipStore((s) => s.selected && wipDirty(s.status))
+  const compareHash = useLogStore((s) => s.compareHash)
   const savedMetaH = useAppStore((s) => s.config?.ui.detailMetaHeight)
   // 드래그 중에는 지역 상태로만 바꾸고, 놓을 때 설정에 저장한다
   const [dragMetaH, setDragMetaH] = useState<number | null>(null)
@@ -136,6 +143,8 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
 
   // 목록에서 WIP 행을 고르면 커밋 상세 대신 작업 트리 변경 패널을 보여 준다
   if (wipSelected) return <WipPanel width={width} />
+  // 두 커밋 비교 모드: 선택한 커밋과 비교 대상 사이의 변경 파일
+  if (compareHash && commit && compareHash !== commit.hash) return <ComparePanel width={width} anchor={commit.hash} other={compareHash} />
 
   if (!commit) {
     return (
@@ -225,6 +234,77 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
         <FileList detail={d} />
       ) : (
         <div className="detail__status">{error ? t('error.generic', { msg: error }) : loading ? t('list.loading') : ''}</div>
+      )}
+    </aside>
+  )
+}
+
+/** 한 줄 요약이 붙은 비교 양끝 커밋(오래된 쪽 from · 새 쪽 to) */
+function CompareEnd({ tag, hash }: { tag: string; hash: string }): React.JSX.Element {
+  const subject = useLogStore((s) => {
+    const i = s.index.get(hash)
+    return i === undefined ? undefined : s.commits[i]?.subject
+  })
+  return (
+    <div className="compare-end">
+      <span className="compare-end__tag">{tag}</span>
+      <span className="compare-end__sha mono">{hash.slice(0, 7)}</span>
+      {subject !== undefined && <span className="compare-end__subject" title={subject}>{subject}</span>}
+    </div>
+  )
+}
+
+/** 두 커밋 비교 모드의 상세 패널: 방향(오래된 → 새), 두 커밋 사이 변경 파일. 파일을 누르면 중앙에 두 커밋 사이 diff 가 열린다 */
+export function ComparePanel({ width, anchor, other }: { width: number; anchor: string; other: string }): React.JSX.Element {
+  const t = useT()
+  const repoId = useLogStore((s) => s.repoId)
+  const swapped = useLogStore((s) => s.compareSwapped)
+  const { swapCompare, clearCompare } = useLogStore.getState()
+  // index 는 페이지를 읽을 때 제자리에서 바뀌므로 커밋 수도 구독해 순서를 다시 계산한다
+  const index = useLogStore((s) => s.index)
+  useLogStore((s) => s.commits.length)
+  const { from, to } = orderCompare(anchor, other, index, swapped)
+  const { result, error, from: loadedFrom, to: loadedTo } = useCompareStore()
+
+  useEffect(() => {
+    if (repoId) void useCompareStore.getState().load(repoId, from, to)
+  }, [repoId, from, to])
+
+  const ready = result && loadedFrom === from && loadedTo === to ? result : null
+  return (
+    <aside
+      className="detail detail--compare"
+      style={{ width }}
+      onKeyDown={(e) => {
+        // diff 를 보고 있으면 첫 Esc 는 diff 를 닫는 몫이다(App) — 비교 모드는 그다음 Esc 에 끝낸다
+        if (e.key === 'Escape' && !useDetailStore.getState().file) {
+          e.preventDefault()
+          clearCompare()
+        }
+      }}
+    >
+      <div className="compare-head">
+        <span className="compare-head__title">{t('compare.title')}</span>
+        <span className="compare-head__dir mono" title={t(swapped ? 'compare.directionSwapped' : 'compare.direction', { from: from.slice(0, 7), to: to.slice(0, 7) })}>
+          {from.slice(0, 7)}..{to.slice(0, 7)}
+        </span>
+        <span className="compare-head__spacer" />
+        <button className="icon-btn icon-btn--sm" title={t('compare.swap')} aria-label={t('compare.swap')} onClick={swapCompare}>
+          <IconSwap size={14} />
+        </button>
+        <button className="icon-btn icon-btn--sm" title={t('compare.exit')} aria-label={t('compare.exit')} onClick={clearCompare}>
+          <IconClose size={13} />
+        </button>
+      </div>
+      <div className="compare-ends">
+        <CompareEnd tag="A" hash={from} />
+        <div className="compare-ends__arrow" aria-hidden="true">↓</div>
+        <CompareEnd tag="B" hash={to} />
+      </div>
+      {ready ? (
+        <FileList detail={{ ...ready, hash: `${ready.from}..${ready.to}` }} title={t('compare.files', { n: ready.files.length.toLocaleString() })} empty={t('compare.noFiles')} />
+      ) : (
+        <div className="detail__status">{error ? t('error.generic', { msg: error }) : t('list.loading')}</div>
       )}
     </aside>
   )

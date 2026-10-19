@@ -3,6 +3,7 @@ import type { Commit } from '@shared/types'
 import { graphEngine } from '../graph/graphEngine'
 import { api, errorMessage, isAbort, isStale, newRequestId } from '../lib/api'
 import { useAppStore } from './appStore'
+import { useCompareStore } from './compareStore'
 import { useDetailStore } from './detailStore'
 import { closeGithubView } from './githubStore'
 
@@ -40,6 +41,12 @@ interface LogState {
   loading: boolean
   error: string | null
   selected: number
+  /** 두 커밋 비교 모드: 선택한 커밋과 비교할 다른 커밋의 해시(null 이면 비교 중이 아님) */
+  compareHash: string | null
+  /** 비교를 시작한 때 선택돼 있던 커밋. 선택이 이 커밋에서 벗어나면(찾아가기·다시 읽기 등) 비교를 끝낸다 */
+  compareAnchor: string | null
+  /** 비교 방향을 사용자가 뒤집었는지(기본은 목록에서 아래쪽 = 오래된 커밋이 from) */
+  compareSwapped: boolean
   /** 저장소 전환·새로고침마다 증가. 늦게 도착한 이전 응답을 버리는 데 쓴다 */
   generation: number
   pendingRequest: string | null
@@ -57,6 +64,13 @@ interface LogState {
   softReload(): Promise<void>
   loadMore(count?: number): Promise<void>
   select(index: number): void
+  /** 선택한 커밋과 index 의 커밋을 비교 모드로 연다(Ctrl/⌘·Shift+클릭) */
+  compareWith(index: number): void
+  /** 해시의 커밋을 선택하고 other 와 비교 모드로 연다(사이드바 "현재 HEAD 와 비교"). 성공하면 true */
+  compareHashes(hash: string, other: string): Promise<boolean>
+  swapCompare(): void
+  /** 비교 모드를 끝낸다(비교로 열었던 diff 도 닫는다) */
+  clearCompare(): void
   /** 해시의 커밋을 (필요하면 더 불러와서) 선택하고 보이게 한다. 찾으면 true */
   reveal(hash: string): Promise<boolean>
 }
@@ -70,12 +84,16 @@ export const useLogStore = create<LogState>((set, get) => ({
   loading: false,
   error: null,
   selected: -1,
+  compareHash: null,
+  compareAnchor: null,
+  compareSwapped: false,
   generation: 0,
   pendingRequest: null,
   scrollRequest: null,
 
   open(repoId, filter = null, keepHash) {
     keepAfterReload = keepHash ?? null
+    useCompareStore.getState().clear()
     const pending = get().pendingRequest
     if (pending) void api.invoke('req:cancel', pending)
     const generation = get().generation + 1
@@ -92,6 +110,9 @@ export const useLogStore = create<LogState>((set, get) => ({
       loading: false,
       error: null,
       selected: -1,
+      compareHash: null,
+      compareAnchor: null,
+      compareSwapped: false,
       generation,
       pendingRequest: null,
       scrollRequest: null
@@ -189,7 +210,36 @@ export const useLogStore = create<LogState>((set, get) => ({
   select(index) {
     const n = get().commits.length
     if (!n) return
+    get().clearCompare()
     set({ selected: Math.max(0, Math.min(n - 1, index)) })
+  },
+
+  compareWith(index) {
+    const { commits, selected } = get()
+    const other = commits[index]
+    if (!other || selected < 0 || index === selected) return
+    // 열려 있던 diff 는 이전 비교(또는 커밋)의 것이다
+    useDetailStore.getState().closeFile()
+    set({ compareHash: other.hash, compareAnchor: commits[selected]?.hash ?? null, compareSwapped: false })
+  },
+
+  async compareHashes(hash, other) {
+    if (hash === other) return false
+    if (!(await get().reveal(hash))) return false
+    set({ compareHash: other, compareAnchor: hash, compareSwapped: false })
+    return true
+  },
+
+  swapCompare() {
+    useDetailStore.getState().closeFile()
+    set((s) => ({ compareSwapped: !s.compareSwapped }))
+  },
+
+  clearCompare() {
+    if (!get().compareHash) return
+    useDetailStore.getState().closeFile()
+    useCompareStore.getState().clear()
+    set({ compareHash: null, compareAnchor: null, compareSwapped: false })
   },
 
   async reveal(hash) {
@@ -224,3 +274,8 @@ export const useLogStore = create<LogState>((set, get) => ({
     }
   }
 }))
+
+// 선택이 비교의 기준 커밋에서 벗어나면 비교를 끝낸다. reveal·softReload 등 select() 를 거치지 않고 selected 를 바꾸는 경로를 모두 덮는다
+useLogStore.subscribe((s) => {
+  if (s.compareHash && s.commits[s.selected]?.hash !== s.compareAnchor) s.clearCompare()
+})

@@ -255,3 +255,30 @@
 .side-item[aria-disabled='true'] {
   cursor: default;
 }
+
+/* 브랜치·태그 우클릭 메뉴 */
+.side-ctx {
+  position: fixed;
+  z-index: 60;
+  min-width: 170px;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  font-size: var(--fs-sm);
+}
+.side-ctx__item {
+  display: block;
+  width: 100%;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+.side-ctx__item:hover:not(:disabled),
+.side-ctx__item:focus-visible {
+  background: var(--row-hover);
+}
+.side-ctx__item:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}

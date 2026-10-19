@@ -204,3 +204,9 @@ export const IconBlame = (p: P) => (
     <path d="M2.5 4h2M2.5 8h2M2.5 12h2M7 4h6.5M7 8h6.5M7 12h4.5" />
   </Svg>
 )
+/** 방향 바꾸기: 위·아래 두 화살표 */
+export const IconSwap = (p: P) => (
+  <Svg {...p}>
+    <path d="M5 13V3M2.5 5.5 5 3l2.5 2.5M11 3v10M8.5 10.5 11 13l2.5-2.5" />
+  </Svg>
+)
