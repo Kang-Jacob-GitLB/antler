@@ -157,6 +157,15 @@ input {
   background: var(--badge-ssh-bg);
   color: var(--badge-ssh-fg);
 }
+/* 사용자가 고른 환경 색(hue) — 그룹 칩과 같은 채도·명도 */
+.env-badge.env-badge--custom {
+  background: hsl(var(--env-hue) 55% 55% / 0.22);
+  color: hsl(var(--env-hue) 70% 74%);
+}
+:root[data-theme='light'] .env-badge.env-badge--custom {
+  background: hsl(var(--env-hue) 60% 50% / 0.16);
+  color: hsl(var(--env-hue) 65% 30%);
+}
 
 /* 코드 글꼴의 합자를 끈다 — PR 본문 코드·경로도 diff 와 같은 글자로 보이게 */
 code,

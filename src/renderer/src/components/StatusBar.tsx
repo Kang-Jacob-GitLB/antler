@@ -65,7 +65,7 @@ export function StatusBar(): React.JSX.Element {
       <div className="statusbar__left">
         {repo && (
           <>
-            {source && <EnvBadge kind={source.kind} />}
+            {source && <EnvBadge kind={source.kind} sourceId={source.id} />}
             <span className="statusbar__item" title={head?.hash ?? ''}>
               <IconBranch size={12} className="statusbar__icon" />
               <span className="statusbar__text">{head ? (head.branch ?? t('toolbar.detached')) : '…'}</span>

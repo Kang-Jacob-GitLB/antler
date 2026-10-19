@@ -1,0 +1,56 @@
+/* 색 고르기 팝오버(그룹 칩·환경 배지). 모양은 저장소 메뉴(.repo-menu)와 맞춘다 */
+.color-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  cursor: default;
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+.color-menu__label {
+  margin-bottom: 8px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.color-menu__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 22px);
+  gap: 6px;
+}
+/* 칸 색은 그룹 칩(.group-chip)과 같은 식 — 고른 색이 칩에 보이는 색과 같다 */
+.color-menu__swatch {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid hsl(var(--chip-h) 55% 60% / 0.6);
+  border-radius: 50%;
+  background: hsl(var(--chip-h) 60% 55%);
+  color: #fff;
+  cursor: pointer;
+  transition: transform var(--dur-fast, 0.1s) var(--ease, ease);
+}
+:root[data-theme='light'] .color-menu__swatch {
+  background: hsl(var(--chip-h) 60% 45%);
+}
+.color-menu__swatch:hover {
+  transform: scale(1.12);
+}
+.color-menu__swatch:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+/* 기본색: 환경 종류의 원래 배지 색 */
+.color-menu__swatch--default {
+  border: 1px dashed var(--border-strong, var(--border));
+  background: transparent;
+  color: var(--text-secondary);
+}

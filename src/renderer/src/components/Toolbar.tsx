@@ -76,7 +76,7 @@ export function Toolbar(): React.JSX.Element {
             }}
             title={`${t('toolbar.switchRepo')} (${mod}P)`}
           >
-            {source && <EnvBadge kind={source.kind} />}
+            {source && <EnvBadge kind={source.kind} sourceId={source.id} />}
             <span className="crumb__label">{repo.name}</span>
             <IconChevronDown size={14} className="crumb__chev" />
           </button>

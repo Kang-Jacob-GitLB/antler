@@ -3,7 +3,7 @@ import type { Branch, RefsDetails, RemoteGroup, Tag } from '@shared/types'
 /** `git for-each-ref` 에 붙일 출력 형식. 필드는 NUL(%00), ref 하나는 한 줄 */
 export const REFS_FORMAT =
   '%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)' +
-  '%00%(symref)%00%(objecttype)%00%(*objecttype)'
+  '%00%(symref)%00%(objecttype)%00%(*objecttype)%00%(creatordate:unix)'
 
 /** `git for-each-ref` 전체 인자 */
 export const REFS_ARGS = ['for-each-ref', `--format=${REFS_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags']
@@ -85,11 +85,12 @@ export function parseRefs(buf: Buffer | string, remoteNames: string[]): ParsedRe
     if (!line) continue
     const f = line.split('\0')
     if (f.length < 4) continue
-    const [fullName, hash, peeled, headMark, upstream = '', track = '', symref = '', type = '', peeledType = ''] = f as [
+    const [fullName, hash, peeled, headMark, upstream = '', track = '', symref = '', type = '', peeledType = '', created = ''] = f as [
       string,
       string,
       string,
       string,
+      string?,
       string?,
       string?,
       string?,
@@ -120,13 +121,18 @@ export function parseRefs(buf: Buffer | string, remoteNames: string[]): ParsedRe
       // annotated 태그는 %(*objectname) 이 가리키는 커밋 해시를 쓴다
       // 트리·블롭을 가리키거나(v2.6.11-tree) 태그를 가리키는 태그는 그래프에서 찾아갈 커밋이 없다
       const targetsCommit = peeled ? peeledType === 'commit' : type === 'commit'
-      tags.push({ name: fullName.slice(10), fullName, hash: peeled || hash, annotated: peeled !== '', targetsCommit })
+      const tag: Tag = { name: fullName.slice(10), fullName, hash: peeled || hash, annotated: peeled !== '', targetsCommit }
+      // %(creatordate): annotated 는 태그를 만든 시각, lightweight 는 가리키는 커밋의 시각
+      const date = Number(created)
+      if (created && Number.isFinite(date)) tag.date = date
+      tags.push(tag)
     }
   }
 
   const byName = (a: { name: string }, b: { name: string }) => naturalCompare(a.name, b.name)
   local.sort(byName)
-  tags.sort(byName)
+  // 태그는 최신순: 만든 시각 내림차순, 시각이 같거나 없으면 이름 역순(v0.10.0 이 v0.9.0 보다 위)
+  tags.sort((a, b) => (b.date ?? -Infinity) - (a.date ?? -Infinity) || naturalCompare(b.name, a.name))
   const remotes: RemoteGroup[] = [...groups.entries()]
     .map(([name, branches]) => ({ name, branches: branches.sort(byName) }))
     .sort(byName)

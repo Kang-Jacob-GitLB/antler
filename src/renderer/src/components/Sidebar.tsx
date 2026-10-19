@@ -23,6 +23,7 @@ import {
   IconFunnel,
   IconMore,
   IconMonitor,
+  IconPalette,
   IconPlus,
   IconRepo,
   IconSearch,
@@ -34,6 +35,9 @@ import {
 } from './icons'
 import { GroupChip } from './GroupChip'
 import { Collapse } from './Collapse'
+import { ColorMenu } from './ColorMenu'
+import { permuteSlots, sortByOrder } from '../lib/repoOrder'
+import { useReorderDnd } from '../lib/useReorderDnd'
 import './Sidebar.css'
 
 /** 기본으로 접어 둘 폴더 크기 */
@@ -107,6 +111,8 @@ interface RowProps {
   /** Solo / Hide 대상 ref. 있으면 더블클릭 solo, hover 아이콘, 숨김 행 흐리게가 붙는다 */
   view?: ViewRef
   onContextMenu?(e: React.MouseEvent): void
+  /** 끌어서 순서 바꾸기(저장소 행): 드래그 속성과 상태 클래스 */
+  drag?: { props: React.HTMLAttributes<HTMLElement>; cls: string }
 }
 
 /** hover 때 나타나는 숨기기(눈)·Solo 버튼. 숨김·Solo 상태인 행에서는 항상 보인다 */
@@ -150,7 +156,7 @@ function ViewActions({ view }: { view: ViewRef }): React.JSX.Element {
   )
 }
 
-function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing, onClick, view, onContextMenu }: RowProps): React.JSX.Element {
+function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing, onClick, view, onContextMenu, drag }: RowProps): React.JSX.Element {
   const soloOn = useLogStore((s) => !!view && inList(s.solo, view.id))
   // Hide 는 solo 가 없을 때만 적용된다
   const hidden = useLogStore((s) => !!view && s.solo.length === 0 && isHidden(s.hide, view.id))
@@ -159,7 +165,8 @@ function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing,
       role="button"
       tabIndex={0}
       aria-disabled={disabled || undefined}
-      className={`side-item${active || soloOn ? ' is-active' : ''}${muted ? ' is-muted' : ''}${hidden ? ' is-hidden' : ''}`}
+      {...drag?.props}
+      className={`side-item${active || soloOn ? ' is-active' : ''}${muted ? ' is-muted' : ''}${hidden ? ' is-hidden' : ''}${drag?.cls ?? ''}`}
       style={{ paddingLeft: 8 + depth * 14 }}
       title={title ?? label}
       onClick={onClick}
@@ -212,16 +219,72 @@ function RemoteRow({ name, count, open, onToggle, onContextMenu }: { name: strin
   )
 }
 
-/** 저장소 그룹 폴더 행: 폴더 아이콘·이름 대신 그룹 칩(이름별 색) */
-function GroupRow({ name, count, open, onToggle }: { name: string; count: number; open: boolean; onToggle(): void }): React.JSX.Element {
+/** 색 바꾸기 버튼과 팝오버(그룹 행·환경 카드 머리). 행을 우클릭해도 열린다(open/setOpen 을 행이 쥔다) */
+function ColorAction({
+  open,
+  setOpen,
+  value,
+  onPick,
+  allowDefault
+}: {
+  open: boolean
+  setOpen(v: boolean): void
+  value: number | undefined
+  onPick(hue: number | undefined): void
+  allowDefault?: boolean
+}): React.JSX.Element {
+  const t = useT()
+  return (
+    <>
+      <button
+        className={`side-item__action${open ? ' is-on' : ''}`}
+        title={t('color.pick')}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(!open)
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <IconPalette size={12} />
+      </button>
+      {open && <ColorMenu value={value} onPick={onPick} onClose={() => setOpen(false)} allowDefault={allowDefault} />}
+    </>
+  )
+}
+
+/** 저장소 그룹 폴더 행: 폴더 아이콘·이름 대신 그룹 칩(이름별 색). 끌어서 순서를 바꾸고, 색을 고칠 수 있다 */
+function GroupRow({
+  name,
+  count,
+  open,
+  onToggle,
+  drag
+}: {
+  name: string
+  count: number
+  open: boolean
+  onToggle(): void
+  drag: { props: React.HTMLAttributes<HTMLElement>; cls: string }
+}): React.JSX.Element {
+  const t = useT()
+  const colors = useAppStore((s) => s.config?.ui.groupColors)
+  const [menu, setMenu] = useState(false)
   return (
     <div
       role="button"
       tabIndex={0}
       aria-expanded={open}
-      className="side-item side-item--folder side-item--group"
+      {...drag.props}
+      className={`side-item side-item--folder side-item--group${drag.cls}`}
       style={{ paddingLeft: 8 }}
+      title={`${name} · ${t('sidebar.dragHint')}`}
       onClick={onToggle}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        setMenu(true)
+      }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
@@ -232,6 +295,12 @@ function GroupRow({ name, count, open, onToggle }: { name: string; count: number
       <IconChevronRight size={12} className={`side-chev${open ? ' is-open' : ''}`} />
       <GroupChip name={name} />
       <span className="side-item__spacer" />
+      <ColorAction
+        open={menu}
+        setOpen={setMenu}
+        value={colors?.[name]}
+        onPick={(hue) => hue !== undefined && void useAppStore.getState().setUi({ groupColors: { ...colors, [name]: hue } })}
+      />
       <span className="side-count">{count}</span>
     </div>
   )
@@ -395,20 +464,57 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
     [config]
   )
 
+  // 사용자 순서(끌어서 바꾼 순서, 없으면 환경은 등록 순·그룹과 저장소는 이름순). 숨긴 것까지 포함한 전체 순서다 —
+  // 화면에 보이는 일부만 옮겨도 permuteSlots 로 그 자리 안에서만 바꾼다
+  const order = useMemo(() => {
+    if (!config) return { sources: [] as Source[], repoIds: [] as string[] }
+    const { sourceOrder, repoOrder } = config.ui
+    const sources = sortByOrder(config.sources, (s) => s.id, sourceOrder, (a, b) => config.sources.indexOf(a) - config.sources.indexOf(b))
+    const repoIds = sortByOrder(config.repos, (r) => r.id, repoOrder, (a, b) => a.name.localeCompare(b.name)).map((r) => r.id)
+    return { sources, repoIds }
+  }, [config])
+
   const repoGroups = useMemo(() => {
     if (!config) return []
-    const bySource = new Map<string, { source: Source; repos: Repo[] }>()
-    for (const s of config.sources) bySource.set(s.id, { source: s, repos: [] })
+    const rank = new Map(order.repoIds.map((id, i) => [id, i]))
+    const bySource = new Map<string, { source: Source; repos: Repo[]; groups: string[]; allGroups: string[] }>()
+    for (const s of order.sources) bySource.set(s.id, { source: s, repos: [], groups: [], allGroups: [] })
     // 프로필의 '보일 그룹': 목록에 없는 그룹의 저장소는 숨긴다(그룹 없는 저장소와 지금 열어 둔 저장소는 항상 보인다)
     const visible = config.ui.visibleGroups
     for (const r of config.repos) {
+      const g = bySource.get(r.sourceId)
+      if (!g) continue
+      if (r.group && !g.allGroups.includes(r.group)) g.allGroups.push(r.group)
       if (visible?.length && r.group && !visible.includes(r.group) && r.id !== activeRepoId) continue
-      bySource.get(r.sourceId)?.repos.push(r)
+      g.repos.push(r)
+      if (r.group && !g.groups.includes(r.group)) g.groups.push(r.group)
     }
     return [...bySource.values()]
       .filter((g) => g.repos.length)
-      .map((g) => ({ ...g, repos: [...g.repos].sort((a, b) => a.name.localeCompare(b.name)) }))
-  }, [config, activeRepoId])
+      .map((g) => {
+        const groupOrder = config.ui.groupOrder?.[g.source.id]
+        const byName = (a: string, b: string): number => a.localeCompare(b)
+        return {
+          ...g,
+          repos: [...g.repos].sort((a, b) => rank.get(a.id)! - rank.get(b.id)!),
+          groups: sortByOrder(g.groups, (x) => x, groupOrder, byName),
+          allGroups: sortByOrder(g.allGroups, (x) => x, groupOrder, byName)
+        }
+      })
+  }, [config, order, activeRepoId])
+
+  const dnd = useReorderDnd()
+  const moveSources = (next: string[]): void =>
+    void useAppStore.getState().setUi({ sourceOrder: permuteSlots(order.sources.map((s) => s.id), next) })
+  const moveGroups = (sourceId: string, all: string[], next: string[]): void => {
+    // 없어진 환경의 항목은 이참에 지운다
+    const live = new Set(config?.sources.map((s) => s.id))
+    const prev = Object.fromEntries(Object.entries(config?.ui.groupOrder ?? {}).filter(([id]) => live.has(id)))
+    void useAppStore.getState().setUi({ groupOrder: { ...prev, [sourceId]: permuteSlots(all, next) } })
+  }
+  const moveRepos = (next: string[]): void => void useAppStore.getState().setUi({ repoOrder: permuteSlots(order.repoIds, next) })
+  /** 색을 고르는 중인 환경 카드(소스 id) */
+  const [srcColorFor, setSrcColorFor] = useState<string | null>(null)
 
   const local = useMemo(() => (refs?.local ?? []).filter((b) => matches(q, b.name)), [refs, q])
   const remotes = useMemo(
@@ -581,7 +687,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
           }
         >
           {repoGroups.length === 0 && <div className="sidebar__empty">{t('sidebar.empty')}</div>}
-          {repoGroups.map(({ source, repos }) => {
+          {repoGroups.map(({ source, repos, groups, allGroups: sourceGroups }) => {
             // 같은 환경 안에서는 사용자 그룹별로 접을 수 있는 폴더로 묶는다(그룹 없는 저장소는 맨 아래)
             const grouped = new Map<string, Repo[]>()
             const loose: Repo[] = []
@@ -589,53 +695,73 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
               if (r.group) grouped.set(r.group, [...(grouped.get(r.group) ?? []), r])
               else loose.push(r)
             }
-            const repoRow = (repo: Repo, depth: number): ReactNode => (
-              <ItemRow
-                key={repo.id}
-                depth={depth}
-                icon={<IconRepo size={13} />}
-                label={repo.name}
-                title={`${source.label} · ${repo.path}`}
-                active={repo.id === activeRepoId}
-                onClick={() => selectRepo(repo.id)}
-                trailing={
-                  <>
-                    <button
-                      className="side-item__action"
-                      title={t('sidebar.repoMenu')}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setMenuFor(menuFor === repo.id ? null : repo.id)
-                      }}
-                    >
-                      <IconMore size={12} />
-                    </button>
-                    {menuFor === repo.id && (
-                      <RepoMenu
-                        repo={repo}
-                        sourceKind={source.kind}
-                        groups={allGroups}
-                        onClose={() => setMenuFor(null)}
-                        onGroup={(group) => void updateRepo(repo.id, { group })}
-                        onRemove={() => void removeRepo(repo.id)}
-                      />
-                    )}
-                  </>
-                }
-              />
-            )
-            // 환경(Local·WSL 배포판·SSH 호스트)마다 접을 수 있는 카드로 감싼다
+            // 저장소는 같은 환경·같은 그룹 안에서만 끌어 옮긴다
+            const repoRow = (repo: Repo, depth: number, siblings: Repo[]): ReactNode => {
+              const scope = `${source.id}\0${repo.group ?? ''}`
+              const ids = siblings.map((r) => r.id)
+              return (
+                <ItemRow
+                  key={repo.id}
+                  depth={depth}
+                  icon={<IconRepo size={13} />}
+                  label={repo.name}
+                  title={`${source.label} · ${repo.path}`}
+                  active={repo.id === activeRepoId}
+                  onClick={() => selectRepo(repo.id)}
+                  drag={{
+                    // 메뉴가 열려 있으면 그 안의 입력칸을 끌지 않게 드래그를 끈다
+                    props: { ...(menuFor === repo.id ? {} : dnd.handle('repo', scope, repo.id)), ...dnd.target('repo', scope, repo.id, ids, moveRepos) },
+                    cls: dnd.cls('repo', scope, repo.id)
+                  }}
+                  trailing={
+                    <>
+                      <button
+                        className="side-item__action"
+                        title={t('sidebar.repoMenu')}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setMenuFor(menuFor === repo.id ? null : repo.id)
+                        }}
+                      >
+                        <IconMore size={12} />
+                      </button>
+                      {menuFor === repo.id && (
+                        <RepoMenu
+                          repo={repo}
+                          sourceKind={source.kind}
+                          groups={allGroups}
+                          onClose={() => setMenuFor(null)}
+                          onGroup={(group) => void updateRepo(repo.id, { group })}
+                          onRemove={() => void removeRepo(repo.id)}
+                        />
+                      )}
+                    </>
+                  }
+                />
+              )
+            }
+            // 환경(Local·WSL 배포판·SSH 호스트)마다 접을 수 있는 카드로 감싼다. 머리를 끌어 카드 순서를 바꾼다
             const srcKey = `src:${source.id}`
             const srcOpen = isOpen(srcKey)
+            const colorOpen = srcColorFor === source.id
             return (
-              <div key={source.id} className="source-card">
+              <div
+                key={source.id}
+                className={`source-card${dnd.cls('source', '', source.id)}`}
+                {...dnd.target('source', '', source.id, repoGroups.map((g) => g.source.id), moveSources)}
+              >
                 <div
                   className="source-card__head"
                   role="button"
                   tabIndex={0}
                   aria-expanded={srcOpen}
-                  title={source.label}
+                  title={`${source.label} · ${t('sidebar.dragHint')}`}
+                  {...(colorOpen ? {} : dnd.handle('source', '', source.id))}
                   onClick={() => toggle(srcKey)}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setSrcColorFor(source.id)
+                  }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault()
@@ -644,25 +770,38 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                   }}
                 >
                   <IconChevronRight size={12} className={`side-chev${srcOpen ? ' is-open' : ''}`} />
-                  <EnvBadge kind={source.kind} />
+                  <EnvBadge kind={source.kind} sourceId={source.id} />
                   <span className="source-card__label">{source.label}</span>
+                  <ColorAction
+                    open={colorOpen}
+                    setOpen={(v) => setSrcColorFor(v ? source.id : null)}
+                    value={config?.ui.sourceColors?.[source.id]}
+                    allowDefault
+                    onPick={(hue) => {
+                      const { [source.id]: _old, ...rest } = config?.ui.sourceColors ?? {}
+                      void useAppStore.getState().setUi({ sourceColors: hue === undefined ? rest : { ...rest, [source.id]: hue } })
+                    }}
+                  />
                   <span className="side-count">{repos.length}</span>
                 </div>
                 <Collapse open={srcOpen}>
                   <div className="source-card__body">
-                {[...grouped.entries()]
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .map(([group, items]) => {
-                    const key = `repogroup:${source.id}:${group}`
-                    const open = isOpen(key)
-                    return (
-                      <div key={group}>
-                        <GroupRow name={group} count={items.length} open={open} onToggle={() => toggle(key)} />
-                        <Collapse open={open}>{items.map((r) => repoRow(r, 1))}</Collapse>
-                      </div>
-                    )
-                  })}
-                {loose.map((r) => repoRow(r, 0))}
+                    {groups.map((group) => {
+                      const items = grouped.get(group) ?? []
+                      const key = `repogroup:${source.id}:${group}`
+                      const open = isOpen(key)
+                      return (
+                        <div
+                          key={group}
+                          className={`side-group${dnd.cls('group', source.id, group)}`}
+                          {...dnd.target('group', source.id, group, groups, (next) => moveGroups(source.id, sourceGroups, next))}
+                        >
+                          <GroupRow name={group} count={items.length} open={open} onToggle={() => toggle(key)} drag={{ props: dnd.handle('group', source.id, group), cls: '' }} />
+                          <Collapse open={open}>{items.map((r) => repoRow(r, 1, items))}</Collapse>
+                        </div>
+                      )
+                    })}
+                    {loose.map((r) => repoRow(r, 0, loose))}
                   </div>
                 </Collapse>
               </div>
