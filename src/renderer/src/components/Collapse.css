@@ -1,0 +1,106 @@
+/* 접기 영역: grid 행 높이를 0fr ↔ 1fr 로 전환해 내용 높이를 몰라도 부드럽게 접고 편다 */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-med) var(--ease),
+    opacity var(--dur-med) var(--ease);
+}
+.collapse.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.collapse__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+/* 전환 중에만 잘라 낸다 — 다 열린 뒤에는 행 안의 팝오버(저장소 메뉴 등)가 잘리지 않게 */
+.collapse.is-settled {
+  display: block;
+}
+.collapse.is-settled > .collapse__inner {
+  overflow: visible;
+}
+
+/* 좌우 패널: 폭을 0 ↔ 패널 폭으로 전환. 안쪽 패널은 고정 폭이라 내용이 다시 배치되지 않고 잘리며 미끄러진다 */
+.side-pane {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.side-pane--right {
+  justify-content: flex-end;
+}
+.side-pane.is-animating {
+  transition: width var(--dur-med) var(--ease);
+}
+
+/* 메뉴·팝오버 등장 */
+@keyframes pop-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pop-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .collapse,
+  .side-pane.is-animating {
+    transition: none;
+  }
+}
+
+/* 메뉴·팝오버·대화상자 등장(사라질 때는 즉시). 아래로 열리는 것은 위에서, 위로 열리는 것은 아래에서 살짝 들어온다 */
+.menu-btn__pop,
+.repo-menu,
+.gh-auth__pop,
+.side-ctx,
+.view-chip__pop,
+.avatar-notice__pop {
+  animation: pop-fade-in var(--dur-fast) var(--ease);
+}
+.menu-btn__pop--top {
+  animation-name: pop-fade-in-up;
+}
+.modal-backdrop {
+  animation: backdrop-fade-in var(--dur-med) var(--ease);
+}
+.add-dialog,
+.settings-dialog {
+  animation: pop-fade-in var(--dur-med) var(--ease);
+}
+@keyframes backdrop-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-btn__pop,
+  .repo-menu,
+  .gh-auth__pop,
+  .side-ctx,
+  .view-chip__pop,
+  .avatar-notice__pop,
+  .modal-backdrop,
+  .add-dialog,
+  .settings-dialog {
+    animation: none;
+  }
+}

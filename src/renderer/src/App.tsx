@@ -29,6 +29,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { ShortcutsDialog } from './components/ShortcutsDialog'
 import { ExternalMenu } from './components/ExternalMenu'
 import { SettingsDialog } from './components/SettingsDialog'
+import { SidePane } from './components/Collapse'
 import { runShortcut } from './lib/commands'
 import { isOverlayOpen } from './stores/paletteStore'
 import { syncGroupColors } from './lib/groupColor'
@@ -253,12 +254,10 @@ export function App(): React.JSX.Element | null {
     <div className="app">
       <Toolbar />
       <div className="app__body">
-        {sidebarShown && (
-          <>
-            <Sidebar width={widths[0]} />
-            <Splitter {...splitter(0)} />
-          </>
-        )}
+        <SidePane open={sidebarShown} width={widths[0]} side="left">
+          <Sidebar width={widths[0]} />
+        </SidePane>
+        {sidebarShown && <Splitter {...splitter(0)} />}
         {launchpadOpen && <LaunchpadView />}
         <div className={`app__main${launchpadOpen ? ' is-hidden' : ''}`}>
           {activeRepoId ? (
@@ -269,12 +268,10 @@ export function App(): React.JSX.Element | null {
               </div>
               {fileViewOpen && <FileView />}
               {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : jiraOpen && !fileViewOpen ? <JiraView /> : null}
-              {detailShown && (
-                <>
-                  <Splitter {...splitter(1)} />
-                  <DetailPanel width={widths[1]} />
-                </>
-              )}
+              {detailShown && <Splitter {...splitter(1)} />}
+              <SidePane open={detailShown} width={widths[1]} side="right">
+                <DetailPanel width={widths[1]} />
+              </SidePane>
             </>
           ) : jiraOpen ? (
             // 저장소가 없어도 Launchpad 에서 연 Jira 이슈는 볼 수 있다
