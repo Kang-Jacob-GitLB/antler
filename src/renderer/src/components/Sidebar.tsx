@@ -562,7 +562,6 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
       <div className="sidebar__scroll">
         <Section
           id="repos"
-          card
           title={t('sidebar.repos')}
           count={config?.repos.length}
           extra={
@@ -591,7 +590,6 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                 onClick={() => selectRepo(repo.id)}
                 trailing={
                   <>
-                    <EnvBadge kind={source.kind} />
                     <button
                       className="side-item__action"
                       title={t('sidebar.repoMenu')}
@@ -615,11 +613,32 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                 }
               />
             )
+            // 환경(Local·WSL 배포판·SSH 호스트)마다 접을 수 있는 카드로 감싼다
+            const srcKey = `src:${source.id}`
+            const srcOpen = isOpen(srcKey)
             return (
-              <div key={source.id}>
-                {(repoGroups.length > 1 || source.kind !== 'local') && (
-                  <div className="sidebar__group-label">{source.label}</div>
-                )}
+              <div key={source.id} className="source-card">
+                <div
+                  className="source-card__head"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={srcOpen}
+                  title={source.label}
+                  onClick={() => toggle(srcKey)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      toggle(srcKey)
+                    }
+                  }}
+                >
+                  <IconChevronRight size={12} className={`side-chev${srcOpen ? ' is-open' : ''}`} />
+                  <EnvBadge kind={source.kind} />
+                  <span className="source-card__label">{source.label}</span>
+                  <span className="side-count">{repos.length}</span>
+                </div>
+                {srcOpen && (
+                  <div className="source-card__body">
                 {[...grouped.entries()]
                   .sort(([a], [b]) => a.localeCompare(b))
                   .map(([group, items]) => {
@@ -633,6 +652,8 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     )
                   })}
                 {loose.map((r) => repoRow(r, 0))}
+                  </div>
+                )}
               </div>
             )
           })}
