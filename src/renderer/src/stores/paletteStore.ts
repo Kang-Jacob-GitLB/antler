@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useAppStore } from './appStore'
+import { useJiraStore } from './jiraStore'
 
 /** 명령 팔레트(Ctrl/⌘+Shift+P)와 단축키 목록(Ctrl/⌘+/) 모달의 열림 상태 */
 interface PaletteState {
@@ -23,5 +24,5 @@ export const usePaletteStore = create<PaletteState>((set) => ({
 export function isOverlayOpen(): boolean {
   const app = useAppStore.getState()
   const p = usePaletteStore.getState()
-  return app.switcherOpen || app.addOpen || p.paletteOpen || p.shortcutsOpen
+  return app.switcherOpen || app.addOpen || p.paletteOpen || p.shortcutsOpen || useJiraStore.getState().dialogOpen
 }

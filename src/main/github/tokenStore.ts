@@ -33,10 +33,12 @@ export class TokenStore {
     private readonly dir: string,
     private readonly safe: SafeStorageLike,
     /** 테스트에서 바꿀 수 있게 주입한다 */
-    private readonly platform: NodeJS.Platform = process.platform
+    private readonly platform: NodeJS.Platform = process.platform,
+    /** 같은 저장 방식을 쓰는 다른 자격 증명(Jira 등)이 파일 이름만 바꿔 쓴다 */
+    files: { token: string; meta: string } = { token: TOKEN_FILE, meta: META_FILE }
   ) {
-    this.tokenPath = join(dir, TOKEN_FILE)
-    this.metaPath = join(dir, META_FILE)
+    this.tokenPath = join(dir, files.token)
+    this.metaPath = join(dir, files.meta)
   }
 
   /** 지금 safeStorage 를 쓸 수 없어 토큰이 디스크에 남지 않는 상태인지(호출 시점에 평가) */

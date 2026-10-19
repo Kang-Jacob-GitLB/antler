@@ -1,0 +1,143 @@
+/* Jira 화면(중앙 목록·상세) 보조 스타일. 레이아웃 대부분은 GitHub 화면의 .gh-* 클래스를 재사용한다 */
+.jira-key {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-text);
+}
+.gh-head__title .jira-key {
+  margin-right: var(--space-1);
+}
+
+/* 상태 칩: todo 회색 · active 정보색 · done 이끼 */
+.jira-status {
+  flex-shrink: 0;
+  padding: 0 8px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 10px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+}
+.jira-status--active {
+  color: color-mix(in srgb, var(--info) 60%, var(--text-primary));
+  background: color-mix(in srgb, var(--info) 20%, transparent);
+}
+.jira-status--done {
+  color: var(--added-text);
+  background: color-mix(in srgb, var(--added) 20%, transparent);
+}
+
+.jira-meta {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+.jira-field {
+  font-size: var(--fs-sm);
+}
+
+.jira-jql {
+  flex-wrap: wrap;
+}
+.jira-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border);
+  font-size: var(--fs-sm);
+}
+.jira-input:hover {
+  box-shadow: var(--field-ring-hover);
+}
+.jira-input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-field);
+}
+.jira-input[readonly] {
+  color: var(--text-secondary);
+}
+.jira-input--name {
+  flex: 0 0 140px;
+}
+
+/* 커밋 상세·PR 머리의 이슈 키 칩 */
+.jira-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+.jira-chip {
+  padding: 0 8px;
+  height: 20px;
+  line-height: 20px;
+  border: 0;
+  border-radius: 10px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  cursor: pointer;
+}
+.jira-chip:hover {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.jira-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* 연결 대화상자 */
+.jira-dialog {
+  min-height: 0;
+}
+.jira-dialog .field input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.jira-conn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.jira-dialog__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: auto;
+}
+.jira-error {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 사이드바 목록의 상태 점 */
+.jira-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.jira-dot--indeterminate {
+  background: var(--info);
+}
+.jira-dot--done {
+  background: var(--added);
+}
+
+/* 연결한 Jira 사이트 밖의 링크는 앱에서 열지 않는다 */
+.gh-body [data-blocked] {
+  cursor: not-allowed;
+  opacity: 0.75;
+}

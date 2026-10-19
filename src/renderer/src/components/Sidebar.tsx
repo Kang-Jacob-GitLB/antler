@@ -9,6 +9,7 @@ import { EnvBadge } from './EnvBadge'
 import { RepoMenu } from './RepoMenu'
 import { ChecksBadge, GhStateIcon, prState } from './github/GhBits'
 import { useGithubStore } from '../stores/githubStore'
+import { useJiraSiteData, useJiraStore } from '../stores/jiraStore'
 import {
   IconCheck,
   IconChevronRight,
@@ -308,6 +309,13 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const ghIssues = useGithubStore((s) => s.sideIssues)
   const ghView = useGithubStore((s) => s.view)
   const ghShow = useGithubStore((s) => s.show)
+  // Jira: 연결 여부와 상관없이 섹션을 보인다(연결 전에는 연결 버튼)
+  const jiraAuth = useJiraStore((s) => s.auth)
+  const jiraMine = useJiraStore((s) => s.mine)
+  const jiraView = useJiraStore((s) => s.view)
+  const jiraSite = useJiraSiteData()
+  const jiraRecent = jiraSite.recent ?? []
+  const jiraFilters = jiraSite.filters ?? []
   const allGroups = useMemo(
     () => [...new Set((config?.repos ?? []).map((r) => r.group).filter((g): g is string => !!g))].sort(),
     [config]
@@ -616,6 +624,109 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                         trailing={<span className="side-sub">#{i.number}</span>}
                       />
                     ))}
+                </Section>
+              </>
+            )}
+
+            <Section
+              id="jira"
+              title={t('jira.mine')}
+              count={jiraAuth.connected ? jiraMine.items.length : undefined}
+              extra={
+                <>
+                  {jiraAuth.connected && (
+                    <button className="icon-btn icon-btn--sm" title={t('jira.viewAll')} onClick={() => useJiraStore.getState().show({ kind: 'list', source: 'mine' })}>
+                      <IconMore size={13} />
+                    </button>
+                  )}
+                  <button className="icon-btn icon-btn--sm" title={t('jira.title')} onClick={() => useJiraStore.getState().setDialogOpen(true)}>
+                    <IconCloud size={13} />
+                  </button>
+                </>
+              }
+            >
+              {!jiraAuth.connected && (
+                <div className="sidebar__empty">
+                  {t('jira.notConnected')}{' '}
+                  <button className="btn btn--sm" onClick={() => useJiraStore.getState().setDialogOpen(true)}>
+                    {t('jira.connect')}
+                  </button>
+                </div>
+              )}
+              {jiraAuth.connected && jiraMine.error && <div className="sidebar__empty">{jiraMine.error}</div>}
+              {jiraAuth.connected && !jiraMine.error && jiraMine.items.length === 0 && !jiraMine.loading && <div className="sidebar__empty">{t('gh.empty')}</div>}
+              {jiraAuth.connected &&
+                jiraMine.items
+                  .filter((i) => matches(q, i.summary, i.key))
+                  .slice(0, SIDEBAR_GH_MAX)
+                  .map((i) => (
+                    <ItemRow
+                      key={i.key}
+                      depth={0}
+                      icon={<span className={`jira-dot jira-dot--${i.statusCategory}`} />}
+                      label={i.summary}
+                      title={`${i.key} ${i.summary} — ${i.status}`}
+                      active={jiraView?.kind === 'issue' && jiraView.key === i.key}
+                      onClick={() => useJiraStore.getState().show({ kind: 'issue', key: i.key, from: { kind: 'list', source: 'mine' } })}
+                      trailing={<span className="side-sub">{i.key}</span>}
+                    />
+                  ))}
+            </Section>
+
+            {jiraAuth.connected && (
+              <>
+                <Section id="jira-recent" title={t('jira.recent')} count={jiraRecent.length}>
+                  {jiraRecent.length === 0 && <div className="sidebar__empty">{t('jira.recentEmpty')}</div>}
+                  {jiraRecent
+                    .filter((r) => matches(q, r.summary, r.key))
+                    .map((r) => (
+                      <ItemRow
+                        key={r.key}
+                        depth={0}
+                        icon={<IconSearch size={13} />}
+                        label={r.summary}
+                        title={`${r.key} ${r.summary}`}
+                        active={jiraView?.kind === 'issue' && jiraView.key === r.key}
+                        onClick={() => useJiraStore.getState().openIssue(r.key)}
+                        trailing={<span className="side-sub">{r.key}</span>}
+                      />
+                    ))}
+                </Section>
+
+                <Section
+                  id="jira-filters"
+                  title={t('jira.filters')}
+                  count={jiraFilters.length}
+                  extra={
+                    <button className="icon-btn icon-btn--sm" title={t('jira.newFilter')} onClick={() => useJiraStore.getState().show({ kind: 'list', source: 'custom' })}>
+                      <IconPlus size={13} />
+                    </button>
+                  }
+                >
+                  {jiraFilters.length === 0 && <div className="sidebar__empty">{t('jira.filtersEmpty')}</div>}
+                  {jiraFilters.map((f, n) => (
+                    <ItemRow
+                      key={f.name}
+                      depth={0}
+                      icon={<IconFunnel size={13} />}
+                      label={f.name}
+                      title={f.jql}
+                      active={jiraView?.kind === 'list' && jiraView.source === n}
+                      onClick={() => useJiraStore.getState().show({ kind: 'list', source: n })}
+                      trailing={
+                        <button
+                          className="side-item__action"
+                          title={t('jira.removeFilter')}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            useJiraStore.getState().removeFilter(n)
+                          }}
+                        >
+                          <IconClose size={11} />
+                        </button>
+                      }
+                    />
+                  ))}
                 </Section>
               </>
             )}

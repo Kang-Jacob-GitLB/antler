@@ -19,6 +19,9 @@ import { useSearchStore } from './stores/searchStore'
 import { refreshWip, useWipSync } from './stores/wipActions'
 import { useGithubStore } from './stores/githubStore'
 import { GitHubView } from './components/github/GitHubView'
+import { JiraConnectDialog } from './components/jira/JiraConnectDialog'
+import { JiraView } from './components/jira/JiraView'
+import { useJiraStore } from './stores/jiraStore'
 import { UpdateSnackbar } from './components/UpdateSnackbar'
 import { CommandPalette } from './components/CommandPalette'
 import { ShortcutsDialog } from './components/ShortcutsDialog'
@@ -49,6 +52,7 @@ export function App(): React.JSX.Element | null {
 
   useEffect(() => {
     void useAppStore.getState().init()
+    void useJiraStore.getState().refreshAuth()
     // 자동·수동 fetch 상태(진행 중·마지막 성공·오류·차단)를 main 이 알려 준다
     const offFetch = window.antler.on('fetch:status', (s) => useFetchStore.getState().set(s))
     // 외부(터미널·IDE)에서 커밋·체크아웃·fetch 하면 main 감시자가 알려 준다 — 선택은 유지한 채 다시 읽는다
@@ -106,6 +110,7 @@ export function App(): React.JSX.Element | null {
   const detailShown = useAppStore((s) => s.config?.ui.detailHidden !== true)
   // 중앙 화면 우선순위: 파일 diff → GitHub 화면 → 커밋 그래프(그래프는 항상 마운트해 스크롤·페이지 유지)
   const ghOpen = useGithubStore((s) => s.view !== null)
+  const jiraOpen = useJiraStore((s) => s.view !== null)
 
   // 그래프 필터가 바뀌면 검색 결과도 그 범위로 다시 구한다(옛 범위의 일치 표시가 남지 않게)
   const filterRev = useLogStore((s) => s.filter?.rev)
@@ -149,6 +154,16 @@ export function App(): React.JSX.Element | null {
         if (tag !== 'INPUT' && tag !== 'SELECT') {
           e.preventDefault()
           gh.show(gh.view.kind === 'pull' ? { kind: 'pulls' } : gh.view.kind === 'issue' ? { kind: 'issues' } : null)
+          return
+        }
+      }
+      // Jira 화면: Esc 로 이슈 → 목록 → 그래프 순으로 물러난다
+      const jira = useJiraStore.getState()
+      if (jira.view && !detail.file && !gh.view && e.key === 'Escape' && !useAppStore.getState().switcherOpen) {
+        const tag = (e.target as HTMLElement | null)?.tagName
+        if (tag !== 'INPUT' && tag !== 'SELECT') {
+          e.preventDefault()
+          jira.show(jira.view.kind === 'issue' ? jira.view.from : null)
           return
         }
       }
@@ -214,11 +229,11 @@ export function App(): React.JSX.Element | null {
         {activeRepoId ? (
           <>
             {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
-            <div className={`app__center${diffOpen || fileViewOpen || ghOpen ? ' is-hidden' : ''}`}>
+            <div className={`app__center${diffOpen || fileViewOpen || ghOpen || jiraOpen ? ' is-hidden' : ''}`}>
               <CommitList />
             </div>
             {fileViewOpen && <FileView />}
-            {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : null}
+            {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : jiraOpen && !fileViewOpen ? <JiraView /> : null}
             {detailShown && (
               <>
                 <Splitter {...splitter(1)} />
@@ -240,6 +255,7 @@ export function App(): React.JSX.Element | null {
       <CommandPalette />
       <ShortcutsDialog />
       <AddRepoDialog />
+      <JiraConnectDialog />
       <UpdateSnackbar />
     </div>
   )

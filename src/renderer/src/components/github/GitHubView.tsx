@@ -7,6 +7,7 @@ import { useGithubStore, type GhView } from '../../stores/githubStore'
 import { DiffBody, DiffModeToggle } from '../DiffView'
 import { FileStatusIcon } from '../FileStatusIcon'
 import { IconClose, IconRefresh } from '../icons'
+import { JiraIssueChips } from '../jira/JiraIssueChips'
 import { Avatar, ChecksBadge, GhStateIcon, HtmlBody, LabelChip, prState, ReviewBadge, useRelative } from './GhBits'
 import './GitHubView.css'
 
@@ -181,6 +182,7 @@ function DetailHead({ title, number, url, state, kind, back }: { title: string; 
       <h2 className="gh-head__title selectable">
         {title} <span className="gh-head__num">#{number}</span>
       </h2>
+      {kind === 'pull' && <JiraIssueChips texts={[title]} />}
       {url && (
         <button className="btn btn--sm" onClick={() => openOnGithub(url)}>
           {t('gh.openInBrowser')}
