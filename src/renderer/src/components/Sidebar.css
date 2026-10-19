@@ -55,12 +55,6 @@
   color: var(--text-muted);
   font-size: var(--fs-sm);
 }
-.sidebar__group-label {
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--fs-xs);
-  color: var(--text-muted);
-}
-
 /* ── 섹션 ── */
 .side-section + .side-section {
   border-top: 1px solid var(--border);
@@ -295,4 +289,43 @@
 .side-ctx__item:disabled {
   color: var(--text-muted);
   cursor: default;
+}
+
+/* 저장소 환경 카드(Local·WSL·SSH): 접을 수 있는 평면 카드 */
+.source-card {
+  margin: 0 var(--space-2) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  overflow: hidden;
+}
+.source-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--space-2) 0 6px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.source-card__head:hover {
+  background: var(--row-hover);
+}
+.source-card__head:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+.source-card__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.source-card__body {
+  padding-bottom: var(--space-1);
+  border-top: 1px solid var(--border);
 }
