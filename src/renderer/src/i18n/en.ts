@@ -231,6 +231,7 @@ export const en: Messages = {
   'blame.atHead': 'At HEAD',
   'blame.atCommit': 'At {hash}',
   'blame.wipNote': 'Working tree changes are not included',
+  'blame.missing': 'The file does not exist at this commit (or is a submodule) — blame is not shown',
   'blame.binary': 'Binary file — blame is not shown',
   'blame.tooLarge': 'File is too large ({size}) — blame is not shown',
   'blame.empty': 'Empty file',

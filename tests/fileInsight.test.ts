@@ -212,25 +212,59 @@ describe('RepoService.fileHistory / blame (실제 저장소)', { timeout: 60_000
     expect(big.size).toBeGreaterThan(512 * 1024)
   })
 
-  it('blame: 없는 파일·잘못된 rev 는 거부한다', async () => {
+  it('blame: 그 시점에 없는 파일은 missing 으로, 잘못된 rev 는 거부한다', async () => {
     const { svc, repoId } = setup()
-    await expect(svc.blame(repoId, { path: 'nope.txt' })).rejects.toThrow()
+    expect(await svc.blame(repoId, { path: 'nope.txt' })).toMatchObject({ missing: true, lines: [] })
+    expect(await svc.blame(repoId, { path: 'g.txt', rev: h.c1! })).toMatchObject({ missing: true })
     await expect(svc.blame(repoId, { path: 'g.txt', rev: 'HEAD' })).rejects.toThrow(/invalid/)
-    await expect(svc.blame(repoId, { path: 'g.txt', rev: h.c1! })).rejects.toThrow()
   })
 
-  it('blame: 저장소 설정의 textconv 명령을 실행하지 않는다', async () => {
-    const marker = join(root, 'textconv-ran')
-    writeFileSync(join(repo, '.git', 'info', 'attributes'), '*.txt diff=evil\n')
-    git('config', 'diff.evil.textconv', `sh -c "echo x > '${marker.replace(/\\/g, '/')}'; cat" --`)
+  it('히스토리: HEAD 기준이면 해석한 HEAD 해시를 돌려주고, 끝을 넘긴 페이지는 비어 hasMore=false', async () => {
+    const { svc, repoId } = setup()
+    const p = await svc.fileHistory(repoId, { path: 'g.txt', skip: 0, count: 2 })
+    expect(p.rev).toBe(h.c7)
+    const beyond = await svc.fileHistory(repoId, { path: 'g.txt', skip: 10, count: 2 })
+    expect(beyond).toMatchObject({ entries: [], hasMore: false })
+    const capped = await svc.fileHistory(repoId, { path: 'g.txt', skip: 1_000_000, count: 2 })
+    expect(capped).toEqual({ entries: [], hasMore: false })
+  })
+
+  it('blame: 저장소 설정의 textconv 명령을 실행하지 않는다(드라이버 이름에 = 가 있어도)', async () => {
+    for (const driver of ['evil', 'a=b']) {
+      const marker = join(root, `textconv-ran-${driver.replace('=', '_')}`)
+      writeFileSync(join(repo, '.git', 'info', 'attributes'), `*.txt diff=${driver}
+`)
+      git('config', `diff.${driver}.textconv`, `sh -c "echo x > '${marker.replace(/\\/g, '/')}'; cat" --`)
+      try {
+        const { svc, repoId } = setup()
+        const b = await svc.blame(repoId, { path: 'g.txt' })
+        expect(b.lines).toEqual(['one', 'TWO', 'three', 'four'])
+        expect(existsSync(marker)).toBe(false)
+      } finally {
+        git('config', '--unset', `diff.${driver}.textconv`)
+        rmSync(join(repo, '.git', 'info', 'attributes'), { force: true })
+      }
+    }
+  })
+
+  it('blame: 전역 blame.ignoreRevsFile 이 없는 파일을 가리켜도 동작한다', async () => {
+    const prev = process.env['GIT_CONFIG_GLOBAL']
+    const cfg = join(root, 'global-ignore-revs')
+    const missing = join(root, 'does-not-exist').replace(/\\/g, '/')
+    writeFileSync(cfg, `[user]
+	name = t
+	email = t@t
+[blame]
+	ignoreRevsFile = ${missing}
+`)
+    process.env['GIT_CONFIG_GLOBAL'] = cfg
     try {
       const { svc, repoId } = setup()
       const b = await svc.blame(repoId, { path: 'g.txt' })
       expect(b.lines).toEqual(['one', 'TWO', 'three', 'four'])
-      expect(existsSync(marker)).toBe(false)
     } finally {
-      git('config', '--unset', 'diff.evil.textconv')
-      rmSync(join(repo, '.git', 'info', 'attributes'), { force: true })
+      if (prev === undefined) delete process.env['GIT_CONFIG_GLOBAL']
+      else process.env['GIT_CONFIG_GLOBAL'] = prev
     }
   })
 })

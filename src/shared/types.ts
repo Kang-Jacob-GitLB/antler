@@ -584,6 +584,8 @@ export interface FileHistoryEntry {
 export interface FileHistoryPage {
   entries: FileHistoryEntry[]
   hasMore: boolean
+  /** 이 페이지를 읽은 시작 커밋(요청에 rev 가 없었다면 해석한 HEAD). 이후 페이지는 이 해시로 요청한다 */
+  rev?: string
 }
 
 /** Blame 요청. rev 를 생략하면 HEAD 시점의 파일 */
@@ -618,6 +620,8 @@ export interface BlameResult {
   binary: boolean
   /** 크기 상한을 넘어 blame 하지 않았다 */
   tooLarge: boolean
+  /** 그 시점에 경로가 없거나 파일이 아니라(서브모듈) 볼 내용이 없다 */
+  missing: boolean
   /** 그 시점 파일 크기(바이트) */
   size: number
   commits: Record<string, BlameCommit>

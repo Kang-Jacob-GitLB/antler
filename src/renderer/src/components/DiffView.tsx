@@ -218,7 +218,8 @@ export function DiffBody({ diff, loading = false, error = null, resetKey }: Diff
   )
 }
 
-export function DiffView(): React.JSX.Element | null {
+/** hidden: 파일 히스토리·Blame 이 위에 떠 있는 동안 숨겨 둔다(언마운트하면 스크롤 위치가 사라진다) */
+export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.Element | null {
   const t = useT()
   const { file, wipArea, diff, diffLoading, diffError, detail, diffFull, fullError, repoId } = useDetailStore()
   const { closeFile, stepFile, openFile, openWipFile } = useDetailStore.getState()
@@ -240,7 +241,7 @@ export function DiffView(): React.JSX.Element | null {
   const viewRev = wipArea ? null : detail!.hash
 
   return (
-    <section className="diff-view">
+    <section className={`diff-view${hidden ? ' is-hidden' : ''}`}>
       <header className="diff-head">
         <button className="diff-head__back" title={`${t('diff.back')} (Esc)`} onClick={closeFile}>
           <IconArrowLeft size={14} />

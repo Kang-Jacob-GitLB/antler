@@ -20,6 +20,8 @@ interface FileViewState {
 
   entries: FileHistoryEntry[]
   hasMore: boolean
+  /** 첫 페이지를 읽을 때 고정한 시작 커밋(HEAD 기준이면 그때의 HEAD 해시) — 이후 페이지가 같은 이력을 잇게 한다 */
+  historyRev: string | null
   historyLoading: boolean
   historyError: string | null
   /** 히스토리에서 고른 커밋 */
@@ -62,6 +64,7 @@ const CLOSED = {
   fromWip: false,
   entries: [],
   hasMore: false,
+  historyRev: null,
   historyLoading: false,
   historyError: null,
   selected: null,
@@ -140,17 +143,19 @@ export const useFileViewStore = create<FileViewState>((set, get) => {
     },
 
     async loadMore() {
-      const { repoId, path, rev, entries, historyLoading, pendingHistory } = get()
+      const { repoId, path, rev, historyRev, entries, historyLoading, pendingHistory } = get()
+      const startRev = historyRev ?? rev
       if (!repoId || historyLoading) return
       cancel(pendingHistory)
       const requestId = newRequestId('history')
       set({ historyLoading: true, historyError: null, pendingHistory: requestId })
       try {
-        const page = await api.invoke('git:fileHistory', repoId, { path, skip: entries.length, count: HISTORY_PAGE, ...(rev ? { rev } : {}) }, requestId)
+        const page = await api.invoke('git:fileHistory', repoId, { path, skip: entries.length, count: HISTORY_PAGE, ...(startRev ? { rev: startRev } : {}) }, requestId)
         if (get().pendingHistory !== requestId) return
         const seen = new Set(entries.map((e) => e.hash))
         const merged = [...entries, ...page.entries.filter((e) => !seen.has(e.hash))]
-        set({ entries: merged, hasMore: page.hasMore, historyLoading: false, pendingHistory: null })
+        // 새 항목이 하나도 없으면 더 받지 않는다(같은 요청이 끝없이 반복되지 않게)
+        set({ entries: merged, hasMore: page.hasMore && merged.length > entries.length, historyRev: startRev ?? page.rev ?? null, historyLoading: false, pendingHistory: null })
         // 처음 받은 페이지면 맨 위 커밋의 diff 를 바로 보여 준다
         if (!get().selected && merged[0]) void get().select(merged[0])
       } catch (err) {

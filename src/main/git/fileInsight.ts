@@ -24,8 +24,18 @@ function assertPath(path: unknown): asserts path is string {
 export async function fileHistory(exec: GitExecutor, repoPath: string, req: FileHistoryRequest, opts?: RunOpts): Promise<FileHistoryPage> {
   assertPath(req.path)
   if (req.rev !== undefined) assertHex(req.rev, 'commit hash')
-  const skip = Number.isInteger(req.skip) && req.skip > 0 ? Math.min(req.skip, FILE_HISTORY_MAX_SKIP) : 0
+  const skip = Number.isInteger(req.skip) && req.skip > 0 ? req.skip : 0
+  // 상한을 넘는 쪽은 더 읽지 않는다(hasMore=false 라 renderer 가 다시 요청하지 않는다)
+  if (skip >= FILE_HISTORY_MAX_SKIP) return { entries: [], hasMore: false }
   const count = Math.min(FILE_HISTORY_MAX_COUNT, Math.max(1, Number.isInteger(req.count) ? req.count : 100))
+  // rev 를 생략하면 HEAD 를 지금 해시로 풀어 돌려준다 — renderer 가 이후 페이지에 이 해시를 써서 브랜치가 바뀌어도 이력이 섞이지 않는다
+  let rev = req.rev
+  if (rev === undefined) {
+    const h = await exec.run(repoPath, ['rev-parse', '--verify', '--quiet', 'HEAD'], opts)
+    rev = h.code === 0 ? h.stdout.toString('utf8').trim() : ''
+    // 커밋이 아직 없는 저장소는 이력이 없는 것과 같다
+    if (!rev) return { entries: [], hasMore: false }
+  }
   const args = [
     'log',
     '--follow',
@@ -34,7 +44,7 @@ export async function fileHistory(exec: GitExecutor, repoPath: string, req: File
     ...FILE_HISTORY_FORMAT_ARGS,
     // --follow 와 함께 쓰면 --skip 이 무시된다(이름 변경을 따라가는 필터가 skip 뒤에 적용되지 않음). 앞쪽까지 읽고 직접 자른다
     `--max-count=${skip + count + 1}`,
-    ...revArgs(req.rev ?? 'HEAD'),
+    ...revArgs(rev),
     '--',
     req.path
   ]
@@ -43,26 +53,10 @@ export async function fileHistory(exec: GitExecutor, repoPath: string, req: File
   if (r.code !== 0 && isEmptyRepoError(r.stderr)) return { entries: [], hasMore: false }
   if (r.code !== 0) throw new GitError(r.stderr.trim() || `git log failed (${r.code})`, r.code, r.stderr, args)
   const all = parseFileHistory(r.stdout, req.path)
-  return { entries: all.slice(skip, skip + count), hasMore: all.length > skip + count }
-}
-
-/**
- * blame 은 textconv 드라이버(diff.<이름>.textconv)를 실행한다. 저장소 설정에 심은 명령이면 열람만으로 임의 명령이 돌므로
- * (fileDiff 가 --no-textconv 를 쓰는 것과 같은 이유) 이번 실행에서만 `cat` 으로 덮어 쓴다 — 내용은 그대로 나온다.
- */
-async function textconvOverrides(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<string[]> {
-  const args = ['config', '-z', '--get-regexp', '^diff\\..+\\.textconv$']
-  const r = await exec.run(repoPath, args, opts)
-  // 1 = 해당 키 없음
-  if (r.code === 1) return []
-  if (r.code !== 0) throw new GitError(r.stderr.trim() || `git config failed (${r.code})`, r.code, r.stderr, args)
-  const names = new Set<string>()
-  for (const entry of r.stdout.toString('utf8').split('\0')) {
-    const nl = entry.indexOf('\n')
-    const m = /^diff\.(.+)\.textconv$/s.exec(nl < 0 ? entry : entry.slice(0, nl))
-    if (m) names.add(m[1]!)
-  }
-  return [...names].flatMap((n) => ['-c', `diff.${n}.textconv=cat`, '-c', `diff.${n}.cachetextconv=false`])
+  const entries = all.slice(skip, skip + count)
+  // 이번에 새 항목이 하나도 없으면 더 받을 게 없다. skip 상한에 닿는 페이지도 마지막으로 친다
+  const hasMore = entries.length > 0 && all.length > skip + count && skip + count < FILE_HISTORY_MAX_SKIP
+  return { entries, hasMore, rev }
 }
 
 /**
@@ -83,16 +77,21 @@ export async function fileBlame(exec: GitExecutor, repoPath: string, req: BlameR
   // rev 는 hex 만 허용하므로 `rev:path` 가 옵션으로 해석될 수 없다
   const sizeArgs = ['cat-file', '-s', `${rev}:${req.path}`]
   const sz = await exec.run(repoPath, sizeArgs, opts)
-  if (sz.code !== 0) throw new GitError(sz.stderr.trim() || `file not found at ${rev.slice(0, 7)}`, sz.code, sz.stderr, sizeArgs)
+  const empty = { rev, path: req.path, size: 0, commits: {}, groups: [], lines: [] }
+  // 그 시점에 경로가 없거나(작업 트리에서 새로 add 한 파일 등) 파일이 아닌 객체(서브모듈)면 blame 할 게 없다
+  if (sz.code !== 0) return { ...empty, binary: false, tooLarge: false, missing: true }
   const size = Number(sz.stdout.toString('utf8').trim()) || 0
-  const empty = { rev, path: req.path, size, commits: {}, groups: [], lines: [] }
-  if (size > BLAME_MAX_BYTES) return { ...empty, binary: false, tooLarge: true }
+  if (size > BLAME_MAX_BYTES) return { ...empty, size, binary: false, tooLarge: true, missing: false }
 
-  const guard = await textconvOverrides(exec, repoPath, opts)
-  const args = [...guard, 'blame', '--porcelain', rev, '--', req.path]
-  const r = await exec.run(repoPath, args, { ...opts, maxBuffer: BLAME_MAX_BUFFER })
-  if (r.code !== 0) throw new GitError(r.stderr.trim() || `git blame failed (${r.code})`, r.code, r.stderr, args)
+  // --no-textconv: 저장소 설정의 diff.<이름>.textconv 명령을 실행하지 않는다(드라이버 이름을 열거해 덮어쓰는 방식은 이름에 '=' 가 있으면 뚫린다)
+  const base = ['blame', '--no-textconv', '--porcelain', rev, '--', req.path]
+  const run = (args: string[]) => exec.run(repoPath, args, { ...opts, maxBuffer: BLAME_MAX_BUFFER })
+  let r = await run(base)
+  // blame.ignoreRevsFile 이 없는 파일을 가리키면 git 이 blame 자체를 거부한다 — 이번 실행에서만 설정된 목록을 비운다
+  // (-c blame.ignoreRevsFile= 는 빈 항목을 더할 뿐 비우지 못해서 --no-ignore-revs-file 을 쓴다)
+  if (r.code !== 0 && /could not open object name list/i.test(r.stderr)) r = await run(['blame', '--no-ignore-revs-file', ...base.slice(1)])
+  if (r.code !== 0) throw new GitError(r.stderr.trim() || `git blame failed (${r.code})`, r.code, r.stderr, base)
   const parsed = parseBlame(r.stdout)
-  if (parsed.binary) return { ...empty, binary: true, tooLarge: false }
-  return { rev, path: req.path, binary: false, tooLarge: false, size, commits: parsed.commits, groups: parsed.groups, lines: parsed.lines }
+  if (parsed.binary) return { ...empty, size, binary: true, tooLarge: false, missing: false }
+  return { rev, path: req.path, binary: false, tooLarge: false, missing: false, size, commits: parsed.commits, groups: parsed.groups, lines: parsed.lines }
 }

@@ -217,7 +217,8 @@ export function App(): React.JSX.Element | null {
             <div className={`app__center${diffOpen || fileViewOpen || ghOpen ? ' is-hidden' : ''}`}>
               <CommitList />
             </div>
-            {fileViewOpen ? <FileView /> : diffOpen ? <DiffView /> : ghOpen ? <GitHubView /> : null}
+            {fileViewOpen && <FileView />}
+            {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : null}
             {detailShown && (
               <>
                 <Splitter {...splitter(1)} />

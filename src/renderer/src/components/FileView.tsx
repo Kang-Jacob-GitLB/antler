@@ -245,7 +245,9 @@ function BlamePane(): React.JSX.Element {
     ? { text: t('error.generic', { msg: blameError }), error: true }
     : !blame
       ? { text: blameLoading ? t('list.loading') : '', error: false }
-      : blame.binary
+      : blame.missing
+        ? { text: t('blame.missing'), error: false }
+        : blame.binary
         ? { text: t('blame.binary'), error: false }
         : blame.tooLarge
           ? { text: t('blame.tooLarge', { size: formatSize(blame.size) }), error: false }

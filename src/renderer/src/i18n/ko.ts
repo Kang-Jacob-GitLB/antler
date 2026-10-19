@@ -229,6 +229,7 @@ export const ko = {
   'blame.atHead': 'HEAD 기준',
   'blame.atCommit': '{hash} 시점',
   'blame.wipNote': '작업 트리의 변경은 반영되지 않습니다',
+  'blame.missing': '이 시점에 파일이 없거나 서브모듈이라 Blame 을 표시하지 않습니다',
   'blame.binary': '바이너리 파일이라 Blame 을 표시하지 않습니다',
   'blame.tooLarge': '파일이 너무 커서({size}) Blame 을 표시하지 않습니다',
   'blame.empty': '빈 파일입니다',
