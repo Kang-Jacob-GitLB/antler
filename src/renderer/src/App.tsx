@@ -97,6 +97,12 @@ export function App(): React.JSX.Element | null {
     useLogStore.getState().open(activeRepoId)
   }, [activeRepoId])
 
+  // 사이드바 ref 스냅샷이 바뀌면 사라진 ref 를 Solo / Hide 에서 빼고, 현재 브랜치 숨김에 맞춰 범위를 다시 계산한다
+  const refsSnapshot = useAppStore((s) => s.refs)
+  useEffect(() => {
+    useLogStore.getState().syncView()
+  }, [refsSnapshot])
+
   // 선택한 커밋의 상세를 불러온다. ↑↓ 를 누르고 있을 때 요청이 쏟아지지 않도록 잠깐 기다린다
   const selectedHash = useLogStore((s) => (s.selected >= 0 ? s.commits[s.selected]?.hash : undefined))
   useEffect(() => {
@@ -112,12 +118,12 @@ export function App(): React.JSX.Element | null {
   const ghOpen = useGithubStore((s) => s.view !== null)
   const jiraOpen = useJiraStore((s) => s.view !== null)
 
-  // 그래프 필터가 바뀌면 검색 결과도 그 범위로 다시 구한다(옛 범위의 일치 표시가 남지 않게)
-  const filterRev = useLogStore((s) => s.filter?.rev)
+  // 그래프 보기 범위(Solo/Hide)가 바뀌면 검색 결과도 그 범위로 다시 구한다(옛 범위의 일치 표시가 남지 않게)
+  const scopeSig = useLogStore((s) => s.scopeSig)
   useEffect(() => {
     const search = useSearchStore.getState()
     if (search.open && search.ranQuery) void search.run()
-  }, [filterRev])
+  }, [scopeSig])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

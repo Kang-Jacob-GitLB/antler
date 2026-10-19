@@ -24,6 +24,7 @@
   padding-left: 78px;
 }
 .crumb,
+.view-chip,
 .filter-chip,
 .toolbar__actions {
   -webkit-app-region: no-drag;
@@ -119,6 +120,76 @@ button.crumb:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.filter-chip.is-inactive {
+  opacity: 0.55;
+}
+
+/* Solo / 숨김 요약 칩과 개별 해제 팝오버 */
+.view-chip {
+  position: relative;
+}
+.view-chip__pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: var(--space-2);
+  z-index: 45;
+  min-width: 200px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  font-size: var(--fs-sm);
+}
+.view-chip__title {
+  padding: 6px 8px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.view-chip__list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.view-chip__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 4px 0 8px;
+  height: var(--control-h-sm);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+}
+.view-chip__item:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.view-chip__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.view-chip__clear {
+  margin-top: 2px;
+  height: var(--control-h-sm);
+  padding: 0 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.view-chip__clear:hover {
+  background: var(--row-hover);
 }
 
 /* 새로고침 + 자동 fetch 주기 메뉴(셰브런)를 한 덩어리로 */

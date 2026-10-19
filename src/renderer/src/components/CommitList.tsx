@@ -7,6 +7,7 @@ import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
 import { formatDate } from '../lib/format'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
+import { isHidden } from '../lib/refView'
 import { useAppStore } from '../stores/appStore'
 import { useGithubStore } from '../stores/githubStore'
 import { pendingAuthors, requestAvatars, useAvatarStore } from '../stores/avatarStore'
@@ -37,6 +38,8 @@ interface Chip {
   lane: number
   /** 더블클릭하면 이 rev 로 그래프를 거른다(로컬 브랜치가 있으면 그것, 없으면 리모트, 태그는 태그) */
   rev: string
+  /** 이 칩이 합친 모든 ref(로컬·리모트). 숨김 표시는 이 전부를 본다 */
+  revs: string[]
 }
 
 function toChips(refs: RefLabel[]): Chip[] {
@@ -45,7 +48,7 @@ function toChips(refs: RefLabel[]): Chip[] {
   for (const r of refs) {
     if (r.kind === 'head') continue
     if (r.kind === 'tag') {
-      map.set(`t:${r.name}`, { key: `t:${r.name}`, label: r.name, kind: 'tag', local: false, remote: false, head: false, lane: -1, rev: `refs/tags/${r.name}` })
+      map.set(`t:${r.name}`, { key: `t:${r.name}`, label: r.name, kind: 'tag', local: false, remote: false, head: false, lane: -1, rev: `refs/tags/${r.name}`, revs: [`refs/tags/${r.name}`] })
       continue
     }
     const name = branchKey(r.name, r.kind === 'remote')
@@ -58,14 +61,17 @@ function toChips(refs: RefLabel[]): Chip[] {
       remote: false,
       head: false,
       lane: laneIndexFor(name),
-      rev: ''
+      rev: '',
+      revs: []
     }
     if (r.kind === 'local') {
       chip.local = true
       chip.head = r.name === headBranch
       chip.rev = `refs/heads/${r.name}`
+      chip.revs.push(chip.rev)
     } else {
       chip.remote = true
+      chip.revs.push(`refs/remotes/${r.name}`)
       if (!chip.local && !chip.rev) chip.rev = `refs/remotes/${r.name}`
     }
     map.set(key, chip)
@@ -75,17 +81,26 @@ function toChips(refs: RefLabel[]): Chip[] {
 }
 const rank = (c: Chip): number => (c.head ? 0 : c.kind === 'tag' ? 3 : c.local ? 1 : 2)
 
-/** 칩을 더블클릭하면 그 브랜치·태그에서 닿는 커밋만 보이게 거른다(사이드바 더블클릭과 같은 필터) */
+/** 칩을 더블클릭하면 그 브랜치·태그만 solo 한다(사이드바 더블클릭과 같다) */
 function filterByChip(chip: Chip): void {
   const label = chip.kind === 'branch' && !chip.local ? chip.rev.replace(/^refs\/remotes\//, '') : chip.label
-  useLogStore.getState().setFilter({ rev: chip.rev, label })
+  const kind = chip.kind === 'tag' ? 'tag' : chip.local ? 'branch' : 'remote'
+  useLogStore.getState().setFilter({ id: chip.rev, label, kind })
 }
 
-const RefChip = ({ chip, filterTitle }: { chip: Chip; filterTitle: string }): React.JSX.Element => (
+const RefChip = ({ chip, filterTitle }: { chip: Chip; filterTitle: string }): React.JSX.Element => {
+  // 숨긴 ref 는 흐리게 보인다(Hide 는 solo 가 없을 때만 적용된다)
+  // 로컬·리모트를 합친 칩은 둘 다 숨겼을 때만 완전히 흐리고, 하나만 숨겼으면 부분 표시(툴팁에 어느 쪽인지)
+  const hiddenCount = useLogStore((s) => (s.solo.length === 0 ? chip.revs.filter((r) => isHidden(s.hide, r)).length : 0))
+  const t = useT()
+  const hidden = hiddenCount > 0 && hiddenCount === chip.revs.length
+  const partial = hiddenCount > 0 && !hidden
+  const partNames = partial ? chip.revs.filter((r) => isHidden(useLogStore.getState().hide, r)).map((r) => r.replace(/^refs\/(heads|remotes|tags)\//, '')).join(', ') : ''
+  return (
   <span
-    className={`ref-chip ref-chip--${chip.kind}${chip.head ? ' is-head' : ''}`}
+    className={`ref-chip ref-chip--${chip.kind}${chip.head ? ' is-head' : ''}${hidden ? ' is-hidden' : ''}${partial ? ' is-hidden-part' : ''}`}
     style={chip.kind === 'branch' ? ({ '--chip': laneVar(chip.lane) } as React.CSSProperties) : undefined}
-    title={`${chip.label}\n${filterTitle}`}
+    title={`${chip.label}\n${filterTitle}${partial ? `\n${t('list.chipPartHidden', { names: partNames })}` : ''}`}
     onDoubleClick={(e) => {
       e.stopPropagation()
       filterByChip(chip)
@@ -102,7 +117,8 @@ const RefChip = ({ chip, filterTitle }: { chip: Chip; filterTitle: string }): Re
     {chip.kind === 'branch' && <ChipFlowDot label={chip.label} />}
     <span className="ref-chip__label">{chip.label}</span>
   </span>
-)
+  )
+}
 
 /** 검색 중 행 표시: 일치(match) / 불일치(dim) / 검색 아님(none) */
 type SearchMark = 'match' | 'current' | 'dim' | 'none'
@@ -259,10 +275,10 @@ function WipRow({ selected, showPr }: { selected: boolean; showPr: boolean }): R
 export function CommitList(): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
-  const { commits, hasMore, loading, error, selected, scrollRequest, filter, repoId: logRepoId, compareHash } = useLogStore()
+  const { commits, hasMore, loading, error, selected, scrollRequest, solo, repoId: logRepoId, compareHash } = useLogStore()
   const { loadMore } = useLogStore.getState()
   const search = useSearchStore()
-  // WIP 행: 변경이 있고 전체 그래프(ref 필터 없음)를 볼 때 맨 위에 둔다. 커밋 행은 그만큼 아래로 밀린다
+  // WIP 행: 변경이 있고 전체 그래프(Solo 없음 — Hide 는 기본 보기 기준이라 WIP 를 둔다)를 볼 때 맨 위에 둔다. 커밋 행은 그만큼 아래로 밀린다
   const wipDirtyNow = useWipStore((s) => wipDirty(s.status))
   const wipSelected = useWipStore((s) => s.selected)
   // PR 열: GitHub remote 가 있거나(번호가 있는 커밋만 칩이 보인다), remote 가 없어도 제목에 PR 번호가 보이는 커밋이 하나라도 있을 때
@@ -270,7 +286,7 @@ export function CommitList(): React.JSX.Element {
   const anyPr = useMemo(() => commits.some((c) => parsePrNumber(c.subject) !== null), [commits])
   const showPr = !!ghRef || anyPr
   const prBase = ghRef ? `https://github.com/${encodeURIComponent(ghRef.owner)}/${encodeURIComponent(ghRef.repo)}/pull/` : null
-  const showWip = wipDirtyNow && !filter && commits.length > 0
+  const showWip = wipDirtyNow && solo.length === 0 && commits.length > 0
   const wipOff = showWip ? ROW_H : 0
   const wipOn = showWip && wipSelected
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)

@@ -50,6 +50,8 @@ export interface UiPrefs {
   graphInitials?: boolean
   /** 사용자가 '이 버전 건너뛰기'를 고른 업데이트 버전(그 버전은 자동 알림에서 제외, 더 새 버전은 알림) */
   skippedUpdateVersion?: string
+  /** 저장소별 Solo / Hide 상태(저장소 id → 목록). 보기 상태일 뿐 저장소는 그대로다 */
+  refView?: Record<string, RepoViewPrefs>
   /** 활성 저장소를 자동으로 fetch 하는 주기(분). 0 이면 끔, 없으면 5분 */
   autoFetchMinutes?: number
   /** Jira 이슈 키로 인식할 프로젝트 키(없으면 일반 패턴 ABC-123 전체) */
@@ -71,6 +73,20 @@ export interface JiraSavedFilter {
 export interface JiraRecentIssue {
   key: string
   summary: string
+}
+
+/** Solo / Hide 대상 ref 하나. id 는 LogScope 항목 형식, label 은 화면 표시용 이름 */
+export interface ViewRef {
+  id: string
+  label: string
+  /** remote = 리모트 추적 브랜치, remoteAll = 리모트 전체, commit = 워크트리 HEAD 등 해시 */
+  kind: 'branch' | 'remote' | 'remoteAll' | 'tag' | 'stash' | 'commit'
+}
+
+/** 한 저장소의 Solo / Hide 상태 */
+export interface RepoViewPrefs {
+  solo?: ViewRef[]
+  hide?: ViewRef[]
 }
 
 /** 저장소 fetch 상태(main 이 관리하고 renderer 로 밀어준다) */
@@ -164,11 +180,25 @@ export interface Commit {
   refs: RefLabel[]
 }
 
+/**
+ * 그래프 보기 범위(Solo / Hide). 읽기 전용 — 저장소는 그대로이고 어떤 커밋을 보여 줄지만 정한다.
+ * 항목은 전체 ref 이름(refs/heads/x · refs/tags/x · refs/remotes/o/x), 40자 커밋 해시(스태시·워크트리),
+ * 또는 리모트 전체(refs/remotes/<name>/*) 중 하나다.
+ */
+export interface LogScope {
+  /** 이 ref 들에서 닿는 커밋만 보기. 비어 있지 않으면 hide 는 적용하지 않는다 */
+  solo?: string[]
+  /** 기본 보기(모든 브랜치·리모트·태그 + HEAD)에서 이 ref 들을 뺀다 */
+  hide?: string[]
+  /** hide 일 때 HEAD 를 시작점에 넣을지(현재 브랜치를 숨기면 false). 기본 true */
+  includeHead?: boolean
+}
+
 export interface LogQuery {
   skip: number
   count: number
-  /** 특정 ref 만 보기. 없으면 모든 브랜치·리모트·태그 + HEAD */
-  ref?: string
+  /** 보기 범위. 없으면 모든 브랜치·리모트·태그 + HEAD */
+  scope?: LogScope
 }
 
 export interface LogPage {

@@ -16,6 +16,7 @@ import type {
   LogQuery,
   LfsPathsRequest,
   RepoExtras,
+  LogScope,
   RefsSnapshot,
   Repo,
   SearchResult,
@@ -24,6 +25,7 @@ import type {
   WipDiffRequest,
   WipStatus
 } from '@shared/types'
+import { scopeKey } from '@shared/logScope'
 import { AbortError, type GitExecutor } from '../executors/GitExecutor'
 import { LocalExecutor } from '../executors/LocalExecutor'
 import { ProcessQueue } from '../executors/ProcessQueue'
@@ -420,10 +422,11 @@ export class RepoService {
    * 메시지·작성자·해시 검색. 전체 이력을 훑을 수 있어 비싸므로 requestId 로 취소할 수 있게 하고,
    * renderer 는 새 질의를 보낼 때 이전 검색을 취소한다(큐 슬롯을 계속 쥐고 스크롤을 막지 않게).
    */
-  search(repoId: string, query: string, ref?: string, requestId?: string): Promise<SearchResult> {
+  search(repoId: string, query: string, scope?: LogScope, requestId?: string): Promise<SearchResult> {
+    git.scopeArgs(scope)
     const { repo, rt } = this.resolve(repoId)
     return this.withSignal(requestId, (signal) =>
-      rt.queue.run(() => git.search(rt.exec, repo.path, query, ref, { signal }), { signal })
+      rt.queue.run(() => git.search(rt.exec, repo.path, query, scope, { signal }), { signal })
     )
   }
 
@@ -431,10 +434,10 @@ export class RepoService {
    * 커밋 활동 미니맵 데이터. 전체 이력을 한 번 훑으므로 ref 시그니처(HEAD·모든 ref 의 해시 요약)가 같으면
    * 캐시를 돌려주고, 같은 키의 진행 중 요청은 공유한다. 취소 가능(큐 슬롯을 오래 쥐지 않게 renderer 가 취소한다).
    */
-  activity(repoId: string, ref: string | undefined, requestId?: string): Promise<CommitActivity> {
-    if (ref !== undefined && typeof ref !== 'string') throw new Error('잘못된 ref 입니다')
+  activity(repoId: string, scope: LogScope | undefined, requestId?: string): Promise<CommitActivity> {
+    git.scopeArgs(scope)
     const { repo, rt } = this.resolve(repoId)
-    const key = `${repoId}\0${ref ?? ''}`
+    const key = `${repoId}\0${scopeKey(scope)}`
     return this.shared(`activity\0${key}`, requestId, async (signal) => {
       const opts = { signal }
       await this.afterFirstPage(repoId)
@@ -442,7 +445,7 @@ export class RepoService {
       const sig = this.knownSigs.get(repoId) ?? (await this.sharedSignature(repoId, signal))
       const hit = this.activityCache.get(key)
       if (hit && hit.sig === sig) return hit.value
-      const value = await rt.queue.run(() => commitActivity(rt.exec, repo.path, ref, opts), opts)
+      const value = await rt.queue.run(() => commitActivity(rt.exec, repo.path, scope, opts), opts)
       this.activityCache.delete(key)
       this.activityCache.set(key, { sig, value })
       // 저장소·필터를 오가도 메모리가 쌓이지 않게 오래된 것부터 버린다
@@ -594,10 +597,11 @@ export class RepoService {
    * 커서는 활성 저장소 하나에만 유지한다(다른 저장소의 커서는 이 시점에 닫아 메모리·프로세스를 돌려준다).
    */
   log(repoId: string, query: LogQuery, requestId?: string): Promise<LogPage> {
+    git.scopeArgs(query.scope)
     const { repo, rt } = this.resolve(repoId)
     const count = Math.min(Math.max(1, Math.floor(query.count)), 5000)
     const skip = Math.max(0, Math.floor(query.skip))
-    const key = `${repoId}\0${query.ref ?? ''}`
+    const key = `${repoId}\0${scopeKey(query.scope)}`
 
     for (const [k, c] of this.cursors) if (k !== key) this.retire(k, c)
     if (skip === 0) this.anchors.delete(key)
@@ -611,7 +615,7 @@ export class RepoService {
       const anchor = this.anchors.get(key)
       const start = anchor && anchor.position === skip && skip > 0 ? skip - 1 : skip
       if (start !== skip) verify = anchor!.hash
-      cursor = new LogCursor(rt.exec, repo.path, (s) => git.logArgs(query.ref, s), start)
+      cursor = new LogCursor(rt.exec, repo.path, (s) => git.logArgs(query.scope, s), start)
       this.cursors.set(key, cursor)
     }
     const active = cursor

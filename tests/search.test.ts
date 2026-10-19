@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
 import { refs, search } from '../src/main/git/commands'
 
+const solo = (...refs: string[]) => ({ solo: refs })
+
 const exec = new LocalExecutor()
 let root: string
 let repo: string
@@ -71,9 +73,9 @@ describe('search', () => {
     expect(r.hashes).toEqual(log.filter((h) => r.hashes.includes(h)))
   })
 
-  it('ref 를 주면 그 ref 이력에서만 찾는다', async () => {
-    expect((await search(exec, repo, 'side', 'main')).hashes).toEqual([])
-    expect((await search(exec, repo, 'side', 'side')).hashes).toEqual([hashes[3]])
+  it('solo 를 주면 그 ref 이력에서만 찾는다', async () => {
+    expect((await search(exec, repo, 'side', solo('refs/heads/main'))).hashes).toEqual([])
+    expect((await search(exec, repo, 'side', solo('refs/heads/side'))).hashes).toEqual([hashes[3]])
   })
 
   it('해시 prefix 는 맨 앞에 온다', async () => {
@@ -90,8 +92,8 @@ describe('search', () => {
 
   it('ref 필터 밖의 커밋은 해시로 찾아도 빠진다(그래프에서 찾아갈 수 없으므로)', async () => {
     const sideOnly = hashes[3]!
-    expect((await search(exec, repo, sideOnly.slice(0, 12), 'refs/heads/main')).hashes).not.toContain(sideOnly)
-    expect((await search(exec, repo, sideOnly.slice(0, 12), 'refs/heads/side')).hashes[0]).toBe(sideOnly)
+    expect((await search(exec, repo, sideOnly.slice(0, 12), solo('refs/heads/main'))).hashes).not.toContain(sideOnly)
+    expect((await search(exec, repo, sideOnly.slice(0, 12), solo('refs/heads/side'))).hashes[0]).toBe(sideOnly)
   })
 
   it('스태시처럼 어느 브랜치에서도 닿지 않는 커밋은 해시로 찾아도 빠진다', async () => {
@@ -104,7 +106,7 @@ describe('search', () => {
     const stash = git(dir, 'alice', 'rev-parse', 'refs/stash')
     expect((await search(exec, dir, stash.slice(0, 10), undefined)).hashes).not.toContain(stash)
     // 그 스태시만 보는 필터에서는 찾아진다
-    expect((await search(exec, dir, stash.slice(0, 10), stash)).hashes[0]).toBe(stash)
+    expect((await search(exec, dir, stash.slice(0, 10), solo(stash))).hashes[0]).toBe(stash)
   })
 
   it('커밋이 없는 저장소는 빈 결과다', async () => {

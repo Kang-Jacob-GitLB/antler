@@ -71,7 +71,7 @@ export const useSearchStore = create<SearchState>((set, get) => {
       // 이전 결과는 바로 비운다 — 새 질의에 옛 일치 표시가 남지 않게
       set({ ...EMPTY, ranQuery: query, loading: true, seq, pendingRequest: requestId })
       try {
-        const res = await api.invoke('git:search', repoId, query, useLogStore.getState().filter?.rev, requestId)
+        const res = await api.invoke('git:search', repoId, query, useLogStore.getState().scope, requestId)
         if (get().seq !== seq) return
         set({ hits: res.hashes, hitSet: new Set(res.hashes), truncated: res.truncated, cursor: -1, loading: false, pendingRequest: null })
         if (res.hashes.length) get().step(1)

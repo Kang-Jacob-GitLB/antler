@@ -130,6 +130,25 @@ export const IconFunnel = (p: P) => (
     <path d="M2.5 3h11l-4.2 5v4.5l-2.6 1V8z" />
   </Svg>
 )
+export const IconEye = (p: P) => (
+  <Svg {...p}>
+    <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" />
+    <circle cx="8" cy="8" r="1.8" />
+  </Svg>
+)
+export const IconEyeOff = (p: P) => (
+  <Svg {...p}>
+    <path d="M6.2 3.8A6.6 6.6 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a11 11 0 0 1-2 2.5M9.7 12.2A6.6 6.6 0 0 1 8 12.5C4 12.5 1.5 8 1.5 8a11 11 0 0 1 2.8-3.2" />
+    <path d="M2.5 2.5l11 11" />
+  </Svg>
+)
+/** Solo: 과녁 — 이 ref 하나에 집중해서 본다 */
+export const IconSolo = (p: P) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5.5" />
+    <circle cx="8" cy="8" r="1.7" fill="currentColor" />
+  </Svg>
+)
 export const IconCheck = (p: P) => (
   <Svg {...p}>
     <path d="M3 8.5l3.2 3L13 4.5" />

@@ -1,7 +1,9 @@
 import { create } from 'zustand'
-import type { Commit } from '@shared/types'
+import { scopeKey } from '@shared/logScope'
+import type { Commit, LogScope, ViewRef } from '@shared/types'
 import { graphEngine } from '../graph/graphEngine'
 import { api, errorMessage, isAbort, isStale, newRequestId } from '../lib/api'
+import { buildScope, canHide, EMPTY_VIEW, inList, pruneView, sanitizeView, toggled, unhidden, type RefView } from '../lib/refView'
 import { useAppStore } from './appStore'
 import { useCompareStore } from './compareStore'
 import { useDetailStore } from './detailStore'
@@ -15,6 +17,12 @@ const REVEAL_PAGE_SIZE = 5000
 /** 부드러운 다시 읽기에서 한 번에 읽는 최대 커밋 수 */
 const SOFT_RELOAD_MAX = 5000
 let revealToken = 0
+/**
+ * 저장된 숨김만 있는 저장소를 열 때 첫 읽기를 ref 스냅샷 뒤로 미룬다 — 현재 브랜치(HEAD)를 숨겼는지 알아야 범위를 정할 수 있다.
+ * 스냅샷이 오지 않아도 AWAIT_REFS_MS 뒤에는 읽는다.
+ */
+let awaitingRefs = false
+const AWAIT_REFS_MS = 3000
 /** 다시 읽은 첫 페이지에서 선택을 이어 갈 커밋 */
 let keepAfterReload: string | null = null
 function firstSelection(commits: Commit[]): number {
@@ -23,17 +31,41 @@ function firstSelection(commits: Commit[]): number {
   return i >= 0 ? i : 0
 }
 
-/** 그래프를 특정 ref 기준으로만 보는 필터 */
-export interface LogFilter {
-  /** git 에 넘길 rev(refs/heads/x, 커밋 해시, stash@{0}) */
-  rev: string
-  /** 화면 표시용 이름 */
-  label: string
+/** 저장소별 Solo / Hide 를 설정에 기억할 때 남기는 저장소 수 상한(오래된 것부터 버린다) */
+const VIEW_PREFS_MAX_REPOS = 50
+
+/** 설정에 저장된 이 저장소의 Solo / Hide */
+function savedView(repoId: string | null): RefView {
+  const saved = repoId ? useAppStore.getState().config?.ui.refView?.[repoId] : undefined
+  return saved ? sanitizeView(saved) : EMPTY_VIEW
+}
+
+function persistView(repoId: string | null, view: RefView): void {
+  if (!repoId) return
+  const prev = useAppStore.getState().config?.ui.refView ?? {}
+  const { [repoId]: _old, ...others } = prev
+  const empty = !view.solo.length && !view.hide.length
+  const next = empty ? others : { ...others, [repoId]: { ...(view.solo.length ? { solo: view.solo } : {}), ...(view.hide.length ? { hide: view.hide } : {}) } }
+  const keys = Object.keys(next)
+  for (const k of keys.slice(0, Math.max(0, keys.length - VIEW_PREFS_MAX_REPOS))) delete next[k]
+  void useAppStore.getState().setUi({ refView: next })
 }
 
 interface LogState {
   repoId: string | null
-  filter: LogFilter | null
+  /** Solo: 이 ref 들에서 닿는 커밋만 본다. 비어 있지 않으면 hide 는 적용하지 않는다(기억만 해 둔다) */
+  solo: ViewRef[]
+  /** Hide: 기본 보기에서 이 ref 들을 뺀다 */
+  hide: ViewRef[]
+  /** git 에 넘기는 보기 범위(solo/hide 와 현재 브랜치로 계산). 기본 보기면 undefined */
+  scope: LogScope | undefined
+  /** scope 의 정규 키. 범위가 바뀌었는지 비교하는 effect 의존성으로 쓴다 */
+  scopeSig: string
+  /**
+   * 사이드바에서 ref 를 눌러 찾아가느라 Solo / Hide 를 잠시 푼 경우, 풀기 전의 보기(설정에는 그대로 남아 있다).
+   * 툴바의 "이전 보기로"가 이걸 되살린다. 사용자가 보기를 직접 바꾸면 사라진다
+   */
+  restoreView: RefView | null
   commits: Commit[]
   /** hash → index */
   index: Map<string, number>
@@ -53,9 +85,31 @@ interface LogState {
   /** 목록이 이 행으로 스크롤해야 함을 알리는 요청(같은 값 재요청도 감지하도록 seq 포함) */
   scrollRequest: { index: number; seq: number } | null
 
-  /** keepHash: 첫 페이지에 그 커밋이 있으면 선택을 유지한다(외부 변경으로 다시 읽을 때) */
-  open(repoId: string | null, filter?: LogFilter | null, keepHash?: string): void
-  setFilter(filter: LogFilter | null): void
+  /**
+   * keepHash: 첫 페이지에 그 커밋이 있으면 선택을 유지한다(외부 변경으로 다시 읽을 때).
+   * view 를 생략하면 설정에 기억된 그 저장소의 Solo / Hide 로 연다.
+   */
+  open(repoId: string | null, view?: RefView, keepHash?: string): void
+  /** Solo / Hide 를 통째로 바꾸고 다시 읽는다(설정에도 기억한다) */
+  setView(view: RefView): void
+  /** ref 하나만 solo 한다(더블클릭). null 이면 Solo / Hide 를 모두 푼다 */
+  setFilter(ref: ViewRef | null): void
+  toggleSolo(ref: ViewRef): void
+  toggleHide(ref: ViewRef): void
+  clearSolo(): void
+  clearHide(): void
+  /**
+   * 어떤 ref 의 커밋(hashes)을 찾아가기 전에 보기를 일시 해제한다: solo 는 풀고, 숨김은 그 ref(id)만 푼다.
+   * 그 ref 가 solo 에 있거나 커밋이 이미 목록에 보이면 아무것도 하지 않는다. 설정은 건드리지 않고 restoreView 에 원래 보기를 남긴다.
+   */
+  releaseFor(id?: string, hashes?: string[]): void
+  /** 일시 해제하기 전의 보기로 되돌린다 */
+  restore(): void
+  /**
+   * 사이드바 스냅샷이 바뀌었을 때: 사라진 ref 를 빼고, 현재 브랜치 숨김에 따라 범위를 다시 계산한다.
+   * 사용자 조작이 아니므로 화면(GitHub 화면·선택·비교·스크롤)은 그대로 두고 목록만 조용히 다시 읽는다.
+   */
+  syncView(): void
   reload(keepSelection?: boolean): void
   /**
    * 외부 변경(커밋·fetch) 반영용 부드러운 다시 읽기: 목록을 비우지 않고 첫 구간을 새로 읽어 한 번에 바꾼다.
@@ -77,7 +131,11 @@ interface LogState {
 
 export const useLogStore = create<LogState>((set, get) => ({
   repoId: null,
-  filter: null,
+  solo: [],
+  hide: [],
+  scope: undefined,
+  scopeSig: '',
+  restoreView: null,
   commits: [],
   index: new Map(),
   hasMore: false,
@@ -91,7 +149,10 @@ export const useLogStore = create<LogState>((set, get) => ({
   pendingRequest: null,
   scrollRequest: null,
 
-  open(repoId, filter = null, keepHash) {
+  open(repoId, view, keepHash) {
+    const { solo, hide } = view ?? savedView(repoId)
+    const scope = buildScope({ solo, hide }, useAppStore.getState().head?.branch ?? null)
+    awaitingRefs = !!repoId && !useAppStore.getState().refs && solo.length === 0 && hide.length > 0
     keepAfterReload = keepHash ?? null
     useCompareStore.getState().clear()
     const pending = get().pendingRequest
@@ -103,7 +164,11 @@ export const useLogStore = create<LogState>((set, get) => ({
     // 이전 저장소의 커밋은 즉시 버린다(비활성 저장소 메모리 해제)
     set({
       repoId,
-      filter,
+      solo,
+      hide,
+      scope,
+      scopeSig: scopeKey(scope),
+      restoreView: view === undefined ? null : get().restoreView,
       commits: [],
       index: new Map(),
       hasMore: repoId !== null,
@@ -117,29 +182,107 @@ export const useLogStore = create<LogState>((set, get) => ({
       pendingRequest: null,
       scrollRequest: null
     })
-    if (repoId) void get().loadMore()
+    if (!repoId) return
+    if (awaitingRefs) {
+      setTimeout(() => {
+        if (awaitingRefs && get().generation === generation) {
+          awaitingRefs = false
+          void get().loadMore()
+        }
+      }, AWAIT_REFS_MS)
+      return
+    }
+    void get().loadMore()
   },
 
-  setFilter(filter) {
-    // ref 필터는 그래프에 적용되므로 GitHub 화면을 보고 있었다면 닫아 그래프가 보이게 한다
+  setView(input) {
+    // Solo / Hide 는 그래프에 적용되므로 GitHub 화면을 보고 있었다면 닫아 그래프가 보이게 한다
     closeGithubView()
-    get().open(get().repoId, filter)
+    // 형식이 맞지 않는 항목은 저장하지 않는다
+    const view = sanitizeView(input)
+    const s = get()
+    set({ restoreView: null })
+    persistView(s.repoId, view)
+    s.open(s.repoId, view)
+  },
+
+  setFilter(ref) {
+    const { hide } = get()
+    get().setView(ref ? { solo: [ref], hide } : EMPTY_VIEW)
+  },
+
+  toggleSolo(ref) {
+    const { solo, hide } = get()
+    get().setView({ solo: toggled(solo, ref), hide })
+  },
+
+  toggleHide(ref) {
+    if (!canHide(ref)) return
+    const { solo, hide } = get()
+    get().setView({ solo, hide: toggled(hide, ref) })
+  },
+
+  clearSolo() {
+    if (get().solo.length) get().setView({ solo: [], hide: get().hide })
+  },
+
+  clearHide() {
+    if (get().hide.length) get().setView({ solo: get().solo, hide: [] })
+  },
+
+  releaseFor(id, hashes = []) {
+    const s = get()
+    // 찾는 커밋이 이미 현재 범위에서 보이거나 그 ref 가 solo 에 들어 있으면 보기를 건드리지 않는다
+    if (hashes.length && hashes.every((h) => s.index.has(h))) return
+    if (id && inList(s.solo, id)) return
+    const nextHide = id ? unhidden(s.hide, id) : s.hide
+    if (!s.solo.length && nextHide === s.hide) return
+    const prev = s.restoreView ?? { solo: s.solo, hide: s.hide }
+    s.open(s.repoId, { solo: [], hide: [...nextHide] })
+    set({ restoreView: prev })
+  },
+
+  restore() {
+    const r = get().restoreView
+    if (r) get().setView(r)
+  },
+
+  syncView() {
+    const s = get()
+    const refs = useAppStore.getState().refs
+    if (!s.repoId || !refs) return
+    const cur: RefView = { solo: s.solo, hide: s.hide }
+    const pruned = pruneView(cur, refs)
+    const prunedChanged = pruned !== cur
+    const scope = buildScope(pruned, refs.head.branch)
+    const scopeSigNext = scopeKey(scope)
+    const waiting = awaitingRefs
+    if (!waiting && !prunedChanged && scopeSigNext === s.scopeSig) return
+    awaitingRefs = false
+    set({ solo: pruned.solo, hide: pruned.hide, scope, scopeSig: scopeSigNext })
+    if (prunedChanged) {
+      // 일시 해제 중이면 설정에는 원래 보기가 남아 있으므로 덮어쓰지 않는다
+      if (s.restoreView) set({ restoreView: pruneView(s.restoreView, refs) })
+      else persistView(s.repoId, pruned)
+    }
+    if (waiting) void get().loadMore()
+    else void get().softReload()
   },
 
   reload(keepSelection = false) {
     const s = get()
     const keep = keepSelection && s.selected >= 0 ? s.commits[s.selected]?.hash : undefined
-    get().open(s.repoId, s.filter, keep)
+    get().open(s.repoId, { solo: s.solo, hide: s.hide }, keep)
   },
 
   async loadMore(count = PAGE_SIZE) {
-    const { repoId, loading, hasMore, commits, generation, filter } = get()
-    if (!repoId || loading || !hasMore) return
+    const { repoId, loading, hasMore, commits, generation, scope } = get()
+    if (!repoId || loading || !hasMore || awaitingRefs) return
     const requestId = newRequestId('log')
     set({ loading: true, pendingRequest: requestId })
     try {
       const start = commits.length
-      const page = await api.invoke('git:log', repoId, { skip: start, count, ref: filter?.rev }, requestId)
+      const page = await api.invoke('git:log', repoId, { skip: start, count, scope }, requestId)
       if (get().generation !== generation) return
       graphEngine.append(generation, start, page.commits)
       set((s) => {
@@ -181,7 +324,7 @@ export const useLogStore = create<LogState>((set, get) => ({
     const requestId = newRequestId('log')
     set({ loading: true, pendingRequest: requestId })
     try {
-      const page = await api.invoke('git:log', s.repoId, { skip: 0, count, ref: s.filter?.rev }, requestId)
+      const page = await api.invoke('git:log', s.repoId, { skip: 0, count, scope: s.scope }, requestId)
       if (get().generation !== myGen) return
       const generation = myGen + 1
       graphEngine.reset(generation)

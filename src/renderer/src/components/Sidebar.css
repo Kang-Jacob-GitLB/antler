@@ -206,8 +206,22 @@
   transition: opacity var(--dur-fast) var(--ease);
 }
 .side-item:hover .side-item__action,
-.side-item:focus-within .side-item__action {
+.side-item:focus-within .side-item__action,
+.side-item__action.is-on {
   opacity: 1;
+}
+.side-item__action.is-on {
+  color: var(--accent-text);
+}
+.side-item__action:disabled {
+  cursor: default;
+}
+/* 숨긴(Hide) ref 행 */
+.side-item.is-hidden {
+  opacity: 0.5;
+}
+.side-item.is-hidden .side-item__label {
+  text-decoration: line-through;
 }
 .side-item__action:hover {
   background: var(--bg-base);

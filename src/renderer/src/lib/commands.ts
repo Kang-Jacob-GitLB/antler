@@ -48,7 +48,7 @@ export function readCommandCtx(): CommandCtx {
   return {
     hasRepo: !!app.activeRepoId,
     github: !!app.activeRepoId && !!useGithubStore.getState().ref,
-    filtered: !!useLogStore.getState().filter,
+    filtered: useLogStore.getState().scopeSig !== '',
     theme: ui?.theme ?? 'system',
     locale: ui?.locale ?? 'ko',
     diffMode: ui?.diffMode ?? 'unified',

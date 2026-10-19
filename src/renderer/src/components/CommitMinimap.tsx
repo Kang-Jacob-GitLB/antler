@@ -35,7 +35,8 @@ export function bucketRangeLabel(t: number, sec: number, locale: Locale): string
 /** 저장소·필터가 바뀌거나 목록을 다시 읽을 때마다(generation) 활동 데이터를 새로 받는다. 이전 요청은 취소한다 */
 function useActivity(enabled: boolean): CommitActivity | null {
   const repoId = useLogStore((s) => s.repoId)
-  const rev = useLogStore((s) => s.filter?.rev)
+  const scope = useLogStore((s) => s.scope)
+  const scopeSig = useLogStore((s) => s.scopeSig)
   const generation = useLogStore((s) => s.generation)
   const [data, setData] = useState<{ repoId: string; value: CommitActivity } | null>(null)
 
@@ -45,7 +46,7 @@ function useActivity(enabled: boolean): CommitActivity | null {
     let dead = false
     const timer = setTimeout(() => {
       api
-        .invoke('git:activity', repoId, rev, requestId)
+        .invoke('git:activity', repoId, scope, requestId)
         .then((value) => {
           if (!dead) setData({ repoId, value })
         })
@@ -58,7 +59,7 @@ function useActivity(enabled: boolean): CommitActivity | null {
       clearTimeout(timer)
       void api.invoke('req:cancel', requestId).catch(() => {})
     }
-  }, [enabled, repoId, rev, generation])
+  }, [enabled, repoId, scopeSig, generation])
 
   // 다른 저장소의 데이터는 보여 주지 않는다(같은 저장소의 필터 전환 중에는 이전 그림을 유지해 깜박이지 않게)
   return data && data.repoId === repoId ? data.value : null
