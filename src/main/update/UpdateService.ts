@@ -1,8 +1,9 @@
 // 앱 업데이트 오케스트레이션. electron 에 직접 의존하지 않고(주입) 상태 기계·정책만 가진다.
 //  - auto (Windows NSIS · Linux AppImage): electron-updater 백엔드가 내려받고 quitAndInstall
 //  - manual-dmg (macOS) / manual-file (Windows portable · Linux deb): manual.ts 가 GitHub Releases 에서 검증하며 내려받고 파일을 연다
-import type { UpdateDismissAction, UpdateMode, UpdateState } from '@shared/types'
+import type { ReleaseNotes, UpdateDismissAction, UpdateMode, UpdateState } from '@shared/types'
 import { findManualUpdate, downloadVerified, type ManualUpdate } from './manual'
+import { fetchReleaseNotes } from './releaseNotes'
 import { UpdatePolicy, detectInstallKind, isOfferable, modeFor, parseDismiss, releaseNotesUrl, sanitizeError, verifyFile, type InstallKind, type InstallProbe } from './logic'
 
 /** electron-updater 를 감싼 최소 인터페이스(autoBackend.ts 가 구현, 테스트는 모의) */
@@ -91,6 +92,20 @@ export class UpdateService {
 
   get(): UpdateState {
     return this.state
+  }
+
+  private notes: { at: number; value: Promise<ReleaseNotes> } | null = null
+
+  /** 현재 버전의 릴리스 노트. 성공한 결과는 10분 동안 재사용하고, 실패하면 다음 요청 때 다시 가져온다 */
+  releaseNotes(): Promise<ReleaseNotes> {
+    if (this.notes && Date.now() - this.notes.at < 10 * 60 * 1000) return this.notes.value
+    const value = fetchReleaseNotes(this.d.fetch ?? fetch, this.d.currentVersion, AbortSignal.timeout(15_000))
+    const entry = { at: Date.now(), value }
+    this.notes = entry
+    value.catch(() => {
+      if (this.notes === entry) this.notes = null
+    })
+    return value
   }
 
   private set(s: UpdateState): UpdateState {

@@ -1,16 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 1024 1024">
   <!--
-    16·24·32px 용 단순판. 픽셀 격자에 맞춘 굵은 선과 큰 노드로, 작은 크기에서도 Y 자 뿔과 앰버 끝점이 보이게 한다.
-    색은 icon.svg 와 같다.
+    16·24·32px 용. icon.svg 와 같은 모양(한쪽에 세 가닥)을 더 굵은 선·큰 노드로 그려 작은 크기에서도 뭉개지지 않게 한다.
+    좌표는 icon.svg 와 같은 1024 격자다. 색은 icon.svg 와 같다.
   -->
-  <rect x="0.5" y="0.5" width="31" height="31" rx="7" fill="#14110F"/>
-  <g fill="none" stroke="#EDE6D8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M16 27 V17"/>
-    <path d="M16 17 C16 13 11 12 9.5 8"/>
-    <path d="M16 17 C16 13 21 12 22.5 8"/>
+  <rect x="16" y="16" width="992" height="992" rx="224" fill="#14110F"/>
+  <g fill="none" stroke="#EDE6D8" stroke-width="80" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M512 880 V620"/>
+    <path d="M512 620 C470 540 300 520 220 300"/>
+    <path d="M430 547 C420 470 410 400 420 300"/>
+    <path d="M338 478 C320 420 300 360 310 260"/>
+    <path d="M512 620 C554 540 724 520 804 300"/>
+    <path d="M594 547 C604 470 614 400 604 300"/>
+    <path d="M686 478 C704 420 724 360 714 260"/>
   </g>
   <g fill="#D9A441">
-    <circle cx="9" cy="7" r="3"/>
-    <circle cx="23" cy="7" r="3"/>
+    <circle cx="210" cy="272" r="54"/>
+    <circle cx="814" cy="272" r="54"/>
+    <circle cx="311" cy="224" r="54"/>
+    <circle cx="713" cy="224" r="54"/>
+    <circle cx="421" cy="270" r="54"/>
+    <circle cx="603" cy="270" r="54"/>
   </g>
 </svg>

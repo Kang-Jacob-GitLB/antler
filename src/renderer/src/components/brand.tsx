@@ -1,21 +1,25 @@
 // 브랜드 심볼과 빈 화면 일러스트. 갈라진 사슴뿔 가지 = git 레인, 가지 끝 점 = 앰버 노드.
 
-/** 앱 로고 마크(툴바용). resources/icon.svg 와 같은 형태를 단순화했다. */
+/** 앱 로고 마크(툴바용). resources/icon.svg 와 같은 모양(한쪽에 세 가닥)·같은 좌표를 바탕 없이 잘라 쓴다. */
 export function AntlerMark({ size = 20 }: { size?: number }): React.JSX.Element {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <g stroke="var(--text-primary)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 22V13" />
-        <path d="M12 13C12 9.5 8.5 8.5 7 5" />
-        <path d="M12 13C12 9.5 15.5 8.5 17 5" />
-        <path d="M8.4 7.6L4.6 7" />
-        <path d="M15.6 7.6L19.4 7" />
+    <svg width={size} height={size} viewBox="140 160 744 744" fill="none" aria-hidden="true">
+      <g stroke="var(--text-primary)" strokeWidth={64} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M512 880 V620" />
+        <path d="M512 620 C470 540 300 520 220 300" />
+        <path d="M430 547 C420 470 410 400 420 300" />
+        <path d="M338 478 C320 420 300 360 310 260" />
+        <path d="M512 620 C554 540 724 520 804 300" />
+        <path d="M594 547 C604 470 614 400 604 300" />
+        <path d="M686 478 C704 420 724 360 714 260" />
       </g>
       <g fill="var(--accent)">
-        <circle cx="7" cy="4.2" r="1.9" />
-        <circle cx="17" cy="4.2" r="1.9" />
-        <circle cx="3.8" cy="6.9" r="1.6" />
-        <circle cx="20.2" cy="6.9" r="1.6" />
+        <circle cx="212" cy="278" r="52" />
+        <circle cx="812" cy="278" r="52" />
+        <circle cx="311" cy="232" r="52" />
+        <circle cx="713" cy="232" r="52" />
+        <circle cx="421" cy="276" r="52" />
+        <circle cx="603" cy="276" r="52" />
       </g>
     </svg>
   )

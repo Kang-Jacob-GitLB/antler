@@ -1,0 +1,49 @@
+/* 릴리스 노트 팝업: 틀은 단축키 목록(.shortcuts)과 같고, 본문은 PR·이슈 본문(.gh-body) 모양 */
+.notes__heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.notes__version {
+  margin-left: var(--space-2);
+  color: var(--accent-text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.notes__date {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.notes__body {
+  outline: none;
+  padding-top: var(--space-3);
+}
+.notes__state {
+  padding: var(--space-3) 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+.notes__state.is-error {
+  color: var(--removed-text);
+}
+.notes__fallback {
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+.notes__foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.notes__foot .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
