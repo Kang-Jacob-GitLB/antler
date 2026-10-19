@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeTheme, safeStorage, session, shell } from 'electron'
 import { AVATAR_CACHE_FILE } from './github/avatars'
+import { createDevFakeFetch } from './github/devFake'
 import { GitHubService } from './github/service'
 import { createGhCli } from './github/ghCli'
 import { TokenStore } from './github/tokenStore'
@@ -115,12 +117,20 @@ app.whenReady().then(() => {
     // 로컬 git 의 core.hooksPath 로 쓸 앱 소유의 빈 디렉터리(Windows 에서 /dev/null 은 드라이브 루트의 \dev\null 로 풀린다)
     join(app.getPath('userData'), 'no-hooks')
   )
+  // 화면 검증용 가짜 GitHub: 패키징되지 않은 빌드에서만 켜진다. 토큰은 메모리에만 두고, 저장소 경로도 존재하지 않는 임시 경로라
+  // 실제 userData 의 토큰 파일은 읽지도(load) 지우지도(clear) 않는다
+  const devFake = !app.isPackaged ? process.env['ANTLER_GH_FAKE'] : undefined
+  const ghStore = devFake
+    ? new TokenStore(join(tmpdir(), `antler-gh-fake-${process.pid}`), { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => '' })
+    : new TokenStore(app.getPath('userData'), safeStorage)
+  if (devFake && process.env['ANTLER_GH_FAKE_SIGNEDOUT'] !== '1') ghStore.save('ghp_devfaketoken', 'pat')
   gh = new GitHubService({
     config,
     repos,
-    store: new TokenStore(app.getPath('userData'), safeStorage),
+    store: ghStore,
+    ...(devFake ? { fetchImpl: createDevFakeFetch(devFake) } : {}),
     cli: createGhCli(),
-    avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE)
+    ...(devFake ? {} : { avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE) })
   })
   jira = new JiraService({
     store: new TokenStore(app.getPath('userData'), safeStorage, process.platform, { token: JIRA_TOKEN_FILE, meta: JIRA_META_FILE }),

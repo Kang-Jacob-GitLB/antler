@@ -10,6 +10,7 @@ import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { isHidden } from '../lib/refView'
 import { useAppStore } from '../stores/appStore'
 import { useGithubStore } from '../stores/githubStore'
+import { scopeOf, useVisibleChecks } from '../stores/checksStore'
 import { pendingAuthors, requestAvatars, useAvatarStore } from '../stores/avatarStore'
 import { PREFETCH, useLogStore } from '../stores/logStore'
 import { useSearchStore } from '../stores/searchStore'
@@ -18,6 +19,7 @@ import { useWipStore, wipDirty } from '../stores/wipStore'
 import { GraphCanvas, graphWidth, useGraphVersion } from './GraphCanvas'
 import { AuthorAvatar } from './AuthorAvatar'
 import { AvatarBlockNotice } from './AvatarBlockNotice'
+import { CommitCheck } from './github/CommitCheck'
 import { CommitMinimap } from './CommitMinimap'
 import { ChipFlowDot } from './FlowBadge'
 import { IconCloud, IconMonitor, IconTag } from './icons'
@@ -193,6 +195,7 @@ const Row = memo(function Row({
       <div className="cell cell--graph" />
       <div className="cell cell--message">
         <span className="commit-subject">{commit.subject}</span>
+        <CommitCheck hash={commit.hash} />
       </div>
       {showPr && <PrCell n={pr} base={prBase} label={pr === null ? '' : t('pr.open', { n: pr })} />}
       <div className="cell cell--author">
@@ -319,6 +322,9 @@ export function CommitList(): React.JSX.Element {
     if (!logRepoId) return
     requestAvatars(logRepoId, pendingAuthors(commits, firstIndex, lastIndex))
   }, [logRepoId, commits, firstIndex, lastIndex, avatarEpoch])
+
+  // GitHub 저장소면 보이는 커밋의 체크(Actions) 상태도 일괄로 묻는다(로그인했을 때만 표시된다)
+  useVisibleChecks(logRepoId, scopeOf(ghRef), !!ghRef, commits, firstIndex, lastIndex)
 
   useEffect(() => {
     if (selected >= 0) virtualizer.scrollToIndex(selected, { align: 'auto' })

@@ -57,10 +57,25 @@ export function ReviewBadge({ state }: { state?: GhReviewState }): React.JSX.Ele
   )
 }
 
-export function ChecksBadge({ state }: { state?: GhCheckState }): React.JSX.Element | null {
+/** 체크 상태 아이콘(성공 ✓ · 실패 ✕ · 진행 중 ● · 중립 –). 커밋 목록·상세·PR·Actions 가 같은 모양을 쓴다. 상태 없음(none)은 그리지 않는다 */
+export function CheckIcon({ state, size = 12, title }: { state?: GhCheckState | undefined; size?: number; title?: string }): React.JSX.Element | null {
   const t = useT()
   if (!state || state === 'none') return null
-  return <span className={`gh-dot gh-dot--${state}`} title={t(`gh.checks.${state}`)} aria-label={t(`gh.checks.${state}`)} />
+  const label = title ?? t(`gh.checks.${state}`)
+  return (
+    <span className={`gh-check gh-check--${state}`} title={label} aria-label={label} role="img">
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        {state === 'success' && <path d="M3 8.5l3.2 3.2L13 4.8" />}
+        {state === 'failure' && <path d="M4 4l8 8M12 4l-8 8" />}
+        {state === 'pending' && <circle cx="8" cy="8" r="3.6" fill="currentColor" stroke="none" />}
+        {state === 'neutral' && <path d="M4 8h8" />}
+      </svg>
+    </span>
+  )
+}
+
+export function ChecksBadge({ state }: { state?: GhCheckState }): React.JSX.Element | null {
+  return <CheckIcon state={state} />
 }
 
 /** GitHub 라벨: 라벨 색은 GitHub 데이터이므로 테마 토큰과 섞어 채도를 눌러 쓴다 */

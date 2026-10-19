@@ -100,7 +100,7 @@ interface RawStatus {
 // ── 기본 변환 ─────────────────────────────────────────
 
 const enc = encodeURIComponent
-const repoPath = (r: Slug): string => `/repos/${enc(r.owner)}/${enc(r.repo)}`
+export const repoPath = (r: Slug): string => `/repos/${enc(r.owner)}/${enc(r.repo)}`
 
 export function toEpoch(iso: string | null | undefined): number {
   if (!iso) return 0

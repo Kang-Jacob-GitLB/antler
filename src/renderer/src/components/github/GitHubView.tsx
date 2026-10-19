@@ -3,12 +3,14 @@ import type { GhComment, GhIssueSummary, GhListQuery, GhPullFile, GhPullSummary 
 import { fileDiffFromPatch } from '../../diff/patch'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
+import { formatDuration } from '../../lib/format'
+import { useActionsStore } from '../../stores/actionsStore'
 import { useGithubStore, type GhView } from '../../stores/githubStore'
 import { DiffBody, DiffModeToggle } from '../DiffView'
 import { FileStatusIcon } from '../FileStatusIcon'
 import { IconClose, IconRefresh } from '../icons'
 import { JiraIssueChips } from '../jira/JiraIssueChips'
-import { Avatar, ChecksBadge, GhStateIcon, HtmlBody, LabelChip, prState, ReviewBadge, useRelative } from './GhBits'
+import { Avatar, CheckIcon, ChecksBadge, GhStateIcon, HtmlBody, LabelChip, prState, ReviewBadge, useRelative } from './GhBits'
 import './GitHubView.css'
 
 const openOnGithub = (url: string): void => void api.invoke('gh:openExternal', url).catch(() => {})
@@ -29,12 +31,35 @@ export function GitHubView(): React.JSX.Element | null {
   if (!view) return null
   return (
     <section className="gh-view">
-      {view.kind === 'pulls' || view.kind === 'issues' ? <ListView kind={view.kind} /> : view.kind === 'pull' ? <PullView view={view} /> : <IssueView number={view.number} />}
+      {view.kind === 'pulls' || view.kind === 'issues' ? (
+        <ListView kind={view.kind} />
+      ) : view.kind === 'actions' ? (
+        <ActionsView />
+      ) : view.kind === 'pull' ? (
+        <PullView view={view} />
+      ) : (
+        <IssueView number={view.number} />
+      )}
     </section>
   )
 }
 
 // ── 목록 ───────────────────────────────────────────────
+
+/** 풀 리퀘스트 · 이슈 · Actions 전환 탭 */
+function GhTabs({ kind }: { kind: 'pulls' | 'issues' | 'actions' }): React.JSX.Element {
+  const t = useT()
+  const show = useGithubStore((s) => s.show)
+  return (
+    <div className="seg" role="tablist">
+      {(['pulls', 'issues', 'actions'] as const).map((k) => (
+        <button key={k} role="tab" aria-selected={kind === k} className={`seg__btn${kind === k ? ' is-on' : ''}`} onClick={() => show({ kind: k })}>
+          {k === 'actions' ? t('gh.actions') : t(k === 'pulls' ? 'gh.pulls' : 'gh.issues')}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 function ListView({ kind }: { kind: 'pulls' | 'issues' }): React.JSX.Element {
   const t = useT()
@@ -47,13 +72,7 @@ function ListView({ kind }: { kind: 'pulls' | 'issues' }): React.JSX.Element {
   return (
     <>
       <header className="gh-head">
-        <div className="seg" role="tablist">
-          {(['pulls', 'issues'] as const).map((k) => (
-            <button key={k} role="tab" aria-selected={kind === k} className={`seg__btn${kind === k ? ' is-on' : ''}`} onClick={() => show({ kind: k })}>
-              {t(k === 'pulls' ? 'gh.pulls' : 'gh.issues')}
-            </button>
-          ))}
-        </div>
+        <GhTabs kind={kind} />
         <span className="gh-head__repo mono">{ref ? `${ref.owner}/${ref.repo}` : ''}</span>
         <span className="gh-head__spacer" />
         <button className="icon-btn icon-btn--sm" title={t('toolbar.refresh')} onClick={() => setQ({})}>
@@ -165,6 +184,95 @@ function IssueRow({ i, rel, onOpen }: { i: GhIssueSummary; rel: (n: number) => s
       {i.comments > 0 && <span className="gh-row__count">💬 {i.comments}</span>}
       <span className="gh-row__when">{rel(i.updatedAt)}</span>
     </div>
+  )
+}
+
+// ── Actions(워크플로 실행, 읽기 전용) ───────────────────────
+
+function ActionsView(): React.JSX.Element {
+  const t = useT()
+  const { ref, repoId, show } = useGithubStore()
+  const { runs, hasMore, loading, error, selected, jobs, load, select } = useActionsStore()
+  const rel = useRelative()
+  const refresh = (): void => {
+    if (repoId) void load(repoId)
+  }
+
+  return (
+    <>
+      <header className="gh-head">
+        <GhTabs kind="actions" />
+        <span className="gh-head__repo mono">{ref ? `${ref.owner}/${ref.repo}` : ''}</span>
+        <span className="gh-head__spacer" />
+        <button className="icon-btn icon-btn--sm" title={t('toolbar.refresh')} onClick={refresh}>
+          <IconRefresh size={14} />
+        </button>
+        <button className="icon-btn icon-btn--sm" title={`${t('diff.close')} (Esc)`} onClick={() => show(null)}>
+          <IconClose size={13} />
+        </button>
+      </header>
+
+      <div className="gh-list">
+        {error && <div className="gh-notice is-error">{error}</div>}
+        {!error && !loading && runs.length === 0 && <div className="gh-notice">{t('gh.actions.empty')}</div>}
+        {runs.map((r) => {
+          const open = selected === r.id
+          const j = jobs[r.id]
+          const toggle = (): void => {
+            if (repoId) select(repoId, open ? null : r.id)
+          }
+          return (
+            <div key={r.id} className="gh-run">
+              <div className={`gh-row${open ? ' is-open' : ''}`} role="button" tabIndex={0} aria-expanded={open} onClick={toggle} onKeyDown={(e) => e.key === 'Enter' && toggle()}>
+                <CheckIcon state={r.state} size={14} title={r.conclusion ?? r.status} />
+                <div className="gh-row__main">
+                  <div className="gh-row__title">
+                    <span className="gh-row__text">{r.name || r.title}</span>
+                  </div>
+                  <div className="gh-row__sub">
+                    {r.title && r.name ? `${r.title} · ` : ''}#{r.number} · <span className="mono">{r.branch}</span> · {r.event}
+                  </div>
+                </div>
+                <span className="gh-row__when">{rel(r.createdAt)}</span>
+              </div>
+              {open && (
+                <div className="gh-jobs">
+                  {j?.loading && <div className="gh-notice">{t('list.loading')}</div>}
+                  {j?.error && <div className="gh-notice is-error">{j.error}</div>}
+                  {j?.list?.length === 0 && <div className="gh-notice">{t('gh.actions.noJobs')}</div>}
+                  {j?.list?.map((job) => (
+                    <div key={job.id} className="gh-job">
+                      <CheckIcon state={job.state} size={13} title={job.conclusion ?? job.status} />
+                      <span className="gh-job__name selectable">{job.name}</span>
+                      <span className="gh-muted">
+                        {job.conclusion ?? job.status}
+                        {job.durationSec !== undefined && ` · ${formatDuration(job.durationSec)}`}
+                      </span>
+                      {job.htmlUrl && (
+                        <button type="button" className="gh-checklist__link" onClick={() => openOnGithub(job.htmlUrl)}>
+                          {t('gh.checks.view')}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {r.htmlUrl && (
+                    <button type="button" className="btn btn--sm gh-jobs__open" onClick={() => openOnGithub(r.htmlUrl)}>
+                      {t('gh.openInBrowser')}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+        {loading && <div className="gh-notice">{t('list.loading')}</div>}
+        {hasMore && !loading && repoId && (
+          <button className="btn gh-more" onClick={() => void load(repoId, true)}>
+            {t('gh.more')}
+          </button>
+        )}
+      </div>
+    </>
   )
 }
 

@@ -7,17 +7,21 @@ import type {
   GhAuthState,
   GhAvatarQuery,
   GhAvatarResult,
+  GhCheckDetail,
   GhComment,
+  GhCommitChecksResult,
   GhCommitSummary,
   GhDeviceCode,
   GhIssueDetail,
   GhIssueSummary,
+  GhJob,
   GhLabel,
   GhListQuery,
   GhListResult,
   GhPullDetail,
   GhPullFile,
   GhPullSummary,
+  GhRun,
   GhRepoRef,
   GhUser,
   JiraAuthState,
@@ -100,6 +104,14 @@ export interface IpcContract {
   /** GitHub 웹 페이지를 기본 브라우저로(https://github.com/ 만 허용) */
   /** 작성자 아바타 해석(커밋 sha → GitHub 계정). 이메일은 GitHub 로 보내지 않는다. requestId 로 취소 */
   'gh:avatars': { args: [repoId: string, requestId: string, authors: GhAvatarQuery[]]; result: GhAvatarResult }
+  /** 커밋 목록의 체크 요약(화면에 보이는 sha 만, 최대 50개). 로그인하지 않았으면 available=false */
+  'gh:commitChecks': { args: [repoId: string, shas: string[]]; result: GhCommitChecksResult }
+  /** 한 커밋의 체크 목록(이름·상태·소요 시간) */
+  'gh:commitCheckRuns': { args: [repoId: string, sha: string]; result: GhCheckDetail[] }
+  /** 최근 워크플로 실행 목록(읽기 전용) */
+  'gh:runs': { args: [repoId: string, page: number]; result: GhListResult<GhRun> }
+  /** 워크플로 실행 한 건의 잡 목록 */
+  'gh:runJobs': { args: [repoId: string, runId: number]; result: GhJob[] }
   'gh:openExternal': { args: [url: string]; result: void }
 
   // ── Jira (읽기 전용, 자격 증명은 main 에만 있다) ──
@@ -205,6 +217,10 @@ export const IPC_CHANNELS = [
   'gh:comments',
   'gh:filters',
   'gh:avatars',
+  'gh:commitChecks',
+  'gh:commitCheckRuns',
+  'gh:runs',
+  'gh:runJobs',
   'gh:openExternal',
   'jira:auth',
   'jira:connect',

@@ -432,6 +432,56 @@ export interface GhCheckRun {
   url?: string
 }
 
+/** 커밋 상세의 체크 한 건(check-run 또는 legacy status) */
+export interface GhCheckDetail {
+  name: string
+  state: GhCheckState
+  /** GitHub 의 conclusion(없으면 아직 끝나지 않았거나 legacy status) */
+  conclusion?: string
+  /** 소요 시간(초). 시작·종료 시각을 모르면 없다 */
+  durationSec?: number
+  /** 상세 링크(github.com) */
+  url?: string
+}
+
+/** 커밋 목록용 체크 요약 조회 결과. available=false 면 로그인하지 않아 조회하지 않은 것(표시하지 않는다) */
+export interface GhCommitChecksResult {
+  available: boolean
+  /** 소문자 sha → 상태. 모르는 sha 는 없다 */
+  states: Record<string, GhCheckState>
+}
+
+/** 워크플로 실행 한 건 */
+export interface GhRun {
+  id: number
+  /** 워크플로 이름 */
+  name: string
+  /** 실행 제목(커밋 메시지·PR 제목) */
+  title: string
+  branch: string
+  event: string
+  state: GhCheckState
+  /** 원본 status·conclusion(툴팁용) */
+  status: string
+  conclusion?: string
+  number: number
+  sha: string
+  /** epoch seconds */
+  createdAt: number
+  updatedAt: number
+  htmlUrl: string
+}
+
+export interface GhJob {
+  id: number
+  name: string
+  state: GhCheckState
+  status: string
+  conclusion?: string
+  durationSec?: number
+  htmlUrl: string
+}
+
 export interface GhReview {
   author: GhUser
   state: GhReviewState

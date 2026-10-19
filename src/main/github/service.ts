@@ -4,11 +4,14 @@ import type {
   GhAuthState,
   GhAvatarQuery,
   GhAvatarResult,
+  GhCheckDetail,
   GhComment,
+  GhCommitChecksResult,
   GhCommitSummary,
   GhDeviceCode,
   GhIssueDetail,
   GhIssueSummary,
+  GhJob,
   GhLabel,
   GhListQuery,
   GhListResult,
@@ -16,11 +19,13 @@ import type {
   GhPullFile,
   GhPullSummary,
   GhRepoRef,
+  GhRun,
   GhUser
 } from '@shared/types'
 import { AbortError } from '../executors/GitExecutor'
 import * as api from './api'
 import { AvatarResolver, FALLBACK_SHAS } from './avatars'
+import { CheckStateCache, fetchCheckDetails, fetchCommitChecks, listJobs, listRuns } from './checks'
 import { GitHubApiError, GitHubClient } from './client'
 import { GhCliError, type GhCli } from './ghCli'
 import { DeviceFlow, MISSING_CLIENT_ID_MESSAGE, type DeviceSession, type SleepFn } from './deviceFlow'
@@ -57,6 +62,8 @@ export class GitHubService {
   private readonly flow: DeviceFlow
   private readonly client: GitHubClient
   private readonly avatarResolver: AvatarResolver
+  /** 커밋 체크 요약 캐시(계정이 바뀌면 보이는 범위가 달라지므로 로그인·로그아웃 때 비운다) */
+  private readonly checkCache = new CheckStateCache()
   private cliAvailable: boolean | undefined
 
   constructor(private readonly deps: GitHubServiceDeps) {
@@ -131,6 +138,7 @@ export class GitHubService {
     this.user = user
     // 한도·"로그인 필요" 표시는 비로그인 기준이었으니 비우고 다시 묻게 한다
     this.avatarResolver.resetSession()
+    this.checkCache.clear()
     return this.state()
   }
 
@@ -143,6 +151,7 @@ export class GitHubService {
     this.client.rate = null
     this.client.clearCache()
     this.avatarResolver.resetSession()
+    this.checkCache.clear()
   }
 
   async loginPat(raw: string): Promise<GhAuthState> {
@@ -273,6 +282,27 @@ export class GitHubService {
 
   filters(repoId: string): Promise<{ labels: GhLabel[]; assignees: GhUser[] }> {
     return this.data(repoId, (slug, signal) => api.getFilters(this.client, slug, signal))
+  }
+
+  /**
+   * 커밋 목록의 체크 요약(GraphQL 일괄). 로그인하지 않았으면 조회하지 않고 available=false 로 알린다
+   * (GraphQL 은 비로그인을 받지 않고, 비로그인 REST 한도(시간당 60)로 커밋마다 묻는 것은 감당할 수 없다).
+   */
+  commitChecks(repoId: string, shas: string[]): Promise<GhCommitChecksResult> {
+    if (!this.token) return Promise.resolve({ available: false, states: {} })
+    return this.data(repoId, async (slug, signal) => ({ available: true, states: await fetchCommitChecks(this.client, slug, shas, this.checkCache, signal) }))
+  }
+
+  commitCheckRuns(repoId: string, sha: string): Promise<GhCheckDetail[]> {
+    return this.data(repoId, (slug, signal) => fetchCheckDetails(this.client, slug, sha, signal))
+  }
+
+  runs(repoId: string, page: number): Promise<GhListResult<GhRun>> {
+    return this.data(repoId, (slug, signal) => listRuns(this.client, slug, page, signal))
+  }
+
+  runJobs(repoId: string, runId: number): Promise<GhJob[]> {
+    return this.data(repoId, (slug, signal) => listJobs(this.client, slug, runId, signal))
   }
 
   /**

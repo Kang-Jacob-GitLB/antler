@@ -73,6 +73,32 @@ export function parseAvatarAuthors(v: unknown): GhAvatarQuery[] {
   return out
 }
 
+/** 워크플로 실행·잡 ID: 양의 안전 정수(실제 ID 는 10자리를 넘는다) */
+export function parseRunId(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isSafeInteger(v) || v <= 0) throw new Error('잘못된 실행 ID입니다')
+  return v
+}
+
+/** 커밋 해시 하나(40/64자리 16진수), 소문자로 정규화 */
+export function parseSha(v: unknown): string {
+  if (typeof v !== 'string' || !SHA_RE.test(v)) throw new Error('잘못된 커밋 해시입니다')
+  return v.toLowerCase()
+}
+
+const MAX_CHECK_SHAS = 100
+
+/** gh:commitChecks 의 sha 목록: 최대 100건, 중복 제거 */
+export function parseCheckShas(v: unknown): string[] {
+  if (!Array.isArray(v) || v.length > MAX_CHECK_SHAS) throw new Error('잘못된 커밋 목록입니다')
+  return [...new Set((v as unknown[]).map(parseSha))]
+}
+
+/** 목록 페이지 번호(1 이상) */
+export function parsePage(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MAX_PAGE) throw new Error('잘못된 페이지입니다')
+  return v
+}
+
 /** gh:openExternal 허용 대상: origin 이 정확히 https://github.com 인 URL 만(자격 증명·다른 호스트 거부). 정규화된 href 를 돌려준다 */
 export function allowedExternalUrl(raw: unknown): string | null {
   if (typeof raw !== 'string' || raw.length > 2048) return null

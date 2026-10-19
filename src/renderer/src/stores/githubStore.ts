@@ -16,13 +16,16 @@ import type {
   GhUser
 } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { useActionsStore } from './actionsStore'
 import { resetAvatarSession } from './avatarStore'
+import { resetChecksSession } from './checksStore'
 import { useDetailStore } from './detailStore'
 
 /** 중앙에 띄우는 GitHub 화면 */
 export type GhView =
   | { kind: 'pulls' }
   | { kind: 'issues' }
+  | { kind: 'actions' }
   | { kind: 'pull'; number: number; tab: 'conversation' | 'commits' | 'files' }
   | { kind: 'issue'; number: number }
 
@@ -221,6 +224,7 @@ export const useGithubStore = create<GithubState>((set, get) => {
 
     async open(repoId) {
       const g = ++gen
+      useActionsStore.getState().reset()
       set({
         repoId,
         ref: undefined,
@@ -248,6 +252,9 @@ export const useGithubStore = create<GithubState>((set, get) => {
     reload() {
       const { repoId, ref, view } = get()
       anonNotFound.clear()
+      // 로그인 상태가 바뀌면 커밋 체크 상태와 Actions 목록도 새 계정 기준으로 다시 받는다
+      resetChecksSession()
+      useActionsStore.getState().reset()
       if (!repoId) return
       ++gen
       // 비공개 저장소는 로그인 뒤에야 보이므로 GitHub 저장소 여부부터 다시 본다
@@ -344,6 +351,9 @@ export const useGithubStore = create<GithubState>((set, get) => {
       } else if (view.kind === 'issue') {
         const i = get().issue
         if (i?.number !== view.number || (i.error && !i.detail)) void loadIssue(view.number)
+      } else if (view.kind === 'actions') {
+        const { repoId } = get()
+        if (repoId) void useActionsStore.getState().load(repoId)
       } else {
         void get().loadFilters()
         const list = get()[view.kind]
