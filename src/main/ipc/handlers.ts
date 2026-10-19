@@ -210,6 +210,8 @@ export function registerIpc(
   handle('git:fileDiff', (_e, repoId, req, requestId) => repos.fileDiff(repoId, req, requestId))
   handle('git:fileHistory', (_e, repoId, req, requestId) => repos.fileHistory(repoId, req, requestId))
   handle('git:blame', (_e, repoId, req, requestId) => repos.blame(repoId, req, requestId))
+  handle('git:repoExtras', (_e, repoId) => repos.repoExtras(repoId))
+  handle('git:lfsPaths', (_e, repoId, req, requestId) => repos.lfsPaths(repoId, req, requestId))
   handle('git:wipStatus', (_e, repoId, requestId) => repos.wipStatus(repoId, requestId))
   handle('git:wipDiff', (_e, repoId, req, requestId) => repos.wipDiff(repoId, req, requestId))
   // manual 은 renderer 가 주장하는 값이다. 침해된 renderer 는 manual=true 로 수동 fetch 를 요청할 수 있지만(자동 fetch 의 자격 증명 도우미 제한·file 전송 제한을 피함),

@@ -8,6 +8,7 @@ import { useCompareStore } from '../stores/compareStore'
 import { useDetailStore } from '../stores/detailStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
 import { useLogStore } from '../stores/logStore'
+import { useLfsPaths } from '../stores/repoExtrasStore'
 import { useWipStore, wipDirty } from '../stores/wipStore'
 import { AuthorAvatar } from './AuthorAvatar'
 import { FileRow } from './FileRow'
@@ -61,6 +62,7 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
   const active = useDetailStore((s) => s.file)
   const repoId = useDetailStore((s) => s.repoId)
   const openFile = useDetailStore((s) => s.openFile)
+  const lfsPaths = useLfsPaths(repoId, detail.hash, detail.files)
   const v = useVirtualizer({
     count: detail.files.length,
     getScrollElement: () => scrollRef.current,
@@ -71,7 +73,7 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
   // 다른 커밋으로 바뀌면 맨 위부터
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [detail.hash])
+  }, [detail.hash, detail.files])
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     // 수정 키 조합(Alt+↑↓ 등)은 앱 전역 단축키 몫이라 여기서 처리하지 않는다 — 두 번 이동하는 것을 막는다
@@ -109,6 +111,7 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
                 <FileRow
                   file={f}
                   active={f === active}
+                  lfs={lfsPaths.has(f.path)}
                   onOpen={(x) => void openFile(x)}
                   {...(repoId && fileViewAvailability(f, null).history ? { onHistory: (x: FileChange) => openFileView('history', repoId, x, detail.hash) } : {})}
                   {...(repoId && fileViewAvailability(f, null).blame ? { onBlame: (x: FileChange) => openFileView('blame', repoId, x, detail.hash) } : {})}
@@ -304,7 +307,7 @@ export function ComparePanel({ width, anchor, other }: { width: number; anchor: 
         <CompareEnd tag="B" hash={to} />
       </div>
       {ready ? (
-        <FileList detail={{ ...ready, hash: `${ready.from}..${ready.to}` }} title={t('compare.files', { n: ready.files.length.toLocaleString() })} empty={t('compare.noFiles')} />
+        <FileList detail={{ ...ready, hash: ready.to }} title={t('compare.files', { n: ready.files.length.toLocaleString() })} empty={t('compare.noFiles')} />
       ) : (
         <div className="detail__status">{error ? t('error.generic', { msg: error }) : t('list.loading')}</div>
       )}

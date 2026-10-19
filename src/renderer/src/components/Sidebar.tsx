@@ -7,6 +7,7 @@ import { useAppStore } from '../stores/appStore'
 import { useLogStore, type LogFilter } from '../stores/logStore'
 import { EnvBadge } from './EnvBadge'
 import { RepoMenu } from './RepoMenu'
+import { BranchFlowBadge } from './FlowBadge'
 import { ChecksBadge, GhStateIcon, prState } from './github/GhBits'
 import { useGithubStore } from '../stores/githubStore'
 import { useJiraSiteData, useJiraStore } from '../stores/jiraStore'
@@ -411,6 +412,12 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
           {b.behind ? `↓${b.behind}` : ''}
         </span>
       ) : null
+    const trailingAll = (
+      <>
+        <BranchFlowBadge name={b.name} remote={remote} />
+        {tracking}
+      </>
+    )
     return (
       <ItemRow
         key={b.fullName}
@@ -425,7 +432,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
         label={label}
         title={`${b.name}${b.upstream ? ` → ${b.upstream}` : ''}`}
         active={isFiltered(b.fullName) || b.isHead}
-        trailing={tracking}
+        trailing={trailingAll}
         onClick={() => reveal(b.hash)}
         onFilter={() => solo({ rev: b.fullName, label: b.name })}
         onContextMenu={ctxOf(b.hash)}

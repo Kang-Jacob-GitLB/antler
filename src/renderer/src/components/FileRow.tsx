@@ -3,6 +3,7 @@ import type { FileChange } from '@shared/types'
 import { useT } from '../i18n'
 import { FileStatusIcon } from './FileStatusIcon'
 import { IconBlame, IconHistory } from './icons'
+import { LfsBadge } from './LfsBadge'
 
 /** 경로를 (디렉터리, 파일 이름)으로 나눈다 */
 export function splitPath(path: string): [dir: string, base: string] {
@@ -15,6 +16,7 @@ export const FileRow = memo(function FileRow({
   file,
   active,
   tag,
+  lfs,
   onOpen,
   onHistory,
   onBlame
@@ -23,6 +25,8 @@ export const FileRow = memo(function FileRow({
   active: boolean
   /** 이름 옆에 붙는 작은 표지(예: 추적 안 됨) */
   tag?: string
+  /** Git LFS 로 추적되는 파일이면 'LFS' 배지를 붙인다 */
+  lfs?: boolean
   onOpen(f: FileChange): void
   /** 있으면 마우스를 올릴 때 파일 히스토리·Blame 버튼을 보여 준다 */
   onHistory?(f: FileChange): void
@@ -44,6 +48,7 @@ export const FileRow = memo(function FileRow({
         {dir && <span className="file-row__dir">{dir}</span>}
         {file.oldPath && <span className="file-row__from">← {splitPath(file.oldPath)[1]}</span>}
       </span>
+      {lfs && <LfsBadge />}
       {tag && <span className="file-row__tag">{tag}</span>}
       {(onHistory || onBlame) && (
         <span className="file-row__actions" onClick={(e) => e.stopPropagation()}>

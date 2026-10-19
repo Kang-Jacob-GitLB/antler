@@ -5,6 +5,7 @@ import { useT } from '../i18n'
 import { useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
+import { useLfsPaths } from '../stores/repoExtrasStore'
 import { useWipStore, wipEntries, type WipEntry } from '../stores/wipStore'
 import { FileRow } from './FileRow'
 import './DetailPanel.css'
@@ -35,6 +36,8 @@ export function WipPanel({ width }: { width: number }): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const entries = useMemo(() => wipEntries(status), [status])
+  const wipFiles = useMemo(() => entries.map((e) => e.file), [entries])
+  const lfsPaths = useLfsPaths(repoId, null, wipFiles)
   // 번역 함수(t)는 렌더마다 새로 만들어지므로 rows 는 t 에 의존하지 않는다(문구는 렌더 때 붙인다)
   const rows = useMemo<PanelRow[]>(() => {
     if (!status) return []
@@ -108,6 +111,7 @@ export function WipPanel({ width }: { width: number }): React.JSX.Element {
                     <FileRow
                       file={row.entry.file}
                       active={isActive(row.entry)}
+                      lfs={lfsPaths.has(row.entry.file.path)}
                       {...(row.entry.area === 'untracked' ? { tag: t('wip.untracked') } : {})}
                       onOpen={(f) => void openWipFile(f, row.entry.area)}
                       {...(repoId && fileViewAvailability(row.entry.file, row.entry.area).history

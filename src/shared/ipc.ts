@@ -39,6 +39,8 @@ import type {
   BlameResult,
   LogPage,
   LogQuery,
+  LfsPathsRequest,
+  RepoExtras,
   RefsDetails,
   RefsSnapshot,
   Repo,
@@ -129,6 +131,10 @@ export interface IpcContract {
   'git:fileHistory': { args: [repoId: string, req: FileHistoryRequest, requestId?: string]; result: FileHistoryPage }
   /** 지정 커밋(생략하면 HEAD) 시점 파일의 줄별 blame. 읽기 전용 */
   'git:blame': { args: [repoId: string, req: BlameRequest, requestId?: string]; result: BlameResult }
+  /** 저장소 부가 정보(읽기 전용): LFS 사용 여부(.gitattributes 의 filter=lfs)와 git config 의 gitflow.* 설정 */
+  'git:repoExtras': { args: [repoId: string]; result: RepoExtras }
+  /** 경로 중 filter=lfs 속성인 것(git check-attr). req.rev 가 있으면 그 커밋 기준 */
+  'git:lfsPaths': { args: [repoId: string, req: LfsPathsRequest, requestId?: string]; result: string[] }
   /** 작업 트리 상태(WIP): 스테이지됨·변경됨·추적 안 됨 파일. 읽기 전용이며 캐시하지 않는다 */
   'git:wipStatus': { args: [repoId: string, requestId?: string]; result: WipStatus }
   /** 작업 트리 파일 하나의 diff(스테이지/작업 트리/추적 안 됨). 결과 형식은 git:fileDiff 와 같다 */
@@ -216,6 +222,8 @@ export const IPC_CHANNELS = [
   'git:fileDiff',
   'git:fileHistory',
   'git:blame',
+  'git:repoExtras',
+  'git:lfsPaths',
   'git:wipStatus',
   'git:wipDiff',
   'git:fetch',
