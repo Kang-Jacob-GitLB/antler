@@ -1,28 +1,32 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!--
     Antler 앱 아이콘(48px 이상용). 둥근 사각형(토큰 bg-base) 위에 갈라진 사슴뿔.
-    줄기에서 두 가지가 git 레인처럼 갈라지고, 가지 끝은 앰버 노드(커밋)로 끝난다.
-    색: 바탕 #14110F(토큰 bg-base), 뿔 #EDE6D8(text-primary 뼈·아이보리), 노드 #D9A441(accent 앰버)
-    16·24·32px 은 icon-small.svg(더 굵고 단순한 형태)를 쓴다.
+    줄기에서 두 가지가 git 레인처럼 바깥으로 휘어 오르고, 가지 안쪽에서 곁가지 둘이 위로 솟아 한쪽에 세 가닥이다.
+    가닥 끝은 앰버 노드(커밋). 색: 바탕 #14110F(토큰 bg-base), 뿔 #EDE6D8(text-primary 뼈·아이보리), 노드 #D9A441(accent 앰버)
+    16·24·32px 은 icon-small.svg(같은 모양을 굵게), 툴바 로고는 components/brand.tsx(같은 모양) — 모양을 바꾸면 셋을 함께 고친다.
   -->
   <rect x="32" y="32" width="960" height="960" rx="216" fill="#14110F"/>
   <rect x="32" y="32" width="960" height="960" rx="216" fill="none" stroke="#342D27" stroke-width="8"/>
-  <g fill="none" stroke="#EDE6D8" stroke-width="56" stroke-linecap="round" stroke-linejoin="round">
+  <g fill="none" stroke="#EDE6D8" stroke-width="52" stroke-linecap="round" stroke-linejoin="round">
     <!-- 줄기 -->
-    <path d="M512 840 V560"/>
-    <!-- 왼쪽 가지와 곁가지 -->
-    <path d="M512 560 C512 430 380 400 330 260"/>
-    <path d="M404 404 C330 400 268 368 232 300"/>
-    <!-- 오른쪽 가지와 곁가지 -->
-    <path d="M512 560 C512 430 644 400 694 260"/>
-    <path d="M620 404 C694 400 756 368 792 300"/>
+    <path d="M512 860 V620"/>
+    <!-- 왼쪽 가지와 곁가지 둘 -->
+    <path d="M512 620 C470 540 300 520 220 300"/>
+    <path d="M430 547 C420 470 410 400 420 300"/>
+    <path d="M338 478 C320 420 300 360 310 260"/>
+    <!-- 오른쪽 가지와 곁가지 둘 -->
+    <path d="M512 620 C554 540 724 520 804 300"/>
+    <path d="M594 547 C604 470 614 400 604 300"/>
+    <path d="M686 478 C704 420 724 360 714 260"/>
   </g>
   <g fill="#D9A441">
-    <circle cx="330" cy="236" r="58"/>
-    <circle cx="694" cy="236" r="58"/>
-    <circle cx="216" cy="278" r="50"/>
-    <circle cx="808" cy="278" r="50"/>
+    <circle cx="214" cy="283" r="48"/>
+    <circle cx="810" cy="283" r="48"/>
+    <circle cx="311" cy="240" r="48"/>
+    <circle cx="713" cy="240" r="48"/>
+    <circle cx="421" cy="282" r="48"/>
+    <circle cx="603" cy="282" r="48"/>
   </g>
   <!-- 뿌리 노드(HEAD 처럼 앰버 외곽선) -->
-  <circle cx="512" cy="560" r="40" fill="#14110F" stroke="#D9A441" stroke-width="22"/>
+  <circle cx="512" cy="620" r="40" fill="#14110F" stroke="#D9A441" stroke-width="22"/>
 </svg>
