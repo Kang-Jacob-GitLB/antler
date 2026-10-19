@@ -110,7 +110,7 @@ export const useLaunchpadStore = create<LaunchpadState>((set, get) => ({
 
   openEntry(entry) {
     if (entry.kind === 'jira' && entry.jiraKey) {
-      get().show(false)
+      // Jira 화면이 Launchpad 위를 덮는다 — 뒤로가기로 Launchpad 에 돌아온다
       useJiraStore.getState().openIssue(entry.jiraKey)
       return
     }

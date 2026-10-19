@@ -1,0 +1,165 @@
+/* Jira 작업 공간: 창 본문(.app__body) 전체를 덮는다 — 사이드바·저장소 화면은 아래에 그대로 남는다 */
+.jira-ws {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-base);
+  animation: fade-in var(--dur-fast, 0.12s) var(--ease, ease);
+}
+.jira-ws__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 40px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface, var(--bg-base));
+  flex-shrink: 0;
+}
+.jira-ws__head .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.jira-ws__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+.jira-ws__site {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.jira-ws__spacer {
+  flex: 1;
+}
+
+.jira-ws__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.jira-ws__nav {
+  width: 248px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-surface, var(--bg-base));
+}
+.jira-ws__main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.jira-ws__main > .gh-view {
+  flex: 1;
+  min-width: 0;
+}
+
+.jira-ws__group {
+  margin: var(--space-3) var(--space-3) var(--space-1);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.jira-ws__none {
+  padding: 2px var(--space-3) var(--space-1);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+.jira-ws__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2) 0 var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  user-select: none;
+}
+.jira-ws__item:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.jira-ws__item:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+.jira-ws__item.is-active {
+  background: var(--row-selected);
+  color: var(--text-primary);
+}
+.jira-ws__item.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.jira-ws__icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.jira-ws__item.is-active .jira-ws__icon {
+  color: var(--accent);
+}
+.jira-ws__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jira-ws__sub {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  flex-shrink: 0;
+}
+.jira-ws__remove {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  opacity: 0;
+  flex-shrink: 0;
+}
+.jira-ws__item:hover .jira-ws__remove,
+.jira-ws__item:focus-within .jira-ws__remove {
+  opacity: 1;
+}
+.jira-ws__remove:hover {
+  background: var(--bg-base);
+  color: var(--accent-text);
+}
+
+.jira-ws__empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+}
+.jira-ws__empty svg {
+  color: var(--text-muted);
+}
