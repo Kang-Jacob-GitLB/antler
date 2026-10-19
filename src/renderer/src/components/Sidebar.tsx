@@ -241,6 +241,8 @@ function ColorAction({
         title={t('color.pick')}
         aria-haspopup="dialog"
         aria-expanded={open}
+        // 열린 팝오버의 '바깥 누름 → 닫기'가 이 버튼에서 먼저 닫고 click 이 다시 여는 것을 막는다
+        onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
           setOpen(!open)
@@ -718,6 +720,8 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                       <button
                         className="side-item__action"
                         title={t('sidebar.repoMenu')}
+                        // 열린 메뉴의 '바깥 누름 → 닫기' 뒤에 click 이 다시 여는 것을 막는다
+                        onMouseDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation()
                           setMenuFor(menuFor === repo.id ? null : repo.id)

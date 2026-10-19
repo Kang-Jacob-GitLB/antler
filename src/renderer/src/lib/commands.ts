@@ -18,7 +18,6 @@ import { matchesShortcut, type KeyEventLike, type Shortcut } from './shortcuts'
 
 type T = ReturnType<typeof useT>
 
-export const RELEASES_URL = 'https://github.com/Kang-Jacob-GitLB/antler/releases'
 export const CATEGORY_ORDER: CommandCategory[] = ['general', 'list', 'diff', 'panel']
 export const CATEGORY_KEY: Record<CommandCategory, MessageKey> = {
   general: 'cmd.cat.general',
@@ -132,7 +131,7 @@ export const COMMAND_DEFS: CommandDef[] = [
     category: 'general',
     title: (t) => t('update.notes'),
     keywords: 'release notes changelog',
-    run: () => void window.antler.invoke('gh:openExternal', RELEASES_URL).catch(() => {})
+    run: () => usePaletteStore.getState().setNotesOpen(true)
   },
   ...THEMES.map(
     (th): CommandDef => ({

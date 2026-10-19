@@ -27,6 +27,7 @@ import { useLaunchpadStore } from './stores/launchpadStore'
 import { UpdateSnackbar } from './components/UpdateSnackbar'
 import { CommandPalette } from './components/CommandPalette'
 import { ShortcutsDialog } from './components/ShortcutsDialog'
+import { ReleaseNotesDialog } from './components/ReleaseNotesDialog'
 import { ExternalMenu } from './components/ExternalMenu'
 import { SettingsDialog } from './components/SettingsDialog'
 import { SidePane } from './components/Collapse'
@@ -290,6 +291,7 @@ export function App(): React.JSX.Element | null {
       <RepoSwitcher />
       <CommandPalette />
       <ShortcutsDialog />
+      <ReleaseNotesDialog />
       <AddRepoDialog />
       <JiraConnectDialog />
       <SettingsDialog />

@@ -15,7 +15,6 @@ import { MenuButton } from './MenuButton'
 import { IconBranch, IconGear, IconGlobe, IconMonitor, IconMoon, IconRefresh, IconSun, IconTerminal } from './icons'
 import './StatusBar.css'
 
-const RELEASES_URL = 'https://github.com/Kang-Jacob-GitLB/antler/releases'
 /** "n분 전" 표시를 갱신하는 주기 */
 const TICK_MS = 30_000
 
@@ -112,7 +111,7 @@ export function StatusBar(): React.JSX.Element {
         </button>
         <button
           className="statusbar__btn"
-          onClick={() => void window.antler.invoke('gh:openExternal', RELEASES_URL).catch(() => {})}
+          onClick={() => usePaletteStore.getState().setNotesOpen(true)}
         >
           <IconGlobe size={12} />
           {t('update.notes')}

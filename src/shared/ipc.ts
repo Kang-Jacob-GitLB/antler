@@ -50,6 +50,7 @@ import type {
   LogScope,
   RefsDetails,
   RefsSnapshot,
+  ReleaseNotes,
   Repo,
   SearchResult,
   UiPrefs,
@@ -181,6 +182,8 @@ export interface IpcContract {
   /** 내려받은 업데이트 설치(auto: 앱 재시작 후 설치, manual: 설치 파일을 다시 열기) */
   'update:install': { args: []; result: void }
   'update:dismiss': { args: [action: UpdateDismissAction, version: string]; result: UpdateState }
+  /** 현재 버전의 릴리스 노트(그 버전 릴리스가 없으면 최신 릴리스) */
+  'update:releaseNotes': { args: []; result: ReleaseNotes }
   /** 제목 표시줄 오버레이(Windows·Linux 창 컨트롤) 색을 현재 테마에 맞춘다. macOS 는 no-op */
   /** dim: 모달 배경막이 떠 있음(창 컨트롤도 같은 정도로 어둡게) */
   'win:setTitleBarTheme': { args: [theme: { dark: boolean; dim?: boolean }]; result: void }
@@ -265,6 +268,7 @@ export const IPC_CHANNELS = [
   'update:cancel',
   'update:install',
   'update:dismiss',
+  'update:releaseNotes',
   'win:setTitleBarTheme'
 ] as const satisfies readonly IpcChannel[]
 

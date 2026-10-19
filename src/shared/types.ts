@@ -145,6 +145,21 @@ export interface FetchStatus {
  */
 export type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error' | 'not-available'
 export type UpdateMode = 'auto' | 'manual-dmg' | 'manual-file'
+/** 릴리스 노트(GitHub Release 본문) */
+export interface ReleaseNotes {
+  /** 노트가 속한 버전(태그에서 v 를 뺀 값) */
+  version: string
+  /** 현재 앱 버전의 노트인지. false 면 그 버전의 릴리스가 없어 최신 릴리스로 대신했다 */
+  exact: boolean
+  title?: string
+  /** 마크다운 원문(정화 전). 너무 길면 잘려 있고 truncated */
+  body: string
+  truncated?: boolean
+  publishedAt?: string
+  /** '더보기'로 열 GitHub 릴리스 페이지 */
+  url: string
+}
+
 export interface UpdateState {
   status: UpdateStatus
   mode: UpdateMode

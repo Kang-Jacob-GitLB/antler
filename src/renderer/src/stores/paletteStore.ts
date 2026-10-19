@@ -6,15 +6,20 @@ import { useJiraStore } from './jiraStore'
 interface PaletteState {
   paletteOpen: boolean
   shortcutsOpen: boolean
+  /** 릴리스 노트 팝업 */
+  notesOpen: boolean
   setPaletteOpen(open: boolean): void
   setShortcutsOpen(open: boolean): void
+  setNotesOpen(open: boolean): void
 }
 
 export const usePaletteStore = create<PaletteState>((set) => ({
   paletteOpen: false,
   shortcutsOpen: false,
+  notesOpen: false,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
-  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen })
+  setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+  setNotesOpen: (notesOpen) => set({ notesOpen })
 }))
 
 /**
@@ -24,5 +29,5 @@ export const usePaletteStore = create<PaletteState>((set) => ({
 export function isOverlayOpen(): boolean {
   const app = useAppStore.getState()
   const p = usePaletteStore.getState()
-  return app.switcherOpen || app.addOpen || app.settingsOpen || p.paletteOpen || p.shortcutsOpen || useJiraStore.getState().dialogOpen
+  return app.switcherOpen || app.addOpen || app.settingsOpen || p.paletteOpen || p.shortcutsOpen || p.notesOpen || useJiraStore.getState().dialogOpen
 }

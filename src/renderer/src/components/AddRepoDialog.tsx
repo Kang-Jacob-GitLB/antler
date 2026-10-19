@@ -120,7 +120,8 @@ export function AddRepoDialog(): React.JSX.Element | null {
   ]
 
   return (
-    <div className="modal-backdrop" onMouseDown={close}>
+    // 바깥을 누르면 닫는다. 원격 폴더 찾아보기가 떠 있으면 그것만 닫는다(입력한 주소·그룹은 남긴다) — Esc 와 같은 단계
+    <div className="modal-backdrop" onMouseDown={() => (remoteBrowse ? setRemoteBrowse(false) : close())}>
       <form
         className="add-dialog"
         role="dialog"
