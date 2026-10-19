@@ -37,6 +37,10 @@ export function registerGithubIpc(handle: IpcHandle, gh: GitHubService, repos: R
   handle('gh:commitCheckRuns', (_e, repoId, sha) => gh.commitCheckRuns(parseId(repoId, '저장소 ID'), parseSha(sha)))
   handle('gh:runs', (_e, repoId, page) => gh.runs(parseId(repoId, '저장소 ID'), parsePage(page)))
   handle('gh:runJobs', (_e, repoId, runId) => gh.runJobs(parseId(repoId, '저장소 ID'), parseRunId(runId)))
+  handle('gh:launchpad', (_e, requestId, fresh) => {
+    if (fresh === true) repos.invalidateGhRemotes()
+    return gh.launchpad(parseId(requestId, '요청 ID'))
+  })
   handle('gh:openExternal', async (_e, url) => {
     const href = allowedExternalUrl(url)
     if (!href) throw new Error('GitHub(https://github.com/) 주소만 열 수 있습니다')

@@ -1,0 +1,157 @@
+/* Launchpad: 레이아웃은 .gh-view / .gh-head / .gh-filters / .gh-list / .gh-row 를 재사용하고 여기서는 보조 스타일만 둔다 */
+.lp-title {
+  flex: 0 0 auto;
+}
+.lp-updated {
+  white-space: nowrap;
+}
+
+/* 범위 선택 줄: 전체 · 그룹 칩 · 저장소 하나 */
+.lp-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.lp-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.lp-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.lp-chip.is-on {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border-color: var(--border-strong);
+}
+/* 선택된 그룹 칩은 윤곽을 굵게 */
+.lp-scope .group-chip--btn.is-on {
+  box-shadow: 0 0 0 1px var(--chip-dot);
+}
+.lp-repo-select {
+  width: auto;
+  max-width: 220px;
+}
+.lp-repo-select.is-on {
+  box-shadow: var(--field-ring), 0 0 0 1px var(--accent);
+}
+
+.lp-tabs {
+  min-height: 40px;
+}
+.lp-count {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.seg__btn.is-on .lp-count {
+  color: var(--text-secondary);
+}
+
+.lp-filters {
+  flex-wrap: wrap;
+}
+.lp-search {
+  flex: 1 1 200px;
+  width: auto;
+  min-width: 140px;
+  max-width: 360px;
+}
+.lp-filter-repo {
+  width: auto;
+  max-width: 200px;
+}
+.lp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lp-note {
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.lp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6, 32px) var(--space-4);
+  color: var(--text-secondary);
+  text-align: center;
+}
+.lp-empty p {
+  margin: 0;
+  max-width: 420px;
+}
+
+/* 행 */
+.lp-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lp-repo {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.lp-tag {
+  padding: 0 6px;
+  border-radius: 8px;
+  font-size: var(--fs-xs);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.lp-row {
+  position: relative;
+}
+.lp-row.is-pinned {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.lp-row.is-snoozed {
+  opacity: 0.6;
+}
+.lp-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+/* 고정하지 않은 행의 동작 버튼은 마우스를 올리거나 포커스할 때만 보인다 */
+.lp-row .lp-actions {
+  opacity: 0;
+}
+.lp-row:hover .lp-actions,
+.lp-row:focus-within .lp-actions {
+  opacity: 1;
+}
+.lp-row.is-pinned .lp-pin {
+  opacity: 1;
+  color: var(--accent-text);
+}
+.lp-row.is-pinned .lp-actions {
+  opacity: 1;
+}
+.lp-row.is-pinned:not(:hover):not(:focus-within) .lp-actions .menu-btn {
+  visibility: hidden;
+}

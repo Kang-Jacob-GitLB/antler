@@ -13,6 +13,7 @@ import type {
   GhIssueSummary,
   GhJob,
   GhLabel,
+  GhLaunchpadResult,
   GhListQuery,
   GhListResult,
   GhPullDetail,
@@ -29,14 +30,17 @@ import { CheckStateCache, fetchCheckDetails, fetchCommitChecks, listJobs, listRu
 import { GitHubApiError, GitHubClient } from './client'
 import { GhCliError, type GhCli } from './ghCli'
 import { DeviceFlow, MISSING_CLIENT_ID_MESSAGE, type DeviceSession, type SleepFn } from './deviceFlow'
+import { fetchLaunchpad, loginRequired } from './launchpad'
 import type { TokenMethod, TokenStore } from './tokenStore'
 import { parsePat as parsePatInput } from './validate'
 
 export interface GitHubServiceDeps {
-  /** 설정(ui.githubClientId 만 읽는다) */
-  config: { get(): { ui: { githubClientId?: string | undefined } } }
+  /** 설정(ui.githubClientId 와 Launchpad 가 훑을 저장소 목록만 읽는다) */
+  config: { get(): { ui: { githubClientId?: string | undefined }; repos?: { id: string }[] } }
   repos: {
     ghRepo(repoId: string): Promise<GhRepoRef | null>
+    /** 저장소의 모든 GitHub remote(Launchpad). 없으면 ghRepo 의 결과 하나로 대신한다 */
+    ghRemotes?(repoId: string, signal?: AbortSignal): Promise<GhRepoRef[]>
     /** 아바타 404 대비: 그 작성자의 push 된 커밋 sha(없으면 빈 배열). 없으면 대체 조회를 하지 않는다 */
     pushedShasByAuthor?(repoId: string, email: string, limit: number, signal?: AbortSignal): Promise<string[]>
   }
@@ -325,6 +329,36 @@ export class GitHubService {
       const unresolved = authors.some((a) => !(a.email in avatars))
       const blocked = unresolved && slug ? this.avatarResolver.blockedFor(slug) : null
       return { github: slug !== null, avatars, ...(blocked ? { blocked } : {}) }
+    })
+  }
+
+  /**
+   * Launchpad: 내 PR·리뷰 요청·할당 이슈. 로그인하지 않았으면 조회하지 않고 needsLogin 으로 알린다.
+   * 검색은 사용자 기준으로 보내고, 등록된 모든 저장소(config)의 GitHub remote 와 맞춰 거른다.
+   * remote 를 읽지 못한 저장소는 건너뛰고(unresolved), 검색 일부가 실패하면 이유를 errors 에 담아 나머지를 돌려준다.
+   */
+  launchpad(requestId: string): Promise<GhLaunchpadResult> {
+    const epoch = this.epoch.signal
+    return this.withSignal(requestId, async (own) => {
+      const tok = this.token
+      if (!tok) return loginRequired()
+      const signal = AbortSignal.any([epoch, own])
+      const repos = this.deps.repos
+      const ids = (this.deps.config.get().repos ?? []).map((r) => r.id)
+      try {
+        return await fetchLaunchpad(
+          this.client,
+          ids,
+          async (id, sig) => {
+            const refs = repos.ghRemotes ? await repos.ghRemotes(id, sig) : [await repos.ghRepo(id)].filter((r) => r !== null)
+            return refs.map((r) => ({ owner: r.owner, repo: r.repo }))
+          },
+          signal
+        )
+      } catch (err) {
+        if (this.token === tok && err instanceof GitHubApiError && err.code === 'GH_AUTH') await this.validate()
+        throw err
+      }
     })
   }
 

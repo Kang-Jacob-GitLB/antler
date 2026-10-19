@@ -7,6 +7,7 @@ import { useDetailStore } from '../stores/detailStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useGithubStore } from '../stores/githubStore'
 import { useJiraStore } from '../stores/jiraStore'
+import { useLaunchpadStore } from '../stores/launchpadStore'
 import { useLogStore } from '../stores/logStore'
 import { usePaletteStore } from '../stores/paletteStore'
 import { useSearchStore } from '../stores/searchStore'
@@ -90,6 +91,13 @@ export const COMMAND_DEFS: CommandDef[] = [
     keywords: 'repository switch repo',
     shortcut: { code: 'KeyP' },
     run: () => useAppStore.getState().setSwitcherOpen(true)
+  },
+  {
+    id: 'launchpad.open',
+    category: 'general',
+    title: (t) => t('cmd.launchpad'),
+    keywords: 'launchpad dashboard pull requests issues all repositories',
+    run: () => useLaunchpadStore.getState().show(true)
   },
   {
     id: 'repo.add',

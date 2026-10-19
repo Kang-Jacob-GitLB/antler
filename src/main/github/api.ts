@@ -66,7 +66,7 @@ interface RawPull {
   deletions?: number
   changed_files?: number
 }
-interface RawIssue {
+export interface RawIssue {
   number: number
   title?: string
   state?: string
@@ -81,6 +81,8 @@ interface RawIssue {
   html_url?: string
   body_html?: string | null
   pull_request?: { merged_at?: string | null }
+  /** 검색 결과에서 항목이 속한 저장소(`https://api.github.com/repos/{owner}/{repo}`) */
+  repository_url?: string
 }
 interface RawReview {
   user?: RawUser | null

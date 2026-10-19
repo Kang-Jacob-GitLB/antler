@@ -4,6 +4,7 @@ import { useT } from '../i18n'
 import { fetchDetail } from '../lib/fetchText'
 import { toggleDetail, toggleSidebar, useActiveRepo, useAppStore } from '../stores/appStore'
 import { useFetchStore } from '../stores/fetchStore'
+import { useLaunchpadStore } from '../stores/launchpadStore'
 import { GhAuthButton } from './github/GhAuthButton'
 import { AntlerMark } from './brand'
 import { EnvBadge } from './EnvBadge'
@@ -12,6 +13,7 @@ import { ViewChips } from './ViewChips'
 import {
   IconBranch,
   IconChevronDown,
+  IconLaunchpad,
   IconPanelLeft,
   IconPanelRight,
   IconRefresh
@@ -30,6 +32,7 @@ export function Toolbar(): React.JSX.Element {
   const fetchStatus = useFetchStore((s) => (repo ? s.status[repo.id] : undefined))
   // 툴팁의 "n분 전"은 마우스를 올릴 때 갱신한다(타이머 없이)
   const [now, setNow] = useState(() => Date.now())
+  const launchpadOpen = useLaunchpadStore((s) => s.open)
 
   const fetchTitle = (s: FetchStatus | undefined, at: number): string => {
     const base = t('toolbar.refresh')
@@ -81,6 +84,15 @@ export function Toolbar(): React.JSX.Element {
       <div className="toolbar__spacer" />
 
       <div className="toolbar__actions">
+        <button
+          className="icon-btn"
+          aria-pressed={launchpadOpen}
+          title={t('launchpad.open')}
+          aria-label={t('launchpad.title')}
+          onClick={() => useLaunchpadStore.getState().toggle()}
+        >
+          <IconLaunchpad />
+        </button>
         <GhAuthButton />
         {repo && (
           <div className="refresh-group">
