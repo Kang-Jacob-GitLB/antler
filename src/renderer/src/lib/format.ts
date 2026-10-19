@@ -62,3 +62,12 @@ export function formatBytes(bytes: number): string {
   }
   return `${v.toFixed(1)} ${units[i]}`
 }
+
+/** 체크·잡 소요 시간(초) → 언어 중립 표기: "45s" / "3m 05s" / "1h 02m" */
+export function formatDuration(sec: number): string {
+  const s = Math.max(0, Math.round(sec))
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+}

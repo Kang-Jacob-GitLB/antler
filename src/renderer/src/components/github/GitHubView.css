@@ -158,23 +158,24 @@
 .gh-badge--review-pending {
   color: var(--text-muted);
 }
-.gh-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
+.gh-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  line-height: 0;
 }
-.gh-dot--success {
-  background: var(--added);
+.gh-check--success {
+  color: var(--added);
 }
-.gh-dot--failure {
-  background: var(--removed);
+.gh-check--failure {
+  color: var(--removed);
 }
-.gh-dot--pending {
-  background: var(--modified);
+.gh-check--pending {
+  color: var(--modified);
 }
-.gh-dot--neutral {
-  background: var(--text-muted);
+.gh-check--neutral {
+  color: var(--text-muted);
 }
 .gh-label {
   --label: var(--text-muted);
@@ -407,4 +408,62 @@
 .gh-body hr {
   border: 0;
   border-top: 1px solid var(--border);
+}
+
+/* ── 커밋 상세의 체크 목록 · Actions 잡 ── */
+.gh-checklist {
+  margin-top: var(--space-3);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+  font-size: var(--fs-sm);
+}
+.gh-checklist__head {
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+.gh-checklist__row,
+.gh-job {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.gh-checklist__name,
+.gh-job__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gh-checklist__meta {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.gh-checklist__link {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-text);
+  font: inherit;
+  cursor: pointer;
+}
+.gh-checklist__link:hover {
+  text-decoration: underline;
+}
+.gh-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2) var(--space-4) var(--space-3) 36px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+.gh-jobs__open {
+  align-self: flex-start;
+  margin-top: var(--space-2);
+}
+.gh-row.is-open {
+  background: var(--row-hover);
 }

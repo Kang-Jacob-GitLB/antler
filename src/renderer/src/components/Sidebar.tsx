@@ -728,6 +728,16 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                       />
                     ))}
                 </Section>
+
+                <Section id="actions" title={t('gh.actions')}>
+                  <ItemRow
+                    depth={0}
+                    icon={<IconCheck size={13} />}
+                    label={t('gh.actions.sidebar')}
+                    active={ghView?.kind === 'actions'}
+                    onClick={() => ghShow({ kind: 'actions' })}
+                  />
+                </Section>
               </>
             )}
 

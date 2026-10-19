@@ -151,6 +151,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.cell--message .gh-check {
+  margin-left: auto;
+}
 .cell--author,
 .cell--date {
   color: var(--text-secondary);

@@ -16,6 +16,7 @@ import { Splitter, type SplitterHandlers } from './Splitter'
 import { WipPanel } from './WipPanel'
 import { markdownToHtml } from '../lib/markdown'
 import { HtmlBody } from './github/GhBits'
+import { CommitChecksList } from './github/CommitChecksList'
 import { orderCompare } from '../lib/compare'
 import { JiraIssueChips } from './jira/JiraIssueChips'
 import { IconClose, IconCopy, IconSwap } from './icons'
@@ -231,6 +232,7 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
             )}
           </div>
         </div>
+        <CommitChecksList sha={commit.hash} />
       </div>
 
       <Splitter horizontal {...metaSplitter} />

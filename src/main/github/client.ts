@@ -4,6 +4,7 @@ import { AbortError } from '../executors/GitExecutor'
 import { LruCache } from '../services/lru'
 
 export const API_BASE = 'https://api.github.com'
+const GRAPHQL_PATH = '/graphql'
 export const API_VERSION = '2022-11-28'
 const ACCEPT_JSON = 'application/vnd.github+json'
 /** body_html(GitHub 가 렌더링·정화한 본문)를 함께 받는다 */
@@ -141,6 +142,43 @@ export class GitHubClient {
     const etag = res.headers.get('etag')
     if (etag) this.cache.set(key, { etag, data, hasMore, at: Date.now() }, text.length * 2)
     return { data: data as T, hasMore }
+  }
+
+  /**
+   * GraphQL 조회(읽기 전용 query 만 보낸다). GraphQL 은 비로그인 요청을 받지 않으므로 토큰이 없으면 GH_AUTH 로 거절한다.
+   * ETag 캐시가 없어 호출자가 결과를 캐시한다. 부분 오류(errors 와 data 가 함께 오는 경우)는 data 를 그대로 돌려준다.
+   */
+  async graphql<T>(query: string, variables: Record<string, string>, opts: { signal?: AbortSignal } = {}): Promise<T> {
+    const token = this.tokenProvider()
+    if (!token) throw new GitHubApiError('GraphQL 조회에는 GitHub 로그인이 필요합니다', 'GH_AUTH', 401)
+    const url = API_BASE + GRAPHQL_PATH
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    const signal = opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout
+    let res: Response
+    try {
+      res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: { Accept: ACCEPT_JSON, 'Content-Type': 'application/json', 'User-Agent': 'Antler', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ query, variables }),
+        signal
+      })
+    } catch (err) {
+      if (opts.signal?.aborted) throw new AbortError()
+      if (timeout.aborted) throw new GitHubApiError(`GitHub 응답이 ${REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다`, 'GH_TIMEOUT')
+      const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : err instanceof Error ? err.message : ''
+      throw new GitHubApiError(`GitHub 에 연결할 수 없습니다${cause ? `(${cause})` : ''}`, 'GH_NETWORK')
+    }
+    const text = await readText(res, opts.signal, timeout)
+    if (!res.ok) throw httpError(res, text, true)
+    let body: { data?: T | null; errors?: { type?: string; message?: string }[] }
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw new GitHubApiError('GitHub 응답을 해석할 수 없습니다', 'GH_HTTP', res.status)
+    }
+    if (body.errors?.some((e) => e.type === 'RATE_LIMITED')) throw new GitHubApiError('GitHub API 호출 한도를 초과했습니다. 잠시 후 다시 시도하세요', 'GH_RATE_LIMIT', res.status)
+    if (!body.data) throw new GitHubApiError('GitHub GraphQL 조회에 실패했습니다', 'GH_HTTP', res.status)
+    return body.data
   }
 
   private trackRate(h: Headers): void {

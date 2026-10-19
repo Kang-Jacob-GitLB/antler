@@ -1,7 +1,7 @@
 import { shell, type IpcMainInvokeEvent } from 'electron'
 import type { IpcArgs, IpcChannel, IpcResult } from '@shared/ipc'
 import type { GitHubService } from '../github/service'
-import { allowedExternalUrl, parseAvatarAuthors, parseId, parseListQuery, parseNumber, parsePat } from '../github/validate'
+import { allowedExternalUrl, parseAvatarAuthors, parseCheckShas, parseSha, parseId, parseListQuery, parseNumber, parsePage, parsePat, parseRunId } from '../github/validate'
 import type { RepoService } from '../services/RepoService'
 
 /** handlers.ts 의 handle() 과 같은 모양 — 결과를 IpcEnvelope 로 감싸 등록하는 함수를 주입받는다 */
@@ -33,6 +33,10 @@ export function registerGithubIpc(handle: IpcHandle, gh: GitHubService, repos: R
   handle('gh:avatars', (_e, repoId, requestId, authors) =>
     gh.avatars(parseId(repoId, '저장소 ID'), parseId(requestId, '요청 ID'), parseAvatarAuthors(authors))
   )
+  handle('gh:commitChecks', (_e, repoId, shas) => gh.commitChecks(parseId(repoId, '저장소 ID'), parseCheckShas(shas)))
+  handle('gh:commitCheckRuns', (_e, repoId, sha) => gh.commitCheckRuns(parseId(repoId, '저장소 ID'), parseSha(sha)))
+  handle('gh:runs', (_e, repoId, page) => gh.runs(parseId(repoId, '저장소 ID'), parsePage(page)))
+  handle('gh:runJobs', (_e, repoId, runId) => gh.runJobs(parseId(repoId, '저장소 ID'), parseRunId(runId)))
   handle('gh:openExternal', async (_e, url) => {
     const href = allowedExternalUrl(url)
     if (!href) throw new Error('GitHub(https://github.com/) 주소만 열 수 있습니다')
