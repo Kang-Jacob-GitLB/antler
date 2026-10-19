@@ -5,6 +5,7 @@ import { AVATAR_CACHE_FILE } from './github/avatars'
 import { GitHubService } from './github/service'
 import { createGhCli } from './github/ghCli'
 import { TokenStore } from './github/tokenStore'
+import { JiraService, JIRA_META_FILE, JIRA_TOKEN_FILE } from './jira/service'
 import { registerIpc } from './ipc/handlers'
 import { allowedExternalUrl } from './github/validate'
 import { ConfigStore } from './services/ConfigStore'
@@ -31,6 +32,7 @@ const BG = { dark: '#14110F', light: '#F6F1E7' }
 let config: ConfigStore
 let repos: RepoService
 let gh: GitHubService
+let jira: JiraService
 let watcher: RepoWatcher | undefined
 let updates: UpdateService | undefined
 let fetcher: FetchService | undefined
@@ -120,6 +122,11 @@ app.whenReady().then(() => {
     cli: createGhCli(),
     avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE)
   })
+  jira = new JiraService({
+    store: new TokenStore(app.getPath('userData'), safeStorage, process.platform, { token: JIRA_TOKEN_FILE, meta: JIRA_META_FILE }),
+    // 가짜 Jira 서버(테스트·화면 확인)에 한해 루프백 http 를 허용한다. 실사용에서는 켜지 않는다
+    allowInsecureLoopback: process.env['ANTLER_JIRA_ALLOW_LOOPBACK'] === '1'
+  })
   updates = new UpdateService({
     currentVersion: __APP_VERSION__,
     platform: process.platform,
@@ -142,7 +149,7 @@ app.whenReady().then(() => {
     openPath: (p) => shell.openPath(p),
     showItem: (p) => shell.showItemInFolder(p)
   })
-  registerIpc(config, repos, watcher, gh, fetcher, updates)
+  registerIpc(config, repos, watcher, gh, jira, fetcher, updates)
   updates.start()
 
   // 카메라·마이크 등 어떤 권한도 주지 않는다
@@ -168,6 +175,7 @@ app.on('before-quit', () => {
   watcher?.dispose()
   fetcher?.dispose()
   gh?.dispose()
+  jira?.dispose()
   updates?.dispose()
   void repos?.dispose()
 })

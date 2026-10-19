@@ -89,13 +89,22 @@ export function Avatar({ user, size = 18 }: { user: GhUser; size?: number }): Re
  * GitHub 가 렌더링한 본문 HTML. 허용 목록으로 다시 정화한 뒤 넣고, 링크는 앱 안에서 이동하지 않고
  * main 을 거쳐 기본 브라우저로 연다(github.com 만 허용).
  */
-export const HtmlBody = memo(function HtmlBody({ html, className = '' }: { html: string; className?: string }) {
-  const clean = useMemo(() => sanitizeHtml(html), [html])
+export const HtmlBody = memo(function HtmlBody({
+  html,
+  className = '',
+  jiraSite
+}: {
+  html: string
+  className?: string
+  /** Jira 본문이면 연결한 사이트 주소: 상대 링크의 기준이 되고, 링크는 jira:openExternal(그 사이트 호스트만)로 연다 */
+  jiraSite?: string
+}) {
+  const clean = useMemo(() => sanitizeHtml(html, jiraSite ? `${jiraSite}/` : undefined), [html, jiraSite])
   const open = (e: React.SyntheticEvent): void => {
     const a = (e.target as HTMLElement).closest('[data-href]')
     if (!a) return
     e.preventDefault()
-    void api.invoke('gh:openExternal', a.getAttribute('data-href')!).catch(() => {})
+    void api.invoke(jiraSite ? 'jira:openExternal' : 'gh:openExternal', a.getAttribute('data-href')!).catch(() => {})
   }
   return (
     <div

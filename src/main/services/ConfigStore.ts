@@ -14,6 +14,19 @@ export function sourceFor(kind: SourceKind, target?: string): Source {
     : { id: `ssh:${target}`, kind, label: `SSH · ${target}`, sshHost: target }
 }
 
+const isStr = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max
+
+/** renderer 가 저장하려는 Jira 설정(프로젝트 키·저장 필터·최근 이슈)의 모양과 크기를 확인한다 */
+function checkJiraPrefs(patch: Partial<UiPrefs>): void {
+  const bad = (): never => {
+    throw new Error('잘못된 Jira 설정입니다')
+  }
+  const { jiraProjectKeys: keys, jiraFilters: filters, jiraRecent: recent } = patch
+  if (keys !== undefined && (!Array.isArray(keys) || keys.length > 50 || !keys.every((k) => typeof k === 'string' && /^[A-Z][A-Z0-9_]{1,19}$/.test(k)))) bad()
+  if (filters !== undefined && (!Array.isArray(filters) || filters.length > 50 || !filters.every((f) => f && isStr(f.name, 100) && isStr(f.jql, 2000)))) bad()
+  if (recent !== undefined && (!Array.isArray(recent) || recent.length > 30 || !recent.every((r) => r && typeof r.key === 'string' && /^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$/.test(r.key) && isStr(r.summary, 500)))) bad()
+}
+
 function defaults(): AppConfig {
   return {
     version: 1,
@@ -53,6 +66,7 @@ export class ConfigStore {
     if ('skippedUpdateVersion' in patch) throw new Error('이 설정은 직접 바꿀 수 없습니다')
     const af = patch.autoFetchMinutes
     if (af !== undefined && (!Number.isInteger(af) || af < 0 || af > 1440)) throw new Error('잘못된 자동 fetch 주기입니다(0~1440분)')
+    checkJiraPrefs(patch)
     return this.update({ ...this.config, ui: { ...this.config.ui, ...patch } })
   }
 

@@ -20,6 +20,12 @@ import type {
   GhPullSummary,
   GhRepoRef,
   GhUser,
+  JiraAuthState,
+  JiraComment,
+  JiraConnectInput,
+  JiraIssueDetail,
+  JiraSearchQuery,
+  JiraSearchResult,
   RemoteDirListing,
   RepoPatch,
   SshHostInfo,
@@ -92,6 +98,18 @@ export interface IpcContract {
   /** 작성자 아바타 해석(커밋 sha → GitHub 계정). 이메일은 GitHub 로 보내지 않는다. requestId 로 취소 */
   'gh:avatars': { args: [repoId: string, requestId: string, authors: GhAvatarQuery[]]; result: GhAvatarResult }
   'gh:openExternal': { args: [url: string]; result: void }
+
+  // ── Jira (읽기 전용, 자격 증명은 main 에만 있다) ──
+  'jira:auth': { args: []; result: JiraAuthState }
+  /** 자격 증명을 확인(/myself)한 뒤 safeStorage 로 암호화 저장 */
+  'jira:connect': { args: [input: JiraConnectInput]; result: JiraAuthState }
+  'jira:disconnect': { args: []; result: JiraAuthState }
+  'jira:issue': { args: [key: string, requestId?: string]; result: JiraIssueDetail }
+  /** 최근 댓글 몇 개(최신순) */
+  'jira:comments': { args: [key: string, requestId?: string]; result: JiraComment[] }
+  'jira:search': { args: [query: JiraSearchQuery, requestId?: string]; result: JiraSearchResult }
+  /** Jira 사이트 호스트의 https 주소만 기본 브라우저로 연다 */
+  'jira:openExternal': { args: [url: string]; result: void }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
   'git:refs': { args: [repoId: string]; result: RefsSnapshot }
   /** git:refs 에서 미룬 부가 정보(업스트림 ahead/behind·서브모듈). 첫 로그 페이지가 나간 뒤에 조회한다 */
@@ -181,6 +199,13 @@ export const IPC_CHANNELS = [
   'gh:filters',
   'gh:avatars',
   'gh:openExternal',
+  'jira:auth',
+  'jira:connect',
+  'jira:disconnect',
+  'jira:issue',
+  'jira:comments',
+  'jira:search',
+  'jira:openExternal',
   'git:refs',
   'git:refsDetails',
   'git:search',

@@ -16,6 +16,7 @@ import { WipPanel } from './WipPanel'
 import { markdownToHtml } from '../lib/markdown'
 import { HtmlBody } from './github/GhBits'
 import { orderCompare } from '../lib/compare'
+import { JiraIssueChips } from './jira/JiraIssueChips'
 import { IconClose, IconCopy, IconSwap } from './icons'
 import './ComparePanel.css'
 import './DetailPanel.css'
@@ -210,6 +211,7 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
         </div>
 
         <h2 className="detail__subject selectable">{commit.subject}</h2>
+        <JiraIssueChips texts={[commit.subject, d?.body]} />
         {d?.body && <CommitBody body={d.body} />}
 
         <div className="detail__person">

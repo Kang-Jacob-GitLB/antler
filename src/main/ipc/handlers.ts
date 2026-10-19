@@ -13,6 +13,9 @@ import type { RepoWatcher } from '../services/RepoWatcher'
 import { GitHubApiError } from '../github/client'
 import type { GitHubService } from '../github/service'
 import { registerGithubIpc } from './github'
+import { JiraApiError } from '../jira/client'
+import type { JiraService } from '../jira/service'
+import { registerJiraIpc } from './jira'
 import { applyTitleBarTheme } from '../titleBar'
 import type { UpdateService } from '../update/UpdateService'
 
@@ -29,7 +32,7 @@ function handle<C extends IpcChannel>(channel: C, fn: Handler<C>): void {
           ? 'ABORTED'
           : err instanceof StaleLogError
             ? 'STALE'
-            : err instanceof GitHubApiError
+            : err instanceof GitHubApiError || err instanceof JiraApiError
               ? err.code
               : err instanceof GitError
                 ? 'GIT'
@@ -133,6 +136,7 @@ export function registerIpc(
   repos: RepoService,
   watcher: RepoWatcher,
   gh: GitHubService,
+  jira: JiraService,
   fetcher: FetchService,
   updates: UpdateService
 ): void {
@@ -217,9 +221,11 @@ export function registerIpc(
     })
   )
   registerGithubIpc(handle, gh, repos)
+  registerJiraIpc(handle, jira)
   handle('req:cancel', (_e, requestId) => {
     repos.cancel(requestId)
     gh.cancel(requestId)
+    jira.cancel(requestId)
   })
   handle('win:setTitleBarTheme', (e, theme) => {
     if (!theme || typeof theme !== 'object' || typeof theme.dark !== 'boolean') throw new Error('잘못된 입력입니다')

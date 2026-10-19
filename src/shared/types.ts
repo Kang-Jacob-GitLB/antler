@@ -52,6 +52,22 @@ export interface UiPrefs {
   skippedUpdateVersion?: string
   /** 활성 저장소를 자동으로 fetch 하는 주기(분). 0 이면 끔, 없으면 5분 */
   autoFetchMinutes?: number
+  /** Jira 이슈 키로 인식할 프로젝트 키(없으면 일반 패턴 ABC-123 전체) */
+  jiraProjectKeys?: string[]
+  /** 사용자가 저장한 Jira JQL 필터 */
+  jiraFilters?: JiraSavedFilter[]
+  /** 최근 본 Jira 이슈(최신순) */
+  jiraRecent?: JiraRecentIssue[]
+}
+
+export interface JiraSavedFilter {
+  name: string
+  jql: string
+}
+
+export interface JiraRecentIssue {
+  key: string
+  summary: string
 }
 
 /** 저장소 fetch 상태(main 이 관리하고 renderer 로 밀어준다) */
@@ -710,4 +726,71 @@ export interface WipDiffRequest {
   oldPath?: string
   /** true 면 크기 상한을 무시하고 전체를 불러온다 */
   full?: boolean
+}
+
+// ── Jira (읽기 전용, 자격 증명은 main 에만 있다) ──────────────
+
+/** cloud: *.atlassian.net(이메일 + API 토큰, Basic) / server: Data Center·Server(Personal Access Token, Bearer) */
+export type JiraKind = 'cloud' | 'server'
+
+/** 연결 상태. 토큰은 절대 싣지 않는다 */
+export interface JiraAuthState {
+  connected: boolean
+  kind?: JiraKind
+  /** 정규화된 사이트 주소(비밀 아님). 링크의 기준이자 브라우저로 열 수 있는 유일한 호스트 */
+  siteUrl?: string
+  email?: string
+  /** 연결 확인 때 받은 표시 이름 */
+  displayName?: string
+  /** safeStorage 를 쓸 수 없어 자격 증명을 저장하지 않는 환경 */
+  storageUnavailable?: boolean
+}
+
+export interface JiraConnectInput {
+  kind: JiraKind
+  siteUrl: string
+  /** cloud 에서만 */
+  email?: string
+  token: string
+}
+
+export interface JiraIssueSummary {
+  key: string
+  summary: string
+  status: string
+  /** new | indeterminate | done (Jira statusCategory) */
+  statusCategory: string
+  issueType: string
+  priority: string
+  assignee: string
+  updated: string
+}
+
+export interface JiraIssueDetail extends JiraIssueSummary {
+  reporter: string
+  created: string
+  /** 서버 렌더 HTML 또는 ADF 변환 결과. 화면에 넣기 전 renderer 가 한 번 더 정화한다 */
+  descriptionHtml: string
+  /** 브라우저로 열 주소 */
+  url: string
+}
+
+export interface JiraComment {
+  author: string
+  created: string
+  bodyHtml: string
+}
+
+export interface JiraSearchQuery {
+  jql: string
+  /** 이전 결과가 돌려준 다음 페이지 표지 */
+  cursor?: string
+  /** 1부터. 상한을 넘기면 거부한다 */
+  page?: number
+}
+
+export interface JiraSearchResult {
+  items: JiraIssueSummary[]
+  /** 더 있으면 다음 요청에 넘길 표지(상한에 닿으면 없음) */
+  nextCursor?: string
 }

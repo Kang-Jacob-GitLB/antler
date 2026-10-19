@@ -1,0 +1,175 @@
+// Jira REST 클라이언트(읽기 전용 GET). 자격 증명은 credProvider 로만 읽고 요청 헤더에만 싣는다(반환값·에러 메시지·로그에 넣지 않는다).
+// 리다이렉트는 따라가지 않는다 — 다른 호스트(또는 같은 호스트의 http)로 인증 헤더가 새어 나가는 일을 원천 차단한다.
+import { AbortError } from '../executors/GitExecutor'
+
+const REQUEST_TIMEOUT_MS = 15_000
+const MAX_BODY_BYTES = 5 * 1024 * 1024
+/** 429 의 Retry-After 가 이 이하면 한 번만 기다렸다 다시 시도한다 */
+const AUTO_RETRY_MAX_SEC = 3
+
+export type JiraErrorCode = 'JIRA_AUTH' | 'JIRA_NOT_FOUND' | 'JIRA_FORBIDDEN' | 'JIRA_RATE_LIMIT' | 'JIRA_HTTP' | 'JIRA_NETWORK' | 'JIRA_TIMEOUT' | 'JIRA_REDIRECT'
+
+/** Jira API 실패. 메시지는 그대로 사용자에게 보여 줘도 되는 한국어 문장이다 */
+export class JiraApiError extends Error {
+  constructor(
+    message: string,
+    readonly code: JiraErrorCode,
+    readonly status?: number
+  ) {
+    super(message)
+    this.name = 'JiraApiError'
+  }
+}
+
+export interface JiraCredential {
+  kind: 'cloud' | 'server'
+  /** 정규화된 사이트 주소(경로 포함, 끝 '/' 없음) */
+  siteUrl: string
+  email: string
+  token: string
+}
+
+export type CredentialProvider = () => JiraCredential | null
+export type SleepFn = (ms: number, signal?: AbortSignal) => Promise<void>
+
+export interface GetOptions {
+  query?: Record<string, string | number | undefined>
+  signal?: AbortSignal
+  /** 저장된 자격 증명 대신 이 값으로 요청한다(연결 전 검증용) */
+  credential?: JiraCredential
+}
+
+export const defaultSleep: SleepFn = (ms, signal) =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new AbortError())
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t)
+        reject(new AbortError())
+      },
+      { once: true }
+    )
+  })
+
+/** Authorization 헤더 값. Cloud 는 이메일:API 토큰 Basic, Data Center 는 PAT Bearer */
+export function authHeader(c: JiraCredential): string {
+  return c.kind === 'cloud' ? `Basic ${Buffer.from(`${c.email}:${c.token}`, 'utf8').toString('base64')}` : `Bearer ${c.token}`
+}
+
+export class JiraClient {
+  constructor(
+    private readonly fetchImpl: typeof fetch = fetch,
+    private readonly credProvider: CredentialProvider = () => null,
+    private readonly sleep: SleepFn = defaultSleep
+  ) {}
+
+  /** REST GET. path 는 '/rest/api/…' 처럼 '/' 로 시작하는 사이트 상대 경로(세그먼트는 호출자가 인코딩한다) */
+  async get<T>(path: string, opts: GetOptions = {}): Promise<T> {
+    if (!path.startsWith('/') || path.startsWith('//')) throw new Error('invalid api path')
+    const cred = opts.credential ?? this.credProvider()
+    if (!cred) throw new JiraApiError('Jira 에 연결되어 있지 않습니다', 'JIRA_AUTH')
+    const site = new URL(cred.siteUrl)
+    const url = new URL(cred.siteUrl + path)
+    if (url.origin !== site.origin) throw new Error('invalid api path')
+    for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v))
+
+    for (let attempt = 0; ; attempt++) {
+      const res = await this.request(url.href, cred, opts.signal)
+      if (res.status === 429 && attempt === 0) {
+        const wait = parseRetryAfter(res.headers.get('retry-after'))
+        if (wait !== null && wait <= AUTO_RETRY_MAX_SEC) {
+          await res.arrayBuffer().catch(() => undefined)
+          await this.sleep(wait * 1000, opts.signal)
+          continue
+        }
+      }
+      const text = await readText(res, opts.signal)
+      if (!res.ok) throw httpError(res, text)
+      try {
+        return JSON.parse(text) as T
+      } catch {
+        throw new JiraApiError('Jira 응답을 해석할 수 없습니다', 'JIRA_HTTP', res.status)
+      }
+    }
+  }
+
+  private async request(href: string, cred: JiraCredential, signal: AbortSignal | undefined): Promise<Response> {
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    const sig = signal ? AbortSignal.any([timeout, signal]) : timeout
+    let res: Response
+    try {
+      res = await this.fetchImpl(href, {
+        method: 'GET',
+        headers: { Accept: 'application/json', Authorization: authHeader(cred), 'User-Agent': 'Antler' },
+        redirect: 'manual',
+        signal: sig
+      })
+    } catch (err) {
+      if (signal?.aborted) throw new AbortError()
+      if (timeout.aborted) throw new JiraApiError(`Jira 응답이 ${REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다`, 'JIRA_TIMEOUT')
+      // fetch 에러 객체에는 요청 헤더가 없지만, 원인 문자열만 남기고 나머지는 버린다
+      const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : err instanceof Error ? err.message : ''
+      throw new JiraApiError(`Jira 에 연결할 수 없습니다${cause ? `(${cause})` : ''}`, 'JIRA_NETWORK')
+    }
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel().catch(() => undefined)
+      throw new JiraApiError('Jira 가 다른 주소로 이동시키려 해 요청을 중단했습니다(사이트 주소를 확인하세요)', 'JIRA_REDIRECT', res.status)
+    }
+    return res
+  }
+}
+
+async function readText(res: Response, signal: AbortSignal | undefined): Promise<string> {
+  const len = Number(res.headers.get('content-length'))
+  if (Number.isFinite(len) && len > MAX_BODY_BYTES) {
+    await res.body?.cancel().catch(() => undefined)
+    throw new JiraApiError('Jira 응답이 너무 큽니다', 'JIRA_HTTP', res.status)
+  }
+  let text: string
+  try {
+    text = await res.text()
+  } catch {
+    if (signal?.aborted) throw new AbortError()
+    throw new JiraApiError('Jira 응답을 읽는 중 연결이 끊겼습니다', 'JIRA_NETWORK', res.status)
+  }
+  if (text.length > MAX_BODY_BYTES) throw new JiraApiError('Jira 응답이 너무 큽니다', 'JIRA_HTTP', res.status)
+  return text
+}
+
+/** Retry-After: 초 또는 HTTP-date → 남은 초(올림). 해석할 수 없으면 null */
+export function parseRetryAfter(v: string | null, now = Date.now()): number | null {
+  if (!v) return null
+  const sec = Number(v)
+  if (Number.isFinite(sec) && sec >= 0) return Math.ceil(sec)
+  const at = Date.parse(v)
+  return Number.isFinite(at) ? Math.max(0, Math.ceil((at - now) / 1000)) : null
+}
+
+/** Jira 오류 본문의 errorMessages[0] 또는 message(있다면). 길이는 제한한다 */
+function bodyMessage(text: string): string {
+  try {
+    const b = JSON.parse(text) as { errorMessages?: unknown; message?: unknown }
+    const m = Array.isArray(b.errorMessages) && typeof b.errorMessages[0] === 'string' ? b.errorMessages[0] : b.message
+    return typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 200) : ''
+  } catch {
+    return ''
+  }
+}
+
+function httpError(res: Response, text: string): JiraApiError {
+  const s = res.status
+  if (s === 401) return new JiraApiError('Jira 인증이 거부되었습니다. 이메일·토큰을 확인하고 다시 연결하세요', 'JIRA_AUTH', s)
+  if (s === 403) {
+    const msg = bodyMessage(text)
+    return new JiraApiError(`Jira 접근이 거부되었습니다${msg ? `: ${msg}` : ''}`, 'JIRA_FORBIDDEN', s)
+  }
+  if (s === 404) return new JiraApiError('이슈를 찾을 수 없거나 볼 권한이 없습니다', 'JIRA_NOT_FOUND', s)
+  if (s === 429) {
+    const wait = parseRetryAfter(res.headers.get('retry-after'))
+    return new JiraApiError(wait !== null && wait > 0 ? `Jira 요청이 너무 잦습니다. ${wait}초 후에 다시 시도하세요` : 'Jira 요청이 너무 잦습니다. 잠시 후 다시 시도하세요', 'JIRA_RATE_LIMIT', s)
+  }
+  const msg = bodyMessage(text)
+  return new JiraApiError(`Jira API 오류(${s})${msg ? `: ${msg}` : ''}`, 'JIRA_HTTP', s)
+}

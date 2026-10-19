@@ -25,17 +25,20 @@ const ALLOWED_ATTRS: Record<string, Set<string>> = {
   '*': new Set(['lang', 'dir'])
 }
 
-function safeHttpsUrl(raw: string | null): string | null {
+/** 상대 주소를 풀 기준(GitHub 본문). Jira 본문은 연결한 사이트 주소를 넘긴다 */
+const DEFAULT_BASE = 'https://github.com/'
+
+function safeHttpsUrl(raw: string | null, base: string): string | null {
   if (!raw) return null
   try {
-    const u = new URL(raw, 'https://github.com/')
+    const u = new URL(raw, base)
     return u.protocol === 'https:' ? u.href : null
   } catch {
     return null
   }
 }
 
-function clean(node: Node, doc: Document): void {
+function clean(node: Node, doc: Document, base: string): void {
   for (const child of [...node.childNodes]) {
     if (child.nodeType === 3) continue // 텍스트
     if (child.nodeType !== 1) {
@@ -50,7 +53,7 @@ function clean(node: Node, doc: Document): void {
     }
     if (!ALLOWED_TAGS.has(tag)) {
       // 모르는 태그는 벗기고 내용만 남긴다
-      clean(el, doc)
+      clean(el, doc, base)
       el.replaceWith(...[...el.childNodes])
       continue
     }
@@ -65,7 +68,7 @@ function clean(node: Node, doc: Document): void {
       if (!(allowed?.has(name) || ALLOWED_ATTRS['*']!.has(name))) el.removeAttribute(attr.name)
     }
     if (tag === 'a') {
-      const href = safeHttpsUrl(el.getAttribute('href'))
+      const href = safeHttpsUrl(el.getAttribute('href'), base)
       el.removeAttribute('href')
       if (href) {
         el.setAttribute('data-href', href)
@@ -74,7 +77,7 @@ function clean(node: Node, doc: Document): void {
       }
     }
     if (tag === 'img') {
-      const src = safeHttpsUrl(el.getAttribute('src'))
+      const src = safeHttpsUrl(el.getAttribute('src'), base)
       if (src) {
         el.setAttribute('src', src)
         el.setAttribute('loading', 'lazy')
@@ -82,13 +85,13 @@ function clean(node: Node, doc: Document): void {
       } else el.remove()
     }
     if (tag === 'input') el.setAttribute('disabled', '')
-    clean(el, doc)
+    clean(el, doc, base)
   }
 }
 
 /** 허용 목록으로 정화한 HTML 문자열 */
-export function sanitizeHtml(html: string): string {
+export function sanitizeHtml(html: string, base = DEFAULT_BASE): string {
   const doc = new DOMParser().parseFromString(`<!doctype html><body>${html}`, 'text/html')
-  clean(doc.body, doc)
+  clean(doc.body, doc, base)
   return doc.body.innerHTML
 }
