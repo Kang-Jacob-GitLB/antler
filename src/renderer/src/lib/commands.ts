@@ -1,6 +1,6 @@
 // 명령 레지스트리: 명령 팔레트·단축키 목록·전역 단축키(App 의 onKey)가 모두 이 한 곳을 출처로 쓴다.
 // 명령의 run 은 툴바·상태바 버튼이 부르는 것과 같은 함수·스토어 액션을 호출한다.
-import type { Locale, ThemePref } from '@shared/types'
+import type { EditorKind, ExternalAction, Locale, ThemePref } from '@shared/types'
 import type { MessageKey, useT } from '../i18n'
 import { toggleDetail, toggleSidebar, useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
@@ -13,6 +13,7 @@ import { usePaletteStore } from '../stores/paletteStore'
 import { useSearchStore } from '../stores/searchStore'
 import { useUpdateStore } from '../stores/updateStore'
 import type { CommandCategory, CommandCtx, CommandLike } from './commandFilter'
+import { externalSupported, openExternal, sourceKindOf } from './external'
 import { matchesShortcut, type KeyEventLike, type Shortcut } from './shortcuts'
 
 type T = ReturnType<typeof useT>
@@ -57,7 +58,11 @@ export function readCommandCtx(): CommandCtx {
     minimapCollapsed: ui?.minimapCollapsed === true,
     initials: ui?.graphInitials !== false,
     sidebarShown: ui?.sidebarHidden !== true,
-    detailShown: ui?.detailHidden !== true
+    detailShown: ui?.detailHidden !== true,
+    sourceKind: sourceKindOf(app.activeRepoId),
+    editor: ui?.editor ?? 'vscode',
+    activeProfileId: ui?.activeProfileId,
+    profiles: (app.config?.profiles ?? []).map((p) => ({ id: p.id, name: p.name }))
   }
 }
 
@@ -73,6 +78,17 @@ const LOCALES: { v: Locale; name: string; kw: string }[] = [
   { v: 'en', name: 'English', kw: 'language english 영어' }
 ]
 const AUTO_FETCH = [0, 1, 5, 15, 30]
+const EDITORS: { v: EditorKind; key: MessageKey; kw: string }[] = [
+  { v: 'vscode', key: 'editor.vscode', kw: 'editor vscode code' },
+  { v: 'cursor', key: 'editor.cursor', kw: 'editor cursor' },
+  { v: 'jetbrains', key: 'editor.jetbrains', kw: 'editor jetbrains intellij idea' },
+  { v: 'custom', key: 'editor.custom', kw: 'editor custom' }
+]
+const EXTERNALS: { action: ExternalAction; key: MessageKey; kw: string }[] = [
+  { action: 'fileManager', key: 'cmd.extFileManager', kw: 'open reveal file manager explorer finder folder' },
+  { action: 'editor', key: 'cmd.extEditor', kw: 'open editor vscode code ide' },
+  { action: 'terminal', key: 'cmd.extTerminal', kw: 'open terminal shell console' }
+]
 
 export const COMMAND_DEFS: CommandDef[] = [
   // ── 일반 ──
@@ -138,6 +154,35 @@ export const COMMAND_DEFS: CommandDef[] = [
       run: () => useAppStore.getState().setLocale(l.v)
     })
   ),
+  ...EXTERNALS.map(
+    (x): CommandDef => ({
+      id: `ext.${x.action}`,
+      category: 'general',
+      title: (t) => t(x.key),
+      keywords: x.kw,
+      when: (c) => c.hasRepo && externalSupported(c.sourceKind, x.action),
+      run: () => {
+        const id = useAppStore.getState().activeRepoId
+        if (id) void openExternal(id, x.action)
+      }
+    })
+  ),
+  ...EDITORS.map(
+    (e): CommandDef => ({
+      id: `editor.${e.v}`,
+      category: 'general',
+      title: (t) => t('cmd.editorPick', { name: t(e.key) }),
+      keywords: e.kw,
+      run: () => setUi({ editor: e.v })
+    })
+  ),
+  {
+    id: 'settings.open',
+    category: 'general',
+    title: (t) => t('cmd.settings'),
+    keywords: 'settings preferences profile editor external tools',
+    run: () => useAppStore.getState().openSettings(true)
+  },
   {
     id: 'shortcuts.open',
     category: 'general',
@@ -286,6 +331,8 @@ function isChecked(id: string, c: CommandCtx): boolean {
   if (id.startsWith('theme.')) return c.theme === id.slice(6)
   if (id.startsWith('locale.')) return c.locale === id.slice(7)
   if (id.startsWith('autofetch.')) return c.autoFetch === Number(id.slice(10))
+  if (id.startsWith('editor.')) return c.editor === id.slice(7)
+  if (id.startsWith('profile.apply:')) return c.activeProfileId === id.slice(14)
   if (id === 'diff.unified') return c.diffMode === 'unified'
   if (id === 'diff.split') return c.diffMode === 'split'
   return false
@@ -293,6 +340,20 @@ function isChecked(id: string, c: CommandCtx): boolean {
 
 /** 레지스트리를 현재 언어·상태로 풀어 낸다. 숨겨야 할 명령도 available=false 로 남긴다(단축키 목록은 전부 보여 준다) */
 export function resolveCommands(t: T, ctx: CommandCtx): ResolvedCommand[] {
+  // 저장된 프로필마다 전환 명령을 만든다(프로필 이름이 곧 명령 이름)
+  const profileCommands: ResolvedCommand[] = ctx.profiles.map((p) => ({
+    id: `profile.apply:${p.id}`,
+    category: 'general',
+    label: t('cmd.profileApply', { name: p.name }),
+    keywords: 'profile switch',
+    available: true,
+    checked: isChecked(`profile.apply:${p.id}`, ctx),
+    run: () => void useAppStore.getState().applyProfile(p.id)
+  }))
+  return [...resolveDefs(t, ctx), ...profileCommands]
+}
+
+function resolveDefs(t: T, ctx: CommandCtx): ResolvedCommand[] {
   return COMMAND_DEFS.map((d) => ({
     id: d.id,
     category: d.category,

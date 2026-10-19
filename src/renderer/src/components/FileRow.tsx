@@ -1,9 +1,11 @@
 import { memo } from 'react'
 import type { FileChange } from '@shared/types'
 import { useT } from '../i18n'
+import { useAppStore } from '../stores/appStore'
+import { showExternalMenuAt, useExternalMenuStore } from '../stores/externalMenuStore'
 import { FileStatusIcon } from './FileStatusIcon'
-import { IconBlame, IconHistory } from './icons'
 import { LfsBadge } from './LfsBadge'
+import { IconBlame, IconHistory, IconMore } from './icons'
 
 /** 경로를 (디렉터리, 파일 이름)으로 나눈다 */
 export function splitPath(path: string): [dir: string, base: string] {
@@ -41,6 +43,12 @@ export const FileRow = memo(function FileRow({
       className={`file-row${active ? ' is-active' : ''}`}
       title={file.oldPath ? `${file.oldPath} → ${file.path}` : file.path}
       onClick={() => onOpen(file)}
+      onContextMenu={(e) => {
+        const repoId = useAppStore.getState().activeRepoId
+        if (!repoId) return
+        e.preventDefault()
+        useExternalMenuStore.getState().show({ x: e.clientX, y: e.clientY, repoId, path: file.path })
+      }}
     >
       <FileStatusIcon status={file.status} />
       <span className="file-row__name">
@@ -50,20 +58,29 @@ export const FileRow = memo(function FileRow({
       </span>
       {lfs && <LfsBadge />}
       {tag && <span className="file-row__tag">{tag}</span>}
-      {(onHistory || onBlame) && (
-        <span className="file-row__actions" onClick={(e) => e.stopPropagation()}>
-          {onHistory && (
-            <button className="icon-btn icon-btn--sm" title={t('fileView.openHistory')} onClick={() => onHistory(file)}>
-              <IconHistory size={13} />
-            </button>
-          )}
-          {onBlame && (
-            <button className="icon-btn icon-btn--sm" title={t('fileView.openBlame')} onClick={() => onBlame(file)}>
-              <IconBlame size={13} />
-            </button>
-          )}
-        </span>
-      )}
+      <span className="file-row__actions" onClick={(e) => e.stopPropagation()}>
+        {onHistory && (
+          <button className="icon-btn icon-btn--sm" title={t('fileView.openHistory')} onClick={() => onHistory(file)}>
+            <IconHistory size={13} />
+          </button>
+        )}
+        {onBlame && (
+          <button className="icon-btn icon-btn--sm" title={t('fileView.openBlame')} onClick={() => onBlame(file)}>
+            <IconBlame size={13} />
+          </button>
+        )}
+        <button
+          className="icon-btn icon-btn--sm"
+          title={t('ext.menu')}
+          aria-label={t('ext.menu')}
+          onClick={(e) => {
+            const repoId = useAppStore.getState().activeRepoId
+            if (repoId) showExternalMenuAt(e.currentTarget, repoId, file.path)
+          }}
+        >
+          <IconMore size={13} />
+        </button>
+      </span>
       {file.binary ? (
         <span className="file-row__bin">{t('detail.binary')}</span>
       ) : (

@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Repo } from '@shared/types'
+import type { Repo, SourceKind } from '@shared/types'
 import { useT } from '../i18n'
+import { externalSupported, openExternal } from '../lib/external'
+import { EXTERNAL_ITEMS } from './ExternalMenu'
 import { GroupPicker } from './GroupChip'
 import './RepoMenu.css'
 
 interface Props {
   repo: Repo
+  /** 저장소 환경(SSH 는 에디터로만 열 수 있다) */
+  sourceKind: SourceKind
   groups: string[]
   onClose(): void
   onGroup(group: string | null): void
@@ -13,7 +17,7 @@ interface Props {
 }
 
 /** 사이드바 저장소 행의 작은 메뉴: 그룹 지정(기존 그룹 고르기·새로 입력·해제), 목록에서 제거 */
-export function RepoMenu({ repo, groups, onClose, onGroup, onRemove }: Props): React.JSX.Element {
+export function RepoMenu({ repo, sourceKind, groups, onClose, onGroup, onRemove }: Props): React.JSX.Element {
   const t = useT()
   const [group, setGroup] = useState(repo.group ?? '')
   const [confirm, setConfirm] = useState(false)
@@ -73,6 +77,26 @@ export function RepoMenu({ repo, groups, onClose, onGroup, onRemove }: Props): R
           </button>
         }
       />
+      <div className="repo-menu__sep" />
+      {/* 외부 도구로 열기: 파일 관리자 · 에디터 · 터미널(저장소 폴더) */}
+      {EXTERNAL_ITEMS.map(({ action, label, icon: Icon }) => {
+        const ok = externalSupported(sourceKind, action)
+        return (
+          <button
+            key={action}
+            className="repo-menu__item repo-menu__item--icon"
+            disabled={!ok}
+            title={ok ? undefined : t('ext.sshOnlyEditor')}
+            onClick={() => {
+              void openExternal(repo.id, action)
+              onClose()
+            }}
+          >
+            <Icon size={14} />
+            <span>{t(label)}</span>
+          </button>
+        )
+      })}
       <div className="repo-menu__sep" />
       {confirm ? (
         <div className="repo-menu__row">

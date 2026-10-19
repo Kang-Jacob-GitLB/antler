@@ -1,5 +1,5 @@
 // 명령 레지스트리의 타입과, 상황(ctx)에 맞는 명령을 질의로 거르는 순수 함수. 스토어를 import 하지 않아 단위 테스트가 가능하다.
-import type { Locale, ThemePref } from '@shared/types'
+import type { EditorKind, Locale, SourceKind, ThemePref } from '@shared/types'
 import { rankByQuery, type Ranked } from './fuzzy'
 import type { Shortcut } from './shortcuts'
 
@@ -19,6 +19,11 @@ export interface CommandCtx {
   initials: boolean
   sidebarShown: boolean
   detailShown: boolean
+  /** 활성 저장소의 환경(외부 도구로 열기에서 SSH 는 에디터만 가능) */
+  sourceKind: SourceKind | undefined
+  editor: EditorKind
+  activeProfileId: string | undefined
+  profiles: { id: string; name: string }[]
 }
 
 export interface CommandLike {

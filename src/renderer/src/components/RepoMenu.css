@@ -61,3 +61,16 @@
 .btn--danger {
   color: var(--removed-text);
 }
+
+.repo-menu__item--icon {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.repo-menu__item:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+.repo-menu__item:disabled:hover {
+  background: none;
+}

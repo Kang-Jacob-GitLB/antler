@@ -36,6 +36,7 @@ import type {
   SshHostInfo,
   CommitDetail,
   CompareResult,
+  ExternalOpenRequest,
   FileDiff,
   FileDiffRequest,
   FileHistoryPage,
@@ -47,6 +48,7 @@ import type {
   LfsPathsRequest,
   RepoExtras,
   LogScope,
+  ProfileSaveInput,
   RefsDetails,
   RefsSnapshot,
   Repo,
@@ -61,6 +63,16 @@ import type {
 export interface IpcContract {
   'config:get': { args: []; result: AppConfig }
   'config:setUi': { args: [patch: Partial<UiPrefs>]; result: AppConfig }
+  /** 이름 붙인 설정 묶음 저장(새로 만들기·이름 변경·덮어쓰기). 토큰(GitHub·Jira)은 어떤 프로필에도 담기지 않는다 — 앱 전체가 공유한다 */
+  'profile:save': { args: [input: ProfileSaveInput]; result: AppConfig }
+  /** 프로필 적용: 지금 프로필을 현재 설정으로 갱신해 두고, 선택한 프로필의 설정으로 바꾼다 */
+  'profile:apply': { args: [profileId: string]; result: AppConfig }
+  'profile:duplicate': { args: [profileId: string, name: string]; result: AppConfig }
+  'profile:delete': { args: [profileId: string]; result: AppConfig }
+  /** 저장소(또는 그 안의 파일)를 파일 관리자·에디터·터미널로 연다. 경로·실행 파일은 main 이 저장소 설정과 사용자가 고른 에디터 설정으로만 정한다 */
+  'external:open': { args: [repoId: string, req: ExternalOpenRequest]; result: void }
+  /** 에디터 실행 파일 선택 창(JetBrains·사용자 지정). 고르면 저장하고 설정을 돌려준다, 취소하면 null */
+  'external:pickEditorExe': { args: []; result: AppConfig | null }
   /** 폴더 선택 대화상자. 취소하면 null. defaultPath 로 시작 위치(\\wsl.localhost\… 등)를 줄 수 있다 */
   'dialog:pickFolder': { args: [defaultPath?: string]; result: string | null }
   'repos:remove': { args: [repoId: string]; result: AppConfig }
@@ -199,6 +211,12 @@ export const IPC_CHANNELS = [
   'config:get',
   'config:setUi',
   'dialog:pickFolder',
+  'profile:save',
+  'profile:apply',
+  'profile:duplicate',
+  'profile:delete',
+  'external:open',
+  'external:pickEditorExe',
   'repos:remove',
   'repos:add',
   'repos:update',

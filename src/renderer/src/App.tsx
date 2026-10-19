@@ -27,6 +27,8 @@ import { useLaunchpadStore } from './stores/launchpadStore'
 import { UpdateSnackbar } from './components/UpdateSnackbar'
 import { CommandPalette } from './components/CommandPalette'
 import { ShortcutsDialog } from './components/ShortcutsDialog'
+import { ExternalMenu } from './components/ExternalMenu'
+import { SettingsDialog } from './components/SettingsDialog'
 import { runShortcut } from './lib/commands'
 import { isOverlayOpen } from './stores/paletteStore'
 import { syncGroupColors } from './lib/groupColor'
@@ -80,6 +82,13 @@ export function App(): React.JSX.Element | null {
       setWidths(config.ui.paneWidths)
     }
   }, [config])
+
+  // 프로필을 적용하면 저장된 패널 폭으로 바뀐다(드래그 중에는 설정이 바뀌지 않으므로 끼어들지 않는다)
+  const savedWidths = config?.ui.paneWidths
+  useEffect(() => {
+    if (!savedWidths || !widthsLoaded.current) return
+    setWidths((w) => (w[0] === savedWidths[0] && w[1] === savedWidths[1] ? w : [savedWidths[0], savedWidths[1]]))
+  }, [savedWidths?.[0], savedWidths?.[1]])
 
   // 저장소 그룹 칩 색: 새로 생긴 그룹에 겹치지 않는 색을 주고, 없어진 그룹의 색은 지운다
   const groupKey = config ? [...new Set(config.repos.map((r) => r.group).filter((g): g is string => !!g))].sort().join('\0') : null
@@ -286,6 +295,8 @@ export function App(): React.JSX.Element | null {
       <ShortcutsDialog />
       <AddRepoDialog />
       <JiraConnectDialog />
+      <SettingsDialog />
+      <ExternalMenu />
       <UpdateSnackbar />
     </div>
   )

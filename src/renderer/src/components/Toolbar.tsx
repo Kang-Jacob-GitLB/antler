@@ -3,6 +3,7 @@ import type { FetchStatus } from '@shared/types'
 import { useT } from '../i18n'
 import { fetchDetail } from '../lib/fetchText'
 import { toggleDetail, toggleSidebar, useActiveRepo, useAppStore } from '../stores/appStore'
+import { showExternalMenuAt, useExternalMenuStore } from '../stores/externalMenuStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useLaunchpadStore } from '../stores/launchpadStore'
 import { GhAuthButton } from './github/GhAuthButton'
@@ -14,6 +15,9 @@ import {
   IconBranch,
   IconChevronDown,
   IconLaunchpad,
+  IconClose,
+  IconFunnel,
+  IconMore,
   IconPanelLeft,
   IconPanelRight,
   IconRefresh
@@ -66,11 +70,24 @@ export function Toolbar(): React.JSX.Element {
           <button
             className="crumb"
             onClick={() => setSwitcherOpen(true)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              useExternalMenuStore.getState().show({ x: e.clientX, y: e.clientY, repoId: repo.id })
+            }}
             title={`${t('toolbar.switchRepo')} (${mod}P)`}
           >
             {source && <EnvBadge kind={source.kind} />}
             <span className="crumb__label">{repo.name}</span>
             <IconChevronDown size={14} className="crumb__chev" />
+          </button>
+          <button
+            className="icon-btn icon-btn--sm crumb-more"
+            title={t('ext.menu')}
+            aria-label={t('ext.menu')}
+            aria-haspopup="menu"
+            onClick={(e) => showExternalMenuAt(e.currentTarget, repo.id)}
+          >
+            <IconMore size={13} />
           </button>
           <span className="toolbar__sep">/</span>
           <span className="crumb crumb--static" title={head?.hash ?? ''}>
