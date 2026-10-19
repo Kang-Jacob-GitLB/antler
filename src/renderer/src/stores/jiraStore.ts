@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { JiraAuthState, JiraComment, JiraConnectInput, JiraIssueDetail, JiraIssueSummary, JiraSavedFilter } from '@shared/types'
+import type { JiraAuthState, JiraComment, JiraConnectInput, JiraIssueDetail, JiraIssueSummary, JiraSavedFilter, JiraSiteData } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
 import { useAppStore } from './appStore'
 import { useGithubStore } from './githubStore'
@@ -58,7 +58,29 @@ interface JiraState {
 /** 요청 순번 — 늦게 온 응답을 버린다 */
 let issueSeq = 0
 const listSeq = { mine: 0, list: 0 }
-let issueReq: string | null = null
+/** 이슈·댓글은 요청 ID 를 따로 쓴다(취소가 둘 다 되도록) */
+let issueReqs: string[] = []
+
+/** 지금 연결한 사이트의 저장 필터·최근 본 이슈(사이트별로 분리 저장) */
+export function useJiraSiteData(): JiraSiteData {
+  const site = useJiraStore((s) => s.auth.siteUrl)
+  return useAppStore((s) => (site ? s.config?.ui.jiraSites?.[site] : undefined) ?? NO_SITE_DATA)
+}
+const NO_SITE_DATA: JiraSiteData = {}
+
+function currentSite(): string | undefined {
+  return useJiraStore.getState().auth.siteUrl
+}
+
+function siteData(): JiraSiteData {
+  const site = currentSite()
+  return (site ? useAppStore.getState().config?.ui.jiraSites?.[site] : undefined) ?? NO_SITE_DATA
+}
+
+function saveSiteData(site: string, data: JiraSiteData): void {
+  const app = useAppStore.getState()
+  void app.setUi({ jiraSites: { ...(app.config?.ui.jiraSites ?? {}), [site]: data } })
+}
 
 export const useJiraStore = create<JiraState>((set, get) => {
   const fetchList = async (key: 'mine' | 'list', jql: string, more: boolean): Promise<void> => {
@@ -79,33 +101,40 @@ export const useJiraStore = create<JiraState>((set, get) => {
 
   const loadIssue = async (key: string): Promise<void> => {
     const seq = ++issueSeq
-    if (issueReq) void api.invoke('req:cancel', issueReq).catch(() => {})
-    const req = newRequestId('jira')
-    issueReq = req
+    cancelIssueReqs()
+    const reqIssue = newRequestId('jira')
+    const reqComments = newRequestId('jira')
+    issueReqs = [reqIssue, reqComments]
     set({ issue: { key, detail: null, comments: null, error: null, commentsError: null } })
     const patch = (p: Partial<JiraIssueState>): void => {
       const cur = get().issue
       if (seq === issueSeq && cur?.key === key) set({ issue: { ...cur, ...p } })
     }
     void api
-      .invoke('jira:issue', key, req)
+      .invoke('jira:issue', key, reqIssue)
       .then((detail) => {
         patch({ detail })
         remember({ key: detail.key || key, summary: detail.summary })
       })
       .catch((err) => !isAbort(err) && patch({ error: errorMessage(err) }))
     void api
-      .invoke('jira:comments', key, req)
+      .invoke('jira:comments', key, reqComments)
       .then((comments) => patch({ comments }))
       .catch((err) => !isAbort(err) && patch({ commentsError: errorMessage(err) }))
   }
 
   /** 최근 본 이슈를 설정에 기억한다(맨 앞으로, 중복 제거) */
   const remember = (r: { key: string; summary: string }): void => {
-    const app = useAppStore.getState()
-    const cur = app.config?.ui.jiraRecent ?? []
+    const site = currentSite()
+    if (!site) return
+    const cur = siteData().recent ?? []
     if (cur[0]?.key === r.key && cur[0].summary === r.summary) return
-    void app.setUi({ jiraRecent: [r, ...cur.filter((x) => x.key !== r.key)].slice(0, MAX_RECENT) })
+    saveSiteData(site, { ...siteData(), recent: [r, ...cur.filter((x) => x.key !== r.key)].slice(0, MAX_RECENT) })
+  }
+
+  const cancelIssueReqs = (): void => {
+    for (const id of issueReqs) void api.invoke('req:cancel', id).catch(() => {})
+    issueReqs = []
   }
 
   return {
@@ -135,7 +164,16 @@ export const useJiraStore = create<JiraState>((set, get) => {
     },
 
     async disconnect() {
+      const site = currentSite()
       const auth = await api.invoke('jira:disconnect')
+      // 이 사이트의 저장 필터·최근 본 이슈는 지운다(다른 사이트로 연결했을 때 옛 키로 조회하지 않게)
+      const app = useAppStore.getState()
+      const sites = { ...(app.config?.ui.jiraSites ?? {}) }
+      if (site && site in sites) {
+        delete sites[site]
+        void app.setUi({ jiraSites: Object.keys(sites).length ? sites : undefined })
+      }
+      cancelIssueReqs()
       issueSeq++
       listSeq.mine++
       listSeq.list++
@@ -153,15 +191,14 @@ export const useJiraStore = create<JiraState>((set, get) => {
         if (view.kind === 'issue') {
           void loadIssue(view.key)
         } else if (view.source !== 'custom') {
-          const apps = useAppStore.getState().config?.ui.jiraFilters ?? []
+          const apps = siteData().filters ?? []
           const jql = view.source === 'mine' ? MINE_JQL : apps[view.source]?.jql
           if (!jql) return
           if (get().list.jql !== jql || get().list.items.length === 0) void fetchList('list', jql, false)
         }
       } else {
         issueSeq++
-        if (issueReq) void api.invoke('req:cancel', issueReq).catch(() => {})
-        issueReq = null
+        cancelIssueReqs()
       }
       set({ view })
     },
@@ -176,15 +213,16 @@ export const useJiraStore = create<JiraState>((set, get) => {
     loadList: (jql, more = false) => fetchList('list', jql, more),
 
     saveFilter(f) {
-      const app = useAppStore.getState()
-      const cur = app.config?.ui.jiraFilters ?? []
-      void app.setUi({ jiraFilters: [...cur.filter((x) => x.name !== f.name), f].slice(0, MAX_FILTERS) })
+      const site = currentSite()
+      if (!site) return
+      const cur = siteData().filters ?? []
+      saveSiteData(site, { ...siteData(), filters: [...cur.filter((x) => x.name !== f.name), f].slice(0, MAX_FILTERS) })
     },
 
     removeFilter(index) {
-      const app = useAppStore.getState()
-      const cur = app.config?.ui.jiraFilters ?? []
-      void app.setUi({ jiraFilters: cur.filter((_, i) => i !== index) })
+      const site = currentSite()
+      if (!site) return
+      saveSiteData(site, { ...siteData(), filters: (siteData().filters ?? []).filter((_, i) => i !== index) })
       const v = get().view
       if (v?.kind === 'list' && typeof v.source === 'number') get().show(null)
     }

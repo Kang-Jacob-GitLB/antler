@@ -43,14 +43,21 @@ function bodyHtml(c: JiraCredential, raw: unknown, rendered: unknown): string {
 }
 
 export async function myself(client: JiraClient, c: JiraCredential, signal?: AbortSignal): Promise<string> {
-  const me = obj(await client.get<unknown>(`${apiBase(c)}/myself`, { credential: c, ...(signal ? { signal } : {}) }))
+  const me = obj(await client.get<unknown>(`${apiBase(c)}/myself`, {
+      credential: c,
+      notFound: '이 주소에서 Jira API 를 찾을 수 없습니다(사이트 주소와 Cloud/Server 종류를 확인하세요)',
+      ...(signal ? { signal } : {})
+    })
+  )
   return str(me['displayName']) || str(me['name']) || str(me['emailAddress'])
 }
 
 export async function getIssue(client: JiraClient, c: JiraCredential, key: string, signal?: AbortSignal): Promise<JiraIssueDetail> {
   const raw = obj(
     await client.get<unknown>(`${apiBase(c)}/issue/${encodeURIComponent(key)}`, {
-      query: { fields: DETAIL_FIELDS, expand: 'renderedFields' },
+      // Cloud 는 ADF 를 직접 변환하므로 서버 렌더 HTML 이 필요 없다
+      query: { fields: DETAIL_FIELDS, expand: c.kind === 'server' ? 'renderedFields' : undefined },
+      notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다',
       ...(signal ? { signal } : {})
     })
   )
@@ -58,8 +65,8 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
   const summary = mapSummary(raw)
   return {
     ...summary,
-    // 응답의 key 가 아니라 요청한 key 로 주소를 만든다(이동된 이슈는 새 key 가 올 수 있다)
-    url: `${c.siteUrl}/browse/${encodeURIComponent(summary.key || key)}`,
+    // 응답의 key 가 아니라 요청한 key 로 주소를 만든다(이동된 이슈는 Jira 가 /browse/옛키 를 새 키로 연결한다)
+    url: `${c.siteUrl}/browse/${encodeURIComponent(key)}`,
     reporter: str(obj(f['reporter'])['displayName']),
     created: str(f['created']),
     descriptionHtml: bodyHtml(c, f['description'], obj(raw['renderedFields'])['description'])
@@ -67,13 +74,21 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
 }
 
 export async function getComments(client: JiraClient, c: JiraCredential, key: string, signal?: AbortSignal): Promise<JiraComment[]> {
-  const raw = obj(
-    await client.get<unknown>(`${apiBase(c)}/issue/${encodeURIComponent(key)}/comment`, {
-      query: { orderBy: '-created', maxResults: COMMENT_COUNT, expand: 'renderedBody' },
-      ...(signal ? { signal } : {})
-    })
-  )
-  const list = Array.isArray(raw['comments']) ? (raw['comments'] as unknown[]) : []
+  const path = `${apiBase(c)}/issue/${encodeURIComponent(key)}/comment`
+  const common = { notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다', ...(signal ? { signal } : {}) }
+  let list: unknown[]
+  if (c.kind === 'cloud') {
+    // Cloud 는 orderBy 로 최신순을 직접 받는다
+    const raw = obj(await client.get<unknown>(path, { query: { orderBy: '-created', maxResults: COMMENT_COUNT }, ...common }))
+    list = Array.isArray(raw['comments']) ? (raw['comments'] as unknown[]) : []
+  } else {
+    // Data Center 는 정렬 인자가 문서화되어 있지 않다 — 첫 페이지의 total 로 마지막 페이지(최신 N개)를 받아 뒤집는다
+    const query = { maxResults: COMMENT_COUNT, expand: 'renderedBody' }
+    let raw = obj(await client.get<unknown>(path, { query: { ...query, startAt: 0 }, ...common }))
+    const total = typeof raw['total'] === 'number' ? raw['total'] : 0
+    if (total > COMMENT_COUNT) raw = obj(await client.get<unknown>(path, { query: { ...query, startAt: Math.max(0, total - COMMENT_COUNT) }, ...common }))
+    list = (Array.isArray(raw['comments']) ? (raw['comments'] as unknown[]) : []).reverse()
+  }
   return list.slice(0, COMMENT_COUNT).map((x) => {
     const cm = obj(x)
     return { author: str(obj(cm['author'])['displayName']), created: str(cm['created']), bodyHtml: bodyHtml(c, cm['body'], cm['renderedBody']) }
@@ -90,7 +105,7 @@ export async function search(
   q: { jql: string; cursor?: string | undefined; page: number },
   signal?: AbortSignal
 ): Promise<JiraSearchResult> {
-  const sig = signal ? { signal } : {}
+  const sig = { notFound: '검색 API 를 찾을 수 없습니다(Jira 버전과 사이트 주소를 확인하세요)', ...(signal ? { signal } : {}) }
   if (c.kind === 'cloud') {
     const raw = obj(
       await client.get<unknown>('/rest/api/3/search/jql', {

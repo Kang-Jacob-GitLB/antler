@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
-import { useAppStore } from '../../stores/appStore'
-import { MINE_JQL, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
+import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
 import { IconClose, IconRefresh } from '../icons'
 import { isoToEpoch, issueSub, JiraStatus } from './JiraBits'
@@ -26,7 +25,7 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
   const t = useT()
   const list = useJiraStore((s) => s.list)
   const { show, openIssue, loadList, saveFilter } = useJiraStore.getState()
-  const filters = useAppStore((s) => s.config?.ui.jiraFilters) ?? NO_FILTERS
+  const filters = useJiraSiteData().filters ?? NO_FILTERS
   const saved = typeof view.source === 'number' ? filters[view.source] : undefined
   const title = view.source === 'mine' ? t('jira.mine') : saved ? saved.name : t('jira.customJql')
   const [jql, setJql] = useState(list.jql)

@@ -54,10 +54,13 @@ export interface UiPrefs {
   autoFetchMinutes?: number
   /** Jira 이슈 키로 인식할 프로젝트 키(없으면 일반 패턴 ABC-123 전체) */
   jiraProjectKeys?: string[]
-  /** 사용자가 저장한 Jira JQL 필터 */
-  jiraFilters?: JiraSavedFilter[]
-  /** 최근 본 Jira 이슈(최신순) */
-  jiraRecent?: JiraRecentIssue[]
+  /** 연결한 Jira 사이트(origin+경로)별 저장 필터·최근 본 이슈. 연결을 해제하면 그 사이트 항목을 지운다 */
+  jiraSites?: Record<string, JiraSiteData>
+}
+
+export interface JiraSiteData {
+  filters?: JiraSavedFilter[]
+  recent?: JiraRecentIssue[]
 }
 
 export interface JiraSavedFilter {

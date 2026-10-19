@@ -124,8 +124,8 @@ app.whenReady().then(() => {
   })
   jira = new JiraService({
     store: new TokenStore(app.getPath('userData'), safeStorage, process.platform, { token: JIRA_TOKEN_FILE, meta: JIRA_META_FILE }),
-    // 가짜 Jira 서버(테스트·화면 확인)에 한해 루프백 http 를 허용한다. 실사용에서는 켜지 않는다
-    allowInsecureLoopback: process.env['ANTLER_JIRA_ALLOW_LOOPBACK'] === '1'
+    // 가짜 Jira 서버(테스트·화면 확인)에 한해 루프백 http 를 허용한다. 패키지된 앱에서는 환경 변수가 있어도 무시한다
+    allowInsecureLoopback: !app.isPackaged && process.env['ANTLER_JIRA_ALLOW_LOOPBACK'] === '1'
   })
   updates = new UpdateService({
     currentVersion: __APP_VERSION__,

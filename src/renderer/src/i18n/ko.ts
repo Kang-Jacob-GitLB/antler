@@ -355,6 +355,10 @@ export const ko = {
   'jira.reporter': '보고자',
   'jira.unassigned': '담당자 없음',
   'jira.updatedAt': '{when} 수정',
+  'jira.foreignLink': '연결한 Jira 사이트 밖의 링크라 앱에서 열지 않습니다',
+  'cmd.jiraConnect': 'Jira 연결 설정(연결 · 연결 해제)',
+  'cmd.jiraDisconnect': 'Jira 연결 해제',
+  'cmd.jiraMine': 'Jira: 나에게 할당된 이슈',
   'error.generic': '오류: {msg}'
 }
 

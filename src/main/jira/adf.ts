@@ -50,6 +50,7 @@ function renderChildren(n: AdfNode, depth: number, b: Budget): string {
 function applyMarks(html: string, marks: AdfMark[] | undefined): string {
   let out = html
   for (const m of Array.isArray(marks) ? marks : []) {
+    if (!m || typeof m !== 'object') continue
     switch (m.type) {
       case 'strong':
         out = `<strong>${out}</strong>`
@@ -124,7 +125,7 @@ function render(n: AdfNode, depth: number, b: Budget): string {
       out = `<blockquote>${renderChildren(n, depth, b)}</blockquote>`
       break
     case 'codeBlock':
-      out = `<pre><code>${esc((n.content ?? []).map((c) => str(c.text)).join(''))}</code></pre>`
+      out = `<pre><code>${esc((Array.isArray(n.content) ? n.content : []).map((c) => str(c?.text)).join(''))}</code></pre>`
       break
     case 'rule':
       out = '<hr>'
@@ -158,7 +159,9 @@ function render(n: AdfNode, depth: number, b: Budget): string {
       break
     case 'date': {
       const ms = Number(n.attrs?.['timestamp'])
-      out = Number.isFinite(ms) ? esc(new Date(ms).toISOString().slice(0, 10)) : ''
+      // 범위를 벗어난 값은 Invalid Date 가 되어 toISOString 이 RangeError 를 던진다
+      const day = new Date(ms)
+      out = Number.isFinite(ms) && !Number.isNaN(day.getTime()) ? esc(day.toISOString().slice(0, 10)) : ''
       break
     }
     case 'inlineCard':
@@ -180,9 +183,28 @@ function render(n: AdfNode, depth: number, b: Budget): string {
   return out
 }
 
-/** ADF 문서(또는 노드)를 HTML 로. 해석할 수 없는 입력은 빈 문자열 */
+/** 변환이 실패했을 때의 대체: 문서 안의 text 를 모아 문단 하나로(깊이·길이 상한 적용) */
+function plainFallback(node: unknown, depth = 0, acc: string[] = []): string {
+  if (depth > MAX_DEPTH || !node || typeof node !== 'object') return ''
+  const n = node as AdfNode
+  if (typeof n.text === 'string') acc.push(n.text)
+  if (Array.isArray(n.content)) for (const c of n.content) plainFallback(c, depth + 1, acc)
+  if (depth > 0) return ''
+  const text = acc.join(' ').slice(0, 100_000)
+  return text.trim() ? `<p>${esc(text)}</p>` : ''
+}
+
+/** ADF 문서(또는 노드)를 HTML 로. 해석할 수 없는 입력은 빈 문자열, 변환 중 예외가 나면 평문으로 대체 */
 export function adfToHtml(doc: unknown): string {
   if (!doc || typeof doc !== 'object') return ''
-  const html = render(doc as AdfNode, 0, new Budget())
-  return html.length > MAX_OUTPUT ? html.slice(0, MAX_OUTPUT) : html
+  try {
+    const html = render(doc as AdfNode, 0, new Budget())
+    return html.length > MAX_OUTPUT ? html.slice(0, MAX_OUTPUT) : html
+  } catch {
+    try {
+      return plainFallback(doc)
+    } catch {
+      return ''
+    }
+  }
 }

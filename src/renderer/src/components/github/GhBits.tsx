@@ -99,11 +99,18 @@ export const HtmlBody = memo(function HtmlBody({
   /** Jira 본문이면 연결한 사이트 주소: 상대 링크의 기준이 되고, 링크는 jira:openExternal(그 사이트 호스트만)로 연다 */
   jiraSite?: string
 }) {
-  const clean = useMemo(() => sanitizeHtml(html, jiraSite ? `${jiraSite}/` : undefined), [html, jiraSite])
+  const t = useT()
+  const foreignTip = t('jira.foreignLink')
+  const clean = useMemo(() => {
+    const safe = sanitizeHtml(html, jiraSite ? `${jiraSite}/` : undefined)
+    return jiraSite ? markForeignLinks(safe, jiraSite, foreignTip) : safe
+  }, [html, jiraSite, foreignTip])
   const open = (e: React.SyntheticEvent): void => {
     const a = (e.target as HTMLElement).closest('[data-href]')
     if (!a) return
     e.preventDefault()
+    // 연결한 Jira 사이트 밖의 링크는 열지 않는다(툴팁·커서로 안내)
+    if (a.hasAttribute('data-blocked')) return
     void api.invoke(jiraSite ? 'jira:openExternal' : 'gh:openExternal', a.getAttribute('data-href')!).catch(() => {})
   }
   return (
@@ -115,6 +122,25 @@ export const HtmlBody = memo(function HtmlBody({
     />
   )
 })
+
+/** Jira 본문에서 사이트 밖을 가리키는 링크에 열 수 없다는 표시(data-blocked)와 툴팁을 붙인다 */
+function markForeignLinks(safeHtml: string, site: string, tip: string): string {
+  const origin = new URL(site).origin
+  const doc = new DOMParser().parseFromString(`<!doctype html><body>${safeHtml}`, 'text/html')
+  for (const a of doc.body.querySelectorAll('[data-href]')) {
+    let same = false
+    try {
+      same = new URL(a.getAttribute('data-href') ?? '').origin === origin
+    } catch {
+      /* 해석할 수 없는 주소는 막는다 */
+    }
+    if (!same) {
+      a.setAttribute('data-blocked', '')
+      a.setAttribute('title', tip)
+    }
+  }
+  return doc.body.innerHTML
+}
 
 /** 상대 시간(GitHub 목록용) */
 export function useRelative(): (epoch: number) => string {

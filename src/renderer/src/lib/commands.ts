@@ -6,6 +6,7 @@ import { toggleDetail, toggleSidebar, useAppStore } from '../stores/appStore'
 import { useDetailStore } from '../stores/detailStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useGithubStore } from '../stores/githubStore'
+import { useJiraStore } from '../stores/jiraStore'
 import { useLogStore } from '../stores/logStore'
 import { usePaletteStore } from '../stores/paletteStore'
 import { useSearchStore } from '../stores/searchStore'
@@ -209,6 +210,29 @@ export const COMMAND_DEFS: CommandDef[] = [
     keywords: 'github issues',
     when: (c) => c.github,
     run: () => useGithubStore.getState().show({ kind: 'issues' })
+  },
+  {
+    id: 'jira.connect',
+    category: 'general',
+    title: (t) => t('cmd.jiraConnect'),
+    keywords: 'jira atlassian connect disconnect token',
+    run: () => useJiraStore.getState().setDialogOpen(true)
+  },
+  {
+    id: 'jira.disconnect',
+    category: 'general',
+    title: (t) => t('cmd.jiraDisconnect'),
+    keywords: 'jira disconnect sign out',
+    when: () => useJiraStore.getState().auth.connected,
+    run: () => void useJiraStore.getState().disconnect().catch(() => {})
+  },
+  {
+    id: 'jira.mine',
+    category: 'list',
+    title: (t) => t('cmd.jiraMine'),
+    keywords: 'jira assigned issues mine',
+    when: () => useJiraStore.getState().auth.connected,
+    run: () => useJiraStore.getState().show({ kind: 'list', source: 'mine' })
   },
 
   // ── diff ──

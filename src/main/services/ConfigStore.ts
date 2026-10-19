@@ -21,10 +21,16 @@ function checkJiraPrefs(patch: Partial<UiPrefs>): void {
   const bad = (): never => {
     throw new Error('잘못된 Jira 설정입니다')
   }
-  const { jiraProjectKeys: keys, jiraFilters: filters, jiraRecent: recent } = patch
+  const { jiraProjectKeys: keys, jiraSites: sites } = patch
   if (keys !== undefined && (!Array.isArray(keys) || keys.length > 50 || !keys.every((k) => typeof k === 'string' && /^[A-Z][A-Z0-9_]{1,19}$/.test(k)))) bad()
-  if (filters !== undefined && (!Array.isArray(filters) || filters.length > 50 || !filters.every((f) => f && isStr(f.name, 100) && isStr(f.jql, 2000)))) bad()
-  if (recent !== undefined && (!Array.isArray(recent) || recent.length > 30 || !recent.every((r) => r && typeof r.key === 'string' && /^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$/.test(r.key) && isStr(r.summary, 500)))) bad()
+  if (sites === undefined) return
+  if (!sites || typeof sites !== 'object' || Array.isArray(sites) || Object.keys(sites).length > 20) bad()
+  for (const [site, d] of Object.entries(sites)) {
+    if (site.length > 300 || !d || typeof d !== 'object') bad()
+    const { filters, recent } = d
+    if (filters !== undefined && (!Array.isArray(filters) || filters.length > 50 || !filters.every((f) => f && isStr(f.name, 100) && isStr(f.jql, 2000)))) bad()
+    if (recent !== undefined && (!Array.isArray(recent) || recent.length > 30 || !recent.every((r) => r && typeof r.key === 'string' && /^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$/.test(r.key) && isStr(r.summary, 500)))) bad()
+  }
 }
 
 function defaults(): AppConfig {

@@ -34,6 +34,8 @@ export type SleepFn = (ms: number, signal?: AbortSignal) => Promise<void>
 
 export interface GetOptions {
   query?: Record<string, string | number | undefined>
+  /** 404 일 때 보여 줄 문장(엔드포인트별: 이슈 / 검색 / 연결 확인) */
+  notFound?: string
   signal?: AbortSignal
   /** 저장된 자격 증명 대신 이 값으로 요청한다(연결 전 검증용) */
   credential?: JiraCredential
@@ -76,17 +78,20 @@ export class JiraClient {
     for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v))
 
     for (let attempt = 0; ; attempt++) {
-      const res = await this.request(url.href, cred, opts.signal)
+      const { res, timeout } = await this.request(url.href, cred, opts.signal)
       if (res.status === 429 && attempt === 0) {
         const wait = parseRetryAfter(res.headers.get('retry-after'))
         if (wait !== null && wait <= AUTO_RETRY_MAX_SEC) {
-          await res.arrayBuffer().catch(() => undefined)
+          // 본문은 필요 없지만 상한을 지켜 비운다(연결 재사용·메모리). 취소만 전파한다
+          await readText(res, opts.signal, timeout).catch((e: unknown) => {
+            if (e instanceof AbortError) throw e
+          })
           await this.sleep(wait * 1000, opts.signal)
           continue
         }
       }
-      const text = await readText(res, opts.signal)
-      if (!res.ok) throw httpError(res, text)
+      const text = await readText(res, opts.signal, timeout)
+      if (!res.ok) throw httpError(res, text, cred.kind, opts.notFound)
       try {
         return JSON.parse(text) as T
       } catch {
@@ -95,7 +100,7 @@ export class JiraClient {
     }
   }
 
-  private async request(href: string, cred: JiraCredential, signal: AbortSignal | undefined): Promise<Response> {
+  private async request(href: string, cred: JiraCredential, signal: AbortSignal | undefined): Promise<{ res: Response; timeout: AbortSignal }> {
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     const sig = signal ? AbortSignal.any([timeout, signal]) : timeout
     let res: Response
@@ -117,25 +122,40 @@ export class JiraClient {
       await res.body?.cancel().catch(() => undefined)
       throw new JiraApiError('Jira 가 다른 주소로 이동시키려 해 요청을 중단했습니다(사이트 주소를 확인하세요)', 'JIRA_REDIRECT', res.status)
     }
-    return res
+    return { res, timeout }
   }
 }
 
-async function readText(res: Response, signal: AbortSignal | undefined): Promise<string> {
+/** 본문을 읽으며 바이트를 센다. 상한을 넘으면 읽기를 중단(reader.cancel)하고 오류 — chunked 거대 응답도 메모리에 다 받지 않는다 */
+async function readText(res: Response, signal: AbortSignal | undefined, timeout: AbortSignal): Promise<string> {
+  const tooBig = (): JiraApiError => new JiraApiError('Jira 응답이 너무 큽니다', 'JIRA_HTTP', res.status)
   const len = Number(res.headers.get('content-length'))
   if (Number.isFinite(len) && len > MAX_BODY_BYTES) {
     await res.body?.cancel().catch(() => undefined)
-    throw new JiraApiError('Jira 응답이 너무 큽니다', 'JIRA_HTTP', res.status)
+    throw tooBig()
   }
-  let text: string
+  if (!res.body) return ''
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
   try {
-    text = await res.text()
-  } catch {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        throw tooBig()
+      }
+      chunks.push(value)
+    }
+  } catch (err) {
+    if (err instanceof JiraApiError) throw err
     if (signal?.aborted) throw new AbortError()
+    if (timeout.aborted) throw new JiraApiError(`Jira 응답이 ${REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다`, 'JIRA_TIMEOUT')
     throw new JiraApiError('Jira 응답을 읽는 중 연결이 끊겼습니다', 'JIRA_NETWORK', res.status)
   }
-  if (text.length > MAX_BODY_BYTES) throw new JiraApiError('Jira 응답이 너무 큽니다', 'JIRA_HTTP', res.status)
-  return text
+  return Buffer.concat(chunks).toString('utf8')
 }
 
 /** Retry-After: 초 또는 HTTP-date → 남은 초(올림). 해석할 수 없으면 null */
@@ -158,14 +178,17 @@ function bodyMessage(text: string): string {
   }
 }
 
-function httpError(res: Response, text: string): JiraApiError {
+function httpError(res: Response, text: string, kind: JiraCredential['kind'], notFound?: string): JiraApiError {
   const s = res.status
-  if (s === 401) return new JiraApiError('Jira 인증이 거부되었습니다. 이메일·토큰을 확인하고 다시 연결하세요', 'JIRA_AUTH', s)
+  if (s === 401) {
+    const how = kind === 'cloud' ? '이메일·API 토큰을 확인하고' : 'Personal Access Token 을 확인하고'
+    return new JiraApiError(`Jira 인증이 거부되었습니다. ${how} 다시 연결하세요`, 'JIRA_AUTH', s)
+  }
   if (s === 403) {
     const msg = bodyMessage(text)
     return new JiraApiError(`Jira 접근이 거부되었습니다${msg ? `: ${msg}` : ''}`, 'JIRA_FORBIDDEN', s)
   }
-  if (s === 404) return new JiraApiError('이슈를 찾을 수 없거나 볼 권한이 없습니다', 'JIRA_NOT_FOUND', s)
+  if (s === 404) return new JiraApiError(notFound ?? '요청한 항목을 찾을 수 없거나 볼 권한이 없습니다', 'JIRA_NOT_FOUND', s)
   if (s === 429) {
     const wait = parseRetryAfter(res.headers.get('retry-after'))
     return new JiraApiError(wait !== null && wait > 0 ? `Jira 요청이 너무 잦습니다. ${wait}초 후에 다시 시도하세요` : 'Jira 요청이 너무 잦습니다. 잠시 후 다시 시도하세요', 'JIRA_RATE_LIMIT', s)

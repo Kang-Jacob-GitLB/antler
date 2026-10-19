@@ -9,7 +9,7 @@ import { EnvBadge } from './EnvBadge'
 import { RepoMenu } from './RepoMenu'
 import { ChecksBadge, GhStateIcon, prState } from './github/GhBits'
 import { useGithubStore } from '../stores/githubStore'
-import { useJiraStore } from '../stores/jiraStore'
+import { useJiraSiteData, useJiraStore } from '../stores/jiraStore'
 import {
   IconCheck,
   IconChevronRight,
@@ -313,8 +313,9 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const jiraAuth = useJiraStore((s) => s.auth)
   const jiraMine = useJiraStore((s) => s.mine)
   const jiraView = useJiraStore((s) => s.view)
-  const jiraRecent = config?.ui.jiraRecent ?? []
-  const jiraFilters = config?.ui.jiraFilters ?? []
+  const jiraSite = useJiraSiteData()
+  const jiraRecent = jiraSite.recent ?? []
+  const jiraFilters = jiraSite.filters ?? []
   const allGroups = useMemo(
     () => [...new Set((config?.repos ?? []).map((r) => r.group).filter((g): g is string => !!g))].sort(),
     [config]

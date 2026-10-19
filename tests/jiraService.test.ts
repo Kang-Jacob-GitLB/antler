@@ -116,7 +116,7 @@ describe('JiraService', () => {
     expect((await svc.comments('ABC-1'))[0]).toMatchObject({ author: '이영희' })
     // 요청한 필드·확장
     const q = new URL(fake.requests.find((r) => r.url.includes('/issue/ABC-1?'))!.url, 'http://x').searchParams
-    expect(q.get('expand')).toBe('renderedFields')
+    expect(q.get('expand')).toBeNull() // Cloud 는 ADF 를 직접 변환하므로 서버 렌더 HTML 을 요청하지 않는다
   })
 
   it('Server 이슈: 서버가 렌더한 HTML 을 쓴다(API v2)', async () => {

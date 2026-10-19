@@ -357,5 +357,9 @@ export const en: Messages = {
   'jira.reporter': 'Reporter',
   'jira.unassigned': 'Unassigned',
   'jira.updatedAt': 'updated {when}',
+  'jira.foreignLink': 'This link points outside the connected Jira site, so it is not opened',
+  'cmd.jiraConnect': 'Jira connection settings (connect / disconnect)',
+  'cmd.jiraDisconnect': 'Disconnect Jira',
+  'cmd.jiraMine': 'Jira: issues assigned to me',
   'error.generic': 'Error: {msg}'
 }
