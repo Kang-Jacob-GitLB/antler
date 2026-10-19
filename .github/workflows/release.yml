@@ -190,7 +190,8 @@ jobs:
           printf '%s\n' "$NOTES" > tag_message.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -F tag_message.md "$SHA"
+          # 기본 cleanup(strip)은 '#' 으로 시작하는 줄을 주석으로 지워 노트의 '## 새 기능' 같은 제목이 사라진다
+          git tag -a --cleanup=verbatim "$TAG" -F tag_message.md "$SHA"
           git push origin "refs/tags/$TAG"
 
       # 릴리스 노트: annotated 태그 메시지. 없으면 GitHub 자동 생성 노트로 대신한다
