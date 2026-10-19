@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { FetchStatus } from '@shared/types'
 import { useT } from '../i18n'
 import { fetchDetail } from '../lib/fetchText'
-import { useActiveRepo, useAppStore } from '../stores/appStore'
+import { toggleDetail, toggleSidebar, useActiveRepo, useAppStore } from '../stores/appStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useLogStore } from '../stores/logStore'
 import { GhAuthButton } from './github/GhAuthButton'
@@ -14,6 +14,8 @@ import {
   IconChevronDown,
   IconClose,
   IconFunnel,
+  IconPanelLeft,
+  IconPanelRight,
   IconRefresh
 } from './icons'
 import './Toolbar.css'
@@ -25,6 +27,8 @@ export function Toolbar(): React.JSX.Element {
   const head = useAppStore((s) => s.head)
   const autoFetch = useAppStore((s) => s.config?.ui.autoFetchMinutes ?? 5)
   const { setUi, setSwitcherOpen } = useAppStore.getState()
+  const sidebarShown = useAppStore((s) => s.config?.ui.sidebarHidden !== true)
+  const detailShown = useAppStore((s) => s.config?.ui.detailHidden !== true)
   const fetchStatus = useFetchStore((s) => (repo ? s.status[repo.id] : undefined))
   // 툴팁의 "n분 전"은 마우스를 올릴 때 갱신한다(타이머 없이)
   const [now, setNow] = useState(() => Date.now())
@@ -37,6 +41,7 @@ export function Toolbar(): React.JSX.Element {
   }
 
   const mod = window.antler.platform === 'darwin' ? '⌘' : 'Ctrl+'
+  const altKey = window.antler.platform === 'darwin' ? '⌥' : 'Alt+'
 
   return (
     <header className="toolbar">
@@ -100,6 +105,26 @@ export function Toolbar(): React.JSX.Element {
             </MenuButton>
           </div>
         )}
+        <div className="panel-toggles">
+          <button
+            className="icon-btn"
+            aria-pressed={sidebarShown}
+            title={`${t(sidebarShown ? 'toolbar.hideSidebar' : 'toolbar.showSidebar')} (${mod}B)`}
+            onClick={() => toggleSidebar()}
+          >
+            <IconPanelLeft on={sidebarShown} />
+          </button>
+          {repo && (
+            <button
+              className="icon-btn"
+              aria-pressed={detailShown}
+              title={`${t(detailShown ? 'toolbar.hideDetail' : 'toolbar.showDetail')} (${mod}${altKey}B)`}
+              onClick={() => toggleDetail()}
+            >
+              <IconPanelRight on={detailShown} />
+            </button>
+          )}
+        </div>
       </div>
     </header>
   )

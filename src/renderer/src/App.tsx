@@ -9,7 +9,7 @@ import { Sidebar } from './components/Sidebar'
 import { Splitter, type SplitterHandlers } from './components/Splitter'
 import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
-import { useAppStore } from './stores/appStore'
+import { toggleDetail, toggleSidebar, useAppStore } from './stores/appStore'
 import { useDetailStore } from './stores/detailStore'
 import { useLogStore } from './stores/logStore'
 import { useFetchStore } from './stores/fetchStore'
@@ -95,6 +95,8 @@ export function App(): React.JSX.Element | null {
     return () => clearTimeout(timer)
   }, [selectedHash])
   const diffOpen = useDetailStore((s) => s.file !== null)
+  const sidebarShown = useAppStore((s) => s.config?.ui.sidebarHidden !== true)
+  const detailShown = useAppStore((s) => s.config?.ui.detailHidden !== true)
   // 중앙 화면 우선순위: 파일 diff → GitHub 화면 → 커밋 그래프(그래프는 항상 마운트해 스크롤·페이지 유지)
   const ghOpen = useGithubStore((s) => s.view !== null)
 
@@ -131,6 +133,14 @@ export function App(): React.JSX.Element | null {
           gh.show(gh.view.kind === 'pull' ? { kind: 'pulls' } : gh.view.kind === 'issue' ? { kind: 'issues' } : null)
           return
         }
+      }
+      // Ctrl+B 왼쪽 사이드바, Ctrl+Alt+B 오른쪽 상세 패널 보이기/숨기기(입력 중에도 동작 — 글자 입력 키가 아니다)
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.code === 'KeyB') {
+        e.preventDefault()
+        if (e.altKey) {
+          if (useAppStore.getState().activeRepoId) toggleDetail()
+        } else toggleSidebar()
+        return
       }
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return
       const key = e.key.toLowerCase()
@@ -187,8 +197,12 @@ export function App(): React.JSX.Element | null {
     <div className="app">
       <Toolbar />
       <div className="app__body">
-        <Sidebar width={widths[0]} />
-        <Splitter {...splitter(0)} />
+        {sidebarShown && (
+          <>
+            <Sidebar width={widths[0]} />
+            <Splitter {...splitter(0)} />
+          </>
+        )}
         {activeRepoId ? (
           <>
             {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
@@ -196,8 +210,12 @@ export function App(): React.JSX.Element | null {
               <CommitList />
             </div>
             {diffOpen ? <DiffView /> : ghOpen ? <GitHubView /> : null}
-            <Splitter {...splitter(1)} />
-            <DetailPanel width={widths[1]} />
+            {detailShown && (
+              <>
+                <Splitter {...splitter(1)} />
+                <DetailPanel width={widths[1]} />
+              </>
+            )}
           </>
         ) : (
           <EmptyState />

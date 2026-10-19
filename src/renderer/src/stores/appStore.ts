@@ -184,3 +184,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 export function useActiveRepo(): Repo | null {
   return useAppStore((s) => s.config?.repos.find((r) => r.id === s.activeRepoId) ?? null)
 }
+
+/** 왼쪽 사이드바 보이기/숨기기(설정에 기억) */
+export function toggleSidebar(): void {
+  const s = useAppStore.getState()
+  void s.setUi({ sidebarHidden: s.config?.ui.sidebarHidden !== true })
+}
+
+/** 오른쪽 상세 패널 보이기/숨기기(설정에 기억) */
+export function toggleDetail(): void {
+  const s = useAppStore.getState()
+  void s.setUi({ detailHidden: s.config?.ui.detailHidden !== true })
+}
