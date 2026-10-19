@@ -4,16 +4,14 @@ import { useT } from '../i18n'
 import { fetchDetail } from '../lib/fetchText'
 import { toggleDetail, toggleSidebar, useActiveRepo, useAppStore } from '../stores/appStore'
 import { useFetchStore } from '../stores/fetchStore'
-import { useLogStore } from '../stores/logStore'
 import { GhAuthButton } from './github/GhAuthButton'
 import { AntlerMark } from './brand'
 import { EnvBadge } from './EnvBadge'
 import { MenuButton } from './MenuButton'
+import { ViewChips } from './ViewChips'
 import {
   IconBranch,
   IconChevronDown,
-  IconClose,
-  IconFunnel,
   IconPanelLeft,
   IconPanelRight,
   IconRefresh
@@ -32,8 +30,6 @@ export function Toolbar(): React.JSX.Element {
   const fetchStatus = useFetchStore((s) => (repo ? s.status[repo.id] : undefined))
   // 툴팁의 "n분 전"은 마우스를 올릴 때 갱신한다(타이머 없이)
   const [now, setNow] = useState(() => Date.now())
-  const filter = useLogStore((s) => s.filter)
-  const setFilter = useLogStore((s) => s.setFilter)
 
   const fetchTitle = (s: FetchStatus | undefined, at: number): string => {
     const base = t('toolbar.refresh')
@@ -78,13 +74,7 @@ export function Toolbar(): React.JSX.Element {
             <IconBranch size={14} className="crumb__icon" />
             <span className="crumb__label">{head ? (head.branch ?? t('toolbar.detached')) : '…'}</span>
           </span>
-          {filter && (
-            <button className="filter-chip" title={t('toolbar.clearFilter')} onClick={() => setFilter(null)}>
-              <IconFunnel size={12} />
-              <span className="filter-chip__label">{t('toolbar.filter', { label: filter.label })}</span>
-              <IconClose size={11} />
-            </button>
-          )}
+          <ViewChips />
         </div>
       )}
 

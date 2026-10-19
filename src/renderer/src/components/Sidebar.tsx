@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { Branch, Repo, Source, Stash, SubmoduleInfo, Tag, Worktree } from '@shared/types'
+import type { Branch, Repo, Source, Stash, SubmoduleInfo, Tag, ViewRef, Worktree } from '@shared/types'
 import { useT } from '../i18n'
 import { formatDate } from '../lib/format'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
-import { useLogStore, type LogFilter } from '../stores/logStore'
+import { canHide, inList, isHidden, remoteAllRef } from '../lib/refView'
+import { useLogStore } from '../stores/logStore'
 import { EnvBadge } from './EnvBadge'
 import { RepoMenu } from './RepoMenu'
 import { BranchFlowBadge } from './FlowBadge'
@@ -17,12 +18,15 @@ import {
   IconClose,
   IconCloud,
   IconFolder,
+  IconEye,
+  IconEyeOff,
   IconFunnel,
   IconMore,
   IconMonitor,
   IconPlus,
   IconRepo,
   IconSearch,
+  IconSolo,
   IconStash,
   IconSubmodule,
   IconTag,
@@ -99,22 +103,66 @@ interface RowProps {
   disabled?: boolean
   trailing?: ReactNode
   onClick?(): void
-  onFilter?(): void
+  /** Solo / Hide 대상 ref. 있으면 더블클릭 solo, hover 아이콘, 숨김 행 흐리게가 붙는다 */
+  view?: ViewRef
   onContextMenu?(e: React.MouseEvent): void
 }
 
-function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing, onClick, onFilter, onContextMenu }: RowProps): React.JSX.Element {
+/** hover 때 나타나는 숨기기(눈)·Solo 버튼. 숨김·Solo 상태인 행에서는 항상 보인다 */
+function ViewActions({ view }: { view: ViewRef }): React.JSX.Element {
   const t = useT()
+  const soloOn = useLogStore((s) => inList(s.solo, view.id))
+  const hideOn = useLogStore((s) => inList(s.hide, view.id))
+  // 리모트 전체가 숨겨져 있어 이 브랜치도 가려진 상태 — 개별로는 풀 수 없다
+  const viaRemote = useLogStore((s) => !inList(s.hide, view.id) && isHidden(s.hide, view.id))
+  const click = (fn: () => void) => (e: React.MouseEvent) => {
+    e.stopPropagation()
+    fn()
+  }
+  const { toggleHide, toggleSolo } = useLogStore.getState()
+  return (
+    <>
+      {canHide(view) && (
+        <button
+          className={`side-item__action${hideOn || viaRemote ? ' is-on' : ''}`}
+          title={viaRemote ? t('view.hiddenByRemote') : hideOn ? t('view.show') : t('view.hide')}
+          aria-pressed={hideOn || viaRemote}
+          disabled={viaRemote}
+          onClick={click(() => toggleHide(view))}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {hideOn || viaRemote ? <IconEyeOff size={12} /> : <IconEye size={12} />}
+        </button>
+      )}
+      <button
+        className={`side-item__action${soloOn ? ' is-on' : ''}`}
+        title={soloOn ? t('view.unsolo') : t('view.solo')}
+        aria-pressed={soloOn}
+        onClick={click(() => toggleSolo(view))}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <IconSolo size={12} />
+      </button>
+    </>
+  )
+}
+
+function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing, onClick, view, onContextMenu }: RowProps): React.JSX.Element {
+  const soloOn = useLogStore((s) => !!view && inList(s.solo, view.id))
+  // Hide 는 solo 가 없을 때만 적용된다
+  const hidden = useLogStore((s) => !!view && s.solo.length === 0 && isHidden(s.hide, view.id))
   return (
     <div
       role="button"
       tabIndex={0}
       aria-disabled={disabled || undefined}
-      className={`side-item${active ? ' is-active' : ''}${muted ? ' is-muted' : ''}`}
+      className={`side-item${active || soloOn ? ' is-active' : ''}${muted ? ' is-muted' : ''}${hidden ? ' is-hidden' : ''}`}
       style={{ paddingLeft: 8 + depth * 14 }}
       title={title ?? label}
       onClick={onClick}
-      onDoubleClick={onFilter}
+      onDoubleClick={view ? () => useLogStore.getState().setFilter(view) : undefined}
       onContextMenu={onContextMenu}
       onKeyDown={(e) => {
         if (e.key === 'Enter') onClick?.()
@@ -123,18 +171,7 @@ function ItemRow({ depth, icon, label, title, active, muted, disabled, trailing,
       <span className="side-item__icon">{icon}</span>
       <span className="side-item__label">{label}</span>
       {trailing}
-      {onFilter && (
-        <button
-          className="side-item__action"
-          title={t('sidebar.filter')}
-          onClick={(e) => {
-            e.stopPropagation()
-            onFilter()
-          }}
-        >
-          <IconFunnel size={12} />
-        </button>
-      )}
+      {view && <ViewActions view={view} />}
     </div>
   )
 }
@@ -146,6 +183,30 @@ function FolderRow({ depth, name, count, open, onToggle }: { depth: number; name
       <IconFolder size={13} className="side-item__icon" />
       <span className="side-item__label">{name}</span>
       <span className="side-count">{count}</span>
+    </div>
+  )
+}
+
+/** 리모트 폴더 행: 리모트 전체를 Solo / 숨기기 할 수 있다 */
+function RemoteRow({ name, count, open, onToggle, onContextMenu }: { name: string; count: number; open: boolean; onToggle(): void; onContextMenu(e: React.MouseEvent): void }): React.JSX.Element {
+  const view = useMemo(() => remoteAllRef(name), [name])
+  const soloOn = useLogStore((s) => inList(s.solo, view.id))
+  const hidden = useLogStore((s) => s.solo.length === 0 && inList(s.hide, view.id))
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`side-item side-item--folder${soloOn ? ' is-active' : ''}${hidden ? ' is-hidden' : ''}`}
+      style={{ paddingLeft: 8 }}
+      onClick={onToggle}
+      onDoubleClick={() => useLogStore.getState().setFilter(view)}
+      onContextMenu={onContextMenu}
+    >
+      <IconChevronRight size={12} className={`side-chev${open ? ' is-open' : ''}`} />
+      <IconCloud size={13} className="side-item__icon" />
+      <span className="side-item__label">{name}</span>
+      <span className="side-count">{count}</span>
+      <ViewActions view={view} />
     </div>
   )
 }
@@ -231,9 +292,15 @@ function Tree<T>({ node, scope, depth, renderItem }: { node: TreeNode<T>; scope:
   )
 }
 
-/** 브랜치·태그 행 우클릭 메뉴: 현재 HEAD 와 비교. onClose(restore): restore 면 메뉴를 연 행으로 포커스를 돌려준다 */
-function CompareMenu({ x, y, disabled, hint, onPick, onClose }: { x: number; y: number; disabled: boolean; hint?: string; onPick(): void; onClose(restore: boolean): void }): React.JSX.Element {
-  const t = useT()
+interface CtxItem {
+  label: string
+  disabled?: boolean
+  hint?: string
+  onPick(): void
+}
+
+/** ref 행 우클릭 메뉴(현재 HEAD 와 비교 · Solo · 숨기기 · 모두 보이기). onClose(restore): restore 면 메뉴를 연 행으로 포커스를 돌려준다 */
+function RefMenu({ x, y, items, onClose }: { x: number; y: number; items: CtxItem[]; onClose(restore: boolean): void }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   // 뷰포트 밖으로 나가지 않게 실제 크기로 좌표를 보정한다
   const [pos, setPos] = useState({ left: x, top: y })
@@ -278,9 +345,11 @@ function CompareMenu({ x, y, disabled, hint, onPick, onClose }: { x: number; y: 
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onClose(false)
       }}
     >
-      <button className="side-ctx__item" role="menuitem" disabled={disabled} title={hint} autoFocus onClick={onPick}>
-        {t('compare.withHead')}
-      </button>
+      {items.map((it, i) => (
+        <button key={it.label} className="side-ctx__item" role="menuitem" disabled={it.disabled} title={it.hint} autoFocus={i === items.findIndex((x) => !x.disabled)} onClick={it.onPick}>
+          {it.label}
+        </button>
+      ))}
     </div>
   )
 }
@@ -298,7 +367,6 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const activeRepoId = useAppStore((s) => s.activeRepoId)
   const refs = useAppStore((s) => s.refs)
   const { selectRepo, addRepo, openAddDialog, removeRepo, updateRepo } = useAppStore.getState()
-  const filter = useLogStore((s) => s.filter)
   const [query, setQuery] = useState('')
   const q = query.trim().toLowerCase()
   const { isOpen, toggle } = useCollapse()
@@ -342,10 +410,9 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
   const submodules = useMemo(() => (refs?.submodules ?? []).filter((m) => matches(q, m.name, m.path)), [refs, q])
   const worktrees = useMemo(() => (refs?.worktrees ?? []).filter((w) => matches(q, w.path, w.branch ?? undefined)), [refs, q])
 
-  // 필터로 다른 ref 만 보는 중이면 찾는 커밋이 목록에 없을 수 있으므로 전체 보기로 돌아간 뒤 찾아간다
-  const reveal = (hash: string): void => {
-    const log = useLogStore.getState()
-    if (log.filter) log.setFilter(null)
+  // Solo 로 다른 ref 만 보는 중이거나 그 ref 가 숨겨져 있으면 찾는 커밋이 목록에 없을 수 있으므로 보기를 푼 뒤 찾아간다
+  const reveal = (hash: string, id?: string): void => {
+    useLogStore.getState().releaseFor(id, [hash])
     void useLogStore.getState().reveal(hash)
   }
   // 폴더·리모트 접힘 키는 저장소마다 따로 둔다
@@ -373,9 +440,9 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
       ...(parent.group ? { group: parent.group } : {})
     }).catch((err: unknown) => useAppStore.setState({ error: err instanceof Error ? err.message : String(err) }))
   }
-  const solo = (f: LogFilter): void => useLogStore.getState().setFilter(f)
-  // 브랜치·태그 우클릭 메뉴(현재 HEAD 와 비교): 두 쪽 모두 커밋 해시로 해석된 값을 쓴다
-  const [ctx, setCtx] = useState<{ x: number; y: number; hash: string; row: HTMLElement } | null>(null)
+  const solo = (f: ViewRef): void => useLogStore.getState().setFilter(f)
+  // ref 행 우클릭 메뉴(현재 HEAD 와 비교 · Solo · 숨기기): 비교는 두 쪽 모두 커밋 해시로 해석된 값을 쓴다
+  const [ctx, setCtx] = useState<{ x: number; y: number; hash?: string; view?: ViewRef; row: HTMLElement } | null>(null)
   const closeCtx = useCallback(
     (restore: boolean) =>
       setCtx((c) => {
@@ -385,22 +452,56 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
     []
   )
   const headHash = refs?.head.hash ?? null
-  const ctxOf = (hash: string) => (e: React.MouseEvent): void => {
+  const ctxOf = (view: ViewRef, hash?: string) => (e: React.MouseEvent): void => {
     e.preventDefault()
-    setCtx({ x: e.clientX, y: e.clientY, hash, row: e.currentTarget as HTMLElement })
+    setCtx({ x: e.clientX, y: e.clientY, hash, view, row: e.currentTarget as HTMLElement })
   }
-  const compareWithHead = (hash: string): void => {
+  const compareWithHead = (hash: string, id?: string): void => {
     closeCtx(false)
     if (!headHash) return
-    // 필터로 다른 ref 만 보는 중이면 두 커밋이 목록에 없을 수 있으므로 전체 보기로 돌아간 뒤 연다
-    const log = useLogStore.getState()
-    if (log.filter) log.setFilter(null)
+    // Solo·숨김으로 두 커밋이 목록에 없을 수 있으므로 보기를 푼 뒤 연다
+    useLogStore.getState().releaseFor(id, [hash, headHash])
     void useLogStore.getState().compareHashes(hash, headHash)
   }
-  const isFiltered = (rev: string): boolean => filter?.rev === rev
+  /** 우클릭 메뉴 항목: (브랜치·태그면) HEAD 와 비교 · Solo · 숨기기 · 모두 보이기 */
+  const ctxItems = (c: NonNullable<typeof ctx>): CtxItem[] => {
+    const log = useLogStore.getState()
+    const v = c.view
+    const items: CtxItem[] = []
+    if (c.hash) {
+      const hash = c.hash
+      items.push({
+        label: t('compare.withHead'),
+        disabled: !headHash || hash === headHash,
+        hint: !headHash ? t('compare.noHead') : hash === headHash ? t('compare.headSame') : undefined,
+        onPick: () => compareWithHead(hash, v?.id)
+      })
+    }
+    const pick = (fn: () => void) => (): void => {
+      closeCtx(false)
+      fn()
+    }
+    if (v) {
+      items.push({ label: inList(log.solo, v.id) ? t('view.unsolo') : t('view.soloOnly'), onPick: pick(() => log.toggleSolo(v)) })
+      if (canHide(v)) {
+        const viaRemote = !inList(log.hide, v.id) && isHidden(log.hide, v.id)
+        items.push({
+          label: inList(log.hide, v.id) ? t('view.show') : t('view.hide'),
+          disabled: viaRemote,
+          hint: viaRemote ? t('view.hiddenByRemote') : undefined,
+          onPick: pick(() => log.toggleHide(v))
+        })
+      } else {
+        items.push({ label: t('view.hide'), disabled: true, hint: t('view.soloOnlyHint'), onPick: pick(() => {}) })
+      }
+    }
+    if (log.solo.length || log.hide.length) items.push({ label: t('view.showAll'), onPick: pick(() => log.setFilter(null)) })
+    return items
+  }
 
   const branchRow = (b: Branch, label: string, depth: number, remote: boolean): ReactNode => {
     const lane = laneIndexFor(branchKey(b.name, remote))
+    const view: ViewRef = { id: b.fullName, label: b.name, kind: remote ? 'remote' : 'branch' }
     const tracking =
       b.upstreamGone ? (
         <span className="side-track is-gone" title={t('sidebar.upstreamGone')}>
@@ -431,11 +532,11 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
         }
         label={label}
         title={`${b.name}${b.upstream ? ` → ${b.upstream}` : ''}`}
-        active={isFiltered(b.fullName) || b.isHead}
+        active={b.isHead}
         trailing={trailingAll}
-        onClick={() => reveal(b.hash)}
-        onFilter={() => solo({ rev: b.fullName, label: b.name })}
-        onContextMenu={ctxOf(b.hash)}
+        onClick={() => reveal(b.hash, b.fullName)}
+        view={view}
+        onContextMenu={ctxOf(view, b.hash)}
       />
     )
   }
@@ -549,12 +650,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                 const open = isOpen(key) || !!q
                 return (
                   <div key={r.name}>
-                    <div role="button" tabIndex={0} className="side-item side-item--folder" style={{ paddingLeft: 8 }} onClick={() => toggle(key)}>
-                      <IconChevronRight size={12} className={`side-chev${open ? ' is-open' : ''}`} />
-                      <IconCloud size={13} className="side-item__icon" />
-                      <span className="side-item__label">{r.name}</span>
-                      <span className="side-count">{r.branches.length}</span>
-                    </div>
+                    <RemoteRow name={r.name} count={r.branches.length} open={open} onToggle={() => toggle(key)} onContextMenu={ctxOf(remoteAllRef(r.name))} />
                     {open && (
                       <Tree
                         node={buildTree(r.branches.map((b) => ({ name: b.name.slice(r.name.length + 1), value: b })))}
@@ -742,6 +838,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
               {worktrees.map((w: Worktree) => {
                 const base = w.path.split(/[\\/]/).filter(Boolean).pop() ?? w.path
                 const label = w.branch ?? (w.head ? w.head.slice(0, 7) : t('sidebar.noCommits'))
+                const wtView: ViewRef | undefined = w.head ? { id: w.head, label: `${base} (${label})`, kind: 'commit' } : undefined
                 return (
                   <ItemRow
                     key={w.path}
@@ -750,27 +847,32 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     label={base}
                     title={w.path}
                     muted={w.prunable}
-                    active={!!w.head && isFiltered(w.head)}
+                    view={wtView}
                     trailing={<span className="side-sub">{label}</span>}
-                    onClick={() => w.head && solo({ rev: w.head, label: `${base} (${label})` })}
+                    onClick={() => wtView && solo(wtView)}
+                    onContextMenu={wtView ? ctxOf(wtView) : undefined}
                   />
                 )
               })}
             </Section>
 
             <Section id="stashes" title={t('sidebar.stashes')} count={stashes.length}>
-              {stashes.map((s: Stash) => (
-                <ItemRow
-                  key={s.hash}
-                  depth={0}
-                  icon={<IconStash size={13} />}
-                  label={s.message}
-                  title={`${s.ref} · ${s.message}`}
-                  active={isFiltered(s.hash)}
-                  trailing={<span className="side-sub">{formatDate(s.date, locale)}</span>}
-                  onClick={() => solo({ rev: s.hash, label: s.ref })}
-                />
-              ))}
+              {stashes.map((s: Stash) => {
+                const view: ViewRef = { id: s.hash, label: s.ref, kind: 'stash' }
+                return (
+                  <ItemRow
+                    key={s.hash}
+                    depth={0}
+                    icon={<IconStash size={13} />}
+                    label={s.message}
+                    title={`${s.ref} · ${s.message}`}
+                    view={view}
+                    trailing={<span className="side-sub">{formatDate(s.date, locale)}</span>}
+                    onClick={() => solo(view)}
+                    onContextMenu={ctxOf(view)}
+                  />
+                )
+              })}
             </Section>
 
             <Section id="tags" title={t('sidebar.tags')} count={tags.length}>
@@ -785,11 +887,12 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     icon={<IconTag size={13} />}
                     label={it.label}
                     title={it.value.name}
-                    active={isFiltered(it.value.fullName)}
                     muted={!it.value.targetsCommit}
-                    onClick={() => it.value.targetsCommit && reveal(it.value.hash)}
-                    onFilter={it.value.targetsCommit ? () => solo({ rev: it.value.fullName, label: it.value.name }) : undefined}
-                    onContextMenu={it.value.targetsCommit ? ctxOf(it.value.hash) : undefined}
+                    onClick={() => it.value.targetsCommit && reveal(it.value.hash, it.value.fullName)}
+                    view={it.value.targetsCommit ? { id: it.value.fullName, label: it.value.name, kind: 'tag' } : undefined}
+                    onContextMenu={
+                      it.value.targetsCommit ? ctxOf({ id: it.value.fullName, label: it.value.name, kind: 'tag' }, it.value.hash) : undefined
+                    }
                   />
                 )}
               />
@@ -833,14 +936,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
         )}
       </div>
       {ctx && (
-        <CompareMenu
-          x={ctx.x}
-          y={ctx.y}
-          disabled={!headHash || ctx.hash === headHash}
-          hint={!headHash ? t('compare.noHead') : ctx.hash === headHash ? t('compare.headSame') : undefined}
-          onPick={() => compareWithHead(ctx.hash)}
-          onClose={closeCtx}
-        />
+        <RefMenu x={ctx.x} y={ctx.y} items={ctxItems(ctx)} onClose={closeCtx} />
       )}
     </aside>
   )

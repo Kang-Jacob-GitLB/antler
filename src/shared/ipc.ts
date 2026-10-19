@@ -41,6 +41,7 @@ import type {
   LogQuery,
   LfsPathsRequest,
   RepoExtras,
+  LogScope,
   RefsDetails,
   RefsSnapshot,
   Repo,
@@ -117,10 +118,10 @@ export interface IpcContract {
   /** git:refs 에서 미룬 부가 정보(업스트림 ahead/behind·서브모듈). 첫 로그 페이지가 나간 뒤에 조회한다 */
   'git:refsDetails': { args: [repoId: string]; result: RefsDetails }
   'git:log': { args: [repoId: string, query: LogQuery, requestId?: string]; result: LogPage }
-  /** 메시지·작성자·해시 검색. ref 를 주면 그 ref 기준 이력에서만 찾는다 */
-  'git:search': { args: [repoId: string, query: string, ref?: string, requestId?: string]; result: SearchResult }
-  /** 커밋 활동 미니맵용 시간 구간별 커밋 수. ref 를 주면 그 ref 기준(그래프 필터와 같은 범위) */
-  'git:activity': { args: [repoId: string, ref?: string, requestId?: string]; result: CommitActivity }
+  /** 메시지·작성자·해시 검색. scope 를 주면 그 보기 범위(Solo/Hide)의 이력에서만 찾는다 */
+  'git:search': { args: [repoId: string, query: string, scope?: LogScope, requestId?: string]; result: SearchResult }
+  /** 커밋 활동 미니맵용 시간 구간별 커밋 수. scope 를 주면 그 보기 범위(그래프와 같은 범위) */
+  'git:activity': { args: [repoId: string, scope?: LogScope, requestId?: string]; result: CommitActivity }
   /** 커밋 메타데이터 + 첫 부모 대비 변경 파일 목록(+/- 통계). 커밋 해시 기준 불변 캐시 */
   'git:commit': { args: [repoId: string, hash: string, requestId?: string]; result: CommitDetail }
   /** 두 커밋(해시) 사이의 변경 파일 목록(+/- 통계). from → to 방향, 읽기 전용. 해시 쌍 기준 불변 캐시 */

@@ -105,7 +105,7 @@ describe('LogCursor 오류·특수 상태', () => {
 
 describe('logArgs', () => {
   it('ref 는 옵션으로 해석되지 않게 --end-of-options 뒤에 둔다', () => {
-    const args = logArgs('--output=/tmp/x', 0)
-    expect(args.indexOf('--end-of-options')).toBeLessThan(args.indexOf('--output=/tmp/x'))
+    const args = logArgs({ solo: ['refs/heads/--output=x'] }, 0)
+    expect(args.indexOf('--end-of-options')).toBeLessThan(args.indexOf('refs/heads/--output=x'))
   })
 })

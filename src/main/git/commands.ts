@@ -1,6 +1,7 @@
 // git 조회 명령 모음. executor 위에서 동작하며 환경과 무관하다.
 import { createHash } from 'node:crypto'
-import type { CommitDetail, CompareResult, FileChange, FileDiff, FileDiffRequest, HeadInfo, RefsDetails, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
+import type { CommitDetail, CompareResult, FileChange, FileDiff, FileDiffRequest, HeadInfo, LogScope, RefsDetails, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
+import { isRemoteAll, isValidScopeRef, SCOPE_HASH_RE, SCOPE_MAX_ITEMS } from '@shared/logScope'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { pickDefaultBranch } from './defaultBranch'
 import { parseChanges } from './parsers/changes'
@@ -80,12 +81,59 @@ export function revArgs(ref: string | undefined): string[] {
   return ref ? ['--end-of-options', ref] : ['--ignore-missing', '--branches', '--remotes', '--tags', 'HEAD']
 }
 
+function scopeList(list: unknown, what: string): string[] {
+  if (list === undefined) return []
+  if (!Array.isArray(list) || list.length > SCOPE_MAX_ITEMS) throw new Error(`invalid ${what}`)
+  for (const item of list) if (!isValidScopeRef(item)) throw new Error(`invalid ${what}`)
+  return [...new Set(list as string[])]
+}
+
+/**
+ * 보기 범위(Solo / Hide)를 git log·rev-list 의 시작점 인자로 바꾼다. renderer 가 보낸 값이므로 형식만 검증한다
+ * (ref 이름·40자 해시·리모트 전체 패턴만 허용 — 옵션으로 해석될 문자열이나 임의 glob 은 거절).
+ * - 범위가 없으면 기본 보기(모든 브랜치·리모트·태그 + HEAD).
+ * - solo: 그 ref 들에서 닿는 커밋만. 리모트 전체는 --glob, 나머지는 --end-of-options 뒤의 rev.
+ *   이름이 없어진 ref 는 --ignore-missing 으로 건너뛴다(시작점이 하나도 없으면 빈 목록 — HEAD 로 대체되지 않는다).
+ * - hide: 기본 보기에서 그 ref 들을 뺀다. --exclude 는 바로 다음 --branches/--remotes/--tags 한 번에만 적용되므로
+ *   종류별로 나눠 각 옵션 앞에 둔다(패턴은 refs/heads 등 접두사를 뗀 이름). 해시는 hide 할 수 없다.
+ */
+export function scopeArgs(scope: LogScope | undefined): string[] {
+  if (scope === undefined) return revArgs(undefined)
+  if (typeof scope !== 'object' || scope === null) throw new Error('invalid scope')
+  const solo = scopeList(scope.solo, 'solo')
+  const hide = scopeList(scope.hide, 'hide')
+  if (solo.length + hide.length > SCOPE_MAX_ITEMS) throw new Error('invalid scope')
+  if (scope.includeHead !== undefined && typeof scope.includeHead !== 'boolean') throw new Error('invalid scope')
+  if (solo.length) {
+    const globs = solo.filter((s) => s.endsWith('/*'))
+    const revs = solo.filter((s) => !s.endsWith('/*'))
+    return ['--ignore-missing', ...globs.map((g) => `--glob=${g}`), ...(revs.length ? ['--end-of-options', ...revs] : [])]
+  }
+  if (!hide.length) return revArgs(undefined)
+  const group = (prefix: string): string[] => hide.filter((h) => h.startsWith(prefix)).map((h) => `--exclude=${h.slice(prefix.length)}`)
+  if (hide.some((h) => SCOPE_HASH_RE.test(h))) throw new Error('invalid hide')
+  // 리모트의 심볼릭 HEAD(origin/HEAD → origin/main)는 --remotes 로 따로 들어와 숨긴 브랜치를 다시 보이게 한다.
+  // 어느 브랜치를 가리키든 시작점에서 빼도 된다(가리키는 브랜치는 숨기지 않았다면 그 자신이 --remotes 로 들어온다)
+  const remoteBranchHidden = hide.some((h) => h.startsWith('refs/remotes/') && !isRemoteAll(h))
+  return [
+    '--ignore-missing',
+    ...group('refs/heads/'),
+    '--branches',
+    ...group('refs/remotes/'),
+    ...(remoteBranchHidden ? ['--exclude=*/HEAD'] : []),
+    '--remotes',
+    ...group('refs/tags/'),
+    '--tags',
+    ...(scope.includeHead === false ? [] : ['HEAD'])
+  ]
+}
+
 /**
  * 커밋 목록용 git log 인자. `--date-order` 는 자식이 항상 부모보다 먼저 나오도록 보장해
  * 레인 계산(M2)이 위에서 아래로 한 번에 끝난다.
  */
-export function logArgs(ref: string | undefined, skip: number): string[] {
-  return ['log', ...LOG_FORMAT_ARGS, '--date-order', ...(skip > 0 ? [`--skip=${skip}`] : []), ...revArgs(ref), '--']
+export function logArgs(scope: LogScope | undefined, skip: number): string[] {
+  return ['log', ...LOG_FORMAT_ARGS, '--date-order', ...(skip > 0 ? [`--skip=${skip}`] : []), ...scopeArgs(scope), '--']
 }
 
 /** 실패해도(스태시 없음·커밋 없음 등) 빈 결과로 취급해야 하는 조회용. 취소·실행 실패는 그대로 던진다 */
@@ -228,14 +276,14 @@ export async function search(
   exec: GitExecutor,
   repoPath: string,
   query: string,
-  ref: string | undefined,
+  scope: LogScope | undefined,
   opts?: RunOpts
 ): Promise<SearchResult> {
   const q = query.trim()
   if (!q) return { hashes: [], truncated: false }
 
   const base = ['log', '--format=%H', '-z', '--date-order', '-i', '-F', `--max-count=${SEARCH_LIMIT + 1}`]
-  const revs = [...revArgs(ref), '--']
+  const revs = [...scopeArgs(scope), '--']
   const run = async (filter: string): Promise<string[]> => {
     const r = await exec.run(repoPath, [...base, filter, ...revs], opts)
     // 커밋이 아직 없는 저장소는 일치 항목이 없는 것과 같다
@@ -250,19 +298,19 @@ export async function search(
 
   const [byMessage, byAuthor, byHash] = await Promise.all([run(`--grep=${q}`), run(`--author=${q}`), resolveHash])
 
-  const matched = await mergeInGraphOrder(exec, repoPath, ref, byMessage, byAuthor, opts)
+  const matched = await mergeInGraphOrder(exec, repoPath, scope, byMessage, byAuthor, opts)
   const hashes = new Set<string>()
   const resolved = byHash && byHash.code === 0 ? byHash.stdout.toString('utf8').trim() : ''
   // 스태시처럼 지금 보는 이력에서 닿지 않는 커밋은 그래프에서 찾아갈 수 없으므로 뺀다
-  if (resolved && (await reachable(exec, repoPath, resolved, ref, opts))) hashes.add(resolved)
+  if (resolved && (await reachable(exec, repoPath, resolved, scope, opts))) hashes.add(resolved)
   for (const h of matched) hashes.add(h)
   const all = [...hashes]
   return all.length > SEARCH_LIMIT ? { hashes: all.slice(0, SEARCH_LIMIT), truncated: true } : { hashes: all, truncated: false }
 }
 
-/** 커밋이 보기 범위(revArgs)에서 도달 가능한지. hash 는 호출자가 rev-parse 로 해석한 전체 해시다 */
-async function reachable(exec: GitExecutor, repoPath: string, hash: string, ref: string | undefined, opts?: RunOpts): Promise<boolean> {
-  const r = await exec.run(repoPath, ['rev-list', '-n1', hash, '--not', ...revArgs(ref)], opts)
+/** 커밋이 보기 범위(scopeArgs)에서 도달 가능한지. hash 는 호출자가 rev-parse 로 해석한 전체 해시다 */
+async function reachable(exec: GitExecutor, repoPath: string, hash: string, scope: LogScope | undefined, opts?: RunOpts): Promise<boolean> {
+  const r = await exec.run(repoPath, ['rev-list', '-n1', hash, '--not', ...scopeArgs(scope)], opts)
   return r.code === 0 && r.stdout.toString('utf8').trim() === ''
 }
 
@@ -274,7 +322,7 @@ async function reachable(exec: GitExecutor, repoPath: string, hash: string, ref:
 async function mergeInGraphOrder(
   exec: GitExecutor,
   repoPath: string,
-  ref: string | undefined,
+  scope: LogScope | undefined,
   a: string[],
   b: string[],
   opts?: RunOpts
@@ -284,7 +332,7 @@ async function mergeInGraphOrder(
   const want = new Set([...a, ...b])
   const out: string[] = []
   const splitter = new NulRecordSplitter()
-  const args = ['log', '--format=%H', '-z', '--date-order', ...revArgs(ref), '--']
+  const args = ['log', '--format=%H', '-z', '--date-order', ...scopeArgs(scope), '--']
   for await (const chunk of exec.stream(repoPath, args, opts)) {
     for (const h of splitter.push(chunk)) if (want.has(h)) out.push(h)
     if (out.length >= want.size) break

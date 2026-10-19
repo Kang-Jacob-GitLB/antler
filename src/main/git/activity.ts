@@ -1,7 +1,7 @@
 // 커밋 활동(미니맵) 집계. 커밋 시각만 스트림으로 읽어 시간 구간별 개수로 줄인다.
-import type { CommitActivity } from '@shared/types'
+import type { CommitActivity, LogScope } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
-import { isEmptyRepoError, revArgs } from './commands'
+import { isEmptyRepoError, scopeArgs } from './commands'
 
 /** 목표 구간 수. 실제로는 아래 단위 중 구간 수가 MAX_BUCKETS 이하가 되는 가장 작은 단위를 고른다 */
 export const TARGET_BUCKETS = 300
@@ -86,15 +86,15 @@ export class TimeStreamParser {
   }
 }
 
-/** 보기 범위(ref)의 모든 커밋 작성 시각을 스트림으로 읽어 집계한다. 목록과 같은 revArgs 를 쓴다 */
+/** 보기 범위(scope)의 모든 커밋 작성 시각을 스트림으로 읽어 집계한다. 목록과 같은 scopeArgs 를 쓴다 */
 export async function commitActivity(
   exec: GitExecutor,
   repoPath: string,
-  ref: string | undefined,
+  scope: LogScope | undefined,
   opts?: RunOpts
 ): Promise<CommitActivity> {
   // %at: 목록의 authorDate 와 같은 필드 — 뷰포트 표시·점프가 어긋나지 않게 한다
-  const args = ['log', '--format=%at', ...revArgs(ref), '--']
+  const args = ['log', '--format=%at', ...scopeArgs(scope), '--']
   const parser = new TimeStreamParser()
   try {
     for await (const chunk of exec.stream(repoPath, args, opts)) parser.push(chunk)
