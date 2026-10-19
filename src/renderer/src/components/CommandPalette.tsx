@@ -7,6 +7,7 @@ import { useAppStore } from '../stores/appStore'
 import { usePaletteStore } from '../stores/paletteStore'
 import { IconCheck, IconSearch } from './icons'
 import { Keys } from './Keys'
+import { useModalFocus } from './useModalFocus'
 import './RepoSwitcher.css' // 저장소 전환과 같은 팝업 틀(.switcher*)을 쓴다
 import './CommandPalette.css'
 
@@ -45,6 +46,8 @@ function PaletteBody(): React.JSX.Element {
   const [cursor, setCursor] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  useModalFocus(dialogRef)
   const mac = window.antler.platform === 'darwin'
 
   // 열린 시점의 상태로 보일 명령을 정한다(열려 있는 동안 상태는 바뀌지 않는다)
@@ -78,6 +81,7 @@ function PaletteBody(): React.JSX.Element {
   return (
     <div className="switcher-backdrop" onMouseDown={close}>
       <div
+        ref={dialogRef}
         className="switcher palette"
         role="dialog"
         aria-modal="true"

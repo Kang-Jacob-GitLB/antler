@@ -116,7 +116,7 @@ describe('filterCommands', () => {
 })
 
 describe('shortcuts', () => {
-  const ev = (o: Partial<Record<'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey', boolean>> & { code: string }) => ({
+  const ev = (o: Partial<Record<'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey', boolean>> & { code: string; key?: string }) => ({
     ctrlKey: false,
     metaKey: false,
     shiftKey: false,
@@ -134,6 +134,23 @@ describe('shortcuts', () => {
     // Ctrl+B 와 Ctrl+Alt+B 는 서로 다른 조합
     expect(matchesShortcut(ev({ ctrlKey: true, altKey: true, code: 'KeyB' }), { code: 'KeyB' })).toBe(false)
     expect(matchesShortcut(ev({ ctrlKey: true, altKey: true, code: 'KeyB' }), { code: 'KeyB', alt: true })).toBe(true)
+  })
+
+  it('자판 배열: e.key 가 ASCII 면 글자로, 아니면 e.code 로 판정한다', () => {
+    const P = { code: 'KeyP' }
+    // Dvorak: 글자 P 는 물리 KeyR 위치
+    expect(matchesShortcut(ev({ ctrlKey: true, code: 'KeyR', key: 'p' }), P)).toBe(true)
+    // Dvorak 에서 물리 KeyP 는 글자 L 이므로 Ctrl+P 가 아니다
+    expect(matchesShortcut(ev({ ctrlKey: true, code: 'KeyP', key: 'l' }), P)).toBe(false)
+    // 한글 IME: key 가 'ㅔ' 이거나 'Process' 여도 물리 키 P 로 동작
+    expect(matchesShortcut(ev({ ctrlKey: true, code: 'KeyP', key: 'ㅔ' }), P)).toBe(true)
+    expect(matchesShortcut(ev({ ctrlKey: true, code: 'KeyP', key: 'Process' }), P)).toBe(true)
+    // Shift 가 눌려 key 가 대문자여도 소문자로 비교
+    expect(matchesShortcut(ev({ ctrlKey: true, shiftKey: true, code: 'KeyP', key: 'P' }), { code: 'KeyP', shift: true })).toBe(true)
+    // 독일어: Ctrl+/ 는 Shift+7 로 입력된다(key '/')
+    expect(matchesShortcut(ev({ ctrlKey: true, shiftKey: true, code: 'Digit7', key: '/' }), { code: 'Slash' })).toBe(true)
+    // mac Option+B 는 key 가 '∫' → code 로 판정
+    expect(matchesShortcut(ev({ metaKey: true, altKey: true, code: 'KeyB', key: '∫' }), { code: 'KeyB', alt: true })).toBe(true)
   })
 
   it('플랫폼별로 표기한다', () => {

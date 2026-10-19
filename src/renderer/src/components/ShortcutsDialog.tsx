@@ -12,6 +12,7 @@ import { useAppStore } from '../stores/appStore'
 import { usePaletteStore } from '../stores/paletteStore'
 import { IconClose } from './icons'
 import { Keys } from './Keys'
+import { useModalFocus } from './useModalFocus'
 import './RepoSwitcher.css'
 import './CommandPalette.css'
 
@@ -28,11 +29,14 @@ function Body(): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
   const ref = useRef<HTMLDivElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  useModalFocus(ref)
   const mac = window.antler.platform === 'darwin'
   const close = (): void => usePaletteStore.getState().setShortcutsOpen(false)
 
   useEffect(() => {
-    ref.current?.focus()
+    // 스크롤 영역에 포커스를 둬 ↑↓ PageUp/Down Home/End 로 끝까지 스크롤할 수 있게 한다
+    bodyRef.current?.focus()
     // 열려 있는 동안 전역 단축키는 멈춰 있으므로 닫는 키는 여기서 직접 받는다
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' || matchesShortcut(e, SHORTCUTS)) {
@@ -76,7 +80,7 @@ function Body(): React.JSX.Element {
             <IconClose size={13} />
           </button>
         </div>
-        <div className="shortcuts__body">
+        <div ref={bodyRef} className="shortcuts__body" tabIndex={0}>
           {groups.map((g) => (
             <section key={g.cat}>
               <h3 className="shortcuts__group">{t(CATEGORY_KEY[g.cat])}</h3>
