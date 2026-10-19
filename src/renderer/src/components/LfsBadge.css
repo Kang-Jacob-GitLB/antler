@@ -11,6 +11,7 @@
 }
 
 .lfs-card {
+  flex-shrink: 0;
   margin: var(--space-4);
   max-width: 640px;
   padding: var(--space-4);

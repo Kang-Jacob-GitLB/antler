@@ -204,6 +204,8 @@ export const en: Messages = {
   'lfs.prevOid': 'Previous oid',
   'lfs.added': 'added',
   'lfs.removed': 'removed',
+  'lfs.convertedTo': 'converted to LFS',
+  'lfs.convertedFrom': 'removed from LFS',
   'lfs.note': 'LFS objects are not downloaded; only the values in the pointer are shown.',
   'flow.role.feature': 'Gitflow: feature',
   'flow.role.release': 'Gitflow: release',

@@ -202,6 +202,8 @@ export const ko = {
   'lfs.prevOid': '이전 oid',
   'lfs.added': '추가됨',
   'lfs.removed': '삭제됨',
+  'lfs.convertedTo': 'LFS 로 전환됨',
+  'lfs.convertedFrom': 'LFS 에서 해제됨',
   'lfs.note': 'LFS 객체는 내려받지 않으므로 포인터에 적힌 값만 보여 줍니다.',
   'flow.role.feature': 'Gitflow: feature',
   'flow.role.release': 'Gitflow: release',

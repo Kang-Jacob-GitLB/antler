@@ -812,6 +812,8 @@ export interface GitflowConfig {
 /** 화면에 쓰는 Gitflow 정보: 설정(config) 또는 기본 접두사 사용 감지(detected) */
 export interface GitflowInfo {
   source: 'config' | 'detected'
+  /** 저장소가 Gitflow 를 쓰는 것으로 볼 근거가 있는지(gitflow 설정 또는 develop 브랜치). 아니면 범주 배지만 보이고 master 강조·상태바 표시는 생략한다 */
+  active: boolean
   /** 설정된 master 이름. 없으면 master/main 을 모두 본다 */
   master: string | null
   develop: string

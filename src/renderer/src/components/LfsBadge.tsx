@@ -23,8 +23,10 @@ export function LfsCard({ lfs }: { lfs: LfsDiff }): React.JSX.Element {
       <div className="lfs-card__head">
         <LfsBadge />
         <strong>{t('lfs.cardTitle')}</strong>
-        {!before && <span className="lfs-card__state">{t('lfs.added')}</span>}
-        {!after && <span className="lfs-card__state is-del">{t('lfs.removed')}</span>}
+        {lfs.converted === 'to' && <span className="lfs-card__state">{t('lfs.convertedTo')}</span>}
+        {lfs.converted === 'from' && <span className="lfs-card__state is-del">{t('lfs.convertedFrom')}</span>}
+        {!lfs.converted && !before && <span className="lfs-card__state">{t('lfs.added')}</span>}
+        {!lfs.converted && !after && <span className="lfs-card__state is-del">{t('lfs.removed')}</span>}
       </div>
       <dl className="lfs-card__grid">
         <dt>{t('lfs.size')}</dt>

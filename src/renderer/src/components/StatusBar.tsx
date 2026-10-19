@@ -73,7 +73,7 @@ export function StatusBar(): React.JSX.Element {
                 <LfsBadge title={t('lfs.repo')} />
               </span>
             )}
-            {flow && (
+            {flow?.active && (
               <span className="statusbar__item" title={t(flow.source === 'config' ? 'flow.statusConfig' : 'flow.statusDetected')}>
                 <span className="statusbar__text">Gitflow</span>
               </span>

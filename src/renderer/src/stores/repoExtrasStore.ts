@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { create } from 'zustand'
 import { resolveGitflow } from '@shared/gitflow'
 import type { GitflowConfig, GitflowInfo, RefsSnapshot } from '@shared/types'
-import { api } from '../lib/api'
+import { api, newRequestId } from '../lib/api'
 import { branchKey } from '../lib/laneColor'
 import { useAppStore } from './appStore'
 
@@ -81,32 +81,45 @@ const CACHE_MAX = 60
  */
 export function useLfsPaths(repoId: string | null, rev: string | null, files: readonly { path: string }[]): ReadonlySet<string> {
   const enabled = useRepoUsesLfs()
-  const [found, setFound] = useState<{ files: readonly { path: string }[]; rev: string | null; set: ReadonlySet<string> } | null>(null)
+  // 배열이 새로 만들어져도 경로 목록이 같으면 다시 묻지 않는다
+  const pathsKey = useMemo(() => files.map((f) => f.path).join('\0'), [files])
+  const scope = `${repoId}\0${rev ?? ''}`
+  const [found, setFound] = useState<{ scope: string; set: ReadonlySet<string> } | null>(null)
   useEffect(() => {
-    if (!enabled || !repoId || files.length === 0) return
-    const key = rev ? `${repoId}\0${rev}` : ''
+    if (!enabled || !repoId || pathsKey === '') return
+    const key = rev ? `${scope}\0${pathsKey.length}\0${hashText(pathsKey)}` : ''
     const hit = key ? commitCache.get(key) : undefined
     if (hit) {
-      setFound({ files, rev, set: hit })
+      setFound({ scope, set: hit })
       return
     }
-    let cancelled = false
-    const paths = files.map((f) => f.path)
+    let done = false
+    const requestId = newRequestId('lfs')
     api
-      .invoke('git:lfsPaths', repoId, { ...(rev ? { rev } : {}), paths })
+      .invoke('git:lfsPaths', repoId, { ...(rev ? { rev } : {}), paths: pathsKey.split('\0') }, requestId)
       .then((r) => {
-        if (cancelled) return
+        done = true
         const set = new Set(r)
         if (key) {
           commitCache.set(key, set)
           if (commitCache.size > CACHE_MAX) commitCache.delete(commitCache.keys().next().value!)
         }
-        setFound({ files, rev, set })
+        // 같은 범위(저장소·커밋)에서 목록만 바뀐 경우 이전 결과를 유지하다 새 결과로 바꾼다
+        setFound({ scope, set })
       })
-      .catch(() => {})
+      .catch(() => {
+        done = true
+      })
     return () => {
-      cancelled = true
+      // 화면 전환·목록 변경이면 진행 중인 조회를 취소한다
+      if (!done) void api.invoke('req:cancel', requestId).catch(() => {})
     }
-  }, [enabled, repoId, rev, files])
-  return enabled && found && found.files === files && found.rev === rev ? found.set : EMPTY
+  }, [enabled, repoId, rev, scope, pathsKey])
+  return enabled && found && found.scope === scope ? found.set : EMPTY
+}
+
+function hashText(s: string): number {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return h
 }

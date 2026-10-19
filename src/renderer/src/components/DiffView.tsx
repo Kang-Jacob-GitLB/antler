@@ -203,7 +203,7 @@ export function DiffBody({ diff, loading = false, error = null, resetKey }: Diff
         <div className="diff-notice is-error">{t('error.generic', { msg: error })}</div>
       ) : !diff ? (
         <div className="diff-notice">{loading ? t('list.loading') : ''}</div>
-      ) : lfs ? (
+      ) : lfs && !lfs.converted ? (
         <LfsCard lfs={lfs} />
       ) : diff.binary ? (
         <div className="diff-notice">{t('diff.binary')}</div>
@@ -307,6 +307,7 @@ export function DiffView({ hidden = false }: { hidden?: boolean }): React.JSX.El
 
       {current && current.meta.length > 0 && <div className="diff-meta">{current.meta.join(' · ')}</div>}
 
+      {lfsDiff?.converted && <LfsCard lfs={lfsDiff} />}
       <DiffBody diff={current} loading={diffLoading} error={diffError} resetKey={file} />
 
       {current?.truncated && (

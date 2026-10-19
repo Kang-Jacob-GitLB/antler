@@ -52,17 +52,16 @@ export function parseGitflowConfig(raw: string): GitflowConfig | null {
 /**
  * 표시에 쓸 Gitflow 정보. 설정이 있으면 그 값(빠진 접두사는 기본값)을 쓰고,
  * 없으면 기본 접두사가 실제 브랜치에 쓰이는 경우에만 감지한 것으로 본다. 둘 다 아니면 null.
+ * active: 설정이 있거나 develop 브랜치가 있을 때만 true — 아니면 접두사 범주 배지만 보인다.
  * names 는 리모트 이름을 뗀 브랜치 이름이다.
  */
 export function resolveGitflow(cfg: GitflowConfig | null, names: Iterable<string>): GitflowInfo | null {
   const prefixes = { ...GITFLOW_DEFAULT_PREFIXES, ...cfg?.prefixes }
-  if (cfg) return { source: 'config', master: cfg.master ?? null, develop: cfg.develop ?? 'develop', prefixes }
-  for (const n of names) {
-    if (GITFLOW_PREFIX_KINDS.some((k) => n.startsWith(prefixes[k]) && n.length > prefixes[k].length)) {
-      return { source: 'detected', master: null, develop: 'develop', prefixes }
-    }
-  }
-  return null
+  const list = [...names]
+  const develop = cfg?.develop ?? 'develop'
+  if (cfg) return { source: 'config', active: true, master: cfg.master ?? null, develop, prefixes }
+  if (!list.some((n) => GITFLOW_PREFIX_KINDS.some((k) => n.startsWith(prefixes[k]) && n.length > prefixes[k].length))) return null
+  return { source: 'detected', active: list.includes(develop), master: null, develop, prefixes }
 }
 
 export type GitflowRole = GitflowPrefixKind | 'develop' | 'master'
@@ -70,7 +69,7 @@ export type GitflowRole = GitflowPrefixKind | 'develop' | 'master'
 /** 브랜치 이름(리모트 이름 제외)의 Gitflow 범주. 해당 없으면 null */
 export function classifyBranch(name: string, flow: GitflowInfo): GitflowRole | null {
   if (name === flow.develop) return 'develop'
-  if (flow.master ? name === flow.master : name === 'master' || name === 'main') return 'master'
+  if (flow.active && (flow.master ? name === flow.master : name === 'master' || name === 'main')) return 'master'
   let best: GitflowPrefixKind | null = null
   for (const k of GITFLOW_PREFIX_KINDS) {
     const p = flow.prefixes[k]

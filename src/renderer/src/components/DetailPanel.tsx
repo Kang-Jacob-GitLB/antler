@@ -73,7 +73,7 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
   // 다른 커밋으로 바뀌면 맨 위부터
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [detail.hash])
+  }, [detail.hash, detail.files])
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
     // 수정 키 조합(Alt+↑↓ 등)은 앱 전역 단축키 몫이라 여기서 처리하지 않는다 — 두 번 이동하는 것을 막는다
@@ -307,7 +307,7 @@ export function ComparePanel({ width, anchor, other }: { width: number; anchor: 
         <CompareEnd tag="B" hash={to} />
       </div>
       {ready ? (
-        <FileList detail={{ ...ready, hash: `${ready.from}..${ready.to}` }} title={t('compare.files', { n: ready.files.length.toLocaleString() })} empty={t('compare.noFiles')} />
+        <FileList detail={{ ...ready, hash: ready.to }} title={t('compare.files', { n: ready.files.length.toLocaleString() })} empty={t('compare.noFiles')} />
       ) : (
         <div className="detail__status">{error ? t('error.generic', { msg: error }) : t('list.loading')}</div>
       )}

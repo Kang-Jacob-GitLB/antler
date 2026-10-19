@@ -2,10 +2,12 @@ import { pointerFromLines, type LfsPointer } from '@shared/lfs'
 import type { FileDiff } from '@shared/types'
 
 export interface LfsDiff {
-  /** 변경 전 포인터(새 파일이면 null) */
+  /** 변경 전 포인터(새 파일이거나 LFS 전환 전이면 null) */
   before: LfsPointer | null
-  /** 변경 후 포인터(삭제면 null) */
+  /** 변경 후 포인터(삭제거나 LFS 해제 후면 null) */
   after: LfsPointer | null
+  /** 한쪽만 포인터인 전환 커밋: to = 일반 → LFS, from = LFS → 일반. 이때는 실제 diff 도 함께 보여 준다 */
+  converted?: 'to' | 'from'
 }
 
 /**
@@ -26,6 +28,8 @@ export function lfsFromDiff(diff: FileDiff | null): LfsDiff | null {
   const b = pointerFromLines(before)
   const a = pointerFromLines(after)
   if (!b && !a) return null
-  // 한쪽이 비어 있으면 새 파일·삭제, 한쪽이 포인터가 아닌 내용이면(LFS 도입 전후 변환) 있는 쪽만 보여 준다
+  // 한쪽이 포인터가 아닌 실제 내용이면(LFS 도입·해제) 추가·삭제가 아니라 전환이다. 빈 쪽은 새 파일·삭제
+  if (!b && before.length > 0) return { before: b, after: a, converted: 'to' }
+  if (!a && after.length > 0) return { before: b, after: a, converted: 'from' }
   return { before: b, after: a }
 }

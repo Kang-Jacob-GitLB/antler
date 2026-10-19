@@ -60,6 +60,17 @@ export function parseCheckAttrLfs(out: string): string[] {
   return paths
 }
 
+/** `diff --no-index /dev/null <file>` 출력에서 추가된 줄(파일 내용)만 이어 붙인다. 머리(+++ …)는 건너뛴다 */
+export function addedLines(patch: string): string {
+  const out: string[] = []
+  let inHunk = false
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('@@')) inHunk = true
+    else if (inHunk && line.startsWith('+')) out.push(line.slice(1))
+  }
+  return out.join('\n')
+}
+
 /** .gitattributes 텍스트가 LFS 를 쓰는지(`filter=lfs` 속성이 있는 규칙). 주석 줄은 무시한다 */
 export function gitattributesUsesLfs(text: string): boolean {
   for (const raw of text.split(/\r?\n/)) {

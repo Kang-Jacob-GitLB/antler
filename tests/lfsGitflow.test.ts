@@ -1,11 +1,11 @@
 // Git LFS · Gitflow 표시: 포인터 파서·속성 감지·gitflow 설정 파싱·기본 접두사 감지와 악성 설정값 처리.
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { classifyBranch, GITFLOW_VALUE_MAX, parseGitflowConfig, resolveGitflow } from '../src/shared/gitflow'
-import { gitattributesUsesLfs, parseCheckAttrLfs, parseLfsPointer, pointerFromLines } from '../src/shared/lfs'
+import { addedLines, gitattributesUsesLfs, parseCheckAttrLfs, parseLfsPointer, pointerFromLines } from '../src/shared/lfs'
 import { lfsFromDiff } from '../src/renderer/src/diff/lfsDiff'
 import { formatBytes } from '../src/renderer/src/lib/format'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
@@ -97,6 +97,13 @@ describe('lfsFromDiff', () => {
     expect(lfsFromDiff(diffOf(side('+', pointer(OID, 9))))).toMatchObject({ before: null, after: { size: 9 } })
     expect(lfsFromDiff(diffOf(side('-', pointer(OID, 9))))).toMatchObject({ before: { size: 9 }, after: null })
   })
+  it('일반 ↔ LFS 전환은 추가·삭제가 아니라 converted 로 표시한다', () => {
+    const toLfs = diffOf([...side('-', 'raw one\nraw two\nraw three\n'), ...side('+', pointer(OID, 9))])
+    expect(lfsFromDiff(toLfs)).toMatchObject({ before: null, after: { size: 9 }, converted: 'to' })
+    const fromLfs = diffOf([...side('-', pointer(OID, 9)), ...side('+', 'raw one\nraw two\n')])
+    expect(lfsFromDiff(fromLfs)).toMatchObject({ before: { size: 9 }, after: null, converted: 'from' })
+    expect(lfsFromDiff(diffOf(side('+', pointer(OID, 9))))?.converted).toBeUndefined()
+  })
   it('일반 텍스트·바이너리·잘린 diff 는 null', () => {
     expect(lfsFromDiff(diffOf([{ t: '+', text: 'hello' }, { t: '+', text: 'a' }, { t: '+', text: 'b' }]))).toBeNull()
     expect(lfsFromDiff(diffOf(side('+', pointer(OID, 1)), { binary: true }))).toBeNull()
@@ -170,6 +177,12 @@ describe('resolveGitflow · classifyBranch', () => {
     expect(resolveGitflow(null, ['main', 'feature/'])).toBeNull()
     const f = resolveGitflow(null, ['main', 'hotfix/1'])!
     expect(f.source).toBe('detected')
+    // develop 브랜치가 없으면 Gitflow 사용으로 보지 않는다: 범주 배지는 유지하고 master 강조는 없다
+    expect(f.active).toBe(false)
+    expect(classifyBranch('main', f)).toBeNull()
+    expect(resolveGitflow(null, ['main', 'develop', 'feature/a'])).toMatchObject({ active: true })
+    expect(classifyBranch('main', resolveGitflow(null, ['main', 'develop', 'feature/a'])!)).toBe('master')
+    expect(resolveGitflow({ prefixes: {} }, [])).toMatchObject({ active: true })
     expect(classifyBranch('hotfix/1', f)).toBe('hotfix')
     expect(classifyBranch('release/1.0', f)).toBe('release')
     expect(classifyBranch('bugfix/a', f)).toBe('bugfix')
@@ -234,5 +247,74 @@ describe('repoExtras · lfsPaths (실제 git)', () => {
     const many = Array.from({ length: 1500 }, (_, i) => `dir/file-${i}-${'x'.repeat(30)}.psd`)
     const r = await lfsPaths(exec, repo, { rev: head, paths: many })
     expect(r.length).toBe(1000)
+  })
+})
+
+describe('addedLines', () => {
+  it('diff --no-index 출력에서 파일 내용 줄만 모은다', () => {
+    const patch = 'diff --git a/dev/null b/x\nnew file mode 100644\n--- /dev/null\n+++ b/x\n@@ -0,0 +1,2 @@\n+*.psd filter=lfs\n+# +++ not header\n'
+    expect(addedLines(patch)).toBe('*.psd filter=lfs\n# +++ not header')
+    expect(addedLines('')).toBe('')
+  })
+})
+
+describe('LFS 사용 판정은 하위·info 속성도 본다 (실제 git)', () => {
+  const mk = (name: string): { dir: string; g: (...a: string[]) => string } => {
+    const dir = join(root, name)
+    mkdirSync(dir)
+    const g = (...a: string[]): string => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' })
+    execFileSync('git', ['init', '-q', '-b', 'main', dir])
+    return { dir, g }
+  }
+  it('LFS 규칙이 없으면 false', async () => {
+    const { dir, g } = mk('plain')
+    writeFileSync(join(dir, '.gitattributes'), '*.txt text\n')
+    g('add', '-A')
+    g('commit', '-q', '-m', 'x')
+    expect((await repoExtras(exec, dir)).lfs).toBe(false)
+  })
+  it('하위 폴더의 .gitattributes 만 있어도 true', async () => {
+    const { dir, g } = mk('sub')
+    mkdirSync(join(dir, 'assets'))
+    writeFileSync(join(dir, 'assets', '.gitattributes'), '*.png filter=lfs diff=lfs merge=lfs -text\n')
+    writeFileSync(join(dir, 'assets', 'a.png'), pointer(OID, 1))
+    g('add', '-A')
+    g('commit', '-q', '-m', 'x')
+    expect((await repoExtras(exec, dir)).lfs).toBe(true)
+    expect(await lfsPaths(exec, dir, { rev: g('rev-parse', 'HEAD').trim(), paths: ['assets/a.png'] })).toEqual(['assets/a.png'])
+  })
+  it('.git/info/attributes 만 있어도 true', async () => {
+    const { dir, g } = mk('info')
+    writeFileSync(join(dir, 'a.bin'), 'x')
+    g('add', '-A')
+    g('commit', '-q', '-m', 'x')
+    mkdirSync(join(dir, '.git', 'info'), { recursive: true })
+    writeFileSync(join(dir, '.git', 'info', 'attributes'), '*.bin filter=lfs\n')
+    expect((await repoExtras(exec, dir)).lfs).toBe(true)
+  })
+  it('커밋이 없는 저장소·작업 트리 .gitattributes 도 던지지 않는다', async () => {
+    const { dir } = mk('empty')
+    expect((await repoExtras(exec, dir)).lfs).toBe(false)
+    writeFileSync(join(dir, '.gitattributes'), '*.bin filter=lfs\n')
+    expect((await repoExtras(exec, dir)).lfs).toBe(true)
+  })
+})
+
+describe('gitflow 설정은 저장소(--local) 값만 읽는다', () => {
+  it('전역 설정의 gitflow.* 는 무시한다', async () => {
+    const globalCfg = join(root, 'global.gitconfig')
+    writeFileSync(globalCfg, '[gitflow "branch"]\n\tdevelop = global-dev\n[gitflow "prefix"]\n\trelease = global-rel/\n')
+    const dir = join(root, 'noflow')
+    mkdirSync(dir)
+    execFileSync('git', ['init', '-q', '-b', 'main', dir])
+    const prev = process.env['GIT_CONFIG_GLOBAL']
+    process.env['GIT_CONFIG_GLOBAL'] = globalCfg
+    try {
+      expect((await repoExtras(exec, dir)).gitflow).toBeNull()
+      expect((await repoExtras(exec, repo)).gitflow).toEqual({ master: 'main', prefixes: { feature: 'feat/' } })
+    } finally {
+      if (prev === undefined) delete process.env['GIT_CONFIG_GLOBAL']
+      else process.env['GIT_CONFIG_GLOBAL'] = prev
+    }
   })
 })
