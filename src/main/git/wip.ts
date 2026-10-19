@@ -7,6 +7,9 @@ import { WIP_STATUS_ARGS, WipStatusParser } from './parsers/wipStatus'
 
 const AREAS = new Set(['staged', 'unstaged', 'untracked'])
 
+/** 덮어쓸 수 없는 필터 드라이버가 있어 작업 트리 조회를 거부할 때의 메시지 */
+export const UNSAFE_FILTER_MSG = '이 저장소의 filter 드라이버 이름에 "=" 가 있어 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.'
+
 /** 그대로 실행을 허용하는 필터 명령(git-lfs 기본 설치값과 정확히 같을 때만) */
 const SAFE_FILTER_CMDS = new Set(['git-lfs clean -- %f', 'git-lfs smudge -- %f', 'git-lfs smudge --skip -- %f', 'git-lfs filter-process', 'git-lfs filter-process --skip'])
 
@@ -32,6 +35,9 @@ export async function filterOverrides(exec: GitExecutor, repoPath: string, opts?
   }
   const out: string[] = []
   for (const d of drivers) {
+    // git 은 `-c` 인자를 첫 '=' 에서 키와 값으로 자른다. 이름에 '=' 가 든 드라이버(gitattributes 에서 `filter=a=b` 로 쓸 수 있다)는
+    // `-c filter.a=b.clean=` 이 `filter.a` = `b.clean=` 으로 읽혀 덮어쓰기가 조용히 실패한다 — 그런 저장소는 작업 트리를 읽지 않는다
+    if (d.includes('=')) throw new GitError(UNSAFE_FILTER_MSG, 1, UNSAFE_FILTER_MSG, ['config'])
     // required=true 면 빈 명령을 "필터 없음 → 실패"로 본다. 이번 실행에서만 끈다
     out.push('-c', `filter.${d}.clean=`, '-c', `filter.${d}.smudge=`, '-c', `filter.${d}.process=`, '-c', `filter.${d}.required=false`)
   }
