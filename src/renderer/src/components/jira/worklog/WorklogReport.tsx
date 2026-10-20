@@ -1,16 +1,21 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '../../../i18n'
+import { useWorklogStore } from '../../../stores/jiraWorklogStore'
 import { IconChevronDown, IconChevronRight, IconCopy } from '../../icons'
 import { IssueKey, userColor, type WorklogPaneProps } from './WorklogBits'
-import { buildReport, dayStatus, fmtDuration, isWeekend, parseYmd, reportToTsv, weekdayShort, type ReportRow, type WorklogGroup } from './worklogModel'
+import { buildReport, dayStatus, fmtDuration, isWeekend, parseYmd, reportToTsv, weekdayShort, type ReportRow } from './worklogModel'
 
 const shortDate = (ymd: string): string => `${parseYmd(ymd).getMonth() + 1}/${parseYmd(ymd).getDate()}`
 
 /** 팀 시간표: 행 = 사용자(또는 이슈), 열 = 날짜, 오른쪽 합계 열, 아래 합계 행. 가로 스크롤은 표 영역 안에서만, 첫 열은 고정 */
 export function WorklogReport({ days, logs, users, today, locale }: WorklogPaneProps): React.JSX.Element {
   const t = useT()
-  const [group, setGroup] = useState<WorklogGroup>('user')
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  // 묶음 기준·접힘은 스토어에 둔다(이슈를 열었다 돌아와도 유지)
+  const group = useWorklogStore((s) => s.reportGroup)
+  const collapsedIds = useWorklogStore((s) => s.collapsed)
+  const { setReportGroup: setGroup, toggleCollapsed: toggle, setCollapsed } = useWorklogStore.getState()
+  const collapsed = useMemo(() => new Set(collapsedIds), [collapsedIds])
+  const scroller = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
@@ -18,12 +23,17 @@ export function WorklogReport({ days, logs, users, today, locale }: WorklogPaneP
   const report = useMemo(() => buildReport(logs, users, group), [logs, users, group])
   const expandable = report.rows.filter((r) => r.children.length > 0).map((r) => r.id)
   const allCollapsed = expandable.length > 0 && expandable.every((id) => collapsed.has(id))
-  const toggle = (id: string): void =>
-    setCollapsed((cur) => {
-      const next = new Set(cur)
-      if (!next.delete(id)) next.add(id)
-      return next
-    })
+
+  // 오늘이 범위 안이면 오늘 열이 보이게 가로로 맞춘다(월간처럼 표가 넓을 때)
+  const first = days[0]
+  useEffect(() => {
+    const box = scroller.current
+    const th = box?.querySelector<HTMLElement>('thead th.is-today')
+    if (!box || !th || box.scrollWidth <= box.clientWidth) return
+    const lead = box.querySelector<HTMLElement>('thead .wl-t__first')?.offsetWidth ?? 0
+    const tail = box.querySelector<HTMLElement>('thead .wl-t__sum')?.offsetWidth ?? 0
+    box.scrollLeft = Math.max(0, th.offsetLeft - lead - (box.clientWidth - lead - tail - th.offsetWidth) / 2)
+  }, [first, days.length, today])
 
   const copy = (): void => {
     const tsv = reportToTsv(report, days, { name: t('jira.worklog.col.name'), total: t('jira.worklog.total') })
@@ -98,7 +108,7 @@ export function WorklogReport({ days, logs, users, today, locale }: WorklogPaneP
           ))}
         </div>
         {expandable.length > 0 && (
-          <button className="btn btn--sm" onClick={() => setCollapsed(allCollapsed ? new Set() : new Set(expandable))}>
+          <button className="btn btn--sm" onClick={() => setCollapsed(allCollapsed ? [] : expandable)}>
             {allCollapsed ? t('jira.worklog.expandAll') : t('jira.worklog.collapseAll')}
           </button>
         )}
@@ -109,7 +119,7 @@ export function WorklogReport({ days, logs, users, today, locale }: WorklogPaneP
           {copied ? t('jira.worklog.copied') : t('jira.worklog.copy')}
         </button>
       </div>
-      <div className="wl-rpt__scroll">
+      <div className="wl-rpt__scroll" ref={scroller}>
         <table className="wl-t">
           <thead>
             <tr>

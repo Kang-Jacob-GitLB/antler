@@ -4,6 +4,8 @@ import { AbortError } from '../executors/GitExecutor'
 
 const REQUEST_TIMEOUT_MS = 15_000
 const MAX_BODY_BYTES = 5 * 1024 * 1024
+/** 응답이 상한을 넘었을 때의 메시지(호출자가 '이 요청만 건너뛰기'를 가려내는 데도 쓴다) */
+export const JIRA_TOO_BIG = 'Jira 응답이 너무 큽니다'
 /** 429 의 Retry-After 가 이 이하면 한 번만 기다렸다 다시 시도한다 */
 const AUTO_RETRY_MAX_SEC = 3
 
@@ -39,6 +41,8 @@ export interface GetOptions {
   signal?: AbortSignal
   /** 저장된 자격 증명 대신 이 값으로 요청한다(연결 전 검증용) */
   credential?: JiraCredential
+  /** 응답 본문 상한(기본 5MB). 큰 응답이 정상인 엔드포인트만 올린다 */
+  maxBytes?: number
 }
 
 export const defaultSleep: SleepFn = (ms, signal) =>
@@ -83,14 +87,14 @@ export class JiraClient {
         const wait = parseRetryAfter(res.headers.get('retry-after'))
         if (wait !== null && wait <= AUTO_RETRY_MAX_SEC) {
           // 본문은 필요 없지만 상한을 지켜 비운다(연결 재사용·메모리). 취소만 전파한다
-          await readText(res, opts.signal, timeout).catch((e: unknown) => {
+          await readText(res, opts.signal, timeout, opts.maxBytes ?? MAX_BODY_BYTES).catch((e: unknown) => {
             if (e instanceof AbortError) throw e
           })
           await this.sleep(wait * 1000, opts.signal)
           continue
         }
       }
-      const text = await readText(res, opts.signal, timeout)
+      const text = await readText(res, opts.signal, timeout, opts.maxBytes ?? MAX_BODY_BYTES)
       if (!res.ok) throw httpError(res, text, cred.kind, opts.notFound)
       try {
         return JSON.parse(text) as T
@@ -127,10 +131,10 @@ export class JiraClient {
 }
 
 /** 본문을 읽으며 바이트를 센다. 상한을 넘으면 읽기를 중단(reader.cancel)하고 오류 — chunked 거대 응답도 메모리에 다 받지 않는다 */
-async function readText(res: Response, signal: AbortSignal | undefined, timeout: AbortSignal): Promise<string> {
-  const tooBig = (): JiraApiError => new JiraApiError('Jira 응답이 너무 큽니다', 'JIRA_HTTP', res.status)
+async function readText(res: Response, signal: AbortSignal | undefined, timeout: AbortSignal, limit: number): Promise<string> {
+  const tooBig = (): JiraApiError => new JiraApiError(JIRA_TOO_BIG, 'JIRA_HTTP', res.status)
   const len = Number(res.headers.get('content-length'))
-  if (Number.isFinite(len) && len > MAX_BODY_BYTES) {
+  if (Number.isFinite(len) && len > limit) {
     await res.body?.cancel().catch(() => undefined)
     throw tooBig()
   }
@@ -143,7 +147,7 @@ async function readText(res: Response, signal: AbortSignal | undefined, timeout:
       const { done, value } = await reader.read()
       if (done) break
       total += value.byteLength
-      if (total > MAX_BODY_BYTES) {
+      if (total > limit) {
         await reader.cancel().catch(() => undefined)
         throw tooBig()
       }

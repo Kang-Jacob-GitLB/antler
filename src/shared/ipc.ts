@@ -268,6 +268,8 @@ export const IPC_CHANNELS = [
   'jira:comments',
   'jira:search',
   'jira:dev',
+  'jira:worklogs',
+  'jira:userSearch',
   'jira:openExternal',
   'git:refs',
   'git:refsDetails',

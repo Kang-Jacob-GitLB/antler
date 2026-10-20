@@ -226,6 +226,10 @@ button.wl-pop__item:disabled {
 
 /* ── 이슈 키 버튼 ── */
 .wl-key {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 20px;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -272,6 +276,7 @@ button.wl-pop__item:disabled {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  overflow: hidden;
   padding: 6px var(--space-2) 8px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
@@ -329,6 +334,9 @@ button.wl-pop__item:disabled {
   color: var(--info);
 }
 .wl-cell__chips {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -360,7 +368,9 @@ button.wl-pop__item:disabled {
 }
 .wl-more {
   align-self: flex-start;
-  padding: 0 6px;
+  box-sizing: border-box;
+  min-height: 20px;
+  padding: 2px 6px;
   border-radius: var(--radius-sm);
   font-size: var(--fs-xs);
   color: var(--text-muted);
@@ -369,12 +379,9 @@ button.wl-pop__item:disabled {
   color: var(--text-primary);
   background: var(--row-hover);
 }
-/* 하루 기준(8h) 대비 막대: 셀 아래, 은은하게 */
+/* 하루 기준(8h) 대비 막대: 셀 맨 아래 고정 영역(칩과 겹치지 않는다), 은은하게 */
 .wl-cell__bar {
-  position: absolute;
-  right: var(--space-2);
-  bottom: 3px;
-  left: var(--space-2);
+  flex: 0 0 3px;
   height: 3px;
   border-radius: 2px;
   background: color-mix(in srgb, var(--text-muted) 14%, transparent);
@@ -447,6 +454,18 @@ button.wl-tg__day:hover {
   background: var(--accent);
   color: var(--accent-contrast);
 }
+.wl-tg__day--user {
+  align-items: center;
+  gap: 6px;
+}
+.wl-tg__who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 650;
+  color: var(--text-primary);
+}
 .wl-tg__sum {
   font-size: var(--fs-xs);
   color: var(--text-muted);
@@ -492,6 +511,7 @@ button.wl-tg__day:hover {
   pointer-events: none;
 }
 .wl-block {
+  cursor: pointer;
   position: absolute;
   z-index: 1;
   display: flex;
@@ -532,6 +552,28 @@ button.wl-tg__day:hover {
   flex-shrink: 0;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
+}
+.wl-block.is-narrow,
+.wl-block.is-tiny {
+  padding: 2px 4px;
+}
+.wl-block.is-narrow .wl-block__line {
+  flex-direction: column;
+  gap: 0;
+}
+.wl-block.is-tiny {
+  align-items: center;
+}
+.wl-block.is-tiny .wl-block__time {
+  writing-mode: vertical-rl;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.wl-block .wl-key {
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  min-height: 0;
+  line-height: 1.25;
 }
 .wl-block__text {
   overflow: hidden;
@@ -648,6 +690,10 @@ button.wl-tg__day:hover {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+/* 앱 공통 스크롤바(base.css)는 투명 트랙 — 모서리가 흰 사각형으로 남지 않게 표 바탕색으로 */
+.wl-rpt__scroll::-webkit-scrollbar-corner {
+  background: var(--list-bg);
 }
 .wl-t {
   min-width: 100%;

@@ -68,12 +68,20 @@ export interface FakeWorklogIssue {
   worklogs: FakeWorklog[]
   /** 검색 응답에 내장하는 worklog 수(실제 Jira 는 20개 안팎으로 자른다). 기본은 전부 */
   embed?: number
+  /** 이슈별 worklog 엔드포인트가 이 상태 코드로 실패한다 */
+  worklogStatus?: number
+  /** 이슈별 worklog 응답을 이 시간(ms) 뒤에 보낸다 */
+  worklogDelayMs?: number
+  /** 이슈별 worklog 응답을 21MB 로 부풀린다(20MB 상한 초과) */
+  worklogHuge?: boolean
 }
 
 export interface FakeWorklogSite {
   kind: 'cloud' | 'server'
   issues: FakeWorklogIssue[]
   users?: Record<string, unknown>[]
+  /** JQL 에 이 id 가 따옴표로 들어 있으면 검색이 400 으로 실패한다(없는 사용자) */
+  badUsers?: string[]
 }
 
 /** 워크로그 조회에 필요한 엔드포인트(myself·search·issue worklog·user/search)를 흉내 내는 핸들러 */
@@ -96,18 +104,27 @@ export function worklogHandler(site: FakeWorklogSite): Handler {
     if (wl) {
       const issue = site.issues.find((i) => i.key === wl[1])
       if (!issue) return sendJson(res, {}, 404)
-      let list = issue.worklogs
-      if (cloud) {
-        const after = Number(q.get('startedAfter') ?? -Infinity)
-        const before = Number(q.get('startedBefore') ?? Infinity)
-        list = list.filter((w) => Date.parse(w.started) >= after && Date.parse(w.started) < before)
-        const startAt = Number(q.get('startAt') ?? 0)
-        const max = Number(q.get('maxResults') ?? 5000)
-        return sendJson(res, { startAt, maxResults: max, total: list.length, worklogs: list.slice(startAt, startAt + max).map(toWorklog) })
+      const reply = (): void => {
+        if (issue.worklogStatus) return sendJson(res, { errorMessages: ['x'] }, issue.worklogStatus)
+        if (issue.worklogHuge) return sendJson(res, { worklogs: [], pad: 'x'.repeat(21 * 1024 * 1024) })
+        let list = issue.worklogs
+        if (cloud) {
+          const after = Number(q.get('startedAfter') ?? -Infinity)
+          const before = Number(q.get('startedBefore') ?? Infinity)
+          list = list.filter((w) => Date.parse(w.started) >= after && Date.parse(w.started) < before)
+          const startAt = Number(q.get('startAt') ?? 0)
+          const max = Number(q.get('maxResults') ?? 5000)
+          return sendJson(res, { startAt, maxResults: max, total: list.length, worklogs: list.slice(startAt, startAt + max).map(toWorklog) })
+        }
+        return sendJson(res, { worklogs: list.map(toWorklog) })
       }
-      return sendJson(res, { worklogs: list.map(toWorklog) })
+      if (issue.worklogDelayMs) setTimeout(reply, issue.worklogDelayMs)
+      else reply()
+      return
     }
     if (path.endsWith('/search/jql') || path.endsWith('/search')) {
+      const jql = q.get('jql') ?? ''
+      if ((site.badUsers ?? []).some((b) => jql.includes(`"${b}"`))) return sendJson(res, { errorMessages: ['사용자가 없습니다'] }, 400)
       const max = Number(q.get('maxResults') ?? 50)
       const start = cloud ? Number(q.get('nextPageToken') ?? 0) : Number(q.get('startAt') ?? 0)
       const page = site.issues.slice(start, start + max)

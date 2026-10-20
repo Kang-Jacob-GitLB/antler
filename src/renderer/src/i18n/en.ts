@@ -492,6 +492,8 @@ export const en: Messages = {
   'jira.worklog.maxTeam': 'A team can have up to {n} members',
   'jira.worklog.searchHint': 'Searching users needs the Jira "Browse users" permission. Even if you cannot add teammates, your own worklogs still work.',
   'jira.worklog.truncated': 'There are many worklogs, so only some were loaded. Try a shorter range or fewer people.',
+  'jira.worklog.invalidUsers': 'These team members were not found in Jira: {names} (remove them in Manage team)',
+  'jira.worklog.allAdded': 'Everyone found is already added',
   'jira.worklog.loading': 'Loading worklogs…',
   'jira.worklog.empty': 'No worklogs in this range',
   'jira.worklog.more': '+{n} more',

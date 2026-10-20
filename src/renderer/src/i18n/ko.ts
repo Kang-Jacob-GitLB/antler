@@ -490,6 +490,8 @@ export const ko = {
   'jira.worklog.maxTeam': '팀원은 최대 {n}명까지 둘 수 있습니다',
   'jira.worklog.searchHint': '사용자 검색에는 Jira 의 "사용자 찾아보기" 권한이 필요합니다. 팀원을 추가하지 못해도 나의 워크로그는 그대로 볼 수 있습니다.',
   'jira.worklog.truncated': '워크로그가 많아 일부만 불러왔습니다. 기간이나 사용자를 줄여 보세요.',
+  'jira.worklog.invalidUsers': '다음 팀원은 Jira 에서 찾을 수 없습니다: {names} (팀원 관리에서 빼세요)',
+  'jira.worklog.allAdded': '검색된 사람이 모두 이미 추가되어 있습니다',
   'jira.worklog.loading': '워크로그를 불러오는 중…',
   'jira.worklog.empty': '이 기간에 기록된 워크로그가 없습니다',
   'jira.worklog.more': '+{n}개 더',

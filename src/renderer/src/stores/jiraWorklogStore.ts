@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { JiraUser, JiraWorklogResult } from '@shared/types'
-import { rangeFor, shiftAnchor, todayYmd, type WorklogMode } from '../components/jira/worklog/worklogModel'
+import { rangeFor, shiftAnchor, todayYmd, type WorklogGroup, type WorklogMode } from '../components/jira/worklog/worklogModel'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
 import { useJiraStore } from './jiraStore'
 
@@ -26,6 +26,9 @@ interface WorklogState {
   me: JiraUser | null
   loading: boolean
   error: string | null
+  /** 리포트 묶음 기준과 접힌 행(이슈를 보고 돌아와도 유지) */
+  reportGroup: WorklogGroup
+  collapsed: string[]
 
   setTab(tab: WorklogTab): void
   setMode(mode: WorklogMode): void
@@ -34,6 +37,9 @@ interface WorklogState {
   /** 그 날의 일간 보기로 */
   openDay(ymd: string): void
   toggleMe(): void
+  setReportGroup(g: WorklogGroup): void
+  toggleCollapsed(id: string): void
+  setCollapsed(ids: string[]): void
   toggleTeam(id: string): void
   /** 팀 목록에서 사라진 사람을 선택에서 뺀다 */
   pruneTeam(ids: string[]): void
@@ -43,33 +49,36 @@ interface WorklogState {
 
 let seq = 0
 let reqId: string | null = null
+/** 진행 중인 요청의 키(같은 키로 다시 부르면 취소하지 않고 그대로 기다린다) */
+let inflightKey: string | null = null
 const cache = new Map<string, { at: number; result: JiraWorklogResult }>()
 
 function cancelReq(): void {
   if (reqId) void api.invoke('req:cancel', reqId).catch(() => {})
   reqId = null
+  inflightKey = null
 }
 
-/** 요청에 실을 사용자 id(비면 '나만') */
-export function queryUsers(s: Pick<WorklogState, 'includeMe' | 'selectedTeam' | 'me'>): string[] {
-  if (s.selectedTeam.length === 0) return []
-  const ids = [...s.selectedTeam]
-  if (s.includeMe && s.me && !ids.includes(s.me.id)) ids.unshift(s.me.id)
-  return ids
+/** 요청에 실을 팀원 id(내 id 는 renderer 가 모른다 — '나'는 includeMe 로 main 에 맡긴다) */
+export function queryUsers(s: Pick<WorklogState, 'selectedTeam'>): string[] {
+  return [...s.selectedTeam]
 }
 
-export function requestKey(from: string, to: string, users: string[]): string {
-  return `${from}|${to}|${[...users].sort().join(',')}`
+export function requestKey(from: string, to: string, users: string[], includeMe: boolean): string {
+  // 팀원이 없으면 항상 '나만'이라 includeMe 는 키에 영향이 없다
+  return `${from}|${to}|${[...users].sort().join(',')}|${users.length === 0 || includeMe ? 'me' : '-'}`
 }
 
-const initial = (): Pick<WorklogState, 'includeMe' | 'selectedTeam' | 'data' | 'dataKey' | 'me' | 'loading' | 'error'> => ({
+const initial = (): Pick<WorklogState, 'includeMe' | 'selectedTeam' | 'data' | 'dataKey' | 'me' | 'loading' | 'error' | 'reportGroup' | 'collapsed'> => ({
   includeMe: true,
   selectedTeam: [],
   data: null,
   dataKey: null,
   me: null,
   loading: false,
-  error: null
+  error: null,
+  reportGroup: 'user',
+  collapsed: []
 })
 
 export const useWorklogStore = create<WorklogState>((set, get) => {
@@ -89,6 +98,10 @@ export const useWorklogStore = create<WorklogState>((set, get) => {
     shift: (dir) => change({ anchor: shiftAnchor(get().mode, get().anchor, dir) }),
     goToday: () => change({ anchor: todayYmd() }),
     openDay: (ymd) => change({ mode: 'day', anchor: ymd }),
+
+    setReportGroup: (reportGroup) => set({ reportGroup }),
+    toggleCollapsed: (id) => set((s) => ({ collapsed: s.collapsed.includes(id) ? s.collapsed.filter((x) => x !== id) : [...s.collapsed, id] })),
+    setCollapsed: (collapsed) => set({ collapsed }),
 
     toggleMe() {
       const s = get()
@@ -119,7 +132,13 @@ export const useWorklogStore = create<WorklogState>((set, get) => {
       const s = get()
       const { from, to } = rangeFor(s.mode, s.anchor)
       const users = queryUsers(s)
-      const key = requestKey(from, to, users)
+      const includeMe = users.length === 0 || s.includeMe
+      const key = requestKey(from, to, users, includeMe)
+      // 같은 요청이 이미 가는 중이면 취소하지 않고 그 응답을 기다린다(이슈를 보고 돌아온 경우)
+      if (!force && reqId && inflightKey === key) {
+        set({ loading: true })
+        return
+      }
       const mine = ++seq
       cancelReq()
 
@@ -130,17 +149,20 @@ export const useWorklogStore = create<WorklogState>((set, get) => {
       }
       const id = newRequestId('jira')
       reqId = id
+      inflightKey = key
       set({ loading: true, error: null })
       try {
-        const result = await api.invoke('jira:worklogs', { from, to, users }, id)
+        const result = await api.invoke('jira:worklogs', { from, to, users, includeMe }, id)
         if (mine !== seq) return
         reqId = null
+        inflightKey = null
         if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value as string)
         cache.set(key, { at: Date.now(), result })
         set({ data: result, dataKey: key, me: result.me, loading: false })
       } catch (err) {
         if (mine !== seq || isAbort(err)) return
         reqId = null
+        inflightKey = null
         set({ loading: false, error: errorMessage(err), data: null, dataKey: null })
       }
     },

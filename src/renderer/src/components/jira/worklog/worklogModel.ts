@@ -315,7 +315,7 @@ export function buildReport(logs: JiraWorklog[], users: JiraUser[], group: Workl
       child = sub.get(`${pk}\n${ck}`) ?? newRow(`u:${pk}/i:${ck}`, w.issueKey, 'issue', { issue: issueMeta })
     } else {
       parent = top.get(pk) ?? top.set(pk, newRow(`i:${pk}`, w.issueKey, 'issue', { issue: issueMeta })).get(pk)!
-      child = sub.get(`${pk}\n${ck}`) ?? newRow(`i:${pk}/u:${ck}`, authorName, 'user', { target: DAY_TARGET_SEC, userId: ck })
+      child = sub.get(`${pk}\n${ck}`) ?? newRow(`i:${pk}/u:${ck}`, authorName, 'user', { userId: ck })
     }
     if (!sub.has(`${pk}\n${ck}`)) {
       sub.set(`${pk}\n${ck}`, child)
@@ -337,14 +337,15 @@ export function buildReport(logs: JiraWorklog[], users: JiraUser[], group: Workl
 /** 표 복사용 TSV: 시간은 소수 시간(7.5)이라 스프레드시트에서 바로 합산할 수 있다 */
 export function reportToTsv(report: Report, days: string[], labels: { name: string; total: string }): string {
   const hours = (s: number): string => (s ? String(Math.round((s / 3600) * 100) / 100) : '')
-  const clean = (s: string): string => s.replace(/[\t\r\n]+/g, ' ')
+  // 스프레드시트가 수식으로 읽지 않게: = + - @ 나 탭·CR 로 시작하는 글자 셀은 앞에 '
+  const clean = (s: string): string => (/^[=+\-@\t\r]/.test(s) ? `'${s}` : s).replace(/[\t\r\n]+/g, ' ')
   const lines: string[] = [[labels.name, ...days, labels.total].join('\t')]
-  const put = (r: ReportRow, label: string): void => {
-    lines.push([clean(label), ...days.map((d) => hours(r.byDay[d] ?? 0)), hours(r.total)].join('\t'))
+  const put = (r: ReportRow, label: string, indent = ''): void => {
+    lines.push([indent + clean(label),...days.map((d) => hours(r.byDay[d] ?? 0)), hours(r.total)].join('\t'))
   }
   for (const r of report.rows) {
     put(r, r.issue ? `${r.issue.key} ${r.issue.summary}` : r.label)
-    for (const c of r.children) put(c, `  ${c.issue ? `${c.issue.key} ${c.issue.summary}` : c.label}`)
+    for (const c of r.children) put(c, c.issue ? `${c.issue.key} ${c.issue.summary}` : c.label, '  ')
   }
   put(report.total, labels.total)
   return lines.join('\n')

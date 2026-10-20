@@ -42,9 +42,10 @@ export function WorklogView(): React.JSX.Element {
   const focus = useMemo(() => filterWorklogs(logs, range.days[0] ?? range.from, range.days[range.days.length - 1] ?? range.to, null), [logs, range.days])
   const total = sumSeconds(focus)
 
-  const fresh = s.dataKey === requestKey(range.from, range.to, queryUsers(s))
+  const fresh = s.dataKey === requestKey(range.from, range.to, queryUsers(s), s.includeMe)
   const pane = { gridDays: range.gridDays, days: range.days, logs: s.tab === 'report' ? focus : logs, users, anchor: s.anchor, today, locale }
   const ready = !!s.data
+  const invalid = fresh && s.data?.invalidUsers?.length ? s.data.invalidUsers.map((id) => team.find((u) => u.id === id)?.name ?? id) : []
   const dayLogs = s.mode === 'day' ? logs : []
 
   return (
@@ -97,6 +98,12 @@ export function WorklogView(): React.JSX.Element {
       {s.data?.truncated && fresh && (
         <div className="wl-warn" role="status">
           {t('jira.worklog.truncated')}
+        </div>
+      )}
+
+      {invalid.length > 0 && (
+        <div className="wl-warn" role="status">
+          {t('jira.worklog.invalidUsers', { names: invalid.join(', ') })}
         </div>
       )}
 

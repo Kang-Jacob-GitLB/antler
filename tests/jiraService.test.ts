@@ -323,8 +323,9 @@ describe('워크로그·사용자 검색', () => {
     expect(r.worklogs.map((w) => w.id)).toEqual(['1', '4']) // 4 는 로컬 날짜 필터가 화면 몫인 여유분
     expect(r.worklogs[0]).toMatchObject({ issueKey: 'ABC-1', issueSummary: '로그인', issueType: 'Bug', authorId: 'acc-me', author: '표시-acc-me', seconds: 3600, comment: '작업 둘째' })
     const search = fake!.requests.find((x) => x.url.startsWith('/rest/api/3/search/jql'))!
-    expect(jqlOf(search)).toBe('worklogAuthor = currentUser() AND worklogDate >= "2026-10-18" AND worklogDate <= "2026-10-21" ORDER BY updated DESC')
+    expect(jqlOf(search)).toBe('worklogAuthor = currentUser() AND worklogDate >= "2026-10-17" AND worklogDate < "2026-10-22" ORDER BY key ASC')
     expect(new URL(search.url, 'http://x').searchParams.get('fields')).toBe('summary,issuetype,worklog')
+    expect(new URL(search.url, 'http://x').searchParams.get('maxResults')).toBe('25')
     expect(worklogReqs()).toHaveLength(0)
     expect(fake!.requests.every((x) => x.method === 'GET')).toBe(true)
   })
@@ -344,8 +345,8 @@ describe('워크로그·사용자 검색', () => {
     const reqs = worklogReqs()
     expect(reqs.map((x) => x.url.split('?')[0])).toEqual(['/rest/api/3/issue/ABC-1/worklog', '/rest/api/3/issue/ABC-3/worklog'])
     const p = new URL(reqs[0]!.url, 'http://x').searchParams
-    expect(Number(p.get('startedAfter'))).toBe(Date.parse('2026-10-18T00:00:00Z'))
-    expect(Number(p.get('startedBefore'))).toBe(Date.parse('2026-10-22T00:00:00Z'))
+    expect(Number(p.get('startedAfter'))).toBe(Date.parse('2026-10-17T00:00:00Z'))
+    expect(Number(p.get('startedBefore'))).toBe(Date.parse('2026-10-22T14:00:00Z'))
     expect(jqlOf(fake!.requests.find((x) => x.url.startsWith('/rest/api/3/search/jql'))!)).toContain('worklogAuthor in ("acc-x","acc-y")')
   })
 
@@ -399,6 +400,99 @@ describe('워크로그·사용자 검색', () => {
       expect(r.worklogs).toHaveLength(300)
       expect(r.truncated).toBe(true)
     }
+  })
+
+  it('includeMe: 팀원 JQL·필터에 내 id 를 더하고, 팀원이 없으면 무시한다', async () => {
+    const svc = await connected({
+      kind: 'cloud',
+      issues: [{ key: 'ABC-1', worklogs: [wl('1', 'acc-me', '2026-10-19T09:00:00.000+0900'), wl('2', 'acc-x', '2026-10-19T09:00:00.000+0900'), wl('3', 'acc-z', '2026-10-19T09:00:00.000+0900')] }]
+    })
+    const r = await svc.worklogs({ ...Q, users: ['acc-x'], includeMe: true })
+    expect(r.worklogs.map((w) => w.id)).toEqual(['1', '2'])
+    expect(jqlOf(fake!.requests.find((x) => x.url.startsWith('/rest/api/3/search/jql'))!)).toContain('worklogAuthor in ("acc-x","acc-me")')
+    const none = await svc.worklogs({ ...Q, users: [], includeMe: true })
+    expect(none.worklogs.map((w) => w.id)).toEqual(['1'])
+    expect(jqlOf(fake!.requests.filter((x) => x.url.startsWith('/rest/api/3/search/jql')).at(-1)!)).toContain('worklogAuthor = currentUser()')
+  })
+
+  it('includeMe: 내 id 가 JQL 에 못 들어가는 모양이면 currentUser() 와 OR 로 묶는다', async () => {
+    const inner = worklogHandler({
+      kind: 'server',
+      issues: [{ key: 'DC-1', worklogs: [wl('1', 'kim min gyu', '2026-10-19T09:00:00.000+0900'), wl('2', 'alice', '2026-10-19T09:00:00.000+0900')] }]
+    })
+    fake = await startFakeJira((req, res, n) => (req.url.includes('/myself') ? sendJson(res, { name: 'kim min gyu', displayName: '나' }) : inner(req, res, n)))
+    const svc = newService()
+    await svc.connect({ kind: 'server', siteUrl: fake.origin, token: SECRET })
+    const r = await svc.worklogs({ ...Q, users: ['alice'], includeMe: true })
+    expect(r.worklogs.map((w) => w.id)).toEqual(['1', '2'])
+    expect(jqlOf(fake.requests.find((x) => x.url.startsWith('/rest/api/2/search'))!)).toContain('(worklogAuthor = currentUser() OR worklogAuthor in ("alice")) AND')
+    // 팀원이 없으면 같은 이름이어도 currentUser() 경로
+    expect((await svc.worklogs(Q)).worklogs.map((w) => w.id)).toEqual(['1'])
+  })
+
+  it('검색 페이지가 겹쳐도 이슈는 키로 한 번만 센다', async () => {
+    const filler = Array.from({ length: 24 }, (_, i) => ({ key: `F-${i}`, worklogs: [] as FakeWorklog[] }))
+    for (const kind of ['cloud', 'server'] as const) {
+      await fake?.close()
+      const a = { key: 'ABC-1', worklogs: [wl('1', kind === 'cloud' ? 'acc-me' : 'me', '2026-10-19T09:00:00.000+0900')] }
+      const svc = await connected({ kind, issues: [a, ...filler, a] })
+      expect((await svc.worklogs(Q)).worklogs.map((w) => w.id)).toEqual(['1'])
+    }
+  })
+
+  const slow = (n: number): FakeWorklogSite['issues'] =>
+    Array.from({ length: n }, (_, i) => ({ key: `ABC-${i + 1}`, embed: 0, worklogs: [wl(`w${i}`, 'acc-me', '2026-10-19T09:00:00.000+0900')] }))
+
+  it('이슈 worklog 가 404·403 이면 그 이슈만 건너뛰고 truncated', async () => {
+    const issues = slow(3)
+    issues[0]!.worklogStatus = 404
+    issues[2]!.worklogStatus = 403
+    const svc = await connected({ kind: 'cloud', issues })
+    const r = await svc.worklogs(Q)
+    expect(r.worklogs.map((w) => w.id)).toEqual(['w1'])
+    expect(r.truncated).toBe(true)
+  })
+
+  it('이슈 worklog 응답이 20MB 를 넘으면 그 이슈만 건너뛰고 truncated', async () => {
+    const issues = slow(2)
+    issues[1]!.worklogHuge = true
+    const svc = await connected({ kind: 'cloud', issues })
+    const r = await svc.worklogs(Q)
+    expect(r.worklogs.map((w) => w.id)).toEqual(['w0'])
+    expect(r.truncated).toBe(true)
+  })
+
+  it('이슈 worklog 가 인증 오류면 전체 실패하고 남은 이슈는 요청하지 않는다', async () => {
+    const issues = slow(10).map((i) => ({ ...i, worklogDelayMs: 150 }))
+    issues[0]!.worklogStatus = 401
+    issues[0]!.worklogDelayMs = 0
+    const svc = await connected({ kind: 'cloud', issues })
+    await expect(svc.worklogs(Q)).rejects.toMatchObject({ code: 'JIRA_AUTH' })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(worklogReqs().length).toBeLessThanOrEqual(3)
+  })
+
+  it('없는 팀원(400)은 한 명씩 확인해 빼고 invalidUsers 로 알린다', async () => {
+    const svc = await connected({
+      kind: 'cloud',
+      badUsers: ['ghost'],
+      issues: [{ key: 'ABC-1', worklogs: [wl('1', 'acc-x', '2026-10-19T09:00:00.000+0900'), wl('2', 'ghost', '2026-10-19T09:00:00.000+0900')] }]
+    })
+    const r = await svc.worklogs({ ...Q, users: ['acc-x', 'ghost'] })
+    expect(r.invalidUsers).toEqual(['ghost'])
+    expect(r.worklogs.map((w) => w.id)).toEqual(['1'])
+    const probes = fake!.requests.filter((x) => ['worklogAuthor = "ghost"', 'worklogAuthor = "acc-x"'].includes(jqlOf(x)))
+    expect(probes.map((x) => new URL(x.url, 'http://x').searchParams.get('maxResults'))).toEqual(['1', '1'])
+    // 남은 사용자가 없으면 빈 결과(includeMe 면 나만 조회)
+    const empty = await svc.worklogs({ ...Q, users: ['ghost'] })
+    expect(empty).toMatchObject({ worklogs: [], truncated: false, invalidUsers: ['ghost'] })
+    const me = await svc.worklogs({ ...Q, users: ['ghost'], includeMe: true })
+    expect(me.invalidUsers).toEqual(['ghost'])
+  })
+
+  it('사용자 검색 표시 이름은 200자로 자른다', async () => {
+    const svc = await connected({ kind: 'server', issues: [], users: [{ name: 'alice', displayName: '가'.repeat(300) }] })
+    expect((await svc.userSearch('al'))[0]!.name).toHaveLength(200)
   })
 
   it('요청 ID 로 취소하면 AbortError', async () => {

@@ -107,7 +107,8 @@ export function parseWorklogQuery(v: unknown): JiraWorklogQuery {
   if ((to - from) / DAY_MS + 1 > MAX_WORKLOG_DAYS) throw new Error(`조회 범위는 최대 ${MAX_WORKLOG_DAYS}일입니다`)
   if (!Array.isArray(q.users) || q.users.length > MAX_WORKLOG_USERS) throw new Error(`사용자는 최대 ${MAX_WORKLOG_USERS}명까지 고를 수 있습니다`)
   if (!q.users.every((u) => typeof u === 'string' && USER_ID_RE.test(u))) throw new Error('사용자 id 가 올바르지 않습니다')
-  return { from: q.from as string, to: q.to as string, users: [...new Set(q.users as string[])] }
+  if (q.includeMe !== undefined && typeof q.includeMe !== 'boolean') throw new Error('includeMe 가 올바르지 않습니다')
+  return { from: q.from as string, to: q.to as string, users: [...new Set(q.users as string[])], ...(q.includeMe ? { includeMe: true } : {}) }
 }
 
 /** 사용자 검색어: 1~100자, 제어문자 금지 */

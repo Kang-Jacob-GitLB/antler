@@ -50,6 +50,8 @@ function TeamManager({ team, me }: { team: JiraUser[]; me: JiraUser | null }): R
   const [searching, setSearching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const box = useRef<HTMLDivElement>(null)
+  const input = useRef<HTMLInputElement>(null)
+  const opener = useRef<HTMLButtonElement>(null)
   const seq = useRef(0)
   const req = useRef<string | null>(null)
   const { addTeamMember } = useJiraStore.getState()
@@ -94,14 +96,26 @@ function TeamManager({ team, me }: { team: JiraUser[]; me: JiraUser | null }): R
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, open])
 
-  // 바깥을 누르면 닫는다
+  // 바깥을 누르면 닫는다. 열려 있는 동안 Esc 는 팝오버만 닫는다(캡처 단계에서 가로채 Jira 화면의 Esc 로 가지 않게)
   useEffect(() => {
     if (!open) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      e.stopImmediatePropagation()
+      setOpen(false)
+      opener.current?.focus()
+    }
+    document.addEventListener('keydown', onKey, true)
     const onDown = (e: MouseEvent): void => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey, true)
+    }
   }, [open])
 
   const full = team.length >= MAX_TEAM
@@ -109,18 +123,13 @@ function TeamManager({ team, me }: { team: JiraUser[]; me: JiraUser | null }): R
 
   return (
     <div className="wl-team" ref={box}>
-      <button className="btn btn--sm" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <button ref={opener} className="btn btn--sm" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <IconUser size={13} />
         {t('jira.worklog.manage')}
       </button>
       {open && (
-        <div className="wl-pop" role="dialog" aria-label={t('jira.worklog.manage')} onKeyDown={(e) => {
-            if (e.key !== 'Escape') return
-            // 전역 Esc(Jira 화면 닫기)까지 가지 않게 네이티브 이벤트도 멈춘다
-            e.nativeEvent.stopPropagation()
-            setOpen(false)
-          }}>
-          <input className="field__input" autoFocus value={text} spellCheck={false} placeholder={t('jira.worklog.search')} aria-label={t('jira.worklog.search')} onChange={(e) => setText(e.target.value)} />
+        <div className="wl-pop" role="dialog" aria-label={t('jira.worklog.manage')}>
+          <input ref={input} className="field__input" autoFocus value={text} spellCheck={false} placeholder={t('jira.worklog.search')} aria-label={t('jira.worklog.search')} onChange={(e) => setText(e.target.value)} />
           {full && <div className="wl-pop__note">{t('jira.worklog.maxTeam', { n: MAX_TEAM })}</div>}
           {error && (
             <div className="wl-pop__err" role="alert">
@@ -132,9 +141,12 @@ function TeamManager({ team, me }: { team: JiraUser[]; me: JiraUser | null }): R
             <div className="wl-pop__sec">
               <div className="wl-pop__title">{t('jira.worklog.resultsTitle')}</div>
               {searching && <div className="wl-pop__note">{t('jira.worklog.searching')}</div>}
-              {!searching && shown.length === 0 && <div className="wl-pop__note">{t('jira.worklog.noResults')}</div>}
+              {!searching && shown.length === 0 && <div className="wl-pop__note">{t(results.length > 0 ? 'jira.worklog.allAdded' : 'jira.worklog.noResults')}</div>}
               {shown.map((u) => (
-                <button key={u.id} className="wl-pop__item" disabled={full} title={t('jira.worklog.addMember', { name: u.name })} onClick={() => addTeamMember(u)}>
+                <button key={u.id} className="wl-pop__item" disabled={full} title={t('jira.worklog.addMember', { name: u.name })} onClick={() => {
+                    addTeamMember(u)
+                    input.current?.focus()
+                  }}>
                   <span className="wl-user__dot" style={{ background: userColor(u.id) }} />
                   <span className="wl-pop__name">{u.name}</span>
                   <IconPlus size={12} />

@@ -1016,8 +1016,10 @@ export interface JiraUser {
 export interface JiraWorklogQuery {
   from: string
   to: string
-  /** 작성자 id 목록. 비우면 나만 */
+  /** 작성자 id 목록(팀원). 비우면 나만 */
   users: string[]
+  /** users 가 있을 때 나도 함께 볼지. main 이 아는 내 id 를 붙인다(renderer 가 내 id 를 몰라도 된다) */
+  includeMe?: boolean
 }
 
 export interface JiraWorklog {
@@ -1041,8 +1043,10 @@ export interface JiraWorklogResult {
   worklogs: JiraWorklog[]
   /** 연결한 계정 */
   me: JiraUser
-  /** 이슈·워크로그 수 상한에 걸려 일부만 받았는지 */
+  /** 이슈·워크로그 수 상한에 걸렸거나 일부 이슈를 읽지 못해 일부만 받았는지 */
   truncated: boolean
+  /** Jira 가 없는 사용자라고 거부한 팀원 id(이름 변경·삭제). 이들을 빼고 나머지는 조회했다 */
+  invalidUsers?: string[]
 }
 
 /** Jira 개발 정보(dev-status): Jira 의 GitHub 연동이 이 이슈에 모아 둔 PR·커밋 */

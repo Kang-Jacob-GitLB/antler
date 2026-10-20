@@ -2,7 +2,7 @@
 import type { JiraComment, JiraDevCommit, JiraDevInfo, JiraDevPull, JiraIssueDetail, JiraIssueSummary, JiraSearchResult, JiraUser, JiraWorklog, JiraWorklogQuery, JiraWorklogResult } from '@shared/types'
 import { AbortError } from '../executors/GitExecutor'
 import { adfToHtml } from './adf'
-import type { JiraClient, JiraCredential } from './client'
+import { JIRA_TOO_BIG, JiraApiError, type JiraClient, type JiraCredential } from './client'
 import { jqlQuote, MAX_PAGES, PAGE_SIZE, USER_ID_RE } from './validate'
 
 const LIST_FIELDS = 'summary,status,issuetype,priority,assignee,updated'
@@ -236,12 +236,19 @@ export async function search(
 
 const WORKLOG_ISSUE_MAX = 300
 const WORKLOG_MAX = 20_000
-const WORKLOG_ISSUE_PAGE = 100
+/** 워크로그를 내장해 받으므로 페이지가 크면 응답이 커진다 */
+const WORKLOG_ISSUE_PAGE = 25
+/** 이슈별 worklog 엔드포인트만 허용하는 더 큰 응답 상한 */
+const WORKLOG_BODY_MAX_BYTES = 20 * 1024 * 1024
 const WORKLOG_FETCH_CONCURRENCY = 3
 /** 이슈 하나의 워크로그를 이어 받는 최대 횟수(진전이 없으면 그 전에 멈춘다) */
 const WORKLOG_FETCH_PAGES = 20
 const COMMENT_MAX = 500
 const DAY_MS = 86_400_000
+/** ConfigStore team.name 상한과 맞춘다 */
+const USER_NAME_MAX = 200
+// eslint-disable-next-line no-control-regex
+const CONTROL_RE = /[\u0000-\u001f\u007f]/
 
 /** /myself 의 내 id: Cloud 는 accountId, Data Center 는 사용자 이름(name). 워크로그 작성자와 같은 체계다 */
 export async function getMyId(client: JiraClient, c: JiraCredential, signal?: AbortSignal): Promise<JiraUser> {
@@ -252,8 +259,9 @@ export async function getMyId(client: JiraClient, c: JiraCredential, signal?: Ab
     })
   )
   const id = c.kind === 'cloud' ? str(me['accountId']) : str(me['name'])
-  if (!USER_ID_RE.test(id)) throw new Error('Jira 계정 정보를 읽을 수 없습니다')
-  return { id, name: str(me['displayName']) || id }
+  // JQL 에는 직접 넣지 않고 작성자 비교에 쓰므로 USER_ID_RE 보다 느슨하게(Data Center 이름은 공백·한글도 가능) 길이·제어문자만 본다
+  if (id.length < 1 || id.length > 255 || CONTROL_RE.test(id)) throw new Error('Jira 계정 정보를 읽을 수 없습니다')
+  return { id, name: (str(me['displayName']) || id).slice(0, USER_NAME_MAX) }
 }
 
 /** 사용자 검색(팀원 추가용). 최대 20명. Cloud 는 사람 계정(atlassian)만 */
@@ -268,7 +276,7 @@ export async function searchUsers(client: JiraClient, c: JiraCredential, text: s
     const u = obj(x)
     if (c.kind === 'cloud' && u['accountType'] !== 'atlassian') continue
     const id = c.kind === 'cloud' ? str(u['accountId']) : str(u['name'])
-    if (USER_ID_RE.test(id)) out.push({ id, name: str(u['displayName']) || id })
+    if (USER_ID_RE.test(id)) out.push({ id, name: (str(u['displayName']) || id).slice(0, USER_NAME_MAX) })
   }
   return out.slice(0, 20)
 }
@@ -316,10 +324,11 @@ function mapIssueForWorklog(x: unknown): WorklogIssue {
   return { key: str(i['key']), summary: str(f['summary']), type: str(obj(f['issuetype'])['name']), embedded, complete: total <= embedded.length }
 }
 
-/** worklogAuthor·worklogDate JQL 로 이슈를 최대 WORKLOG_ISSUE_MAX 건 모은다. 더 있으면 truncated */
+/** worklogAuthor·worklogDate JQL 로 이슈를 최대 WORKLOG_ISSUE_MAX 건 모은다(키로 중복 제거). 더 있으면 truncated */
 async function findWorklogIssues(client: JiraClient, c: JiraCredential, jql: string, signal?: AbortSignal): Promise<{ issues: WorklogIssue[]; truncated: boolean }> {
   const sig = { notFound: '검색 API 를 찾을 수 없습니다(Jira 버전과 사이트 주소를 확인하세요)', ...(signal ? { signal } : {}) }
   const issues: WorklogIssue[] = []
+  const seen = new Set<string>()
   const fields = 'summary,issuetype,worklog'
   let token: string | undefined
   let startAt = 0
@@ -337,42 +346,78 @@ async function findWorklogIssues(client: JiraClient, c: JiraCredential, jql: str
       startAt += items.length
       more = typeof raw['total'] === 'number' && startAt < raw['total']
     }
-    for (const it of items) issues.push(mapIssueForWorklog(it))
+    for (const it of items) {
+      const issue = mapIssueForWorklog(it)
+      // 페이지 경계에서 같은 이슈가 다시 오면(정렬이 흔들릴 때) 한 번만 쓴다
+      if (!issue.key || seen.has(issue.key)) continue
+      seen.add(issue.key)
+      issues.push(issue)
+    }
     if (items.length === 0 || !more) return { issues: issues.slice(0, WORKLOG_ISSUE_MAX), truncated: issues.length > WORKLOG_ISSUE_MAX }
     if (issues.length >= WORKLOG_ISSUE_MAX) return { issues: issues.slice(0, WORKLOG_ISSUE_MAX), truncated: true }
   }
   return { issues: issues.slice(0, WORKLOG_ISSUE_MAX), truncated: true }
 }
 
-/** 이슈의 워크로그 전부(Cloud 는 범위로 좁힌다). startAt 페이징은 진전이 없으면 멈춘다 */
-async function fetchIssueWorklogs(client: JiraClient, c: JiraCredential, key: string, lo: number, hi: number, signal?: AbortSignal): Promise<unknown[]> {
+/** 이슈의 워크로그를 받는 대로 accept 에 넘긴다(원본을 쌓지 않는다). Cloud 는 범위로 좁히고, startAt 페이징은 진전이 없으면 멈춘다 */
+async function fetchIssueWorklogs(client: JiraClient, c: JiraCredential, key: string, lo: number, hi: number, accept: (w: unknown) => void, signal?: AbortSignal): Promise<void> {
   const path = `${apiBase(c)}/issue/${encodeURIComponent(key)}/worklog`
-  const out: unknown[] = []
   const seen = new Set<string>()
   let startAt = 0
   for (let page = 0; page < WORKLOG_FETCH_PAGES; page++) {
     // Data Center 는 쿼리 파라미터를 받지 않고 전부 돌려준다 — 거르는 것은 호출자의 몫
     const query = c.kind === 'cloud' ? { startAt, maxResults: 1000, startedAfter: lo, startedBefore: hi } : undefined
-    const raw = obj(await client.get<unknown>(path, { ...(query ? { query } : {}), notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다', ...(signal ? { signal } : {}) }))
+    const raw = obj(
+      await client.get<unknown>(path, { ...(query ? { query } : {}), notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다', maxBytes: WORKLOG_BODY_MAX_BYTES, ...(signal ? { signal } : {}) })
+    )
     const list = arr(raw['worklogs'])
     let fresh = 0
     for (const w of list) {
       const id = str(obj(w)['id'])
       if (id && seen.has(id)) continue
       if (id) seen.add(id)
-      out.push(w)
+      accept(w)
       fresh++
     }
     startAt += list.length
     const total = typeof raw['total'] === 'number' ? raw['total'] : 0
     if (fresh === 0 || startAt >= total) break
   }
-  return out
+}
+
+/** 그 이슈만 건너뛰어도 되는 오류: 이슈가 없거나(404) 볼 수 없거나(403) 워크로그 응답이 너무 큰 경우 */
+function skippableIssueError(err: unknown): boolean {
+  if (!(err instanceof JiraApiError)) return false
+  return err.code === 'JIRA_NOT_FOUND' || err.code === 'JIRA_FORBIDDEN' || (err.code === 'JIRA_HTTP' && err.message === JIRA_TOO_BIG)
+}
+
+/** JQL 작성자 절. 내 id 가 JQL 에 들어갈 수 없는 모양이면 currentUser() 로 대신한다 */
+function authorClause(team: string[], me: JiraUser, includeMe: boolean): string {
+  if (team.length === 0) return 'worklogAuthor = currentUser()'
+  const list = (ids: string[]): string => `worklogAuthor in (${ids.map(jqlQuote).join(',')})`
+  if (!includeMe) return list(team)
+  if (USER_ID_RE.test(me.id)) return list([...team, me.id])
+  return `(worklogAuthor = currentUser() OR ${list(team)})`
+}
+
+/** 검색이 400 일 때: 팀원을 한 명씩 가볍게 조회해 Jira 가 거부하는 id 를 골라낸다 */
+async function findInvalidUsers(client: JiraClient, c: JiraCredential, team: string[], signal?: AbortSignal): Promise<string[]> {
+  const bad: string[] = []
+  const path = c.kind === 'cloud' ? '/rest/api/3/search/jql' : '/rest/api/2/search'
+  for (const id of team) {
+    try {
+      await client.get<unknown>(path, { query: { jql: `worklogAuthor = ${jqlQuote(id)}`, fields: 'key', maxResults: 1 }, ...(signal ? { signal } : {}) })
+    } catch (err) {
+      if (err instanceof JiraApiError && err.status === 400) bad.push(id)
+      else throw err
+    }
+  }
+  return bad
 }
 
 /**
- * 범위 안의 워크로그(GET 만). JQL 날짜는 사용자 프로필 시간대 기준일 수 있어 범위를 하루씩 넓혀 이슈를 찾고,
- * started 가 [from-1일 00:00Z, to+2일 00:00Z) 인 것만 남긴다 — 정확한 로컬 날짜 필터는 화면의 몫이다.
+ * 범위 안의 워크로그(GET 만). JQL 날짜는 사용자 프로필 시간대 기준일 수 있어 범위를 이틀씩 넓혀 이슈를 찾고,
+ * started 가 [from-2일 00:00Z, to+2일 00:00Z+14h) 인 것만 남긴다(UTC+14 ~ UTC-12 를 덮는다) — 정확한 로컬 날짜 필터는 화면의 몫이다.
  */
 export async function getWorklogs(
   client: JiraClient,
@@ -381,56 +426,93 @@ export async function getWorklogs(
   me: JiraUser,
   signal?: AbortSignal
 ): Promise<JiraWorklogResult> {
-  const authors = q.users.length > 0 ? q.users : [me.id]
-  const who = q.users.length > 0 ? `worklogAuthor in (${authors.map(jqlQuote).join(',')})` : 'worklogAuthor = currentUser()'
-  const jql = `${who} AND worklogDate >= ${jqlQuote(shiftDay(q.from, -1))} AND worklogDate <= ${jqlQuote(shiftDay(q.to, 1))} ORDER BY updated DESC`
-  const lo = Date.parse(`${q.from}T00:00:00Z`) - DAY_MS
-  const hi = Date.parse(`${q.to}T00:00:00Z`) + 2 * DAY_MS
-  const wanted = new Set(authors)
+  const includeMe = q.users.length > 0 && q.includeMe === true
+  const lo = Date.parse(`${q.from}T00:00:00Z`) - 2 * DAY_MS
+  const hi = Date.parse(`${q.to}T00:00:00Z`) + 2 * DAY_MS + 14 * 3_600_000
+  const dates = `worklogDate >= ${jqlQuote(shiftDay(q.from, -2))} AND worklogDate < ${jqlQuote(shiftDay(q.to, 2))} ORDER BY key ASC`
 
-  const { issues, truncated: issuesCut } = await findWorklogIssues(client, c, jql, signal)
+  let team = q.users
+  let invalidUsers: string[] = []
+  let found: { issues: WorklogIssue[]; truncated: boolean }
+  try {
+    found = await findWorklogIssues(client, c, `${authorClause(team, me, includeMe)} AND ${dates}`, signal)
+  } catch (err) {
+    // 400: 없는 사용자(이름 변경·삭제)가 섞였을 수 있다. 팀원이 있을 때만 하나씩 확인해 빼고 다시 조회한다
+    if (!(err instanceof JiraApiError) || err.status !== 400 || team.length === 0) throw err
+    invalidUsers = await findInvalidUsers(client, c, team, signal)
+    if (invalidUsers.length === 0) throw err
+    team = team.filter((u) => !invalidUsers.includes(u))
+    if (team.length === 0 && !includeMe) return { worklogs: [], me, truncated: false, invalidUsers }
+    found = await findWorklogIssues(client, c, `${authorClause(team, me, includeMe)} AND ${dates}`, signal)
+  }
+  const { issues } = found
+  let truncated = found.truncated
 
-  // 내장 worklog 가 잘린 이슈만 이슈별로 다시 받는다(동시 3개)
-  const raws: unknown[][] = issues.map((i) => i.embedded)
-  const todo = issues.map((i, idx) => (i.complete ? -1 : idx)).filter((idx) => idx >= 0)
+  const wanted = new Set(q.users.length > 0 ? team : [me.id])
+  if (includeMe) wanted.add(me.id)
+
+  const worklogs: JiraWorklog[][] = issues.map(() => [])
+  let count = 0
+  /** 워크로그 하나를 작성자·범위로 거르고 JiraWorklog 로 바꿔 담는다. 원본은 남기지 않는다 */
+  const take = (idx: number, x: unknown): void => {
+    const w = obj(x)
+    const a = obj(w['author'])
+    // Cloud 는 accountId, Data Center 는 name(옛 key 로도 맞춘다)
+    const authorId = c.kind === 'cloud' ? str(a['accountId']) : str(a['name'])
+    if (!authorId || !(wanted.has(authorId) || (c.kind === 'server' && wanted.has(str(a['key']))))) return
+    const started = str(w['started'])
+    const t = Date.parse(started)
+    if (!Number.isFinite(t) || t < lo || t >= hi) return
+    if (count >= WORKLOG_MAX) {
+      truncated = true
+      return
+    }
+    count++
+    const issue = issues[idx]!
+    worklogs[idx]!.push({
+      id: str(w['id']),
+      issueKey: issue.key,
+      issueSummary: issue.summary,
+      issueType: issue.type,
+      authorId,
+      author: str(a['displayName']) || authorId,
+      started,
+      seconds: typeof w['timeSpentSeconds'] === 'number' ? w['timeSpentSeconds'] : 0,
+      comment: commentText(w['comment'])
+    })
+  }
+
+  // 내장 worklog 가 전부인 이슈는 바로 쓰고, 잘린 이슈만 이슈별로 다시 받는다(동시 3개)
+  const todo: number[] = []
+  for (const [idx, issue] of issues.entries()) {
+    if (!issue.complete) todo.push(idx)
+    else for (const x of issue.embedded) take(idx, x)
+    issue.embedded = []
+  }
+  // 전체 실패가 확정되는 첫 오류에서 나머지 워커를 멈춘다
+  const local = new AbortController()
+  const wsig = signal ? AbortSignal.any([signal, local.signal]) : local.signal
   let next = 0
   const worker = async (): Promise<void> => {
     while (next < todo.length) {
-      if (signal?.aborted) throw new AbortError()
+      if (wsig.aborted) throw new AbortError()
       const idx = todo[next++]!
-      raws[idx] = await fetchIssueWorklogs(client, c, issues[idx]!.key, lo, hi, signal)
+      try {
+        await fetchIssueWorklogs(client, c, issues[idx]!.key, lo, hi, (x) => take(idx, x), wsig)
+      } catch (err) {
+        if (skippableIssueError(err)) {
+          // 이 이슈만 건너뛰고 부분 결과로 돌려준다
+          count -= worklogs[idx]!.length
+          worklogs[idx] = []
+          truncated = true
+          continue
+        }
+        local.abort()
+        throw err
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(WORKLOG_FETCH_CONCURRENCY, todo.length) }, worker))
 
-  const worklogs: JiraWorklog[] = []
-  let truncated = issuesCut
-  collect: for (const [idx, issue] of issues.entries()) {
-    for (const x of raws[idx]!) {
-      const w = obj(x)
-      const a = obj(w['author'])
-      // Cloud 는 accountId, Data Center 는 name(옛 key 로도 맞춘다)
-      const authorId = c.kind === 'cloud' ? str(a['accountId']) : str(a['name'])
-      if (!authorId || !(wanted.has(authorId) || (c.kind === 'server' && wanted.has(str(a['key']))))) continue
-      const started = str(w['started'])
-      const t = Date.parse(started)
-      if (!Number.isFinite(t) || t < lo || t >= hi) continue
-      if (worklogs.length >= WORKLOG_MAX) {
-        truncated = true
-        break collect
-      }
-      worklogs.push({
-        id: str(w['id']),
-        issueKey: issue.key,
-        issueSummary: issue.summary,
-        issueType: issue.type,
-        authorId,
-        author: str(a['displayName']) || authorId,
-        started,
-        seconds: typeof w['timeSpentSeconds'] === 'number' ? w['timeSpentSeconds'] : 0,
-        comment: commentText(w['comment'])
-      })
-    }
-  }
-  return { worklogs, me, truncated }
+  return { worklogs: worklogs.flat(), me, truncated, ...(invalidUsers.length > 0 ? { invalidUsers } : {}) }
 }
