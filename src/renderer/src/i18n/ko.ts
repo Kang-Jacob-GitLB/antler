@@ -220,7 +220,7 @@ export const ko = {
   'col.date': '날짜',
   'col.sha': 'SHA',
   'col.pr': 'PR',
-  'pr.open': '#{n} 풀 리퀘스트를 GitHub 에서 열기',
+  'pr.open': '#{n} 풀 리퀘스트 열기',
   'list.loading': '불러오는 중…',
   'list.noCommits': '이 저장소에는 아직 커밋이 없습니다',
   'list.count': '커밋 {n}개{more}',
