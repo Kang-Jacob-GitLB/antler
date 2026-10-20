@@ -196,7 +196,7 @@ const Row = memo(function Row({
         <span className="commit-subject">{commit.subject}</span>
         <CommitCheck hash={commit.hash} />
       </div>
-      {showPr && <PrCell n={pr} linkable={prLinkable}label={pr === null ? '' : t('pr.open', { n: pr })} />}
+      {showPr && <PrCell n={pr} linkable={prLinkable} label={pr === null ? '' : t('pr.open', { n: pr })} />}
       <div className="cell cell--author">
         <AuthorAvatar email={commit.authorEmail} name={commit.authorName} size={18} />
         <span className="cell__text">{commit.authorName}</span>
