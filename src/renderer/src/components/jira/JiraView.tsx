@@ -6,7 +6,7 @@ import { useAppStore } from '../../stores/appStore'
 import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
 import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
-import { isoToEpoch, issueSub, JiraStatus, statusCat } from './JiraBits'
+import { isoToEpoch, issueSub, JiraStatus, JiraType, statusCat } from './JiraBits'
 import '../github/GitHubView.css'
 import './JiraView.css'
 
@@ -209,6 +209,7 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
                 <div className="jira-card__title">{i.summary}</div>
                 <div className="jira-card__meta">
                   <span className="jira-key mono">{i.key}</span>
+                  <JiraType type={i.issueType} />
                   <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
                 </div>
                 <div className="jira-card__when">{rel(isoToEpoch(i.updated))}</div>
@@ -228,6 +229,7 @@ function IssueRow({ i, when, onOpen }: { i: JiraIssueSummary; when: string; onOp
       <span className="jira-key mono">{i.key}</span>
       <div className="gh-row__main">
         <div className="gh-row__title">
+          <JiraType type={i.issueType} />
           <span className="gh-row__text">{i.summary}</span>
         </div>
         <div className="gh-row__sub">{issueSub(i, t('jira.unassigned'))}</div>
@@ -270,7 +272,7 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
       {d && (
         <div className="gh-meta jira-meta">
           <JiraStatus name={d.status} category={d.statusCategory} />
-          <Field label={t('jira.type')} value={d.issueType} />
+          <JiraType type={d.issueType} withName />
           <Field label={t('jira.priority')} value={d.priority} />
           <Field label={t('jira.assignee')} value={d.assignee || t('jira.unassigned')} />
           <Field label={t('jira.reporter')} value={d.reporter} />
