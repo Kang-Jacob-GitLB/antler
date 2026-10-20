@@ -441,6 +441,7 @@ export const ko = {
   'jira.created': '만든 날짜',
   'jira.updated': '수정한 날짜',
   'jira.dev': '개발',
+  'jira.devFromJira': 'Jira 연동',
   'jira.devNoRepo': '저장소를 열면 이 이슈를 언급한 커밋·PR 을 찾아 보여 줍니다',
   'jira.devPulls': 'Pull Request',
   'jira.devNoPulls': '이 이슈를 언급한 PR 이 없습니다',

@@ -1,5 +1,6 @@
 // Jira REST 응답 → 공유 타입 변환과 엔드포인트 호출. Cloud(API v3, ADF)와 Data Center/Server(API v2, 서버 렌더 HTML)의 차이는 여기서 흡수한다.
-import type { JiraComment, JiraIssueDetail, JiraIssueSummary, JiraSearchResult } from '@shared/types'
+import type { JiraComment, JiraDevCommit, JiraDevInfo, JiraDevPull, JiraIssueDetail, JiraIssueSummary, JiraSearchResult } from '@shared/types'
+import { AbortError } from '../executors/GitExecutor'
 import { adfToHtml } from './adf'
 import type { JiraClient, JiraCredential } from './client'
 import { MAX_PAGES, PAGE_SIZE } from './validate'
@@ -93,6 +94,106 @@ export async function getComments(client: JiraClient, c: JiraCredential, key: st
     const cm = obj(x)
     return { author: str(obj(cm['author'])['displayName']), created: str(cm['created']), bodyHtml: bodyHtml(c, cm['body'], cm['renderedBody']) }
   })
+}
+
+const DEV_MAX = 30
+const DEV_INSTANCE_RE = /^[A-Za-z0-9_.-]{1,40}$/
+const NO_DEV: JiraDevInfo = { available: false, pulls: [], commits: [] }
+
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
+const httpsUrl = (v: unknown): string => (typeof v === 'string' && /^https:\/\/[^\s]+$/.test(v) ? v : '')
+/** dev-status 의 시각은 ISO 문자열 또는 epoch ms 로 온다 */
+function isoTime(v: unknown): string {
+  if (typeof v === 'number' && Number.isFinite(v)) return new Date(v).toISOString()
+  return typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v : ''
+}
+function pullState(v: unknown): JiraDevPull['state'] {
+  const s = str(v).toUpperCase()
+  return s === 'OPEN' ? 'open' : s === 'MERGED' ? 'merged' : 'closed'
+}
+
+/**
+ * 개발 정보(dev-status). Jira 화면의 '개발' 칸이 쓰는 API 로, Jira 에 GitHub 연동(GitHub for Jira · DVCS)이 있어야 데이터가 있다.
+ * 이슈 숫자 id → 요약에서 연동 종류(byInstanceType) → 종류별 PR · 커밋 상세. 연동이 없거나 API 가 막혀 있으면 available:false.
+ */
+export async function getDevInfo(client: JiraClient, c: JiraCredential, key: string, signal?: AbortSignal): Promise<JiraDevInfo> {
+  const sig = signal ? { signal } : {}
+  const issue = obj(
+    await client.get<unknown>(`${apiBase(c)}/issue/${encodeURIComponent(key)}`, {
+      query: { fields: 'issuetype' },
+      notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다',
+      ...sig
+    })
+  )
+  const id = str(issue['id'])
+  if (!/^\d{1,18}$/.test(id)) return NO_DEV
+
+  // 연동이 없는 사이트는 404·403 을 줄 수 있다 — 오류가 아니라 '정보 없음'으로 본다(취소만 그대로 던진다)
+  const soft = async (path: string, query: Record<string, string>): Promise<Json | null> => {
+    try {
+      return obj(await client.get<unknown>(path, { query, ...sig }))
+    } catch (err) {
+      if (err instanceof AbortError) throw err
+      return null
+    }
+  }
+  const summaryRaw = await soft('/rest/dev-status/latest/issue/summary', { issueId: id })
+  if (!summaryRaw) return NO_DEV
+  const summary = obj(summaryRaw['summary'])
+  const instances = (part: string): string[] => Object.keys(obj(obj(summary[part])['byInstanceType'])).filter((t) => DEV_INSTANCE_RE.test(t)).slice(0, 4)
+  const details = async (dataType: string, types: string[]): Promise<Json[]> => {
+    const out: Json[] = []
+    for (const applicationType of types) {
+      const raw = await soft('/rest/dev-status/latest/issue/detail', { issueId: id, applicationType, dataType })
+      if (raw) out.push(...arr(raw['detail']).map(obj))
+    }
+    return out
+  }
+
+  const pulls = new Map<string, JiraDevPull>()
+  for (const d of await details('pullrequest', instances('pullrequest'))) {
+    for (const x of arr(d['pullRequests'])) {
+      const p = obj(x)
+      const url = httpsUrl(p['url'])
+      const pull: JiraDevPull = {
+        title: str(p['name']),
+        url,
+        state: pullState(p['status']),
+        author: str(obj(p['author'])['name']),
+        repo: str(p['repositoryName']),
+        branch: str(obj(p['source'])['branch']),
+        updated: isoTime(p['lastUpdate'])
+      }
+      pulls.set(url || `${pull.repo}#${pull.title}`, pull)
+    }
+  }
+
+  const commits = new Map<string, JiraDevCommit>()
+  for (const d of await details('repository', instances('repository'))) {
+    for (const r of arr(d['repositories'])) {
+      const repo = obj(r)
+      for (const x of arr(repo['commits'])) {
+        const cm = obj(x)
+        const sha = str(cm['id'])
+        if (!/^[0-9a-f]{7,64}$/i.test(sha)) continue
+        commits.set(sha, {
+          sha,
+          message: str(cm['message']).split(/\r?\n/)[0]!.trim(),
+          url: httpsUrl(cm['url']),
+          author: str(obj(cm['author'])['name']),
+          repo: str(repo['name']),
+          date: isoTime(cm['authorTimestamp'])
+        })
+      }
+    }
+  }
+
+  const byTime = <T>(at: (x: T) => string) => (a: T, b: T): number => (Date.parse(at(b)) || 0) - (Date.parse(at(a)) || 0)
+  return {
+    available: true,
+    pulls: [...pulls.values()].sort(byTime((p) => p.updated)).slice(0, DEV_MAX),
+    commits: [...commits.values()].sort(byTime((x) => x.date)).slice(0, DEV_MAX)
+  }
 }
 
 /**

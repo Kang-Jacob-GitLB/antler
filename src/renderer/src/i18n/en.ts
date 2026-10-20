@@ -443,6 +443,7 @@ export const en: Messages = {
   'jira.created': 'Created',
   'jira.updated': 'Updated',
   'jira.dev': 'Development',
+  'jira.devFromJira': 'From Jira',
   'jira.devNoRepo': 'Open a repository to see commits and PRs that mention this issue',
   'jira.devPulls': 'Pull requests',
   'jira.devNoPulls': 'No PRs mention this issue',

@@ -27,6 +27,7 @@ import type {
   GhUser,
   JiraAuthState,
   JiraComment,
+  JiraDevInfo,
   JiraConnectInput,
   JiraIssueDetail,
   JiraSearchQuery,
@@ -137,6 +138,8 @@ export interface IpcContract {
   /** 최근 댓글 몇 개(최신순) */
   'jira:comments': { args: [key: string, requestId?: string]; result: JiraComment[] }
   'jira:search': { args: [query: JiraSearchQuery, requestId?: string]; result: JiraSearchResult }
+  /** 개발 정보(dev-status): Jira 의 GitHub 연동이 모은 PR·커밋. 연동이 없으면 available:false */
+  'jira:dev': { args: [key: string, requestId?: string]; result: JiraDevInfo }
   /** Jira 사이트 호스트의 https 주소만 기본 브라우저로 연다 */
   'jira:openExternal': { args: [url: string]; result: void }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
@@ -248,6 +251,7 @@ export const IPC_CHANNELS = [
   'jira:issue',
   'jira:comments',
   'jira:search',
+  'jira:dev',
   'jira:openExternal',
   'git:refs',
   'git:refsDetails',

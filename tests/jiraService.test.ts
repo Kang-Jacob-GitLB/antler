@@ -158,6 +158,76 @@ describe('JiraService', () => {
     expect(svc.externalUrl('https://evil.example/browse/ABC-1')).toBeNull()
   })
 
+  it('개발 정보: 이슈 id → 요약의 연동 종류 → PR·커밋 상세, https 가 아닌 주소와 잘못된 sha 는 버린다', async () => {
+    fake = await startFakeJira((req, res) => {
+      const u = new URL(req.url, 'http://x')
+      if (u.pathname.endsWith('/myself')) return sendJson(res, { displayName: 'x' })
+      if (u.pathname.endsWith('/issue/ABC-1')) return sendJson(res, { id: '10001', key: 'ABC-1', fields: {} })
+      if (u.pathname.endsWith('/dev-status/latest/issue/summary')) {
+        return sendJson(res, { summary: { pullrequest: { byInstanceType: { GitHub: {} } }, repository: { byInstanceType: { GitHub: {}, 'bad type!': {} } } } })
+      }
+      if (u.pathname.endsWith('/dev-status/latest/issue/detail')) {
+        if (u.searchParams.get('dataType') === 'pullrequest') {
+          return sendJson(res, {
+            detail: [
+              {
+                pullRequests: [
+                  { name: '로그인 수정', url: 'https://github.com/o/r/pull/7', status: 'MERGED', author: { name: '홍길동' }, repositoryName: 'o/r', source: { branch: 'fix/ABC-1' }, lastUpdate: '2026-01-02T00:00:00.000+0000' },
+                  { name: '나쁜 주소', url: 'javascript:alert(1)', status: 'OPEN', repositoryName: 'o/r' }
+                ]
+              }
+            ]
+          })
+        }
+        return sendJson(res, {
+          detail: [
+            {
+              repositories: [
+                {
+                  name: 'o/r',
+                  commits: [
+                    { id: 'abcdef1234567', message: 'ABC-1 로그인 수정\n\n본문', url: 'https://github.com/o/r/commit/abcdef1234567', author: { name: '홍길동' }, authorTimestamp: 1767225600000 },
+                    { id: 'not-a-sha', message: 'x' }
+                  ]
+                }
+              ]
+            }
+          ]
+        })
+      }
+      return sendJson(res, {}, 404)
+    })
+    const svc = newService()
+    await svc.connect({ kind: 'cloud', siteUrl: fake.origin, email: 'a@b.c', token: SECRET })
+    const dev = await svc.devInfo('ABC-1')
+    expect(dev.available).toBe(true)
+    expect(dev.pulls).toEqual([
+      { title: '로그인 수정', url: 'https://github.com/o/r/pull/7', state: 'merged', author: '홍길동', repo: 'o/r', branch: 'fix/ABC-1', updated: '2026-01-02T00:00:00.000+0000' },
+      { title: '나쁜 주소', url: '', state: 'open', author: '', repo: 'o/r', branch: '', updated: '' }
+    ])
+    expect(dev.commits).toEqual([{ sha: 'abcdef1234567', message: 'ABC-1 로그인 수정', url: 'https://github.com/o/r/commit/abcdef1234567', author: '홍길동', repo: 'o/r', date: '2026-01-01T00:00:00.000Z' }])
+    // 이상한 연동 종류 이름은 요청하지 않는다
+    expect(fake.requests.some((r) => r.url.includes('bad'))).toBe(false)
+    expect(JSON.stringify(dev)).not.toContain(SECRET)
+  })
+
+  it('개발 정보: 연동 API 가 없으면(404) 오류가 아니라 available:false', async () => {
+    fake = await startFakeJira(jiraHandler)
+    const svc = newService()
+    await svc.connect({ kind: 'server', siteUrl: fake.origin, token: SECRET })
+    // jiraHandler 의 이슈 응답에는 id 가 없다 → 요약까지 가지 않는다
+    expect(await svc.devInfo('ABC-1')).toEqual({ available: false, pulls: [], commits: [] })
+    fake.requests.length = 0
+    await fake.close()
+    fake = await startFakeJira((req, res) =>
+      req.url.includes('/myself') ? sendJson(res, { displayName: 'x' }) : req.url.includes('/issue/ABC-1') ? sendJson(res, { id: '5' }) : sendJson(res, {}, 404)
+    )
+    const svc2 = newService()
+    await svc2.connect({ kind: 'server', siteUrl: fake.origin, token: SECRET })
+    expect(await svc2.devInfo('ABC-1')).toEqual({ available: false, pulls: [], commits: [] })
+    expect(fake.requests.some((r) => r.url.startsWith('/rest/dev-status/latest/issue/summary?issueId=5'))).toBe(true)
+  })
+
   it('요청 ID 로 진행 중인 조회를 취소할 수 있다', async () => {
     fake = await startFakeJira((req, res) => (req.url.includes('/myself') ? sendJson(res, { displayName: 'x' }) : undefined))
     const svc = newService()
