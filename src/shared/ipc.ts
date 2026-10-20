@@ -34,6 +34,9 @@ import type {
   JiraIssueDetail,
   JiraSearchQuery,
   JiraSearchResult,
+  JiraUser,
+  JiraWorklogQuery,
+  JiraWorklogResult,
   RemoteDirListing,
   RepoScanResult,
   RepoPatch,
@@ -147,6 +150,10 @@ export interface IpcContract {
   'jira:search': { args: [query: JiraSearchQuery, requestId?: string]; result: JiraSearchResult }
   /** 개발 정보(dev-status): Jira 의 GitHub 연동이 모은 PR·커밋. 연동이 없으면 available:false */
   'jira:dev': { args: [key: string, requestId?: string]; result: JiraDevInfo }
+  /** 범위 안의 워크로그(나 또는 지정한 팀원). JQL worklogAuthor·worklogDate 로 이슈를 찾고 이슈별 워크로그를 받는다(GET 만) */
+  'jira:worklogs': { args: [query: JiraWorklogQuery, requestId?: string]; result: JiraWorklogResult }
+  /** 팀원 추가용 사용자 검색. 사용자 찾아보기 권한이 없으면 JIRA_FORBIDDEN */
+  'jira:userSearch': { args: [text: string, requestId?: string]; result: JiraUser[] }
   /** Jira 사이트 호스트의 https 주소만 기본 브라우저로 연다 */
   'jira:openExternal': { args: [url: string]; result: void }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
@@ -261,6 +268,8 @@ export const IPC_CHANNELS = [
   'jira:comments',
   'jira:search',
   'jira:dev',
+  'jira:worklogs',
+  'jira:userSearch',
   'jira:openExternal',
   'git:refs',
   'git:refsDetails',

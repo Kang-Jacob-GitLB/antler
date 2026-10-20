@@ -1,5 +1,5 @@
 // renderer 가 보낸 Jira IPC 인자 검증. IPC 인자는 신뢰하지 않는다.
-import type { JiraConnectInput, JiraKind, JiraSearchQuery } from '@shared/types'
+import type { JiraConnectInput, JiraKind, JiraSearchQuery, JiraWorklogQuery } from '@shared/types'
 
 const MAX_TOKEN_LEN = 1024
 const MAX_EMAIL_LEN = 254
@@ -72,6 +72,50 @@ export function parseSearchQuery(v: unknown): JiraSearchQuery & { page: number }
   }
   if (q.cursor !== undefined && (typeof q.cursor !== 'string' || !CURSOR_RE.test(q.cursor))) throw new Error('잘못된 페이지 표지입니다')
   return { jql, page, ...(q.cursor ? { cursor: q.cursor } : {}) }
+}
+
+/** Cloud accountId(`712020:uuid` 꼴 포함)와 Data Center 사용자 이름이 들어올 수 있는 최대 범위 */
+export const USER_ID_RE = /^[A-Za-z0-9._@:+-]{1,128}$/
+export const MAX_WORKLOG_USERS = 30
+export const MAX_WORKLOG_DAYS = 62
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+const DAY_MS = 86_400_000
+
+/** 'YYYY-MM-DD' 이면서 실재하는 날짜만(2월 30일 거부). UTC 자정의 epoch ms */
+function dayMs(v: unknown): number {
+  const m = typeof v === 'string' ? DATE_RE.exec(v) : null
+  if (!m) throw new Error('날짜가 올바르지 않습니다(YYYY-MM-DD)')
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  const t = Date.UTC(y, mo - 1, d)
+  const back = new Date(t)
+  if (y < 1970 || back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d) throw new Error('존재하지 않는 날짜입니다')
+  return t
+}
+
+/** JQL 문자열 값. 엄격 allowlist 를 통과한 값(날짜·사용자 id)만 받아 큰따옴표로 감싼다 — 따옴표·역슬래시가 들어올 수 없다 */
+export function jqlQuote(v: string): string {
+  if (!/^[A-Za-z0-9._@:+-]{1,128}$/.test(v)) throw new Error('JQL 값이 올바르지 않습니다')
+  return `"${v}"`
+}
+
+export function parseWorklogQuery(v: unknown): JiraWorklogQuery {
+  const q = v as Partial<JiraWorklogQuery> | null
+  if (!q || typeof q !== 'object') throw new Error('잘못된 워크로그 조회 조건입니다')
+  const from = dayMs(q.from)
+  const to = dayMs(q.to)
+  if (from > to) throw new Error('시작일이 종료일보다 늦습니다')
+  if ((to - from) / DAY_MS + 1 > MAX_WORKLOG_DAYS) throw new Error(`조회 범위는 최대 ${MAX_WORKLOG_DAYS}일입니다`)
+  if (!Array.isArray(q.users) || q.users.length > MAX_WORKLOG_USERS) throw new Error(`사용자는 최대 ${MAX_WORKLOG_USERS}명까지 고를 수 있습니다`)
+  if (!q.users.every((u) => typeof u === 'string' && USER_ID_RE.test(u))) throw new Error('사용자 id 가 올바르지 않습니다')
+  if (q.includeMe !== undefined && typeof q.includeMe !== 'boolean') throw new Error('includeMe 가 올바르지 않습니다')
+  return { from: q.from as string, to: q.to as string, users: [...new Set(q.users as string[])], ...(q.includeMe ? { includeMe: true } : {}) }
+}
+
+/** 사용자 검색어: 1~100자, 제어문자 금지 */
+export function parseUserSearch(v: unknown): string {
+  const t = typeof v === 'string' ? v.trim() : ''
+  if (!t || t.length > 100 || CONTROL_RE.test(t)) throw new Error('검색어가 올바르지 않습니다(1~100자)')
+  return t
 }
 
 /** jira:openExternal 허용 대상: https(테스트에서는 허용된 루프백 http), origin 이 연결한 사이트와 정확히 같고 자격 증명이 없는 URL 만. 정규화된 href 를 돌려준다 */

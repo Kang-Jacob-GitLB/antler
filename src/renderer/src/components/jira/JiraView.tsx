@@ -9,6 +9,7 @@ import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '
 import { HtmlBody, useRelative } from '../github/GhBits'
 import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
+import { WorklogView } from './worklog/WorklogView'
 import { isoToEpoch, issueSub, JiraStatus, JiraType, statusCat } from './JiraBits'
 import '../github/GitHubView.css'
 import './JiraView.css'
@@ -22,7 +23,7 @@ const openOnJira = (url: string): void => void api.invoke('jira:openExternal', u
 export function JiraView(): React.JSX.Element | null {
   const view = useJiraStore((s) => s.view)
   if (!view) return null
-  return <section className="gh-view jira-view">{view.kind === 'list' ? <ListView view={view} /> : <IssueView view={view} />}</section>
+  return <section className="gh-view jira-view">{view.kind === 'list' ? <ListView view={view} /> : view.kind === 'worklog' ? <WorklogView /> : <IssueView view={view} />}</section>
 }
 
 // ── 목록 ───────────────────────────────────────────────
@@ -261,7 +262,7 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
       <header className="gh-head">
         {view.from && (
           <button className="btn btn--sm" onClick={() => show(view.from)}>
-            ← {t('jira.list')}
+            ← {view.from.kind === 'worklog' ? t('jira.worklog.title') : t('jira.list')}
           </button>
         )}
         <h2 className="gh-head__title selectable">

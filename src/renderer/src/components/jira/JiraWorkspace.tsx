@@ -1,7 +1,7 @@
 import type { JiraSavedFilter } from '@shared/types'
 import { useT } from '../../i18n'
 import { useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
-import { IconArrowLeft, IconClose, IconCloud, IconFunnel, IconHistory, IconJira, IconPlus, IconUser } from '../icons'
+import { IconArrowLeft, IconCalendar, IconClose, IconCloud, IconFunnel, IconHistory, IconJira, IconPlus, IconUser } from '../icons'
 import { JiraView } from './JiraView'
 import './JiraWorkspace.css'
 
@@ -72,6 +72,7 @@ function Nav({ view }: { view: View | null }): React.JSX.Element {
   return (
     <nav className="jira-ws__nav">
       <NavItem icon={<IconUser size={14} />} label={t('jira.mine')} count={mine.items.length} active={isList('mine')} onClick={() => show({ kind: 'list', source: 'mine' })} />
+      <NavItem icon={<IconCalendar size={14} />} label={t('jira.worklog.title')} active={cur?.kind === 'worklog'} onClick={() => show({ kind: 'worklog' })} />
       <NavItem icon={<IconPlus size={14} />} label={t('jira.customJql')} active={isList('custom')} onClick={() => show({ kind: 'list', source: 'custom' })} />
 
       <div className="jira-ws__group">{t('jira.filters')}</div>

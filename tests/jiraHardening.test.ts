@@ -7,6 +7,7 @@ import { TokenStore, type SafeStorageLike } from '../src/main/github/tokenStore'
 import { adfToHtml } from '../src/main/jira/adf'
 import { JiraClient, type JiraCredential } from '../src/main/jira/client'
 import { JIRA_META_FILE, JIRA_TOKEN_FILE, JiraService } from '../src/main/jira/service'
+import { jqlQuote, parseUserSearch, parseWorklogQuery } from '../src/main/jira/validate'
 import { ConfigStore } from '../src/main/services/ConfigStore'
 import { sendJson, startFakeJira, type FakeJira } from './jiraFake'
 
@@ -221,5 +222,74 @@ describe('ConfigStore 의 사이트별 Jira 설정', () => {
     expect(() => store.setUi({ jiraSites: { x: { recent: [{ key: 'abc-1', summary: 's' }] } } })).toThrow('Jira 설정')
     expect(() => store.setUi({ jiraSites: { x: { filters: [{ name: 'a'.repeat(101), jql: 'b' }] } } })).toThrow('Jira 설정')
     expect(() => store.setUi({ jiraSites: [] as never })).toThrow('Jira 설정')
+  })
+})
+
+describe('워크로그 조회·사용자 검색 입력 검증', () => {
+  const ok = { from: '2026-10-19', to: '2026-10-20', users: [] as string[] }
+
+  it('정상 입력은 통과하고 사용자는 중복을 없앤다', () => {
+    expect(parseWorklogQuery({ ...ok, users: ['712020:aaaa-bbbb', 'a.b_c@d+e', 'x', 'x'] }).users).toEqual(['712020:aaaa-bbbb', 'a.b_c@d+e', 'x'])
+    // 정확히 62일(양끝 포함)은 허용
+    expect(() => parseWorklogQuery({ from: '2026-01-01', to: '2026-03-03', users: [] })).not.toThrow()
+    expect(() => parseWorklogQuery({ from: '2024-02-29', to: '2024-02-29', users: [] })).not.toThrow()
+  })
+
+  it('잘못된 날짜·존재하지 않는 날짜·거꾸로·62일 초과를 거부한다', () => {
+    for (const bad of ['2026-1-1', '20261019', '2026-10-19T00:00', '2026-02-30', '2026-13-01', '2026-00-10', '2025-02-29', 'abc', '', 20261019, null]) {
+      expect(() => parseWorklogQuery({ ...ok, from: bad })).toThrow()
+      expect(() => parseWorklogQuery({ ...ok, to: bad })).toThrow()
+    }
+    expect(() => parseWorklogQuery({ ...ok, from: '2026-10-21' })).toThrow('늦습니다')
+    expect(() => parseWorklogQuery({ from: '2026-01-01', to: '2026-03-04', users: [] })).toThrow('62일')
+    for (const bad of [null, 'x', 5, []]) expect(() => parseWorklogQuery(bad)).toThrow()
+  })
+
+  it('JQL 주입을 노린 사용자 id 와 31명 초과를 거부한다', () => {
+    for (const id of ['a" OR 1=1', 'a"', 'a\\', 'a b', 'a)', 'a\n', '', 'x'.repeat(129), 5, null]) {
+      expect(() => parseWorklogQuery({ ...ok, users: [id] })).toThrow()
+    }
+    expect(() => parseWorklogQuery({ ...ok, users: Array.from({ length: 31 }, (_, i) => `u${i}`) })).toThrow('30명')
+    expect(() => parseWorklogQuery({ ...ok, users: Array.from({ length: 30 }, (_, i) => `u${i}`) })).not.toThrow()
+    expect(() => parseWorklogQuery({ ...ok, users: 'abc' })).toThrow()
+    expect(() => parseWorklogQuery({ from: ok.from, to: ok.to })).toThrow()
+    expect(parseWorklogQuery({ ...ok, includeMe: true }).includeMe).toBe(true)
+    expect(parseWorklogQuery({ ...ok, includeMe: undefined })).not.toHaveProperty('includeMe')
+    for (const bad of ['true', 1, null]) expect(() => parseWorklogQuery({ ...ok, includeMe: bad })).toThrow('includeMe')
+    expect(() => jqlQuote('a" OR 1=1')).toThrow()
+    expect(jqlQuote('712020:aaaa')).toBe('"712020:aaaa"')
+  })
+
+  it('검색어: 1~100자, 제어문자 금지', () => {
+    expect(parseUserSearch('  홍길동 ')).toBe('홍길동')
+    for (const bad of ['', '   ', 'a'.repeat(101), 'a\u0000b', 'a\nb', 5, null]) expect(() => parseUserSearch(bad)).toThrow()
+  })
+
+  it('서비스는 거부된 입력으로 Jira 에 요청을 보내지 않는다', async () => {
+    fake = await startFakeJira((_req, res) => sendJson(res, { accountId: 'a', displayName: 'x' }))
+    const svc = newService()
+    await svc.connect({ kind: 'cloud', siteUrl: fake.origin, email: 'a@b.c', token: SECRET })
+    const before = fake.requests.length
+    await expect(svc.worklogs({ ...ok, users: ['a" OR 1=1'] })).rejects.toThrow()
+    await expect(svc.userSearch('a\u0001')).rejects.toThrow()
+    expect(fake.requests.length).toBe(before)
+  })
+
+  it('ConfigStore: 팀원(team) 모양과 크기를 검사한다', () => {
+    const store = new ConfigStore(join(dir, 'cfg-team.json'))
+    const site = (team: unknown): never => ({ 'https://x.atlassian.net': { team } }) as never
+    const good = [{ id: '712020:aaaa', name: '홍길동' }]
+    expect(store.setUi({ jiraSites: site(good) }).ui.jiraSites).toEqual({ 'https://x.atlassian.net': { team: good } })
+    for (const bad of [
+      'x',
+      [{ id: 'a" OR 1=1', name: 'n' }],
+      [{ id: '', name: 'n' }],
+      [{ id: 'a', name: 'n'.repeat(201) }],
+      [{ id: 'a' }],
+      [null],
+      Array.from({ length: 31 }, (_, i) => ({ id: `u${i}`, name: 'n' }))
+    ]) {
+      expect(() => store.setUi({ jiraSites: site(bad) })).toThrow('Jira 설정')
+    }
   })
 })
