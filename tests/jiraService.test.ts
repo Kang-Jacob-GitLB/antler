@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { TokenStore, type SafeStorageLike } from '../src/main/github/tokenStore'
 import { JIRA_META_FILE, JIRA_TOKEN_FILE, JiraService } from '../src/main/jira/service'
 import { allowedJiraUrl, parseConnectInput, parseIssueKey, parseSearchQuery, parseSiteUrl } from '../src/main/jira/validate'
-import { startFakeJira, sendJson, type FakeJira, type RecordedReq } from './jiraFake'
+import { startFakeJira, sendJson, worklogHandler, type FakeJira, type FakeWorklog, type FakeWorklogSite, type RecordedReq } from './jiraFake'
 
 const SECRET = 'tok_SECRET_0123456789'
 
@@ -282,5 +282,151 @@ describe('입력 검증', () => {
     expect(allowedJiraUrl('https://u:p@x.atlassian.net/', site)).toBeNull()
     expect(allowedJiraUrl('javascript:alert(1)', site)).toBeNull()
     expect(allowedJiraUrl('https://x.atlassian.net/', undefined)).toBeNull()
+  })
+})
+
+
+describe('워크로그·사용자 검색', () => {
+  const adfComment = (t: string): unknown => ({ type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: t }] }, { type: 'paragraph', content: [{ type: 'text', text: '둘째' }] }] })
+  const wl = (id: string, author: string, started: string, extra: Partial<FakeWorklog> = {}): FakeWorklog => ({ id, author, started, seconds: 3600, ...extra })
+  const Q = { from: '2026-10-19', to: '2026-10-20', users: [] as string[] }
+  const jqlOf = (r: RecordedReq): string => new URL(r.url, 'http://x').searchParams.get('jql') ?? ''
+  const worklogReqs = (): RecordedReq[] => fake!.requests.filter((r) => /\/issue\/[^/]+\/worklog/.test(r.url))
+
+  async function connected(site: FakeWorklogSite): Promise<JiraService> {
+    fake = await startFakeJira(worklogHandler(site))
+    const svc = newService()
+    await svc.connect(site.kind === 'cloud' ? { kind: 'cloud', siteUrl: fake.origin, email: 'a@b.c', token: SECRET } : { kind: 'server', siteUrl: fake.origin, token: SECRET })
+    return svc
+  }
+
+  it('Cloud: 내장 worklog 로 충분하면 다시 받지 않고, 나만·범위 안만 남긴다', async () => {
+    const svc = await connected({
+      kind: 'cloud',
+      issues: [
+        {
+          key: 'ABC-1',
+          summary: '로그인',
+          type: 'Bug',
+          worklogs: [
+            wl('1', 'acc-me', '2026-10-19T09:00:00.000+0900', { comment: adfComment('작업') }),
+            wl('2', 'acc-other', '2026-10-19T09:00:00.000+0900'),
+            wl('3', 'acc-me', '2026-10-10T09:00:00.000+0900'),
+            wl('4', 'acc-me', '2026-10-21T23:00:00.000+0900')
+          ]
+        }
+      ]
+    })
+    const r = await svc.worklogs(Q)
+    expect(r.me).toEqual({ id: 'acc-me', name: '나' })
+    expect(r.truncated).toBe(false)
+    expect(r.worklogs.map((w) => w.id)).toEqual(['1', '4']) // 4 는 로컬 날짜 필터가 화면 몫인 여유분
+    expect(r.worklogs[0]).toMatchObject({ issueKey: 'ABC-1', issueSummary: '로그인', issueType: 'Bug', authorId: 'acc-me', author: '표시-acc-me', seconds: 3600, comment: '작업 둘째' })
+    const search = fake!.requests.find((x) => x.url.startsWith('/rest/api/3/search/jql'))!
+    expect(jqlOf(search)).toBe('worklogAuthor = currentUser() AND worklogDate >= "2026-10-18" AND worklogDate <= "2026-10-21" ORDER BY updated DESC')
+    expect(new URL(search.url, 'http://x').searchParams.get('fields')).toBe('summary,issuetype,worklog')
+    expect(worklogReqs()).toHaveLength(0)
+    expect(fake!.requests.every((x) => x.method === 'GET')).toBe(true)
+  })
+
+  it('Cloud: 내장 worklog 가 total 보다 적으면 그 이슈만 범위를 주어 다시 받는다', async () => {
+    const mk = (n: number): FakeWorklog[] => Array.from({ length: n }, (_, i) => wl(`w${i}`, 'acc-x', '2026-10-20T10:00:00.000+0900'))
+    const svc = await connected({
+      kind: 'cloud',
+      issues: [
+        { key: 'ABC-1', worklogs: mk(3), embed: 1 },
+        { key: 'ABC-2', worklogs: [wl('z', 'acc-x', '2026-10-20T10:00:00.000+0900')] },
+        { key: 'ABC-3', worklogs: [wl('far', 'acc-x', '2026-01-01T10:00:00.000+0900'), ...mk(2).map((w) => ({ ...w, id: `n${w.id}` }))], embed: 0 }
+      ]
+    })
+    const r = await svc.worklogs({ ...Q, users: ['acc-x', 'acc-y'] })
+    expect(r.worklogs.map((w) => w.id).sort()).toEqual(['nw0', 'nw1', 'w0', 'w1', 'w2', 'z'].sort())
+    const reqs = worklogReqs()
+    expect(reqs.map((x) => x.url.split('?')[0])).toEqual(['/rest/api/3/issue/ABC-1/worklog', '/rest/api/3/issue/ABC-3/worklog'])
+    const p = new URL(reqs[0]!.url, 'http://x').searchParams
+    expect(Number(p.get('startedAfter'))).toBe(Date.parse('2026-10-18T00:00:00Z'))
+    expect(Number(p.get('startedBefore'))).toBe(Date.parse('2026-10-22T00:00:00Z'))
+    expect(jqlOf(fake!.requests.find((x) => x.url.startsWith('/rest/api/3/search/jql'))!)).toContain('worklogAuthor in ("acc-x","acc-y")')
+  })
+
+  it('Server: name 과 key 둘 다로 작성자를 맞추고, 쿼리 없이 받은 전체를 클라이언트에서 거른다', async () => {
+    const svc = await connected({
+      kind: 'server',
+      issues: [
+        {
+          key: 'DC-1',
+          embed: 0,
+          worklogs: [
+            wl('1', 'alice', '2026-10-19T09:00:00.000+0900', { comment: '평문 설명' }),
+            wl('2', 'bob', '2026-10-19T09:00:00.000+0900', { authorKey: 'JIRAUSER9' }),
+            wl('3', 'carol', '2026-10-19T09:00:00.000+0900'),
+            wl('4', 'alice', '2026-09-01T09:00:00.000+0900')
+          ]
+        }
+      ]
+    })
+    const r = await svc.worklogs({ ...Q, users: ['alice', 'JIRAUSER9'] })
+    expect(r.me).toEqual({ id: 'me', name: '나' })
+    expect(r.worklogs.map((w) => [w.id, w.authorId, w.comment])).toEqual([['1', 'alice', '평문 설명'], ['2', 'bob', '']])
+    expect(worklogReqs().map((x) => x.url)).toEqual(['/rest/api/2/issue/DC-1/worklog'])
+    expect(jqlOf(fake!.requests.find((x) => x.url.startsWith('/rest/api/2/search'))!)).toContain('worklogAuthor in ("alice","JIRAUSER9")')
+  })
+
+  it('사용자를 비우면 Server 도 me.id(name)로 거른다', async () => {
+    const svc = await connected({ kind: 'server', issues: [{ key: 'DC-1', worklogs: [wl('1', 'me', '2026-10-19T09:00:00.000+0900'), wl('2', 'alice', '2026-10-19T09:00:00.000+0900')] }] })
+    expect((await svc.worklogs(Q)).worklogs.map((w) => w.id)).toEqual(['1'])
+  })
+
+  it('내 id 는 연결 동안 캐시하고, 재연결하면 다시 읽는다', async () => {
+    const svc = await connected({ kind: 'cloud', issues: [] })
+    const myselfCount = (): number => fake!.requests.filter((x) => x.url.endsWith('/myself')).length
+    const base = myselfCount()
+    await svc.worklogs(Q)
+    await svc.worklogs(Q)
+    expect(myselfCount()).toBe(base + 1)
+    await svc.connect({ kind: 'cloud', siteUrl: fake!.origin, email: 'a@b.c', token: SECRET })
+    const afterConnect = myselfCount()
+    await svc.worklogs(Q)
+    expect(myselfCount()).toBe(afterConnect + 1)
+  })
+
+  it('이슈가 300건을 넘으면 300건에서 자르고 truncated 로 알린다', async () => {
+    const issues = Array.from({ length: 350 }, (_, i) => ({ key: `ABC-${i + 1}`, worklogs: [wl(`w${i}`, 'acc-me', '2026-10-19T09:00:00.000+0900')] }))
+    for (const kind of ['cloud', 'server'] as const) {
+      await fake?.close()
+      const svc = await connected({ kind, issues: issues.map((i) => ({ ...i, worklogs: i.worklogs.map((w) => ({ ...w, author: kind === 'cloud' ? 'acc-me' : 'me' })) })) })
+      const r = await svc.worklogs(Q)
+      expect(r.worklogs).toHaveLength(300)
+      expect(r.truncated).toBe(true)
+    }
+  })
+
+  it('요청 ID 로 취소하면 AbortError', async () => {
+    fake = await startFakeJira((req, res) => (req.url.includes('/myself') ? sendJson(res, { accountId: 'acc-me', displayName: 'x' }) : undefined))
+    const svc = newService()
+    await svc.connect({ kind: 'cloud', siteUrl: fake.origin, email: 'a@b.c', token: SECRET })
+    const p = svc.worklogs(Q, 'wl-1')
+    setTimeout(() => svc.cancel('wl-1'), 50)
+    await expect(p).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  it('사용자 검색: Cloud 는 사람 계정만, Server 는 name 이 id', async () => {
+    let svc = await connected({
+      kind: 'cloud',
+      issues: [],
+      users: [
+        { accountId: '712020:aaaa-bbbb', accountType: 'atlassian', displayName: '홍길동' },
+        { accountId: 'app1', accountType: 'app', displayName: '봇' },
+        { accountId: 'cust1', accountType: 'customer', displayName: '고객' }
+      ]
+    })
+    expect(await svc.userSearch(' 홍 ')).toEqual([{ id: '712020:aaaa-bbbb', name: '홍길동' }])
+    const r = fake!.requests.find((x) => x.url.startsWith('/rest/api/3/user/search'))!
+    const p = new URL(r.url, 'http://x').searchParams
+    expect([p.get('query'), p.get('maxResults')]).toEqual(['홍', '20'])
+    await fake!.close()
+    svc = await connected({ kind: 'server', issues: [], users: [{ name: 'alice', key: 'JIRAUSER2', displayName: 'Alice' }] })
+    expect(await svc.userSearch('al')).toEqual([{ id: 'alice', name: 'Alice' }])
+    expect(fake!.requests.some((x) => x.url.startsWith('/rest/api/2/user/search?username=al&maxResults=20'))).toBe(true)
   })
 })

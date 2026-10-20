@@ -11,6 +11,8 @@ export function registerJiraIpc(handle: IpcHandle, jira: JiraService): void {
   handle('jira:comments', (_e, key, requestId) => jira.comments(key, typeof requestId === 'string' ? requestId : undefined))
   handle('jira:dev', (_e, key, requestId) => jira.devInfo(key, typeof requestId === 'string' ? requestId : undefined))
   handle('jira:search', (_e, query, requestId) => jira.search(query, typeof requestId === 'string' ? requestId : undefined))
+  handle('jira:worklogs', (_e, query, requestId) => jira.worklogs(query, typeof requestId === 'string' ? requestId : undefined))
+  handle('jira:userSearch', (_e, text, requestId) => jira.userSearch(text, typeof requestId === 'string' ? requestId : undefined))
   handle('jira:openExternal', async (_e, url) => {
     const href = jira.externalUrl(url)
     if (!href) throw new Error('연결한 Jira 사이트의 주소만 열 수 있습니다')

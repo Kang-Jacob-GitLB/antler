@@ -1,0 +1,797 @@
+/* Jira 워크로그(캘린더 · 리포트). 평면: 얇은 경계선과 면 색으로만 구분하고 그림자는 팝오버에만 쓴다. 숫자는 모두 tabular-nums */
+
+.wl-head,
+.wl-bar {
+  flex-wrap: wrap;
+}
+.wl-title {
+  margin: 0;
+  margin-right: var(--space-2);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.wl-spacer {
+  flex: 1;
+}
+.wl-total {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.wl-total strong {
+  margin-left: var(--space-1);
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+.wl-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.wl-nav__prev svg {
+  transform: scaleX(-1);
+}
+.wl-range {
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.wl-warn {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--modified) 14%, transparent);
+  color: var(--modified-text);
+  font-size: var(--fs-sm);
+}
+
+.wl-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  transition: opacity var(--dur-med) var(--ease);
+}
+.wl-body.is-loading > :not(.wl-loading) {
+  opacity: 0.55;
+}
+.wl-loading {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  z-index: 3;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* ── 사용자 칩 ── */
+.wl-users {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.wl-user {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+  max-width: 200px;
+  border-radius: var(--control-radius);
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+.wl-user:not(.wl-user--team) {
+  gap: 6px;
+  padding: 0 var(--space-2);
+}
+.wl-user:hover {
+  color: var(--text-primary);
+}
+.wl-user.is-on {
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  color: var(--text-primary);
+}
+.wl-user:focus-visible,
+.wl-user__main:focus-visible,
+.wl-user__x:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+.wl-user__main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 4px 0 var(--space-2);
+  border-radius: var(--control-radius) 0 0 var(--control-radius);
+  color: inherit;
+}
+.wl-user__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wl-user__dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.wl-user:not(.is-on) .wl-user__dot {
+  opacity: 0.45;
+}
+.wl-user__x {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 100%;
+  border-radius: 0 var(--control-radius) var(--control-radius) 0;
+  color: var(--text-muted);
+}
+.wl-user__x:hover {
+  color: var(--removed-text);
+}
+
+/* 팀원 관리 팝오버: 그림자는 여기에만 */
+.wl-team {
+  position: relative;
+}
+.wl-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 320px;
+  max-height: min(70vh, 460px);
+  padding: var(--space-2);
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  font-size: var(--fs-sm);
+}
+.wl-pop__sec {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wl-pop__title {
+  padding: 4px var(--space-2);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.wl-pop__note {
+  padding: 4px var(--space-2);
+  color: var(--text-muted);
+}
+.wl-pop__err {
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--removed) 12%, transparent);
+  color: var(--removed-text);
+}
+.wl-pop__hint {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+}
+.wl-pop__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  text-align: left;
+}
+button.wl-pop__item:hover:not(:disabled),
+button.wl-pop__item:focus-visible {
+  background: var(--row-hover);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+button.wl-pop__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.wl-pop__item--static {
+  padding-right: 2px;
+}
+.wl-pop__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 이슈 키 버튼 ── */
+.wl-key {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+}
+.wl-key:hover {
+  text-decoration: underline;
+}
+
+/* ── 월 캘린더 ── */
+.wl-month {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+.wl-month__head,
+.wl-month__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.wl-month__dow {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--text-muted);
+}
+.wl-month__dow.is-weekend {
+  color: var(--text-secondary);
+}
+.wl-month__grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  grid-auto-rows: minmax(104px, 1fr);
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+.wl-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px var(--space-2) 8px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--list-bg);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.wl-cell.is-weekend {
+  background: var(--bg-surface);
+}
+.wl-cell:hover {
+  background: var(--row-hover);
+}
+.wl-cell:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.wl-cell.is-today {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.wl-cell.is-other > * {
+  opacity: 0.45;
+}
+.wl-cell__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+.wl-cell__date {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.wl-cell.is-today .wl-cell__date {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 650;
+}
+.wl-cell__sum {
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+.wl-cell--under .wl-cell__sum {
+  color: var(--modified-text);
+}
+.wl-cell--over .wl-cell__sum {
+  color: var(--info);
+}
+.wl-cell__chips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.wl-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  min-width: 0;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.wl-cell.is-weekend .wl-chip {
+  background: var(--list-bg);
+}
+.wl-chip .wl-key {
+  font-size: var(--fs-xs);
+}
+.wl-chip__time {
+  flex-shrink: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.wl-more {
+  align-self: flex-start;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.wl-more:hover {
+  color: var(--text-primary);
+  background: var(--row-hover);
+}
+/* 하루 기준(8h) 대비 막대: 셀 아래, 은은하게 */
+.wl-cell__bar {
+  position: absolute;
+  right: var(--space-2);
+  bottom: 3px;
+  left: var(--space-2);
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  overflow: hidden;
+}
+.wl-cell__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--text-muted);
+}
+.wl-cell--ok .wl-cell__bar > span {
+  background: var(--added);
+}
+.wl-cell--under .wl-cell__bar > span {
+  background: var(--modified);
+}
+.wl-cell--over .wl-cell__bar > span {
+  background: var(--info);
+}
+
+/* ── 주간·일간 타임라인 ── */
+.wl-tg {
+  --wl-gutter: 52px;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.wl-tg__head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: var(--wl-gutter) repeat(var(--wl-days), minmax(96px, 1fr));
+  border-bottom: 1px solid var(--border);
+  background: var(--list-bg);
+}
+.wl-tg__day {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px var(--space-1);
+  border-left: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+button.wl-tg__day:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.wl-tg__day.is-weekend {
+  background: var(--bg-surface);
+}
+.wl-tg__date {
+  font-size: var(--fs-md);
+  font-weight: 650;
+  color: var(--text-primary);
+}
+.wl-tg__day.is-today .wl-tg__date {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 11px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+.wl-tg__sum {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.wl-tg__body {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--wl-gutter) repeat(var(--wl-days), minmax(96px, 1fr));
+}
+.wl-tg__hour {
+  position: relative;
+  box-sizing: border-box;
+}
+.wl-tg__hour span {
+  position: absolute;
+  top: -7px;
+  right: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.wl-tg__hour:first-child span {
+  top: 2px;
+}
+.wl-tg__col {
+  position: relative;
+  border-left: 1px solid var(--border);
+  background-image: repeating-linear-gradient(to bottom, var(--border) 0, var(--border) 1px, transparent 1px, transparent var(--wl-hour-h));
+}
+.wl-tg__col.is-weekend {
+  background-color: var(--bg-surface);
+}
+.wl-tg__col.is-today {
+  background-color: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.wl-tg__now {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  height: 0;
+  border-top: 2px solid var(--removed);
+  pointer-events: none;
+}
+.wl-block {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--wl-c) 22%, var(--bg-base));
+  box-shadow: inset 3px 0 0 var(--wl-c), inset 0 0 0 1px color-mix(in srgb, var(--wl-c) 35%, transparent);
+  color: var(--text-primary);
+  text-align: left;
+  font-size: var(--fs-xs);
+  line-height: 1.25;
+  transition: background var(--dur-fast) var(--ease);
+}
+.wl-block:hover {
+  z-index: 3;
+  background: color-mix(in srgb, var(--wl-c) 34%, var(--bg-base));
+}
+.wl-block:focus-visible {
+  z-index: 3;
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+.wl-block__line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+.wl-block__key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 650;
+}
+.wl-block__time {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.wl-block__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+/* ── 일간 보기: 타임라인 + 그날 항목 목록 ── */
+.wl-day {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  min-height: 0;
+  overflow-y: auto;
+}
+.wl-day > .wl-tg {
+  min-height: 360px;
+  overflow: visible;
+}
+.wl-dl {
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  border-left: 1px solid var(--border);
+}
+.wl-dl__title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+.wl-dl__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.wl-dl__item {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  box-shadow: inset 3px 0 0 var(--wl-c), inset 0 0 0 1px var(--border);
+}
+.wl-dl__time {
+  display: flex;
+  flex: 0 0 96px;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.wl-dl__dur {
+  font-weight: 650;
+  color: var(--text-primary);
+}
+.wl-dl__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.wl-dl__issue {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.wl-dl__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wl-dl__author {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.wl-dl__comment {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.wl-dl__comment.is-none {
+  color: var(--text-muted);
+}
+
+/* ── 리포트 ── */
+.wl-rpt {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.wl-rpt__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.wl-rpt__legend {
+  font-size: var(--fs-xs);
+}
+.wl-rpt__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.wl-t {
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.wl-t th,
+.wl-t td {
+  height: 30px;
+  padding: 0 var(--space-2);
+  border-bottom: 1px solid var(--border);
+  background: var(--list-bg);
+  white-space: nowrap;
+  font-weight: 400;
+}
+.wl-t thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 36px;
+  border-bottom-color: var(--border-strong);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  text-align: center;
+}
+.wl-t__dow {
+  margin-right: 4px;
+  color: var(--text-muted);
+}
+.wl-t__first {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 240px;
+  max-width: 360px;
+  border-right: 1px solid var(--border);
+  text-align: left;
+}
+.wl-t thead .wl-t__first {
+  z-index: 3;
+}
+.wl-t__label {
+  display: flex;
+  max-width: 340px;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.wl-t__label.is-child {
+  padding-left: 22px;
+}
+.wl-t__fold {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+button.wl-t__fold:hover {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.wl-t__who,
+.wl-t__issue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.wl-t__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wl-t__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+.wl-t__top > th {
+  font-weight: 650;
+}
+.wl-t__child > th,
+.wl-t__child > td {
+  color: var(--text-secondary);
+}
+.wl-t__num {
+  min-width: 52px;
+  text-align: right;
+}
+.wl-t__num.is-zero {
+  color: var(--text-muted);
+}
+.wl-t th.is-weekend,
+.wl-t td.is-weekend {
+  background: var(--bg-surface);
+}
+.wl-t td.is-today,
+.wl-t th.is-today {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.wl-t td.is-under {
+  background: color-mix(in srgb, var(--modified) 13%, var(--list-bg));
+  color: var(--modified-text);
+}
+.wl-t td.is-over {
+  color: var(--info);
+}
+.wl-t__sum {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  min-width: 64px;
+  border-left: 1px solid var(--border);
+  text-align: right;
+  font-weight: 650;
+}
+.wl-t thead .wl-t__sum {
+  z-index: 3;
+}
+.wl-t td.wl-t__sum {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+.wl-t tfoot th,
+.wl-t tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 0;
+  background: var(--bg-surface);
+  font-weight: 650;
+}
+.wl-t tfoot .wl-t__first {
+  z-index: 3;
+}
+.wl-t tfoot td.wl-t__sum {
+  z-index: 3;
+}
+.wl-t tfoot td.is-under {
+  background: color-mix(in srgb, var(--modified) 13%, var(--bg-surface));
+}

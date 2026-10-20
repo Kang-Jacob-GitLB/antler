@@ -46,3 +46,81 @@ export function sendJson(res: ServerResponse, body: unknown, status = 200, heade
   res.writeHead(status, { 'content-type': 'application/json', ...headers })
   res.end(JSON.stringify(body))
 }
+
+// ── 워크로그 가짜 서버 ────────────────────────────────
+
+export interface FakeWorklog {
+  id: string
+  /** Cloud 는 accountId, Data Center 는 name */
+  author: string
+  /** Data Center 의 옛 key */
+  authorKey?: string
+  started: string
+  seconds: number
+  /** Cloud 는 ADF, Data Center 는 문자열 */
+  comment?: unknown
+}
+
+export interface FakeWorklogIssue {
+  key: string
+  summary?: string
+  type?: string
+  worklogs: FakeWorklog[]
+  /** 검색 응답에 내장하는 worklog 수(실제 Jira 는 20개 안팎으로 자른다). 기본은 전부 */
+  embed?: number
+}
+
+export interface FakeWorklogSite {
+  kind: 'cloud' | 'server'
+  issues: FakeWorklogIssue[]
+  users?: Record<string, unknown>[]
+}
+
+/** 워크로그 조회에 필요한 엔드포인트(myself·search·issue worklog·user/search)를 흉내 내는 핸들러 */
+export function worklogHandler(site: FakeWorklogSite): Handler {
+  const cloud = site.kind === 'cloud'
+  const toWorklog = (w: FakeWorklog): Record<string, unknown> => ({
+    id: w.id,
+    author: cloud ? { accountId: w.author, displayName: `표시-${w.author}` } : { name: w.author, key: w.authorKey ?? w.author, displayName: `표시-${w.author}` },
+    started: w.started,
+    timeSpentSeconds: w.seconds,
+    ...(w.comment !== undefined ? { comment: w.comment } : {})
+  })
+  return (req, res) => {
+    const u = new URL(req.url, 'http://x')
+    const path = u.pathname
+    const q = u.searchParams
+    if (path.endsWith('/myself')) return sendJson(res, cloud ? { accountId: 'acc-me', displayName: '나' } : { name: 'me', key: 'JIRAUSER1', displayName: '나' })
+    if (path.endsWith('/user/search')) return sendJson(res, site.users ?? [])
+    const wl = /\/issue\/([^/]+)\/worklog$/.exec(path)
+    if (wl) {
+      const issue = site.issues.find((i) => i.key === wl[1])
+      if (!issue) return sendJson(res, {}, 404)
+      let list = issue.worklogs
+      if (cloud) {
+        const after = Number(q.get('startedAfter') ?? -Infinity)
+        const before = Number(q.get('startedBefore') ?? Infinity)
+        list = list.filter((w) => Date.parse(w.started) >= after && Date.parse(w.started) < before)
+        const startAt = Number(q.get('startAt') ?? 0)
+        const max = Number(q.get('maxResults') ?? 5000)
+        return sendJson(res, { startAt, maxResults: max, total: list.length, worklogs: list.slice(startAt, startAt + max).map(toWorklog) })
+      }
+      return sendJson(res, { worklogs: list.map(toWorklog) })
+    }
+    if (path.endsWith('/search/jql') || path.endsWith('/search')) {
+      const max = Number(q.get('maxResults') ?? 50)
+      const start = cloud ? Number(q.get('nextPageToken') ?? 0) : Number(q.get('startAt') ?? 0)
+      const page = site.issues.slice(start, start + max)
+      const issues = page.map((i) => {
+        const embed = i.embed ?? i.worklogs.length
+        return {
+          key: i.key,
+          fields: { summary: i.summary ?? `요약 ${i.key}`, issuetype: { name: i.type ?? 'Task' }, worklog: { startAt: 0, maxResults: embed, total: i.worklogs.length, worklogs: i.worklogs.slice(0, embed).map(toWorklog) } }
+        }
+      })
+      const end = start + page.length
+      return sendJson(res, cloud ? { issues, ...(end < site.issues.length ? { nextPageToken: String(end) } : { isLast: true }) } : { issues, startAt: start, total: site.issues.length })
+    }
+    return sendJson(res, { errorMessages: ['nf'] }, 404)
+  }
+}

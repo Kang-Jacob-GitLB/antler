@@ -102,6 +102,8 @@ export type JiraStatusCategory = 'new' | 'indeterminate' | 'done'
 export interface JiraSiteData {
   filters?: JiraSavedFilter[]
   recent?: JiraRecentIssue[]
+  /** 워크로그 리포트에 함께 볼 팀원(나는 넣지 않는다) */
+  team?: JiraUser[]
 }
 
 export interface JiraSavedFilter {
@@ -1002,6 +1004,45 @@ export interface JiraSearchQuery {
   cursor?: string
   /** 1부터. 상한을 넘기면 거부한다 */
   page?: number
+}
+
+/** Jira 사용자(워크로그 리포트의 팀원). id 는 Cloud 의 accountId, Data Center 의 사용자 이름(name) — JQL worklogAuthor 에 그대로 쓴다 */
+export interface JiraUser {
+  id: string
+  name: string
+}
+
+/** 워크로그 조회 범위. 날짜는 로컬 달력 기준 'YYYY-MM-DD'(양끝 포함) */
+export interface JiraWorklogQuery {
+  from: string
+  to: string
+  /** 작성자 id 목록. 비우면 나만 */
+  users: string[]
+}
+
+export interface JiraWorklog {
+  /** Jira 워크로그 id */
+  id: string
+  issueKey: string
+  issueSummary: string
+  issueType: string
+  /** JiraUser.id 와 같은 체계(Cloud accountId / DC name) */
+  authorId: string
+  author: string
+  /** 시작 시각(ISO, Jira 의 started) */
+  started: string
+  seconds: number
+  /** 작업 내용(평문, 길이 제한) */
+  comment: string
+}
+
+export interface JiraWorklogResult {
+  /** 범위 앞뒤로 하루씩 여유를 두고 받는다 — 로컬 날짜로 거르는 것은 화면의 몫이다 */
+  worklogs: JiraWorklog[]
+  /** 연결한 계정 */
+  me: JiraUser
+  /** 이슈·워크로그 수 상한에 걸려 일부만 받았는지 */
+  truncated: boolean
 }
 
 /** Jira 개발 정보(dev-status): Jira 의 GitHub 연동이 이 이슈에 모아 둔 PR·커밋 */

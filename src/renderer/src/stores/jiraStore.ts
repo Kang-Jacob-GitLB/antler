@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { JiraAuthState, JiraComment, JiraConnectInput, JiraIssueDetail, JiraIssueSummary, JiraSavedFilter, JiraSiteData } from '@shared/types'
+import type { JiraAuthState, JiraComment, JiraConnectInput, JiraIssueDetail, JiraIssueSummary, JiraSavedFilter, JiraSiteData, JiraUser } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
 import { useAppStore } from './appStore'
 import { useGithubStore } from './githubStore'
@@ -8,9 +8,11 @@ import { useGithubStore } from './githubStore'
 export const MINE_JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC'
 const MAX_RECENT = 15
 const MAX_FILTERS = 50
+/** 워크로그 리포트에 둘 수 있는 팀원 수(main 의 조회 상한과 같다) */
+export const MAX_TEAM = 30
 
-/** Jira 화면(창 전체를 덮는 작업 공간, null 이면 닫힘). 목록은 'mine'(나에게 할당), 저장 필터의 인덱스, 'custom'(직접 입력한 JQL) */
-export type JiraView = { kind: 'list'; source: 'mine' | 'custom' | number } | { kind: 'issue'; key: string; from: JiraView | null }
+/** Jira 화면(창 전체를 덮는 작업 공간, null 이면 닫힘). 목록은 'mine'(나에게 할당), 저장 필터의 인덱스, 'custom'(직접 입력한 JQL). worklog = 워크로그 달력·리포트 */
+export type JiraView = { kind: 'list'; source: 'mine' | 'custom' | number } | { kind: 'worklog' } | { kind: 'issue'; key: string; from: JiraView | null }
 
 export interface JiraList {
   /** 어느 목록의 결과인지(JQL 문자열) */
@@ -53,6 +55,8 @@ interface JiraState {
   loadList(jql: string, more?: boolean): Promise<void>
   saveFilter(f: JiraSavedFilter): void
   removeFilter(index: number): void
+  addTeamMember(user: JiraUser): void
+  removeTeamMember(id: string): void
 }
 
 /** 요청 순번 — 늦게 온 응답을 버린다 */
@@ -195,7 +199,7 @@ export const useJiraStore = create<JiraState>((set, get) => {
         if (!get().view) void fetchList('mine', MINE_JQL, false)
         if (view.kind === 'issue') {
           void loadIssue(view.key)
-        } else if (view.source !== 'custom') {
+        } else if (view.kind === 'list' && view.source !== 'custom') {
           const apps = siteData().filters ?? []
           const jql = view.source === 'mine' ? MINE_JQL : apps[view.source]?.jql
           if (!jql) return
@@ -211,7 +215,7 @@ export const useJiraStore = create<JiraState>((set, get) => {
 
     openIssue(key) {
       const cur = get().view
-      get().show({ kind: 'issue', key, from: cur?.kind === 'list' ? cur : (cur?.kind === 'issue' ? cur.from : null) })
+      get().show({ kind: 'issue', key, from: cur?.kind === 'issue' ? cur.from : cur })
     },
 
     loadMine: () => fetchList('mine', MINE_JQL, false),
@@ -223,6 +227,21 @@ export const useJiraStore = create<JiraState>((set, get) => {
       if (!site) return
       const cur = siteData().filters ?? []
       saveSiteData(site, { ...siteData(), filters: [...cur.filter((x) => x.name !== f.name), f].slice(0, MAX_FILTERS) })
+    },
+
+    addTeamMember(user) {
+      const site = currentSite()
+      if (!site) return
+      const cur = siteData().team ?? []
+      if (cur.length >= MAX_TEAM || cur.some((u) => u.id === user.id)) return
+      saveSiteData(site, { ...siteData(), team: [...cur, { id: user.id, name: user.name }] })
+    },
+
+    removeTeamMember(id) {
+      const site = currentSite()
+      if (!site) return
+      const team = (siteData().team ?? []).filter((u) => u.id !== id)
+      saveSiteData(site, { ...siteData(), team: team.length ? team : undefined })
     },
 
     removeFilter(index) {

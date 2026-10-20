@@ -301,3 +301,9 @@ export const IconPalette = (p: P) => (
     <circle cx="10.4" cy="5.3" r=".9" fill="currentColor" stroke="none" />
   </Svg>
 )
+export const IconCalendar = (p: P) => (
+  <Svg {...p}>
+    <rect x="2.5" y="3.5" width="11" height="10" rx="1.5" />
+    <path d="M2.5 6.5h11M5.5 2v3M10.5 2v3" />
+  </Svg>
+)

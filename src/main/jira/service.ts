@@ -1,10 +1,10 @@
 // Jira 연동의 진입점(읽기 전용). 자격 증명·연결 상태·API 클라이언트를 소유하고 IPC 계층에는 가공된 결과만 돌려준다.
 // 토큰은 이 객체 밖으로 나가지 않는다 — 반환값은 JiraAuthState(토큰 없음)와 API 응답을 변환한 공유 타입뿐이다.
-import type { JiraAuthState, JiraComment, JiraConnectInput, JiraDevInfo, JiraIssueDetail, JiraSearchResult } from '@shared/types'
+import type { JiraAuthState, JiraComment, JiraConnectInput, JiraDevInfo, JiraIssueDetail, JiraSearchResult, JiraUser, JiraWorklogResult } from '@shared/types'
 import type { TokenStore } from '../github/tokenStore'
 import * as api from './api'
 import { JiraApiError, JiraClient, type JiraCredential, type SleepFn } from './client'
-import { allowedJiraUrl, parseConnectInput, parseIssueKey, parseSearchQuery, type SiteOptions } from './validate'
+import { allowedJiraUrl, parseConnectInput, parseIssueKey, parseSearchQuery, parseUserSearch, parseWorklogQuery, type SiteOptions } from './validate'
 
 /** 자격 증명을 담는 파일 이름(GitHub 토큰 파일과 같은 safeStorage 방식, 파일만 따로) */
 export const JIRA_TOKEN_FILE = 'jira-credential.bin'
@@ -26,6 +26,8 @@ export class JiraService {
   /** 연결이 바뀌거나 해제되면 중단되는 조회 세대 */
   private epoch = new AbortController()
   private readonly client: JiraClient
+  /** /myself 로 알아낸 내 id. 연결이 바뀌거나 해제되면(epoch 교체) 비운다 */
+  private me: JiraUser | null = null
 
   constructor(private readonly deps: JiraServiceDeps) {
     this.conn = this.load()
@@ -84,6 +86,7 @@ export class JiraService {
   private newEpoch(): void {
     this.epoch.abort()
     this.epoch = new AbortController()
+    this.me = null
   }
 
   // ── 조회 ────────────────────────────────────────────
@@ -121,6 +124,26 @@ export class JiraService {
   async search(query: unknown, requestId?: string): Promise<JiraSearchResult> {
     const q = parseSearchQuery(query)
     return this.data(requestId, (c, signal) => api.search(this.client, c, q, signal))
+  }
+
+  /** 범위 안의 워크로그. users 가 비면 나만 */
+  async worklogs(query: unknown, requestId?: string): Promise<JiraWorklogResult> {
+    const q = parseWorklogQuery(query)
+    return this.data(requestId, async (c, signal) => {
+      const epoch = this.epoch
+      let me = this.me
+      if (!me) {
+        me = await api.getMyId(this.client, c, signal)
+        if (this.epoch === epoch) this.me = me
+      }
+      return api.getWorklogs(this.client, c, q, me, signal)
+    })
+  }
+
+  /** 팀원 추가용 사용자 검색 */
+  async userSearch(text: unknown, requestId?: string): Promise<JiraUser[]> {
+    const t = parseUserSearch(text)
+    return this.data(requestId, (c, signal) => api.searchUsers(this.client, c, t, signal))
   }
 
   /** jira:openExternal 이 쓸 검증된 주소(연결한 사이트의 것만). 아니면 null */

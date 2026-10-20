@@ -1,9 +1,9 @@
 // Jira REST 응답 → 공유 타입 변환과 엔드포인트 호출. Cloud(API v3, ADF)와 Data Center/Server(API v2, 서버 렌더 HTML)의 차이는 여기서 흡수한다.
-import type { JiraComment, JiraDevCommit, JiraDevInfo, JiraDevPull, JiraIssueDetail, JiraIssueSummary, JiraSearchResult } from '@shared/types'
+import type { JiraComment, JiraDevCommit, JiraDevInfo, JiraDevPull, JiraIssueDetail, JiraIssueSummary, JiraSearchResult, JiraUser, JiraWorklog, JiraWorklogQuery, JiraWorklogResult } from '@shared/types'
 import { AbortError } from '../executors/GitExecutor'
 import { adfToHtml } from './adf'
 import type { JiraClient, JiraCredential } from './client'
-import { MAX_PAGES, PAGE_SIZE } from './validate'
+import { jqlQuote, MAX_PAGES, PAGE_SIZE, USER_ID_RE } from './validate'
 
 const LIST_FIELDS = 'summary,status,issuetype,priority,assignee,updated'
 const DETAIL_FIELDS = `${LIST_FIELDS},reporter,created,description`
@@ -230,4 +230,207 @@ export async function search(
   const end = startAt + items.length
   const total = typeof raw['total'] === 'number' ? raw['total'] : end
   return { items, ...(items.length > 0 && end < total && q.page < MAX_PAGES ? { nextCursor: String(end) } : {}) }
+}
+
+// ── 워크로그 ────────────────────────────────────────────
+
+const WORKLOG_ISSUE_MAX = 300
+const WORKLOG_MAX = 20_000
+const WORKLOG_ISSUE_PAGE = 100
+const WORKLOG_FETCH_CONCURRENCY = 3
+/** 이슈 하나의 워크로그를 이어 받는 최대 횟수(진전이 없으면 그 전에 멈춘다) */
+const WORKLOG_FETCH_PAGES = 20
+const COMMENT_MAX = 500
+const DAY_MS = 86_400_000
+
+/** /myself 의 내 id: Cloud 는 accountId, Data Center 는 사용자 이름(name). 워크로그 작성자와 같은 체계다 */
+export async function getMyId(client: JiraClient, c: JiraCredential, signal?: AbortSignal): Promise<JiraUser> {
+  const me = obj(
+    await client.get<unknown>(`${apiBase(c)}/myself`, {
+      notFound: '이 주소에서 Jira API 를 찾을 수 없습니다(사이트 주소와 Cloud/Server 종류를 확인하세요)',
+      ...(signal ? { signal } : {})
+    })
+  )
+  const id = c.kind === 'cloud' ? str(me['accountId']) : str(me['name'])
+  if (!USER_ID_RE.test(id)) throw new Error('Jira 계정 정보를 읽을 수 없습니다')
+  return { id, name: str(me['displayName']) || id }
+}
+
+/** 사용자 검색(팀원 추가용). 최대 20명. Cloud 는 사람 계정(atlassian)만 */
+export async function searchUsers(client: JiraClient, c: JiraCredential, text: string, signal?: AbortSignal): Promise<JiraUser[]> {
+  const sig = signal ? { signal } : {}
+  const raw =
+    c.kind === 'cloud'
+      ? await client.get<unknown>('/rest/api/3/user/search', { query: { query: text, maxResults: 20 }, ...sig })
+      : await client.get<unknown>('/rest/api/2/user/search', { query: { username: text, maxResults: 20 }, ...sig })
+  const out: JiraUser[] = []
+  for (const x of arr(raw)) {
+    const u = obj(x)
+    if (c.kind === 'cloud' && u['accountType'] !== 'atlassian') continue
+    const id = c.kind === 'cloud' ? str(u['accountId']) : str(u['name'])
+    if (USER_ID_RE.test(id)) out.push({ id, name: str(u['displayName']) || id })
+  }
+  return out.slice(0, 20)
+}
+
+/** 워크로그 comment 를 평문으로: Cloud 는 ADF 의 텍스트 노드를 이어 붙이고, Data Center 는 문자열 그대로 */
+function commentText(v: unknown): string {
+  if (typeof v === 'string') return v.slice(0, COMMENT_MAX)
+  const parts: string[] = []
+  let len = 0
+  const walk = (node: unknown, depth: number): void => {
+    if (depth > 20 || len > COMMENT_MAX || !node || typeof node !== 'object') return
+    const n = node as Json
+    if (typeof n['text'] === 'string') {
+      parts.push(n['text'])
+      len += n['text'].length
+    } else if (n['type'] === 'hardBreak') {
+      parts.push(' ')
+    }
+    for (const ch of arr(n['content'])) walk(ch, depth + 1)
+    if (n['type'] === 'paragraph') parts.push(' ')
+  }
+  walk(v, 0)
+  return parts.join('').trim().slice(0, COMMENT_MAX)
+}
+
+/** 'YYYY-MM-DD' 에 일수를 더한다(UTC 달력) */
+const shiftDay = (ymd: string, days: number): string => new Date(Date.parse(`${ymd}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10)
+
+interface WorklogIssue {
+  key: string
+  summary: string
+  type: string
+  /** 내장 fields.worklog 의 항목 */
+  embedded: unknown[]
+  /** 내장 worklog 가 전부인지. total 이 더 크면 이슈별로 다시 받아야 한다 */
+  complete: boolean
+}
+
+function mapIssueForWorklog(x: unknown): WorklogIssue {
+  const i = obj(x)
+  const f = obj(i['fields'])
+  const w = obj(f['worklog'])
+  const embedded = arr(w['worklogs'])
+  const total = typeof w['total'] === 'number' ? w['total'] : embedded.length
+  return { key: str(i['key']), summary: str(f['summary']), type: str(obj(f['issuetype'])['name']), embedded, complete: total <= embedded.length }
+}
+
+/** worklogAuthor·worklogDate JQL 로 이슈를 최대 WORKLOG_ISSUE_MAX 건 모은다. 더 있으면 truncated */
+async function findWorklogIssues(client: JiraClient, c: JiraCredential, jql: string, signal?: AbortSignal): Promise<{ issues: WorklogIssue[]; truncated: boolean }> {
+  const sig = { notFound: '검색 API 를 찾을 수 없습니다(Jira 버전과 사이트 주소를 확인하세요)', ...(signal ? { signal } : {}) }
+  const issues: WorklogIssue[] = []
+  const fields = 'summary,issuetype,worklog'
+  let token: string | undefined
+  let startAt = 0
+  for (let page = 0; page <= Math.ceil(WORKLOG_ISSUE_MAX / WORKLOG_ISSUE_PAGE); page++) {
+    let items: unknown[]
+    let more: boolean
+    if (c.kind === 'cloud') {
+      const raw = obj(await client.get<unknown>('/rest/api/3/search/jql', { query: { jql, fields, maxResults: WORKLOG_ISSUE_PAGE, nextPageToken: token }, ...sig }))
+      items = arr(raw['issues'])
+      token = str(raw['nextPageToken']) || undefined
+      more = token !== undefined && raw['isLast'] !== true
+    } else {
+      const raw = obj(await client.get<unknown>('/rest/api/2/search', { query: { jql, fields, maxResults: WORKLOG_ISSUE_PAGE, startAt }, ...sig }))
+      items = arr(raw['issues'])
+      startAt += items.length
+      more = typeof raw['total'] === 'number' && startAt < raw['total']
+    }
+    for (const it of items) issues.push(mapIssueForWorklog(it))
+    if (items.length === 0 || !more) return { issues: issues.slice(0, WORKLOG_ISSUE_MAX), truncated: issues.length > WORKLOG_ISSUE_MAX }
+    if (issues.length >= WORKLOG_ISSUE_MAX) return { issues: issues.slice(0, WORKLOG_ISSUE_MAX), truncated: true }
+  }
+  return { issues: issues.slice(0, WORKLOG_ISSUE_MAX), truncated: true }
+}
+
+/** 이슈의 워크로그 전부(Cloud 는 범위로 좁힌다). startAt 페이징은 진전이 없으면 멈춘다 */
+async function fetchIssueWorklogs(client: JiraClient, c: JiraCredential, key: string, lo: number, hi: number, signal?: AbortSignal): Promise<unknown[]> {
+  const path = `${apiBase(c)}/issue/${encodeURIComponent(key)}/worklog`
+  const out: unknown[] = []
+  const seen = new Set<string>()
+  let startAt = 0
+  for (let page = 0; page < WORKLOG_FETCH_PAGES; page++) {
+    // Data Center 는 쿼리 파라미터를 받지 않고 전부 돌려준다 — 거르는 것은 호출자의 몫
+    const query = c.kind === 'cloud' ? { startAt, maxResults: 1000, startedAfter: lo, startedBefore: hi } : undefined
+    const raw = obj(await client.get<unknown>(path, { ...(query ? { query } : {}), notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다', ...(signal ? { signal } : {}) }))
+    const list = arr(raw['worklogs'])
+    let fresh = 0
+    for (const w of list) {
+      const id = str(obj(w)['id'])
+      if (id && seen.has(id)) continue
+      if (id) seen.add(id)
+      out.push(w)
+      fresh++
+    }
+    startAt += list.length
+    const total = typeof raw['total'] === 'number' ? raw['total'] : 0
+    if (fresh === 0 || startAt >= total) break
+  }
+  return out
+}
+
+/**
+ * 범위 안의 워크로그(GET 만). JQL 날짜는 사용자 프로필 시간대 기준일 수 있어 범위를 하루씩 넓혀 이슈를 찾고,
+ * started 가 [from-1일 00:00Z, to+2일 00:00Z) 인 것만 남긴다 — 정확한 로컬 날짜 필터는 화면의 몫이다.
+ */
+export async function getWorklogs(
+  client: JiraClient,
+  c: JiraCredential,
+  q: JiraWorklogQuery,
+  me: JiraUser,
+  signal?: AbortSignal
+): Promise<JiraWorklogResult> {
+  const authors = q.users.length > 0 ? q.users : [me.id]
+  const who = q.users.length > 0 ? `worklogAuthor in (${authors.map(jqlQuote).join(',')})` : 'worklogAuthor = currentUser()'
+  const jql = `${who} AND worklogDate >= ${jqlQuote(shiftDay(q.from, -1))} AND worklogDate <= ${jqlQuote(shiftDay(q.to, 1))} ORDER BY updated DESC`
+  const lo = Date.parse(`${q.from}T00:00:00Z`) - DAY_MS
+  const hi = Date.parse(`${q.to}T00:00:00Z`) + 2 * DAY_MS
+  const wanted = new Set(authors)
+
+  const { issues, truncated: issuesCut } = await findWorklogIssues(client, c, jql, signal)
+
+  // 내장 worklog 가 잘린 이슈만 이슈별로 다시 받는다(동시 3개)
+  const raws: unknown[][] = issues.map((i) => i.embedded)
+  const todo = issues.map((i, idx) => (i.complete ? -1 : idx)).filter((idx) => idx >= 0)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    while (next < todo.length) {
+      if (signal?.aborted) throw new AbortError()
+      const idx = todo[next++]!
+      raws[idx] = await fetchIssueWorklogs(client, c, issues[idx]!.key, lo, hi, signal)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(WORKLOG_FETCH_CONCURRENCY, todo.length) }, worker))
+
+  const worklogs: JiraWorklog[] = []
+  let truncated = issuesCut
+  collect: for (const [idx, issue] of issues.entries()) {
+    for (const x of raws[idx]!) {
+      const w = obj(x)
+      const a = obj(w['author'])
+      // Cloud 는 accountId, Data Center 는 name(옛 key 로도 맞춘다)
+      const authorId = c.kind === 'cloud' ? str(a['accountId']) : str(a['name'])
+      if (!authorId || !(wanted.has(authorId) || (c.kind === 'server' && wanted.has(str(a['key']))))) continue
+      const started = str(w['started'])
+      const t = Date.parse(started)
+      if (!Number.isFinite(t) || t < lo || t >= hi) continue
+      if (worklogs.length >= WORKLOG_MAX) {
+        truncated = true
+        break collect
+      }
+      worklogs.push({
+        id: str(w['id']),
+        issueKey: issue.key,
+        issueSummary: issue.summary,
+        issueType: issue.type,
+        authorId,
+        author: str(a['displayName']) || authorId,
+        started,
+        seconds: typeof w['timeSpentSeconds'] === 'number' ? w['timeSpentSeconds'] : 0,
+        comment: commentText(w['comment'])
+      })
+    }
+  }
+  return { worklogs, me, truncated }
 }

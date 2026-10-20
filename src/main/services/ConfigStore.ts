@@ -52,8 +52,9 @@ function checkJiraPrefs(patch: Partial<UiPrefs>): void {
   if (!sites || typeof sites !== 'object' || Array.isArray(sites) || Object.keys(sites).length > 20) bad()
   for (const [site, d] of Object.entries(sites)) {
     if (site.length > 300 || !d || typeof d !== 'object') bad()
-    const { filters, recent } = d
+    const { filters, recent, team } = d
     if (filters !== undefined && (!Array.isArray(filters) || filters.length > 50 || !filters.every((f) => f && isStr(f.name, 100) && isStr(f.jql, 2000)))) bad()
+    if (team !== undefined && (!Array.isArray(team) || team.length > 30 || !team.every((u) => u && typeof u.id === 'string' && /^[A-Za-z0-9._@:+-]{1,128}$/.test(u.id) && isStr(u.name, 200)))) bad()
     if (recent !== undefined && (!Array.isArray(recent) || recent.length > 30 || !recent.every((r) => r && typeof r.key === 'string' && /^[A-Z][A-Z0-9_]{1,19}-\d{1,9}$/.test(r.key) && isStr(r.summary, 500)))) bad()
   }
 }
