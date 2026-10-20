@@ -5,6 +5,10 @@
   font-weight: 600;
   color: var(--accent-text);
 }
+/* 목록 행의 키 칸: 목록에서 가장 긴 키 길이(고정폭 글꼴의 ch)로 맞춰 제목이 한 줄로 시작하게 */
+.gh-row > .jira-key {
+  min-width: calc(var(--jira-key-ch, 0) * 1ch);
+}
 .gh-head__title .jira-key {
   margin-right: var(--space-1);
 }
