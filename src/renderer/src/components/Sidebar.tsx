@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { Branch, Repo, Source, Stash, SubmoduleInfo, Tag, ViewRef, Worktree } from '@shared/types'
 import { useT } from '../i18n'
-import { formatDate } from '../lib/format'
+import { DateText } from './DateText'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
 import { canHide, inList, isHidden, remoteAllRef } from '../lib/refView'
@@ -940,7 +940,11 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                     label={s.message}
                     title={`${s.ref} · ${s.message}`}
                     view={view}
-                    trailing={<span className="side-sub">{formatDate(s.date, locale)}</span>}
+                    trailing={
+                      <span className="side-sub">
+                        <DateText epochSec={s.date} locale={locale} />
+                      </span>
+                    }
                     onClick={() => solo(view)}
                     onContextMenu={ctxOf(view)}
                   />

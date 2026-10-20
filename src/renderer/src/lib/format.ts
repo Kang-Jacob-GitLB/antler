@@ -27,7 +27,7 @@ function dtf(locale: Locale): Intl.DateTimeFormat {
 }
 
 /** 상대 시간으로 보여 줄 범위(초). 이보다 오래되면 날짜와 시각으로 */
-const RELATIVE_MAX_SEC = 3 * 3600
+export const RELATIVE_MAX_SEC = 3 * 3600
 
 /** 3시간 이내는 상대 시간(방금·n분 전·n시간 전), 그보다 오래되면 날짜와 시각 */
 export function formatDate(epochSec: number, locale: Locale, now = Date.now()): string {
