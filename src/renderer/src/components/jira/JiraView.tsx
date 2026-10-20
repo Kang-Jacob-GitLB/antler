@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { JiraIssueSummary, JiraSavedFilter } from '@shared/types'
+import type { JiraIssueSummary, JiraSavedFilter, JiraStatusCategory } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
+import { useAppStore } from '../../stores/appStore'
 import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
-import { IconRefresh } from '../icons'
-import { isoToEpoch, issueSub, JiraStatus } from './JiraBits'
+import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
+import { isoToEpoch, issueSub, JiraStatus, statusCat } from './JiraBits'
 import '../github/GitHubView.css'
 import './JiraView.css'
 
 const NO_FILTERS: JiraSavedFilter[] = []
+const NO_CATS: JiraStatusCategory[] = []
+const CATS: JiraStatusCategory[] = ['new', 'indeterminate', 'done']
 const openOnJira = (url: string): void => void api.invoke('jira:openExternal', url).catch(() => {})
 
 /** Jira 작업 공간(JiraWorkspace)의 본문: 이슈 목록 / 이슈 상세. GitHub 화면과 같은 레이아웃·클래스를 쓴다 */
@@ -31,7 +34,30 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
   const [jql, setJql] = useState(list.jql)
   const [name, setName] = useState('')
   const rel = useRelative()
-  const keyCh = useMemo(() => list.items.reduce((n, i) => Math.max(n, i.key.length), 0), [list.items])
+  const layout = useAppStore((s) => s.config?.ui.jiraLayout ?? 'list')
+  const hidden = useAppStore((s) => s.config?.ui.jiraHiddenCategories ?? NO_CATS)
+  const { setUi } = useAppStore.getState()
+  const [query, setQuery] = useState('')
+
+  // 상태 분류별 개수(불러온 항목 기준)와, 숨긴 분류·검색어를 거친 항목
+  const counts = useMemo(() => {
+    const c: Record<JiraStatusCategory, number> = { new: 0, indeterminate: 0, done: 0 }
+    for (const i of list.items) c[statusCat(i.statusCategory)]++
+    return c
+  }, [list.items])
+  const shown = useMemo(() => {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
+    return list.items.filter((i) => {
+      if (hidden.includes(statusCat(i.statusCategory))) return false
+      if (terms.length === 0) return true
+      const hay = `${i.key} ${i.summary} ${i.assignee} ${i.issueType} ${i.status}`.toLowerCase()
+      return terms.every((w) => hay.includes(w))
+    })
+  }, [list.items, hidden, query])
+  const keyCh = useMemo(() => shown.reduce((n, i) => Math.max(n, i.key.length), 0), [shown])
+  const toggleCat = (c: JiraStatusCategory): void => {
+    void setUi({ jiraHiddenCategories: hidden.includes(c) ? hidden.filter((x) => x !== c) : [...hidden, c] })
+  }
 
   // 다른 목록으로 바뀌면 입력칸도 그 목록의 JQL 로
   useEffect(() => setJql(view.source === 'mine' ? MINE_JQL : (saved?.jql ?? useJiraStore.getState().list.jql)), [view.source, saved?.jql])
@@ -40,11 +66,34 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
     if (jql.trim()) void loadList(jql.trim())
   }
   const canSave = view.source === 'custom' && !!jql.trim() && !!name.trim()
+  // 불러오는 중 / 다음 페이지 — 걸러서 하나도 안 보여도 더 불러올 수 있게 늘 아래에 둔다
+  const foot = list.loading ? (
+    <div className="gh-notice">{t('list.loading')}</div>
+  ) : list.nextCursor ? (
+    <button className="btn gh-more" onClick={() => void loadList(list.jql, true)}>
+      {t('gh.more')}
+    </button>
+  ) : null
 
   return (
     <>
       <header className="gh-head">
         <h2 className="gh-head__title">Jira · {title}</h2>
+        <div className="seg" role="radiogroup" aria-label={t('jira.layout')}>
+          {(['list', 'board'] as const).map((l) => (
+            <button
+              key={l}
+              role="radio"
+              aria-checked={layout === l}
+              className={`seg__btn jira-seg-icon${layout === l ? ' is-on' : ''}`}
+              title={t(`jira.layout.${l}`)}
+              onClick={() => void setUi({ jiraLayout: l })}
+            >
+              {l === 'list' ? <IconRows size={14} /> : <IconBoard size={14} />}
+              {t(`jira.layout.${l}`)}
+            </button>
+          ))}
+        </div>
         <button className="icon-btn icon-btn--sm" title={t('toolbar.refresh')} onClick={run}>
           <IconRefresh size={14} />
         </button>
@@ -81,21 +130,94 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
         )}
       </div>
 
-      {/* 키 칸을 가장 긴 키에 맞춰 고정해 제목 시작 위치를 맞춘다 */}
-      <div className="gh-list" style={{ '--jira-key-ch': keyCh } as React.CSSProperties}>
-        {list.error && <div className="gh-notice is-error">{list.error}</div>}
-        {!list.error && !list.loading && list.items.length === 0 && <div className="gh-notice">{t('gh.empty')}</div>}
-        {list.items.map((i) => (
-          <IssueRow key={i.key} i={i} when={rel(isoToEpoch(i.updated))} onOpen={() => openIssue(i.key)} />
-        ))}
-        {list.loading && <div className="gh-notice">{t('list.loading')}</div>}
-        {list.nextCursor && !list.loading && (
-          <button className="btn gh-more" onClick={() => void loadList(list.jql, true)}>
-            {t('gh.more')}
-          </button>
-        )}
+      {/* 불러온 항목을 바로 거른다: 상태 분류(켜고 끄기, 설정에 기억) · 검색어 */}
+      <div className="gh-filters jira-tools">
+        <div className="seg" role="group" aria-label={t('jira.catFilter')}>
+          {CATS.map((c) => {
+            const on = !hidden.includes(c)
+            return (
+              <button key={c} aria-pressed={on} className={`seg__btn jira-cat jira-cat--${c}${on ? ' is-on' : ''}`} onClick={() => toggleCat(c)}>
+                <span className="jira-cat__dot" />
+                {t(`jira.cat.${c}`)}
+                <span className="jira-cat__n">{counts[c]}</span>
+              </button>
+            )
+          })}
+        </div>
+        <label className="jira-search">
+          <IconSearch size={13} />
+          <input
+            className="jira-input"
+            value={query}
+            spellCheck={false}
+            placeholder={t('jira.search')}
+            aria-label={t('jira.search')}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
+          />
+        </label>
       </div>
+
+      {list.error && <div className="gh-notice is-error">{list.error}</div>}
+      {layout === 'board' && shown.length > 0 ? (
+        <>
+          <Board items={shown} rel={rel} onOpen={openIssue} />
+          {foot}
+        </>
+      ) : (
+        // 키 칸을 가장 긴 키에 맞춰 고정해 제목 시작 위치를 맞춘다
+        <div className="gh-list" style={{ '--jira-key-ch': keyCh } as React.CSSProperties}>
+          {shown.map((i) => (
+            <IssueRow key={i.key} i={i} when={rel(isoToEpoch(i.updated))} onOpen={() => openIssue(i.key)} />
+          ))}
+          {!list.error && !list.loading && shown.length === 0 && (
+            <div className="gh-notice">{list.items.length === 0 ? t('gh.empty') : t('jira.filteredOut', { n: list.items.length })}</div>
+          )}
+          {foot}
+        </div>
+      )}
     </>
+  )
+}
+
+/** 칸반: 상태 이름별 열. 열 순서는 할 일 → 진행 중 → 완료, 같은 분류 안에서는 목록에 처음 나온 순서 */
+function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: number): string; onOpen(key: string): void }): React.JSX.Element {
+  const t = useT()
+  const columns = useMemo(() => {
+    const byStatus = new Map<string, { name: string; cat: JiraStatusCategory; items: JiraIssueSummary[] }>()
+    for (const i of items) {
+      const name = i.status || '—'
+      let col = byStatus.get(name)
+      if (!col) byStatus.set(name, (col = { name, cat: statusCat(i.statusCategory), items: [] }))
+      col.items.push(i)
+    }
+    return [...byStatus.values()].sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat))
+  }, [items])
+
+  return (
+    <div className="jira-board">
+      {columns.map((col) => (
+        <section key={col.name} className={`jira-col jira-col--${col.cat}`} aria-label={col.name}>
+          <header className="jira-col__head">
+            <span className="jira-cat__dot" />
+            <span className="jira-col__name">{col.name}</span>
+            <span className="jira-cat__n">{col.items.length}</span>
+          </header>
+          <div className="jira-col__body">
+            {col.items.map((i) => (
+              <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
+                <div className="jira-card__title">{i.summary}</div>
+                <div className="jira-card__meta">
+                  <span className="jira-key mono">{i.key}</span>
+                  <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
+                </div>
+                <div className="jira-card__when">{rel(isoToEpoch(i.updated))}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   )
 }
 

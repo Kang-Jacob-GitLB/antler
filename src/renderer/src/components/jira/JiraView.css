@@ -72,6 +72,162 @@
   flex: 0 0 140px;
 }
 
+/* 머리의 보기 방식(줄·칸반) 분절 버튼: 아이콘 + 글 */
+.jira-seg-icon {
+  gap: 5px;
+}
+
+/* 목록 거르기 줄: 상태 분류 켜고 끄기 + 검색 */
+.jira-tools {
+  flex-wrap: wrap;
+}
+.jira-cat {
+  gap: 6px;
+}
+/* 꺼진 분류는 흐리게(분절 버튼의 is-on 이 켜짐) */
+.jira-cat:not(.is-on) {
+  color: var(--text-muted);
+}
+.jira-cat:not(.is-on) .jira-cat__dot {
+  opacity: 0.35;
+}
+.jira-cat__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+.jira-cat--indeterminate .jira-cat__dot,
+.jira-col--indeterminate .jira-cat__dot {
+  background: var(--info);
+}
+.jira-cat--done .jira-cat__dot,
+.jira-col--done .jira-cat__dot {
+  background: var(--added);
+}
+.jira-cat__n {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+.jira-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 180px;
+  max-width: 360px;
+  color: var(--text-muted);
+}
+.jira-search > svg {
+  position: absolute;
+  left: var(--space-2);
+  pointer-events: none;
+}
+.jira-search > .jira-input {
+  padding-left: calc(var(--space-2) + 18px);
+}
+
+/* 칸반: 상태별 열을 가로로 늘어놓고 가로로 스크롤, 열 안은 세로로 스크롤 */
+.jira-board {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  overflow-x: auto;
+}
+.jira-col {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 272px;
+  min-height: 0;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface, var(--bg-base));
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.jira-col__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.jira-col__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jira-col__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0 var(--space-2) var(--space-2);
+  overflow-y: auto;
+}
+.jira-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-base);
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease);
+}
+.jira-card:hover {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.jira-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.jira-card__title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.jira-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.jira-card__meta .jira-key {
+  font-size: var(--fs-xs);
+}
+.jira-card__sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.jira-card__when {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+/* 칸반 아래의 불러오는 중 / 더 보기(오류 띠는 제외) */
+.jira-view > .gh-more,
+.jira-view > .gh-notice:not(.is-error) {
+  flex-shrink: 0;
+  align-self: center;
+}
+
 /* 커밋 상세·PR 머리의 이슈 키 칩 */
 .jira-chips {
   display: flex;

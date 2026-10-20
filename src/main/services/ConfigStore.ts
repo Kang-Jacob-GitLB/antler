@@ -44,8 +44,10 @@ function checkJiraPrefs(patch: Partial<UiPrefs>): void {
   const bad = (): never => {
     throw new Error('잘못된 Jira 설정입니다')
   }
-  const { jiraProjectKeys: keys, jiraSites: sites } = patch
+  const { jiraProjectKeys: keys, jiraSites: sites, jiraLayout: layout, jiraHiddenCategories: hidden } = patch
   if (keys !== undefined && (!Array.isArray(keys) || keys.length > 50 || !keys.every((k) => typeof k === 'string' && /^[A-Z][A-Z0-9_]{1,19}$/.test(k)))) bad()
+  if (layout !== undefined && layout !== 'list' && layout !== 'board') bad()
+  if (hidden !== undefined && (!Array.isArray(hidden) || !hidden.every((c) => c === 'new' || c === 'indeterminate' || c === 'done') || new Set(hidden).size !== hidden.length)) bad()
   if (sites === undefined) return
   if (!sites || typeof sites !== 'object' || Array.isArray(sites) || Object.keys(sites).length > 20) bad()
   for (const [site, d] of Object.entries(sites)) {

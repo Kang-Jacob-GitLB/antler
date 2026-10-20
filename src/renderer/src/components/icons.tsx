@@ -130,6 +130,20 @@ export const IconFunnel = (p: P) => (
     <path d="M2.5 3h11l-4.2 5v4.5l-2.6 1V8z" />
   </Svg>
 )
+/** 줄 보기 */
+export const IconRows = (p: P) => (
+  <Svg {...p}>
+    <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />
+  </Svg>
+)
+/** 칸반 보기: 높이가 다른 세 열 */
+export const IconBoard = (p: P) => (
+  <Svg {...p}>
+    <rect x="2" y="2.5" width="3.2" height="11" rx="0.8" />
+    <rect x="6.4" y="2.5" width="3.2" height="7.5" rx="0.8" />
+    <rect x="10.8" y="2.5" width="3.2" height="9.5" rx="0.8" />
+  </Svg>
+)
 export const IconEye = (p: P) => (
   <Svg {...p}>
     <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" />
