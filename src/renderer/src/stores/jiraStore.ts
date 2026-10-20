@@ -88,7 +88,9 @@ export const useJiraStore = create<JiraState>((set, get) => {
     const seq = ++listSeq[key]
     const base: JiraList = more && prev.jql === jql ? prev : emptyList(jql)
     const page = more ? base.page + 1 : 1
-    set({ [key]: { ...base, jql, loading: true, error: null } } as Partial<JiraState>)
+    // 같은 목록을 새로 고칠 때는 받아 둔 항목을 그대로 보여 주다가 응답이 오면 바꾼다(빈 화면 깜박임 방지)
+    const shown = !more && prev.jql === jql ? prev : base
+    set({ [key]: { ...shown, jql, loading: true, error: null } } as Partial<JiraState>)
     try {
       const res = await api.invoke('jira:search', { jql, page, ...(more && base.nextCursor ? { cursor: base.nextCursor } : {}) })
       if (seq !== listSeq[key]) return
@@ -189,13 +191,16 @@ export const useJiraStore = create<JiraState>((set, get) => {
       // Jira 화면은 창 전체를 덮는다 — 아래 화면(그래프·GitHub·Launchpad)은 그대로 두어 뒤로가기로 돌아간다.
       // 연결 전에는 불러오지 않고 연결 안내만 보인다
       if (view && get().auth.connected) {
+        // 화면을 새로 열 때마다 "나에게 할당" 개수도 최신으로
+        if (!get().view) void fetchList('mine', MINE_JQL, false)
         if (view.kind === 'issue') {
           void loadIssue(view.key)
         } else if (view.source !== 'custom') {
           const apps = siteData().filters ?? []
           const jql = view.source === 'mine' ? MINE_JQL : apps[view.source]?.jql
           if (!jql) return
-          if (get().list.jql !== jql || get().list.items.length === 0) void fetchList('list', jql, false)
+          // 목록으로 올 때마다 다시 조회한다(받아 둔 결과는 응답이 올 때까지 그대로 보인다)
+          void fetchList('list', jql, false)
         }
       } else if (!view) {
         issueSeq++

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
@@ -31,6 +31,7 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
   const [jql, setJql] = useState(list.jql)
   const [name, setName] = useState('')
   const rel = useRelative()
+  const keyCh = useMemo(() => list.items.reduce((n, i) => Math.max(n, i.key.length), 0), [list.items])
 
   // 다른 목록으로 바뀌면 입력칸도 그 목록의 JQL 로
   useEffect(() => setJql(view.source === 'mine' ? MINE_JQL : (saved?.jql ?? useJiraStore.getState().list.jql)), [view.source, saved?.jql])
@@ -80,7 +81,8 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
         )}
       </div>
 
-      <div className="gh-list">
+      {/* 키 칸을 가장 긴 키에 맞춰 고정해 제목 시작 위치를 맞춘다 */}
+      <div className="gh-list" style={{ '--jira-key-ch': keyCh } as React.CSSProperties}>
         {list.error && <div className="gh-notice is-error">{list.error}</div>}
         {!list.error && !list.loading && list.items.length === 0 && <div className="gh-notice">{t('gh.empty')}</div>}
         {list.items.map((i) => (
