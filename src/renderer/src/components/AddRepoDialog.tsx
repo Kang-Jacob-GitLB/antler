@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { SourceKind, SshHostInfo } from '@shared/types'
+import type { RepoScanResult, SourceKind, SshHostInfo } from '@shared/types'
 import { useT } from '../i18n'
 import { api, errorMessage } from '../lib/api'
 import { useAppStore } from '../stores/appStore'
@@ -10,12 +10,15 @@ import './AddRepoDialog.css'
 
 const isWindows = window.antler.platform === 'win32'
 
-/** 로컬 · WSL · SSH 저장소 추가. 그 환경 안에서 git 최상위 경로를 확인한 뒤 저장한다 */
+/**
+ * 로컬 · WSL · SSH 저장소 추가. 그 환경 안에서 git 최상위 경로를 확인한 뒤 저장한다.
+ * 고른 폴더가 저장소가 아니고 바로 아래에 저장소들이 있으면 목록으로 보여 주고, 고른 것들을 한 번에 추가한다.
+ */
 export function AddRepoDialog(): React.JSX.Element | null {
   const t = useT()
   const open = useAppStore((s) => s.addOpen)
   const config = useAppStore((s) => s.config)
-  const { openAddDialog, addRepo } = useAppStore.getState()
+  const { openAddDialog, addRepo, addRepos } = useAppStore.getState()
 
   const [kind, setKind] = useState<SourceKind>('local')
   const [path, setPath] = useState('')
@@ -24,11 +27,17 @@ export function AddRepoDialog(): React.JSX.Element | null {
   const [host, setHost] = useState('')
   const [hosts, setHosts] = useState<SshHostInfo[]>([])
   const [group, setGroup] = useState('')
-  const [busy, setBusy] = useState<'add' | 'test' | null>(null)
+  const [busy, setBusy] = useState<'add' | 'test' | 'scan' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tested, setTested] = useState<string | null>(null)
   // SSH 원격 폴더 탐색 창
   const [remoteBrowse, setRemoteBrowse] = useState(false)
+  // 고른 폴더 안의 저장소 찾기 결과(key = 환경+경로 — 하나라도 바뀌면 낡은 결과다)와 추가할 것으로 고른 경로
+  const [scan, setScan] = useState<{ key: string; result: RepoScanResult } | null>(null)
+  const [checked, setChecked] = useState<Set<string>>(() => new Set())
+  const scanSeq = useRef(0)
+  // 지금 화면의 환경+경로(찾기를 기다리는 동안 입력이 바뀌었는지 보려고)
+  const latestKey = useRef('')
 
   const groups = useMemo(
     () => [...new Set((config?.repos ?? []).map((r) => r.group).filter((g): g is string => !!g))].sort(),
@@ -48,6 +57,7 @@ export function AddRepoDialog(): React.JSX.Element | null {
     setTested(null)
     setBusy(null)
     setRemoteBrowse(false)
+    setScan(null)
     if (isWindows) {
       void api.invoke('env:wslDistros').then((list) => {
         setDistros(list)
@@ -67,7 +77,41 @@ export function AddRepoDialog(): React.JSX.Element | null {
 
   const close = (): void => openAddDialog(false)
   const target = kind === 'wsl' ? { distro } : kind === 'ssh' ? { sshHost: host.trim() } : {}
-  const canSubmit = !!path.trim() && (kind !== 'wsl' || !!distro) && (kind !== 'ssh' || !!host.trim()) && !busy
+  const keyFor = (p: string): string => [kind, distro, host.trim(), p.trim()].join('\n')
+  latestKey.current = keyFor(path)
+  const found = scan && scan.key === keyFor(path) && !scan.result.isRepo && scan.result.repos.length > 0 ? scan.result : null
+  const picked = found ? found.repos.filter((r) => checked.has(r.path)) : []
+  const canSubmit =
+    !!path.trim() && (kind !== 'wsl' || !!distro) && (kind !== 'ssh' || !!host.trim()) && !busy && (!found || picked.length > 0)
+
+  // 이미 목록에 있는 저장소인가(그 환경의 소스·경로로 비교). 로컬 탭에서 고른 WSL 공유 경로는 WSL 저장소로 본다
+  const isRegistered = (p: string): boolean => {
+    const unc = /^[\\/]{2}(?:wsl\.localhost|wsl\$)[\\/]+([^\\/]+)(.*)$/i.exec(p)
+    const sourceId = unc ? `wsl:${unc[1]}` : kind === 'local' ? 'local' : kind === 'wsl' ? `wsl:${distro}` : `ssh:${host.trim()}`
+    const rp = unc ? '/' + (unc[2] ?? '').split(/[\\/]+/).filter(Boolean).join('/') : p
+    // Windows 로컬 경로는 대소문자를 가리지 않는다
+    const same = !unc && kind === 'local' && isWindows ? (a: string) => a.toLowerCase() === rp.toLowerCase() : (a: string) => a === rp
+    return (config?.repos ?? []).some((r) => r.sourceId === sourceId && same(r.path))
+  }
+
+  /** 고른 폴더가 저장소인지, 아니면 바로 아래에 어떤 저장소가 있는지 찾는다. 그사이 창·찾기가 바뀌었으면 null */
+  const runScan = async (p: string): Promise<{ result: RepoScanResult } | { error: unknown } | null> => {
+    const s = session.current
+    const seq = ++scanSeq.current
+    setBusy('scan')
+    setError(null)
+    try {
+      const result = await api.invoke('repos:scan', { kind, ...target, path: p.trim() })
+      if (s !== session.current || seq !== scanSeq.current) return null
+      setScan({ key: keyFor(p), result })
+      setChecked(new Set(result.repos.filter((r) => !isRegistered(r.path)).map((r) => r.path)))
+      return { result }
+    } catch (error) {
+      return s === session.current && seq === scanSeq.current ? { error } : null
+    } finally {
+      if (s === session.current && seq === scanSeq.current) setBusy(null)
+    }
+  }
 
   const browse = async (): Promise<void> => {
     if (kind === 'ssh') {
@@ -76,8 +120,12 @@ export function AddRepoDialog(): React.JSX.Element | null {
     }
     // WSL 은 \\wsl.localhost\<배포판>\ 에서 시작한다 — 고른 경로는 main 이 WSL 경로로 바꿔 등록한다
     const start = kind === 'wsl' && distro ? `\\\\wsl.localhost\\${distro}\\home` : undefined
-    const picked = await api.invoke('dialog:pickFolder', start)
-    if (picked) setPath(picked)
+    const chosen = await api.invoke('dialog:pickFolder', start)
+    if (chosen) {
+      setPath(chosen)
+      // 찾기 실패는 여기서 알리지 않는다 — 추가를 누르면 다시 확인해 이유를 보여 준다
+      void runScan(chosen)
+    }
   }
 
   const test = async (): Promise<void> => {
@@ -97,9 +145,40 @@ export function AddRepoDialog(): React.JSX.Element | null {
     }
   }
 
+  const submitMany = async (): Promise<void> => {
+    const s = session.current
+    setBusy('add')
+    setError(null)
+    try {
+      const res = await addRepos({ kind, ...target, paths: picked.map((r) => r.path), ...(group.trim() ? { group: group.trim() } : {}) })
+      if (s !== session.current) return
+      if (res.failed.length === 0) return close()
+      // 실패한 것만 남겨 다시 시도할 수 있게 한다(추가된 것은 '이미 추가됨' 으로 바뀐다)
+      setChecked(new Set(res.failed.map((f) => f.path)))
+      const nameOf = (p: string): string => found?.repos.find((r) => r.path === p)?.name ?? p
+      setError([t('add.someFailed', { n: res.failed.length }), ...res.failed.map((f) => `${nameOf(f.path)}: ${f.error}`)].join('\n'))
+      setBusy(null)
+    } catch (err) {
+      if (s !== session.current) return
+      setError(errorMessage(err))
+      setBusy(null)
+    }
+  }
+
   const submit = async (): Promise<void> => {
     if (!canSubmit) return
+    if (found) return submitMany()
     const s = session.current
+    const key = keyFor(path)
+    // 아직 찾아보지 않은 경로(SSH 직접 입력, 찾기 실패 등)면 먼저 찾는다 — 저장소가 여럿 나오면 목록을 보여 주고 고르게 한다
+    if (!(scan && scan.key === key)) {
+      const r = await runScan(path)
+      // 그사이 창을 다시 열었거나 환경·경로를 바꿨으면 이전 입력으로 추가하지 않는다
+      if (!r || s !== session.current || latestKey.current !== key) return
+      // 찾기가 실패하면(연결 취소·접속 실패·없는 폴더) 추가도 같은 이유로 실패한다 — 이유를 보여 주고 멈춘다
+      if ('error' in r) return setError(errorMessage(r.error))
+      if (!r.result.isRepo && r.result.repos.length > 0) return
+    }
     setBusy('add')
     setError(null)
     try {
@@ -142,6 +221,7 @@ export function AddRepoDialog(): React.JSX.Element | null {
             onPick={(p) => {
               setPath(p)
               setRemoteBrowse(false)
+              void runScan(p)
             }}
           />
         )}
@@ -235,6 +315,56 @@ export function AddRepoDialog(): React.JSX.Element | null {
           {kind !== 'local' && <span className="field__hint">{t('add.remotePathHint')}</span>}
         </label>
 
+        {found && (
+          <div className="field">
+            <div className="add-found__head">
+              <span className="field__label">{t('add.found', { n: found.repos.length })}</span>
+              <span className="add-dialog__spacer" />
+              {(() => {
+                const selectable = found.repos.filter((r) => !isRegistered(r.path))
+                const all = selectable.length > 0 && selectable.every((r) => checked.has(r.path))
+                return (
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    disabled={selectable.length === 0 || !!busy}
+                    onClick={() => setChecked(new Set(all ? [] : selectable.map((r) => r.path)))}
+                  >
+                    {all ? t('add.selectNone') : t('add.selectAll')}
+                  </button>
+                )
+              })()}
+            </div>
+            <ul className="add-found" aria-label={t('add.found', { n: found.repos.length })}>
+              {found.repos.map((r) => {
+                const done = isRegistered(r.path)
+                return (
+                  <li key={r.path}>
+                    <label className={`add-found__item${done ? ' is-done' : ''}`} title={r.path}>
+                      <input
+                        type="checkbox"
+                        checked={!done && checked.has(r.path)}
+                        disabled={done || !!busy}
+                        onChange={(e) =>
+                          setChecked((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.add(r.path)
+                            else next.delete(r.path)
+                            return next
+                          })
+                        }
+                      />
+                      <span className="add-found__name">{r.name}</span>
+                      {done && <span className="add-found__tag">{t('add.already')}</span>}
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+            <span className="field__hint">{found.truncated ? t('add.foundTruncated') : t('add.foundHint')}</span>
+          </div>
+        )}
+
         <div className="field">
           <label className="field__label" htmlFor="add-repo-group">
             {t('add.group')}
@@ -276,7 +406,13 @@ export function AddRepoDialog(): React.JSX.Element | null {
             {t('add.cancel')}
           </button>
           <button type="submit" className="btn btn--primary" disabled={!canSubmit}>
-            {busy === 'add' ? t('add.adding') : t('add.submit')}
+            {busy === 'add'
+              ? t('add.adding')
+              : busy === 'scan'
+                ? t('add.scanning')
+                : found
+                  ? t('add.submitMany', { n: picked.length })
+                  : t('add.submit')}
           </button>
         </div>
       </form>

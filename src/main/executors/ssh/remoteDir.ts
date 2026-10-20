@@ -20,9 +20,12 @@ function toSftpPath(p: string): string {
   return s
 }
 
+/** 서버가 SFTP 를 막았다 — 폴더 탐색 대신 경로를 직접 입력해야 한다 */
+export class SftpUnavailableError extends Error {}
+
 export async function listRemoteDirs(client: Client, path: string): Promise<RemoteDirListing> {
   const sftp = await call<SFTPWrapper>((cb) => client.sftp(cb)).catch((err: Error) => {
-    throw new Error(`이 서버는 SFTP 를 쓸 수 없어 폴더를 둘러볼 수 없습니다. 경로를 직접 입력하세요 (${err.message})`)
+    throw new SftpUnavailableError(`이 서버는 SFTP 를 쓸 수 없어 폴더를 둘러볼 수 없습니다. 경로를 직접 입력하세요 (${err.message})`)
   })
   try {
     const base = await call<string>((cb) => sftp.realpath(toSftpPath(path), cb))

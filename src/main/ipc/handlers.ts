@@ -1,6 +1,6 @@
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { IpcArgs, IpcChannel, IpcEnvelope, IpcResult } from '@shared/ipc'
-import type { AddRepoInput } from '@shared/types'
+import type { AddRepoInput, AddReposInput } from '@shared/types'
 import { isWslUnc, wslFromUnc } from '../executors/wslPaths'
 import { AbortError, GitError } from '../executors/GitExecutor'
 import { listSshHosts } from '../executors/SshExecutor'
@@ -45,6 +45,8 @@ function handle<C extends IpcChannel>(channel: C, fn: Handler<C>): void {
 
 const MAX_PATH_LEN = 4096
 const MAX_HOST_LEN = 255
+/** 한 번에 추가할 수 있는 저장소 수 */
+const MAX_ADD_MANY = 500
 
 const isUncPath = (p: string): boolean => /^[\\/]{2}/.test(p)
 
@@ -54,17 +56,23 @@ const isUncPath = (p: string): boolean => /^[\\/]{2}/.test(p)
  * - WSL 배포판은 실제 설치된 것만
  * - ~/.ssh/config 에 없는 SSH 대상은 main 이 띄우는 확인 창에서 사용자가 승인해야 접속한다
  */
+function checkPath(kind: AddRepoInput['kind'], path: unknown): asserts path is string {
+  if (typeof path !== 'string' || !path.trim() || path.length > MAX_PATH_LEN || path.includes('\0')) {
+    throw new Error('잘못된 경로입니다')
+  }
+  // 서비스는 앞뒤 공백을 지운 경로를 쓴다 — 같은 값으로 검사해야 ' \\host\share' 가 빠져나가지 못한다
+  const p = path.trim()
+  if ((kind === 'local' || kind === 'wsl') && isUncPath(p) && !isWslUnc(p)) {
+    throw new Error('네트워크 공유 경로는 지원하지 않습니다(WSL 경로는 \\\\wsl.localhost\\… 로 고르세요)')
+  }
+}
+
 async function checkEnvInput(e: IpcMainInvokeEvent, input: unknown, withPath: boolean): Promise<void> {
   const i = input as Partial<AddRepoInput> | null
   if (!i || typeof i !== 'object' || !['local', 'wsl', 'ssh'].includes(i.kind as string)) throw new Error('잘못된 입력입니다')
   if (withPath) {
-    if (typeof i.path !== 'string' || !i.path.trim() || i.path.length > MAX_PATH_LEN || i.path.includes('\0')) {
-      throw new Error('잘못된 경로입니다')
-    }
+    checkPath(i.kind as AddRepoInput['kind'], i.path)
     if (i.group !== undefined && (typeof i.group !== 'string' || i.group.length > 200)) throw new Error('잘못된 그룹 이름입니다')
-    if ((i.kind === 'local' || i.kind === 'wsl') && isUncPath(i.path) && !isWslUnc(i.path)) {
-      throw new Error('네트워크 공유 경로는 지원하지 않습니다(WSL 경로는 \\\\wsl.localhost\\… 로 고르세요)')
-    }
   }
   if (i.kind === 'wsl') {
     const distros = await listWslDistros()
@@ -76,7 +84,7 @@ async function checkEnvInput(e: IpcMainInvokeEvent, input: unknown, withPath: bo
   if (i.kind === 'ssh') {
     const host = typeof i.sshHost === 'string' ? i.sshHost.trim() : ''
     if (!host || host.length > MAX_HOST_LEN || /[\s\0]/.test(host) || host.startsWith('-')) throw new Error('잘못된 SSH 호스트입니다')
-    const known = (await listSshHosts()).some((h) => h.alias === host)
+    const known = approvedSshHosts.has(host) || (await listSshHosts()).some((h) => h.alias === host)
     if (!known) {
       const win = BrowserWindow.fromWebContents(e.sender)
       const opts: Electron.MessageBoxOptions = {
@@ -90,9 +98,16 @@ async function checkEnvInput(e: IpcMainInvokeEvent, input: unknown, withPath: bo
       }
       const res = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts)
       if (res.response !== 0) throw new Error('연결을 취소했습니다')
+      approvedSshHosts.add(host)
     }
   }
 }
+
+/**
+ * 이번 실행 동안 사용자가 연결을 승인한 설정 밖 SSH 호스트. 저장소 추가 한 번에 폴더 탐색·찾기·추가가 이어지므로
+ * 같은 호스트를 매번 다시 묻지 않는다(앱을 다시 켜면 다시 묻는다)
+ */
+const approvedSshHosts = new Set<string>()
 
 /**
  * 저장소 설정에 외부 명령을 실행할 수 있는 항목이 있을 때 수동 fetch 전에 묻는다. 허용은 이번 세션의 같은 설정에만 유효하다.
@@ -172,6 +187,22 @@ export function registerIpc(
   handle('repos:add', async (e, input) => {
     await checkEnvInput(e, input, true)
     return repos.addRepo(input)
+  })
+  handle('repos:addMany', async (e, input) => {
+    const i = input as Partial<AddReposInput> | null
+    if (!i || !Array.isArray(i.paths) || i.paths.length === 0 || i.paths.length > MAX_ADD_MANY) throw new Error('잘못된 입력입니다')
+    const distro = wslFromUnc(String(i.paths[0]))?.distro
+    for (const p of i.paths) {
+      checkPath(i.kind as AddRepoInput['kind'], p)
+      if (wslFromUnc(p)?.distro !== distro) throw new Error('한 번에 추가하는 저장소는 같은 환경이어야 합니다')
+    }
+    // 환경 검증(설정에 없는 SSH 호스트 확인 창 포함)은 한 번만 한다. 모든 경로가 한 폴더 아래라 첫 경로로 WSL 배포판을 본다
+    await checkEnvInput(e, { kind: i.kind, distro: i.distro, sshHost: i.sshHost, group: i.group, path: i.paths[0] }, true)
+    return repos.addRepos(i as AddReposInput)
+  })
+  handle('repos:scan', async (e, input) => {
+    await checkEnvInput(e, input, true)
+    return repos.scanRepos(input)
   })
   handle('repos:update', (_e, repoId, patch) => {
     repos.invalidateGhRemotes(repoId)

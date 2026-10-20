@@ -1,6 +1,8 @@
 // IPC 계약. 채널 이름과 인자·결과 타입을 한곳에서 정의해 main/preload/renderer 가 공유한다.
 import type {
   AddRepoInput,
+  AddReposInput,
+  AddReposResult,
   AppConfig,
   CommitActivity,
   FetchStatus,
@@ -33,6 +35,7 @@ import type {
   JiraSearchQuery,
   JiraSearchResult,
   RemoteDirListing,
+  RepoScanResult,
   RepoPatch,
   SshHostInfo,
   CommitDetail,
@@ -73,6 +76,10 @@ export interface IpcContract {
   'repos:remove': { args: [repoId: string]; result: AppConfig }
   /** 환경(로컬·WSL·SSH)과 경로로 저장소를 추가한다. 그 환경에서 git 최상위 경로를 확인한 뒤 저장한다 */
   'repos:add': { args: [input: AddRepoInput]; result: Repo }
+  /** 같은 환경의 여러 경로를 한 번에 추가한다(폴더 안 저장소 찾기 뒤). 실패한 경로는 failed 로 돌려준다 */
+  'repos:addMany': { args: [input: AddReposInput]; result: AddReposResult }
+  /** 고른 폴더가 저장소인지, 아니면 바로 아래에 어떤 저장소들이 있는지 찾는다 */
+  'repos:scan': { args: [input: Omit<AddRepoInput, 'group'>]; result: RepoScanResult }
   /** 이름·그룹 변경 */
   'repos:update': { args: [repoId: string, patch: RepoPatch]; result: AppConfig }
   /** 변경 감시 대상(활성 저장소). null 이면 감시 중단. 바뀌면 'repo:changed' 이벤트 */
@@ -216,6 +223,8 @@ export const IPC_CHANNELS = [
   'external:pickEditorExe',
   'repos:remove',
   'repos:add',
+  'repos:addMany',
+  'repos:scan',
   'repos:update',
   'repos:watch',
   'env:wslDistros',
