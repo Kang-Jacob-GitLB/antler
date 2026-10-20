@@ -390,6 +390,22 @@ export async function listPulls(c: GitHubClient, r: Slug, q: GhListQuery, signal
   return { items, hasMore: res.hasMore }
 }
 
+const SLUG_PART_RE = /^[A-Za-z0-9._-]{1,100}$/
+const KEY_PULLS_MAX = 20
+
+/**
+ * Jira 이슈 키(호출부에서 ABC-123 형식으로 검증)를 제목·본문에 담은 PR(최근 수정순 최대 20개).
+ * 검색 API 쿼리 언어를 쓰므로 저장소는 형식을 확인해 repo: 로 고정하고, 키는 따옴표로 감싸 한 낱말로만 찾는다.
+ */
+export async function searchPullsByKey(c: GitHubClient, r: Slug, key: string, signal?: AbortSignal): Promise<GhPullSummary[]> {
+  if (!SLUG_PART_RE.test(r.owner) || !SLUG_PART_RE.test(r.repo)) throw new Error('저장소 이름을 해석할 수 없습니다')
+  const res = await c.get<{ items?: RawIssue[] }>('/search/issues', {
+    query: { q: `repo:${r.owner}/${r.repo} is:pr "${key}"`, sort: 'updated', order: 'desc', per_page: KEY_PULLS_MAX },
+    ...(signal ? { signal } : {})
+  })
+  return (res.data.items ?? []).filter((i) => i.pull_request).map(mapSearchPull)
+}
+
 export async function getPull(c: GitHubClient, r: Slug, n: number, signal?: AbortSignal): Promise<GhPullDetail> {
   const o = signal ? { signal } : {}
   const pull = await c.get<RawPull>(`${repoPath(r)}/pulls/${n}`, { html: true, ...o })

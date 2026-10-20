@@ -2,6 +2,7 @@ import { shell, type IpcMainInvokeEvent } from 'electron'
 import type { IpcArgs, IpcChannel, IpcResult } from '@shared/ipc'
 import type { GitHubService } from '../github/service'
 import { allowedExternalUrl, parseAvatarAuthors, parseCheckShas, parseSha, parseId, parseListQuery, parseNumber, parsePage, parsePat, parseRunId } from '../github/validate'
+import { parseIssueKey } from '../jira/validate'
 import type { RepoService } from '../services/RepoService'
 
 /** handlers.ts 의 handle() 과 같은 모양 — 결과를 IpcEnvelope 로 감싸 등록하는 함수를 주입받는다 */
@@ -23,6 +24,7 @@ export function registerGithubIpc(handle: IpcHandle, gh: GitHubService, repos: R
   handle('gh:devicePoll', (_e, requestId) => gh.devicePoll(parseId(requestId, '요청 ID')))
   handle('gh:logout', () => gh.logout())
   handle('gh:pulls', (_e, repoId, query) => gh.pulls(parseId(repoId, '저장소 ID'), parseListQuery(query)))
+  handle('gh:pullsForKey', (_e, repoId, key) => gh.pullsForKey(parseId(repoId, '저장소 ID'), parseIssueKey(key)))
   handle('gh:pull', (_e, repoId, n) => gh.pull(parseId(repoId, '저장소 ID'), parseNumber(n)))
   handle('gh:pullFiles', (_e, repoId, n) => gh.pullFiles(parseId(repoId, '저장소 ID'), parseNumber(n)))
   handle('gh:pullCommits', (_e, repoId, n) => gh.pullCommits(parseId(repoId, '저장소 ID'), parseNumber(n)))

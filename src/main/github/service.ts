@@ -260,6 +260,11 @@ export class GitHubService {
     return this.data(repoId, (slug, signal) => api.listPulls(this.client, slug, query, signal))
   }
 
+  /** Jira 이슈 키를 언급한 PR */
+  pullsForKey(repoId: string, key: string): Promise<GhPullSummary[]> {
+    return this.data(repoId, (slug, signal) => api.searchPullsByKey(this.client, slug, key, signal))
+  }
+
   pull(repoId: string, n: number): Promise<GhPullDetail> {
     return this.data(repoId, (slug, signal) => api.getPull(this.client, slug, n, signal))
   }
