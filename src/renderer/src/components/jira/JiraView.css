@@ -13,6 +13,35 @@
   margin-right: var(--space-1);
 }
 
+/* 유형 아이콘: Jira 와 같은 색 네모(에픽 보라 · 작업 파랑 · 버그 빨강 · 스토리 초록 · 그 밖 회색) */
+.jira-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.jira-type > svg {
+  display: block;
+  flex-shrink: 0;
+}
+.jira-type__bg {
+  fill: #8c8c8c;
+}
+.jira-type--epic .jira-type__bg {
+  fill: #904ee2;
+}
+.jira-type--task .jira-type__bg {
+  fill: #4bade8;
+}
+.jira-type--bug .jira-type__bg {
+  fill: #e5493a;
+}
+.jira-type--story .jira-type__bg {
+  fill: #63ba3c;
+}
+
 /* 상태 칩: todo 회색 · active 정보색 · done 이끼 */
 .jira-status {
   flex-shrink: 0;
