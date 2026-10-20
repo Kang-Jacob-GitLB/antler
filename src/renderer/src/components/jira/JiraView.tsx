@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter, JiraStatusCategory } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
+import { formatAbsolute, initials } from '../../lib/format'
+import { fnv1a, laneVar, LANE_COUNT } from '../../lib/laneColor'
 import { useAppStore } from '../../stores/appStore'
 import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
 import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
+import { JiraDevPanel } from './JiraDevPanel'
 import { isoToEpoch, issueSub, JiraStatus, JiraType, statusCat } from './JiraBits'
 import '../github/GitHubView.css'
 import './JiraView.css'
@@ -250,6 +253,8 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
   const rel = useRelative()
   const cur = issue?.key === view.key ? issue : null
   const d = cur?.detail ?? null
+  const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
+  const jiraSite = siteUrl ? { jiraSite: siteUrl } : {}
 
   return (
     <>
@@ -269,35 +274,63 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
         )}
       </header>
 
-      {d && (
-        <div className="gh-meta jira-meta">
-          <JiraStatus name={d.status} category={d.statusCategory} />
-          <JiraType type={d.issueType} withName />
-          <Field label={t('jira.priority')} value={d.priority} />
-          <Field label={t('jira.assignee')} value={d.assignee || t('jira.unassigned')} />
-          <Field label={t('jira.reporter')} value={d.reporter} />
-          <span className="gh-muted">{t('jira.updatedAt', { when: rel(isoToEpoch(d.updated)) })}</span>
-        </div>
-      )}
       {cur?.error && <div className="gh-notice is-error">{cur.error}</div>}
 
-      <div className="gh-scroll">
+      {/* Jira 이슈 화면처럼: 왼쪽 = 설명 · 댓글(구역을 나눔), 오른쪽 = 세부 정보 · 개발(관련 커밋·PR) */}
+      <div className="gh-scroll jira-issue">
         {!d && !cur?.error && <div className="gh-notice">{t('list.loading')}</div>}
         {d && (
           <>
-            <article className="gh-comment">
-              {d.descriptionHtml ? <HtmlBody html={d.descriptionHtml} {...(siteUrl ? { jiraSite: siteUrl } : {})} /> : <p className="gh-muted">{t('gh.noDescription')}</p>}
-            </article>
-            {cur?.commentsError && <div className="gh-notice is-error">{cur.commentsError}</div>}
-            {cur?.comments?.map((c, n) => (
-              <article key={n} className="gh-comment">
-                <header className="gh-comment__head">
-                  <strong>{c.author}</strong>
-                  <span className="gh-comment__when">{rel(isoToEpoch(c.created))}</span>
-                </header>
-                <HtmlBody html={c.bodyHtml} {...(siteUrl ? { jiraSite: siteUrl } : {})} />
-              </article>
-            ))}
+            <div className="jira-issue__main">
+              <section className="jira-sec">
+                <h3 className="jira-sec__title">{t('jira.description')}</h3>
+                {d.descriptionHtml ? <HtmlBody html={d.descriptionHtml} {...jiraSite} /> : <p className="gh-muted">{t('gh.noDescription')}</p>}
+              </section>
+
+              <section className="jira-sec">
+                <h3 className="jira-sec__title">
+                  {t('jira.comments')}
+                  {cur?.comments && <span className="jira-cat__n">{cur.comments.length}</span>}
+                </h3>
+                {cur?.commentsError && <div className="gh-notice is-error">{cur.commentsError}</div>}
+                {!cur?.comments && !cur?.commentsError && <p className="gh-muted">{t('list.loading')}</p>}
+                {cur?.comments?.length === 0 && <p className="gh-muted">{t('jira.noComments')}</p>}
+                {cur?.comments?.map((c, n) => (
+                  <article key={n} className="jira-cmt">
+                    <NameAvatar name={c.author} />
+                    <div className="jira-cmt__main">
+                      <header className="jira-cmt__head">
+                        <strong>{c.author}</strong>
+                        <span className="gh-muted" title={formatAbsolute(isoToEpoch(c.created), locale)}>
+                          {rel(isoToEpoch(c.created))}
+                        </span>
+                      </header>
+                      <HtmlBody html={c.bodyHtml} {...jiraSite} />
+                    </div>
+                  </article>
+                ))}
+              </section>
+            </div>
+
+            <aside className="jira-issue__side">
+              <section className="jira-panel">
+                <h3 className="jira-panel__title">{t('jira.details')}</h3>
+                <dl className="jira-props">
+                  <Prop label={t('jira.status')}>
+                    <JiraStatus name={d.status} category={d.statusCategory} />
+                  </Prop>
+                  <Prop label={t('jira.type')}>
+                    <JiraType type={d.issueType} withName />
+                  </Prop>
+                  <Prop label={t('jira.priority')}>{d.priority}</Prop>
+                  <Prop label={t('jira.assignee')}>{d.assignee || <span className="gh-muted">{t('jira.unassigned')}</span>}</Prop>
+                  <Prop label={t('jira.reporter')}>{d.reporter}</Prop>
+                  <Prop label={t('jira.created')}>{d.created && formatAbsolute(isoToEpoch(d.created), locale)}</Prop>
+                  <Prop label={t('jira.updated')}>{d.updated && formatAbsolute(isoToEpoch(d.updated), locale)}</Prop>
+                </dl>
+              </section>
+              <JiraDevPanel issueKey={view.key} />
+            </aside>
           </>
         )}
       </div>
@@ -305,11 +338,22 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
   )
 }
 
-function Field({ label, value }: { label: string; value: string }): React.JSX.Element | null {
-  if (!value) return null
+/** 세부 정보 한 줄(값이 없으면 줄째 생략) */
+function Prop({ label, children }: { label: string; children: React.ReactNode }): React.JSX.Element | null {
+  if (children === '' || children === null || children === undefined || children === false) return null
   return (
-    <span className="jira-field">
-      <span className="gh-muted">{label}</span> {value}
+    <>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </>
+  )
+}
+
+/** 이름만 아는 사람(Jira 댓글 작성자)의 이니셜 아바타. 색은 이름으로 정한다 */
+function NameAvatar({ name }: { name: string }): React.JSX.Element {
+  return (
+    <span className="avatar jira-cmt__avatar" style={{ '--avatar': laneVar(fnv1a(name) % LANE_COUNT) } as React.CSSProperties} aria-hidden="true">
+      {initials(name)}
     </span>
   )
 }

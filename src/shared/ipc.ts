@@ -99,6 +99,8 @@ export interface IpcContract {
   'gh:devicePoll': { args: [requestId: string]; result: GhAuthState }
   'gh:logout': { args: []; result: GhAuthState }
   'gh:pulls': { args: [repoId: string, query: GhListQuery]; result: GhListResult<GhPullSummary> }
+  /** Jira 이슈 키(ABC-123)를 제목·본문에 담은 PR */
+  'gh:pullsForKey': { args: [repoId: string, key: string]; result: GhPullSummary[] }
   'gh:pull': { args: [repoId: string, number: number]; result: GhPullDetail }
   'gh:pullFiles': { args: [repoId: string, number: number]; result: GhPullFile[] }
   'gh:pullCommits': { args: [repoId: string, number: number]; result: GhCommitSummary[] }
@@ -225,6 +227,7 @@ export const IPC_CHANNELS = [
   'gh:devicePoll',
   'gh:logout',
   'gh:pulls',
+  'gh:pullsForKey',
   'gh:pull',
   'gh:pullFiles',
   'gh:pullCommits',

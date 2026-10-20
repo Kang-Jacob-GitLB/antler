@@ -64,12 +64,189 @@
   background: color-mix(in srgb, var(--added) 20%, transparent);
 }
 
-.jira-meta {
-  flex-wrap: wrap;
-  row-gap: var(--space-1);
+/* ── 이슈 상세: 왼쪽 본문(설명·댓글) + 오른쪽 세부 정보·개발. 좁으면 한 줄로 쌓는다 ── */
+.jira-view {
+  container-type: inline-size;
 }
-.jira-field {
+.jira-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+.jira-issue__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1;
+  min-width: 0;
+  max-width: 860px;
+}
+.jira-issue__side {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 0 0 300px;
+  min-width: 0;
+}
+/* 화면 폭이 좁으면 세부 정보를 위로 올려 한 줄로 쌓는다 */
+@container (max-width: 760px) {
+  .jira-issue {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .jira-issue__side {
+    position: static;
+    flex-basis: auto;
+  }
+}
+
+.jira-sec__title,
+.jira-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 var(--space-2);
   font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.jira-sec__title {
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+/* 댓글: 아바타 + (이름 · 시각 / 본문), 댓글 사이 구분선 */
+.jira-cmt {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+}
+.jira-cmt + .jira-cmt {
+  border-top: 1px solid var(--border);
+}
+.jira-cmt__avatar {
+  width: 28px;
+  height: 28px;
+  font-size: var(--fs-xs);
+}
+.jira-cmt__main {
+  flex: 1;
+  min-width: 0;
+}
+.jira-cmt__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  font-size: var(--fs-sm);
+}
+
+/* 오른쪽 패널: 테두리 상자, 세부 정보는 이름/값 두 칸 */
+.jira-panel {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.jira-props {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.jira-props dt {
+  color: var(--text-muted);
+}
+.jira-props dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.jira-props dd > .jira-status {
+  display: inline-block;
+}
+
+/* 개발 패널: 이 이슈를 언급한 PR · 커밋(지금 연 저장소 기준) */
+.jira-dev__repo {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.jira-dev__group + .jira-dev__group {
+  margin-top: var(--space-3);
+}
+.jira-dev__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--space-1);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.jira-dev__group > .gh-muted {
+  margin: 0;
+  font-size: var(--fs-xs);
+}
+.jira-dev__error {
+  overflow-wrap: anywhere;
+}
+.jira-dev__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 5px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.jira-dev__row:hover {
+  background: var(--row-hover);
+}
+.jira-dev__row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.jira-dev__row > svg,
+.jira-dev__sha {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.jira-dev__sha {
+  font-size: var(--fs-xs);
+  color: var(--accent-text);
+}
+.jira-dev__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.jira-dev__main,
+.jira-dev__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jira-dev__main {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+}
+.jira-dev__sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
 }
 
 .jira-jql {
