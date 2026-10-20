@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { BlameCommit, BlameResult, FileHistoryEntry, FileStatus } from '@shared/types'
 import { useT } from '../i18n'
-import { formatDate } from '../lib/format'
+import { DateText } from './DateText'
 import { useAppStore } from '../stores/appStore'
 import { useFileViewStore, type FileViewTab } from '../stores/fileViewStore'
 import { useLogStore } from '../stores/logStore'
@@ -76,7 +76,9 @@ const EntryRow = memo(function EntryRow({ entry, active, locale, onPick }: { ent
         <div className="fh-entry__meta">
           <span className="mono">{shortHash(entry.hash)}</span>
           <span className="fh-entry__author">{entry.authorName}</span>
-          <span>{formatDate(entry.authorDate, locale)}</span>
+          <span>
+            <DateText epochSec={entry.authorDate} locale={locale} />
+          </span>
         </div>
       </div>
     </div>
@@ -149,7 +151,9 @@ function HistoryPane(): React.JSX.Element {
                 <div className="fh-detail__meta">
                   <span className="mono selectable">{shortHash(selected.hash)}</span>
                   <span className="selectable">{selected.authorName}</span>
-                  <span>{formatDate(selected.authorDate, locale)}</span>
+                  <span>
+                    <DateText epochSec={selected.authorDate} locale={locale} />
+                  </span>
                   {selected.oldPath && <span className="fh-detail__rename">{t('fileView.renamedFrom', { from: selected.oldPath })}</span>}
                 </div>
               </div>
@@ -217,7 +221,9 @@ function BlameGutter({ commit, locale }: { commit: BlameCommit; locale: 'ko' | '
     >
       <span className="bl-gutter__hash mono">{shortHash(commit.hash)}</span>
       <span className="bl-gutter__author">{commit.authorName}</span>
-      <span className="bl-gutter__date">{formatDate(commit.authorDate, locale)}</span>
+      <span className="bl-gutter__date">
+        <DateText epochSec={commit.authorDate} locale={locale} />
+      </span>
     </button>
   )
 }

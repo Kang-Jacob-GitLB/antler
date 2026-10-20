@@ -5,7 +5,7 @@ import { parsePrNumber } from '@shared/prNumber'
 import { api } from '../lib/api'
 import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
-import { formatDate } from '../lib/format'
+import { DateText } from './DateText'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { isHidden } from '../lib/refView'
 import { useAppStore } from '../stores/appStore'
@@ -202,7 +202,9 @@ const Row = memo(function Row({
         <AuthorAvatar email={commit.authorEmail} name={commit.authorName} size={18} />
         <span className="cell__text">{commit.authorName}</span>
       </div>
-      <div className="cell cell--date">{formatDate(commit.authorDate, locale)}</div>
+      <div className="cell cell--date">
+        <DateText epochSec={commit.authorDate} locale={locale} />
+      </div>
       <div className="cell cell--sha mono">{commit.hash.slice(0, 7)}</div>
     </div>
   )
