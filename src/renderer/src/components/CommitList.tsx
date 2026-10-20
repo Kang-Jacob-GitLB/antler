@@ -2,7 +2,6 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Commit, Locale, RefLabel } from '@shared/types'
 import { parsePrNumber } from '@shared/prNumber'
-import { api } from '../lib/api'
 import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
 import { DateText } from './DateText'
@@ -125,12 +124,12 @@ const RefChip = ({ chip, filterTitle }: { chip: Chip; filterTitle: string }): Re
 /** 검색 중 행 표시: 일치(match) / 불일치(dim) / 검색 아님(none) */
 type SearchMark = 'match' | 'current' | 'dim' | 'none'
 
-/** PR 열: 제목에서 읽은 번호. GitHub remote 가 있으면 PR 페이지로 가는 링크 칩, 없으면 그냥 글자 */
-function PrCell({ n, base, label }: { n: number | null; base: string | null; label: string }): React.JSX.Element {
+/** PR 열: 제목에서 읽은 번호. GitHub remote 가 있으면 앱 안의 PR 화면을 여는 칩(GitHub 로 가는 버튼은 그 화면에 있다), 없으면 그냥 글자 */
+function PrCell({ n, linkable, label }: { n: number | null; linkable: boolean; label: string }): React.JSX.Element {
   return (
     <div className="cell cell--pr">
       {n !== null &&
-        (base ? (
+        (linkable ? (
           <button
             type="button"
             className="pr-chip mono"
@@ -138,7 +137,7 @@ function PrCell({ n, base, label }: { n: number | null; base: string | null; lab
             aria-label={label}
             // 행 선택(mousedown)으로 번지지 않게 하고, 키보드로도 누를 수 있게 버튼으로 둔다
             onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => void api.invoke('gh:openExternal', `${base}${n}`).catch(() => {})}
+            onClick={() => useGithubStore.getState().show({ kind: 'pull', number: n, tab: 'conversation' })}
           >
             #{n}
           </button>
@@ -157,7 +156,7 @@ const Row = memo(function Row({
   mark,
   compared,
   showPr,
-  prBase,
+  prLinkable,
   onSelect
 }: {
   commit: Commit
@@ -168,8 +167,8 @@ const Row = memo(function Row({
   /** 두 커밋 비교에서 선택 행과 짝이 되는 행 */
   compared: boolean
   showPr: boolean
-  /** `https://github.com/o/r/pull/` — GitHub remote 가 없으면 null */
-  prBase: string | null
+  /** GitHub remote 가 있어 PR 화면을 열 수 있는지 */
+  prLinkable: boolean
   onSelect(i: number, e: React.MouseEvent): void
 }) {
   const t = useT()
@@ -197,7 +196,7 @@ const Row = memo(function Row({
         <span className="commit-subject">{commit.subject}</span>
         <CommitCheck hash={commit.hash} />
       </div>
-      {showPr && <PrCell n={pr} base={prBase} label={pr === null ? '' : t('pr.open', { n: pr })} />}
+      {showPr && <PrCell n={pr} linkable={prLinkable} label={pr === null ? '' : t('pr.open', { n: pr })} />}
       <div className="cell cell--author">
         <AuthorAvatar email={commit.authorEmail} name={commit.authorName} size={18} />
         <span className="cell__text">{commit.authorName}</span>
@@ -290,7 +289,6 @@ export function CommitList(): React.JSX.Element {
   const ghRef = useGithubStore((s) => s.ref)
   const anyPr = useMemo(() => commits.some((c) => parsePrNumber(c.subject) !== null), [commits])
   const showPr = !!ghRef || anyPr
-  const prBase = ghRef ? `https://github.com/${encodeURIComponent(ghRef.owner)}/${encodeURIComponent(ghRef.repo)}/pull/` : null
   const showWip = wipDirtyNow && solo.length === 0 && commits.length > 0
   const wipOff = showWip ? ROW_H : 0
   const wipOn = showWip && wipSelected
@@ -447,7 +445,7 @@ export function CommitList(): React.JSX.Element {
                     mark={markOf(commit)}
                     compared={!!compareHash && commit.hash === compareHash}
                     showPr={showPr}
-                    prBase={prBase}
+                    prLinkable={!!ghRef}
                     onSelect={selectCommit}
                   />
                 ) : (
