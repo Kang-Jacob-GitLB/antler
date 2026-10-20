@@ -66,6 +66,10 @@ export interface UiPrefs {
   jiraProjectKeys?: string[]
   /** 연결한 Jira 사이트(origin+경로)별 저장 필터·최근 본 이슈. 연결을 해제하면 그 사이트 항목을 지운다 */
   jiraSites?: Record<string, JiraSiteData>
+  /** Jira 목록 보기 방식(없으면 줄) */
+  jiraLayout?: 'list' | 'board'
+  /** Jira 목록에서 숨길 상태 분류(statusCategory). 없으면 전부 보인다 */
+  jiraHiddenCategories?: JiraStatusCategory[]
   /** Launchpad 고정(핀) 항목 키(`owner/repo#번호` 또는 `jira:KEY`). 맨 위에 보인다 */
   launchpadPins?: string[]
   /** Launchpad 스누즈: 항목 키 → 숨김이 끝나는 시각(epoch ms) */
@@ -91,6 +95,9 @@ export interface ExternalOpenRequest {
   /** 저장소 루트 기준 상대 경로. 없으면 저장소 루트 */
   path?: string
 }
+
+/** Jira 상태 분류(statusCategory.key): 할 일 · 진행 중 · 완료 */
+export type JiraStatusCategory = 'new' | 'indeterminate' | 'done'
 
 export interface JiraSiteData {
   filters?: JiraSavedFilter[]

@@ -1,11 +1,17 @@
 // Jira 화면 공용 조각
-import type { JiraIssueSummary } from '@shared/types'
+import type { JiraIssueSummary, JiraStatusCategory } from '@shared/types'
 import './JiraView.css'
+
+/** 상태 분류. Jira 가 모르는 값(undefined 등)을 주면 '할 일'로 본다 */
+export function statusCat(category: string): JiraStatusCategory {
+  return category === 'done' || category === 'indeterminate' ? category : 'new'
+}
 
 /** 상태 칩. statusCategory(new | indeterminate | done)로 색을 정한다 */
 export function JiraStatus({ name, category }: { name: string; category: string }): React.JSX.Element | null {
   if (!name) return null
-  const tone = category === 'done' ? 'done' : category === 'indeterminate' ? 'active' : 'todo'
+  const cat = statusCat(category)
+  const tone = cat === 'done' ? 'done' : cat === 'indeterminate' ? 'active' : 'todo'
   return <span className={`jira-status jira-status--${tone}`}>{name}</span>
 }
 
