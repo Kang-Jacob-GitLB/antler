@@ -109,6 +109,53 @@ describe('RepoService.addRepo (local)', () => {
   })
 })
 
+describe('RepoService.scanRepos / addRepos (local)', { timeout: 30_000 }, () => {
+  /** parent/{b(저장소), a(저장소), plain, .hidden(저장소)} */
+  function makeParent(): string {
+    const parent = mkdtempSync(join(root, 'parent-'))
+    for (const name of ['b', 'a', '.hidden']) {
+      mkdirSync(join(parent, name))
+      execFileSync('git', ['init', '-q', join(parent, name)], { stdio: 'ignore' })
+    }
+    mkdirSync(join(parent, 'plain'))
+    return parent
+  }
+
+  it('저장소가 아닌 폴더는 바로 아래 저장소들을 이름순으로 찾고, 숨김 폴더와 일반 폴더는 뺀다', async () => {
+    const { svc } = setup()
+    const parent = makeParent()
+    const r = await svc.scanRepos({ kind: 'local', path: parent })
+    expect(r.isRepo).toBe(false)
+    expect(r.truncated).toBe(false)
+    expect(r.repos).toEqual([
+      { name: 'a', path: join(parent, 'a') },
+      { name: 'b', path: join(parent, 'b') }
+    ])
+  })
+
+  it('고른 폴더 자체가 저장소면 isRepo 로 알리고 하위는 보지 않는다', async () => {
+    const { svc } = setup()
+    const r = await svc.scanRepos({ kind: 'local', path: repoPath })
+    expect(r.isRepo).toBe(true)
+    expect(r.repos).toEqual([])
+    // 저장소 안의 하위 폴더도 저장소로 본다(그 안의 중첩 저장소 목록을 띄우지 않는다)
+    const sub = join(repoPath, 'libs')
+    mkdirSync(join(sub, 'nested'), { recursive: true })
+    execFileSync('git', ['init', '-q', join(sub, 'nested')], { stdio: 'ignore' })
+    expect((await svc.scanRepos({ kind: 'local', path: sub })).isRepo).toBe(true)
+  })
+
+  it('여러 경로를 한 번에 추가하고, 실패한 경로는 나머지를 막지 않고 따로 돌려준다', async () => {
+    const { svc } = setup()
+    const parent = makeParent()
+    const res = await svc.addRepos({ kind: 'local', paths: [join(parent, 'a'), join(parent, 'plain'), join(parent, 'b')], group: '묶음' })
+    expect(res.added.map((r) => r.name)).toEqual(['a', 'b'])
+    expect(res.added.every((r) => r.group === '묶음')).toBe(true)
+    expect(res.failed.map((f) => f.path)).toEqual([join(parent, 'plain')])
+    expect(res.failed[0]?.error).toBeTruthy()
+  })
+})
+
 describe('ConfigStore', () => {
   it('손상된 설정 파일은 .bak 으로 보존하고 기본값으로 시작한다', () => {
     const dir = mkdtempSync(join(root, 'cfg-bad-'))

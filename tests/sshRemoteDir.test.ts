@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { SshExecutor } from '../src/main/executors/SshExecutor'
+import { scanFromListing } from '../src/main/services/repoScan'
 import { knownHostsLine, makeHome, newKeyPair, startServer, type SshEnv, type TestServer } from './sshHarness'
 
 const clientKey = newKeyPair()
@@ -34,6 +35,29 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server.close()
+})
+
+describe('scanFromListing (SSH 폴더 안 저장소 찾기)', () => {
+  it('원격 폴더 바로 아래의 저장소를 절대 경로로 돌려주고, 폴더 자체가 저장소면 하위는 비운다', async () => {
+    const ex = executor()
+    try {
+      expect(scanFromListing(await ex.listDirs('~/work'))).toEqual({
+        path: '/home/tester/work',
+        isRepo: false,
+        repos: [{ name: 'app', path: '/home/tester/work/app' }],
+        truncated: false
+      })
+      expect(scanFromListing(await ex.listDirs('~/work/app'))).toMatchObject({ isRepo: true, repos: [] })
+    } finally {
+      await ex.dispose()
+    }
+  })
+
+  it('저장소 여부를 확인하지 못한 폴더가 있으면 truncated 로 알린다', () => {
+    const r = scanFromListing({ path: '/w', parent: '/', isRepo: false, dirs: [{ name: 'a', isRepo: true }, { name: 'b' }], truncated: false })
+    expect(r.repos).toEqual([{ name: 'a', path: '/w/a' }])
+    expect(r.truncated).toBe(true)
+  })
 })
 
 describe('SshExecutor.listDirs (SFTP)', () => {

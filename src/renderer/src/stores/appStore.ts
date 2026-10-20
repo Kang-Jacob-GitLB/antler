@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type {
   AddRepoInput,
+  AddReposInput,
+  AddReposResult,
   AppConfig,
   HeadInfo,
   Locale,
@@ -35,6 +37,8 @@ interface AppState {
   /** 저장소 추가 대화상자 */
   openAddDialog(open?: boolean): void
   addRepo(input: AddRepoInput): Promise<void>
+  /** 같은 환경의 여러 저장소를 한 번에 추가하고 첫 저장소를 연다. 실패한 경로는 결과로 돌려준다 */
+  addRepos(input: AddReposInput): Promise<AddReposResult>
   updateRepo(id: string, patch: RepoPatch): Promise<void>
   removeRepo(id: string): Promise<void>
   setUi(patch: Partial<UiPrefs>): Promise<void>
@@ -129,6 +133,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     const config = await api.invoke('config:get')
     set({ config })
     get().selectRepo(repo.id)
+  },
+
+  async addRepos(input) {
+    const result = await api.invoke('repos:addMany', input)
+    const first = result.added[0]
+    if (first) {
+      const config = await api.invoke('config:get')
+      set({ config })
+      get().selectRepo(first.id)
+    }
+    return result
   },
 
   async updateRepo(id, patch) {

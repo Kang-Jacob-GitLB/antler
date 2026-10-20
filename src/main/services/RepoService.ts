@@ -1,7 +1,10 @@
 import type {
   AddRepoInput,
+  AddReposInput,
+  AddReposResult,
   CommitActivity,
   RemoteDirListing,
+  RepoScanResult,
   CommitDetail,
   CompareResult,
   RefsDetails,
@@ -26,12 +29,13 @@ import type {
   WipStatus
 } from '@shared/types'
 import { scopeKey } from '@shared/logScope'
-import { AbortError, type GitExecutor } from '../executors/GitExecutor'
+import { AbortError, GitError, type GitExecutor } from '../executors/GitExecutor'
 import { LocalExecutor } from '../executors/LocalExecutor'
 import { ProcessQueue } from '../executors/ProcessQueue'
 import { SshExecutor } from '../executors/SshExecutor'
+import { SftpUnavailableError } from '../executors/ssh/remoteDir'
 import { WslExecutor } from '../executors/WslExecutor'
-import { wslFromUnc } from '../executors/wslPaths'
+import { uncFromWsl, wslFromUnc } from '../executors/wslPaths'
 import { commitActivity } from '../git/activity'
 import * as git from '../git/commands'
 import * as fileInsight from '../git/fileInsight'
@@ -41,6 +45,7 @@ import * as wip from '../git/wip'
 import { pickGithubRemote, pickGithubRemotes } from '../github/remoteUrl'
 import { LOCAL_SOURCE_ID, sourceFor, type ConfigStore } from './ConfigStore'
 import { LruCache } from './lru'
+import { scanFromListing, scanLocalRepos } from './repoScan'
 
 /** 환경별 동시 git 프로세스 상한(LogCursor 는 저장소당 하나라 큐 밖에서 돈다) */
 const CONCURRENCY: Record<SourceKind, number> = { local: 6, wsl: 4, ssh: 4 }
@@ -163,31 +168,86 @@ export class RepoService {
    * 9P 파일 공유를 거치지 않아 빠르고 줄바꿈·권한이 정확하다).
    */
   async addRepo(input: AddRepoInput): Promise<Repo> {
-    let { kind, path } = input
-    let target = kind === 'wsl' ? input.distro : kind === 'ssh' ? input.sshHost?.trim() : undefined
-    path = path.trim()
-    if (kind === 'local' || kind === 'wsl') {
-      const unc = wslFromUnc(path)
-      if (unc) {
-        kind = 'wsl'
-        target = unc.distro
-        path = unc.path
-      }
-    }
-    if (!path) throw new Error('경로를 입력하세요')
-    const source = sourceFor(kind, target)
+    const env = resolveEnv(input)
+    if (!env.path) throw new Error('경로를 입력하세요')
+    const source = sourceFor(env.kind, env.target)
     // 처음 써 보는 원격 환경이 실패하면 연결을 남기지 않는다(성공하면 소스가 저장돼 계속 쓴다)
     const rt = this.holdRuntime(source)
     try {
-      const top = await rt.queue.run(() => git.resolveTopLevel(rt.exec, remoteRelative(kind, path)))
+      const top = await rt.queue.run(() => git.resolveTopLevel(rt.exec, remoteRelative(env.kind, env.path)))
       // Windows git 은 C:/a/b 형식으로 돌려주므로 사용자가 고른 표기(역슬래시)로 맞춘다
-      const normalized = kind === 'local' && process.platform === 'win32' ? top.replace(/\//g, '\\') : top
+      const normalized = env.kind === 'local' && process.platform === 'win32' ? top.replace(/\//g, '\\') : top
       const name = normalized.split(/[\\/]/).filter(Boolean).pop() ?? normalized
       const group = input.group?.trim()
       const repo = this.config.addRepo({ sourceId: source.id, path: normalized, name, ...(group ? { group } : {}) }, source)
       // 이미 등록된 저장소를 다시 추가하면서 그룹을 골랐으면 그 그룹으로 옮긴다(조용히 버리지 않는다)
       if (group && repo.group !== group) this.config.updateRepo(repo.id, { group })
       return this.config.repo(repo.id) ?? repo
+    } finally {
+      this.dropRuntime(source.id)
+    }
+  }
+
+  /**
+   * 같은 환경의 여러 경로를 차례로 추가한다(폴더 안 저장소 찾기 뒤). 하나가 실패해도 나머지는 추가하고 실패 목록을 돌려준다.
+   * 묶음 동안 런타임을 잡아 두어, 처음 쓰는 원격 환경에서 앞쪽 경로가 실패해도 연결을 매번 다시 맺지 않는다.
+   */
+  async addRepos(input: AddReposInput): Promise<AddReposResult> {
+    const { paths, ...rest } = input
+    const added: Repo[] = []
+    const failed: AddReposResult['failed'] = []
+    const first = paths[0]
+    if (first === undefined) return { added, failed }
+    const env = resolveEnv({ ...rest, path: first })
+    const source = sourceFor(env.kind, env.target)
+    this.holdRuntime(source)
+    try {
+      for (const path of paths) {
+        try {
+          const repo = await this.addRepo({ ...rest, path })
+          if (!added.some((r) => r.id === repo.id)) added.push(repo)
+        } catch (err) {
+          failed.push({ path, error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+    } finally {
+      this.dropRuntime(source.id)
+    }
+    return { added, failed }
+  }
+
+  /**
+   * 고른 폴더가 저장소(작업 트리 안)인지 git 으로 확인하고, 아니면 바로 아래 하위 폴더 중 저장소(.git 이 있는 폴더)를 찾는다.
+   * 읽기 전용이다. 로컬·WSL 은 파일 시스템(WSL 은 \\wsl.localhost 공유)으로, SSH 는 SFTP 폴더 목록으로 읽는다.
+   */
+  async scanRepos(input: Omit<AddRepoInput, 'group'>): Promise<RepoScanResult> {
+    const path = input.path.trim()
+    const env = resolveEnv(input)
+    const source = sourceFor(env.kind, env.target)
+    const rt = this.holdRuntime(source)
+    try {
+      // 저장소 안의 하위 폴더(서브모듈이 든 폴더 등)를 골랐을 때 하위 저장소 목록 대신 그 저장소를 추가하게 한다
+      const inside = await rt.queue
+        .run(() => git.resolveTopLevel(rt.exec, remoteRelative(env.kind, env.path)))
+        .then(
+          () => true,
+          (err: unknown) => {
+            if (err instanceof GitError) return false
+            throw err
+          }
+        )
+      if (inside) return { path, isRepo: true, repos: [], truncated: false }
+      if (env.kind === 'ssh') {
+        try {
+          return scanFromListing(await this.listRemoteDir(env.target ?? '', env.path))
+        } catch (err) {
+          // SFTP 를 막은 서버는 찾기 없이 그 경로를 그대로 추가하게 둔다
+          if (err instanceof SftpUnavailableError) return { path, isRepo: false, repos: [], truncated: false }
+          throw err
+        }
+      }
+      // WSL 은 공유 경로로 읽는다(결과도 공유 경로 — addRepo 가 WSL 경로로 바꾼다)
+      return await scanLocalRepos(env.kind === 'wsl' && !wslFromUnc(path) ? uncFromWsl(env.target ?? '', env.path) : path)
     } finally {
       this.dropRuntime(source.id)
     }
@@ -748,6 +808,20 @@ export class RepoService {
     }
     return rt
   }
+}
+
+/**
+ * 입력의 환경과 경로를 정한다. 로컬·WSL 로 고른 경로가 \\wsl.localhost\… 같은 WSL 공유 경로면 WSL 저장소로 바꾼다(WSL 안에서
+ * git 을 돌려야 9P 파일 공유를 거치지 않아 빠르고 줄바꿈·권한이 정확하다).
+ */
+function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; target?: string; path: string } {
+  const path = input.path.trim()
+  if (input.kind === 'local' || input.kind === 'wsl') {
+    const unc = wslFromUnc(path)
+    if (unc) return { kind: 'wsl', target: unc.distro, path: unc.path }
+  }
+  const target = input.kind === 'wsl' ? input.distro : input.kind === 'ssh' ? input.sshHost?.trim() : undefined
+  return { kind: input.kind, target, path }
 }
 
 function createExecutor(source: Source): GitExecutor {

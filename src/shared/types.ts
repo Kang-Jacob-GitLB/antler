@@ -685,6 +685,29 @@ export interface AddRepoInput {
   group?: string
 }
 
+/** 여러 저장소를 한 번에 추가한다. 환경(kind·distro·sshHost)과 그룹은 모두 같다 */
+export interface AddReposInput extends Omit<AddRepoInput, 'path'> {
+  paths: string[]
+}
+
+export interface AddReposResult {
+  added: Repo[]
+  /** 추가하지 못한 경로와 이유. 나머지는 그대로 추가된다 */
+  failed: { path: string; error: string }[]
+}
+
+/** 고른 폴더 안의 저장소 찾기 결과. 바로 아래 하위 폴더만 본다 */
+export interface RepoScanResult {
+  /** 찾은 폴더(SSH 는 원격의 절대 경로, 그 밖은 고른 표기 그대로) */
+  path: string
+  /** 이 폴더 자체가 git 작업 트리다 — repos 는 비어 있다 */
+  isRepo: boolean
+  /** .git 이 있는 하위 폴더. path 는 addRepo 에 그대로 넘길 수 있는 표기다 */
+  repos: { name: string; path: string }[]
+  /** 항목이 너무 많아 일부만 확인했다 */
+  truncated: boolean
+}
+
 /** 원격 폴더 탐색 결과(SSH 저장소 추가 창). path 는 원격의 절대 경로 */
 export interface RemoteDirListing {
   path: string
