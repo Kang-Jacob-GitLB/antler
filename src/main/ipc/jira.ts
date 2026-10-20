@@ -9,6 +9,7 @@ export function registerJiraIpc(handle: IpcHandle, jira: JiraService): void {
   handle('jira:disconnect', () => jira.disconnect())
   handle('jira:issue', (_e, key, requestId) => jira.issue(key, typeof requestId === 'string' ? requestId : undefined))
   handle('jira:comments', (_e, key, requestId) => jira.comments(key, typeof requestId === 'string' ? requestId : undefined))
+  handle('jira:dev', (_e, key, requestId) => jira.devInfo(key, typeof requestId === 'string' ? requestId : undefined))
   handle('jira:search', (_e, query, requestId) => jira.search(query, typeof requestId === 'string' ? requestId : undefined))
   handle('jira:openExternal', async (_e, url) => {
     const href = jira.externalUrl(url)

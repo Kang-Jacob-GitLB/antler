@@ -1,6 +1,6 @@
 // Jira 연동의 진입점(읽기 전용). 자격 증명·연결 상태·API 클라이언트를 소유하고 IPC 계층에는 가공된 결과만 돌려준다.
 // 토큰은 이 객체 밖으로 나가지 않는다 — 반환값은 JiraAuthState(토큰 없음)와 API 응답을 변환한 공유 타입뿐이다.
-import type { JiraAuthState, JiraComment, JiraConnectInput, JiraIssueDetail, JiraSearchResult } from '@shared/types'
+import type { JiraAuthState, JiraComment, JiraConnectInput, JiraDevInfo, JiraIssueDetail, JiraSearchResult } from '@shared/types'
 import type { TokenStore } from '../github/tokenStore'
 import * as api from './api'
 import { JiraApiError, JiraClient, type JiraCredential, type SleepFn } from './client'
@@ -110,6 +110,12 @@ export class JiraService {
   async comments(key: unknown, requestId?: string): Promise<JiraComment[]> {
     const k = parseIssueKey(key)
     return this.data(requestId, (c, signal) => api.getComments(this.client, c, k, signal))
+  }
+
+  /** 개발 정보(Jira 의 GitHub 연동이 모은 PR·커밋). 연동이 없으면 available:false */
+  async devInfo(key: unknown, requestId?: string): Promise<JiraDevInfo> {
+    const k = parseIssueKey(key)
+    return this.data(requestId, (c, signal) => api.getDevInfo(this.client, c, k, signal))
   }
 
   async search(query: unknown, requestId?: string): Promise<JiraSearchResult> {

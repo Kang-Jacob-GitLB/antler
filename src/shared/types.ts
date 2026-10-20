@@ -981,6 +981,38 @@ export interface JiraSearchQuery {
   page?: number
 }
 
+/** Jira 개발 정보(dev-status): Jira 의 GitHub 연동이 이 이슈에 모아 둔 PR·커밋 */
+export interface JiraDevInfo {
+  /** 연동 정보를 읽었는지. 연동이 없거나 API 를 쓸 수 없으면 false — 화면은 git·GitHub 검색으로 대신한다 */
+  available: boolean
+  pulls: JiraDevPull[]
+  commits: JiraDevCommit[]
+}
+
+export interface JiraDevPull {
+  title: string
+  /** https 주소만(아니면 빈 문자열) */
+  url: string
+  state: 'open' | 'merged' | 'closed'
+  author: string
+  repo: string
+  branch: string
+  /** ISO 시각(모르면 빈 문자열) */
+  updated: string
+}
+
+export interface JiraDevCommit {
+  sha: string
+  /** 메시지 첫 줄 */
+  message: string
+  /** https 주소만(아니면 빈 문자열) */
+  url: string
+  author: string
+  repo: string
+  /** ISO 시각(모르면 빈 문자열) */
+  date: string
+}
+
 export interface JiraSearchResult {
   items: JiraIssueSummary[]
   /** 더 있으면 다음 요청에 넘길 표지(상한에 닿으면 없음) */
