@@ -25,8 +25,11 @@ const MAX_ERROR_LEN = 300
 export interface FetchOptions {
   /** 사용자가 새로고침을 눌렀다 — 위험 설정 확인 창을 띄울 수 있고, 인증 실패·백오프 상태를 풀고 다시 시도한다 */
   manual: boolean
-  /** 위험한 저장소 설정을 이번 세션에서 허용할지 사용자에게 묻는다(manual 일 때만 호출) */
-  confirm?: (repoId: string, items: { key: string; value: string }[]) => Promise<boolean>
+  /**
+   * 위험한 저장소 설정을 허용할지 사용자에게 묻는다(manual 일 때만 호출).
+   * true 는 이번 실행 동안, 'always' 는 같은 설정이 유지되는 한 이 저장소에서 계속(설정 파일에 지문을 남긴다)
+   */
+  confirm?: (repoId: string, items: { key: string; value: string }[]) => Promise<boolean | 'always'>
 }
 
 interface State {
@@ -39,7 +42,7 @@ interface State {
   failures: number
   needsManual: boolean
   fetching: boolean
-  /** 이번 세션에서 사용자가 허용한 위험 설정의 지문 */
+  /** 이번 실행에서 사용자가 허용한 위험 설정의 지문("항상 허용"은 ConfigStore.trustedConfig 에 따로 남는다) */
   accepted: string | null
 }
 
@@ -181,6 +184,11 @@ export class FetchService {
     return s
   }
 
+  /** 위험 설정 지문을 사용자가 허용했는가(이번 실행 동안, 또는 이 저장소에서 항상) */
+  private accepted(repoId: string, fingerprint: string): boolean {
+    return this.state(repoId).accepted === fingerprint || this.config.trustedConfig(repoId) === fingerprint
+  }
+
   private autoEnabled(repoId: string): boolean {
     const s = this.state(repoId)
     return this.minutes() > 0 && !s.blocked && !s.authPaused && !s.noRemote
@@ -237,12 +245,21 @@ export class FetchService {
             s.blocked = { keys: ins.forbidden.map((f) => `${f.key} (${f.reason})`), confirmable: false }
             return false
           }
-          if (ins.dangerous.length > 0 && s.accepted !== ins.fingerprint) {
-            if (!opts.manual || !opts.confirm || !(await opts.confirm(repoId, ins.dangerous))) {
+          if (ins.dangerous.length > 0 && !this.accepted(repoId, ins.fingerprint)) {
+            const answer = opts.manual && opts.confirm ? await opts.confirm(repoId, ins.dangerous) : false
+            if (!answer) {
               s.blocked = { keys: ins.dangerous.map((d) => d.key), confirmable: true }
               return false
             }
             s.accepted = ins.fingerprint
+            // 확인 창이 떠 있는 동안 저장소를 지웠으면 남기지 않는다. 저장에 실패해도 이번 실행 동안의 허용으로 계속한다
+            if (answer === 'always' && this.config.repo(repoId)) {
+              try {
+                this.config.setTrustedConfig(repoId, ins.fingerprint)
+              } catch {
+                /* 다음 실행에서 다시 묻는다 */
+              }
+            }
           }
           // 검사와 실행 사이에 설정이 바뀌었을 수 있다(TOCTOU) — 실행 직전에 다시 검사해 달라졌으면 멈춘다
           const again = await inspectConfig(exec, path, { signal })
@@ -250,7 +267,7 @@ export class FetchService {
             s.blocked = { keys: again.forbidden.map((f) => `${f.key} (${f.reason})`), confirmable: false }
             return false
           }
-          if (again.dangerous.length > 0 && again.fingerprint !== s.accepted) {
+          if (again.dangerous.length > 0 && !this.accepted(repoId, again.fingerprint)) {
             s.blocked = { keys: again.dangerous.map((d) => d.key), confirmable: true }
             return false
           }

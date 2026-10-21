@@ -215,6 +215,11 @@ export interface AppConfig {
    * 자동 fetch 가 자격 증명 도우미를 쓴다. renderer 는 바꿀 수 없다(config:setUi·repos:update 는 이 키를 받지 않는다)
    */
   fetchApprovals?: Record<string, string>
+  /**
+   * main 전용: fetch 확인 창에서 "이 저장소에서 항상 허용"을 고른 허용 목록 밖 설정의 지문(저장소별). 설정이 바뀌면 지문이 달라져
+   * 다시 묻는다. renderer 는 바꿀 수 없다
+   */
+  trustedConfigs?: Record<string, string>
   /** main 전용: 마지막 창 위치·크기(최대화 전 크기)와 최대화 여부. 다음 실행 때 그대로 연다 */
   window?: WindowState
 }

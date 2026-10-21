@@ -11,7 +11,7 @@ import type { FetchStatus } from '../src/shared/types'
 import { wslArgv } from '../src/main/executors/WslExecutor'
 import { buildRemoteCommand } from '../src/main/executors/ssh/quote'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
-import { GitError } from '../src/main/executors/GitExecutor'
+import { GitError, type GitExecutor, type RunOpts } from '../src/main/executors/GitExecutor'
 import { MAX_STDERR, runProcess, stderrCollector, streamProcess } from '../src/main/executors/processRunner'
 import { display, formatItem, MAX_CONFIRM_ITEMS, quoteForDisplay } from '../src/main/ipc/confirmText'
 import {
@@ -27,6 +27,7 @@ import {
   nextDelayMs,
   parseConfigList,
   parseGitVersion,
+  parseScopedConfigList,
   resolveSshCommand,
   unsafeRemoteUrl,
   versionAtLeast
@@ -46,6 +47,15 @@ describe('설정 검사(순수 함수)', () => {
       { scope: 'local', key: 'core.bare', value: null },
       { scope: 'worktree', key: 'remote.o.url', value: 'u\nrl' }
     ])
+  })
+
+  it('--show-scope 없는 git config --<scope> --list -z 출력을 호출자가 정한 scope 로 파싱한다', () => {
+    expect(parseScopedConfigList('core.bare\0Core.SshCommand\nssh -i x\0remote.o.url\nu\nrl\0', 'local')).toEqual([
+      { scope: 'local', key: 'core.bare', value: null },
+      { scope: 'local', key: 'core.sshcommand', value: 'ssh -i x' },
+      { scope: 'local', key: 'remote.o.url', value: 'u\nrl' }
+    ])
+    expect(parseScopedConfigList('', 'global')).toEqual([])
   })
 
   // 허용 목록 모델: 목록에 없는 키는 전부 "알 수 없는 설정"이다
@@ -446,6 +456,45 @@ describe('악성 저장소 설정', () => {
     expect(existsSync(marker)).toBe(false)
   })
 
+  it('"항상 허용"은 앱을 다시 켜도(새 FetchService) 묻지 않고, 설정이 바뀌면 다시 묻고, 저장소를 지우면 사라진다', async () => {
+    const { repo, pushCommit } = makeRepos()
+    git(repo, 'config', 'protocol.ext.allow', 'never')
+    const { fetcher: first, repoId, config } = setup(repo)
+    let asked = 0
+    const always = async (): Promise<'always'> => {
+      asked++
+      return 'always'
+    }
+    expect((await first.fetch(repoId, { manual: true, confirm: always })).blocked).toBeNull()
+    expect(asked).toBe(1)
+    first.dispose()
+
+    // 다시 켠 앱: 확인 없이 자동 fetch 까지 통과한다(file remote 라 자동 fetch 는 전송 정책에서만 실패한다)
+    const second = new FetchService(config, svc!, () => {}, () => {}, noHooks)
+    fetcher = second
+    const sha = pushCommit('second')
+    expect((await second.fetch(repoId, { manual: false })).blocked).toBeNull()
+    const never = async (): Promise<boolean> => {
+      asked++
+      return false
+    }
+    expect((await second.fetch(repoId, { manual: true, confirm: never })).blocked).toBeNull()
+    expect(git(repo, 'rev-parse', 'origin/main')).toBe(sha)
+    expect(asked).toBe(1)
+
+    // 설정이 바뀌면 지문이 달라져 다시 묻는다
+    git(repo, 'config', 'protocol.file.allow', 'always')
+    expect((await second.fetch(repoId, { manual: true, confirm: never })).blocked?.confirmable).toBe(true)
+    expect(asked).toBe(2)
+
+    // renderer 가 보낼 수 있는 패치로는 바꿀 수 없고, 저장소를 지우면 지운다
+    const before = config.trustedConfig(repoId)
+    config.setUi({ trustedConfigs: { [repoId]: 'forged' } } as never)
+    expect(config.trustedConfig(repoId)).toBe(before)
+    config.removeRepo(repoId)
+    expect(config.trustedConfig(repoId)).toBeUndefined()
+  })
+
   it('include 로 끌어온 파일의 위험 설정도 잡는다', async () => {
     const { repo, marker } = makeRepos()
     const inc = join(root, `inc-${seq++}.gitconfig`)
@@ -837,6 +886,7 @@ describe('허용 목록: 현실적인 저장소 설정은 그대로 통과한다
     c('core.hooksPath', '.husky')
     c('core.fsmonitor', 'true')
     c('core.untrackedcache', 'true')
+    c('core.excludesFile', '.gitignore-extra')
     c('user.name', 'Me')
     c('user.email', 'me@example.com')
     c('pull.rebase', 'true')
@@ -1155,5 +1205,101 @@ describe('UNC·네트워크 경로 remote URL 은 어느 플랫폼에서든 거�
     git(repo, 'config', 'submodule.lib.url', '\\\\host\\share\\lib.git')
     const ins = await inspectConfig(exec, repo)
     expect(ins.forbidden.map((f) => f.key)).toContain('submodule.lib.url')
+  })
+})
+
+describe('--show-scope 를 모르는 옛 git(2.26 미만, 예: SSH 서버의 2.17)', () => {
+  /** --show-scope 를 넣으면 옛 git 처럼 실패하는 실행기. 실제 호출을 기록한다 */
+  const oldGit = (): { exec: GitExecutor; calls: string[][] } => {
+    const calls: string[][] = []
+    const wrapped: GitExecutor = {
+      kind: 'local',
+      run: async (repoPath: string, args: string[], opts?: RunOpts) => {
+        calls.push(args)
+        if (args.includes('--show-scope')) return { stdout: Buffer.alloc(0), stderr: "error: unknown option `show-scope'\n", code: 129 }
+        return exec.run(repoPath, args, opts)
+      },
+      stream: (repoPath: string, args: string[], opts?: RunOpts) => exec.stream(repoPath, args, opts),
+      dispose: async () => {}
+    }
+    return { exec: wrapped, calls }
+  }
+
+  it('범위마다 따로 읽어 같은 검사를 한다: 저장소의 위험 설정은 잡고, 전역 core.sshCommand 는 사용자 설정으로 존중한다', async () => {
+    const { repo, marker } = makeRepos()
+    git(repo, 'config', 'core.sshCommand', payload(marker))
+    git(repo, 'config', 'core.excludesFile', '.gitignore-extra')
+    execFileSync('git', ['config', '--global', 'core.sshCommand', 'ssh -i mykey'])
+    try {
+      const { exec: old, calls } = oldGit()
+      const ins = await inspectConfig(old, repo)
+      expect(calls.some((a) => a.includes('--local'))).toBe(true)
+      expect(ins.dangerous.map((d) => d.key)).toEqual(['core.sshcommand'])
+      expect(ins.userSshCommand).toBe('ssh -i mykey')
+      expect(ins.hasRemote).toBe(true)
+      expect(ins.remoteNames).toEqual(['origin'])
+    } finally {
+      execFileSync('git', ['config', '--global', '--unset-all', 'core.sshCommand'])
+    }
+  })
+
+  it('extensions.worktreeConfig 가 켜져 있으면 config.worktree 도 읽는다', async () => {
+    const { repo } = makeRepos()
+    git(repo, 'config', 'extensions.worktreeConfig', 'true')
+    git(repo, 'config', '--worktree', 'trace2.eventTarget', '/tmp/x')
+    const { exec: old, calls } = oldGit()
+    const ins = await inspectConfig(old, repo)
+    expect(calls.some((a) => a.includes('--worktree'))).toBe(true)
+    expect(ins.dangerous.map((d) => d.key)).toEqual(['trace2.eventtarget'])
+  })
+
+  it('worktreeConfig 가 켜져 있어도 config.worktree 가 없거나 --worktree 를 모르면 비어 있는 것으로 보고, 다른 실패는 거부한다', async () => {
+    const { repo } = makeRepos()
+    git(repo, 'config', 'extensions.worktreeConfig', 'true')
+    const worktreeFails = (stderr: string): GitExecutor => ({
+      kind: 'local',
+      run: async (repoPath: string, args: string[], opts?: RunOpts) => {
+        if (args.includes('--show-scope')) return { stdout: Buffer.alloc(0), stderr: "error: unknown option `show-scope'", code: 129 }
+        if (args.includes('--worktree')) return { stdout: Buffer.alloc(0), stderr, code: 128 }
+        return exec.run(repoPath, args, opts)
+      },
+      stream: (repoPath: string, args: string[], opts?: RunOpts) => exec.stream(repoPath, args, opts),
+      dispose: async () => {}
+    })
+    // 실제 2.49 의 "파일 없음" 메시지(config.worktree 를 만들지 않은 저장소)
+    expect((await inspectConfig(oldGit().exec, repo)).dangerous).toEqual([])
+    expect((await inspectConfig(worktreeFails("error: unknown option `worktree'"), repo)).dangerous).toEqual([])
+    await expect(inspectConfig(worktreeFails("fatal: bad config line 1 in file .git/config.worktree"), repo)).rejects.toThrow(
+      /검사하지 못해/
+    )
+  })
+
+  it('include 로 끌어온 저장소 설정도 잡는다', async () => {
+    const { repo } = makeRepos()
+    const inc = join(repo, '..', 'extra.cfg')
+    writeFileSync(inc, '[credential]\n\thelper = !evil\n')
+    git(repo, 'config', 'include.path', posix(inc))
+    const ins = await inspectConfig(oldGit().exec, repo)
+    expect(ins.dangerous.map((d) => d.key)).toContain('credential.helper')
+  })
+
+  it('local 설정을 읽지 못하면 fetch 하지 않는다', async () => {
+    const dir = mkdtempSync(join(root, 'notrepo-'))
+    await expect(inspectConfig(oldGit().exec, dir)).rejects.toThrow(/저장소 설정을 검사하지 못해/)
+  })
+
+  it('--show-scope 와 무관한 실패는 범위별 읽기로 넘어가지 않고 그대로 실패한다', async () => {
+    const calls: string[][] = []
+    const failing: GitExecutor = {
+      kind: 'local',
+      run: async (_p: string, args: string[]) => {
+        calls.push(args)
+        return { stdout: Buffer.alloc(0), stderr: 'fatal: bad config line 3', code: 128 }
+      },
+      stream: () => exec.stream('.', []),
+      dispose: async () => {}
+    }
+    await expect(inspectConfig(failing, '.')).rejects.toThrow(/bad config line/)
+    expect(calls).toHaveLength(1)
   })
 })
