@@ -60,6 +60,12 @@ export function parseIssueKey(v: unknown): string {
   return v
 }
 
+/** 전환 id 는 Jira 가 정한 숫자 문자열이다 */
+export function parseTransitionId(v: unknown): string {
+  if (typeof v !== 'string' || !/^\d{1,10}$/.test(v)) throw new Error('잘못된 전환입니다')
+  return v
+}
+
 export function parseSearchQuery(v: unknown): JiraSearchQuery & { page: number } {
   const q = v as Partial<JiraSearchQuery> | null
   if (!q || typeof q !== 'object' || typeof q.jql !== 'string') throw new Error('잘못된 조회 조건입니다')

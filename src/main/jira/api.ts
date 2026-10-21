@@ -1,5 +1,5 @@
 // Jira REST 응답 → 공유 타입 변환과 엔드포인트 호출. Cloud(API v3, ADF)와 Data Center/Server(API v2, 서버 렌더 HTML)의 차이는 여기서 흡수한다.
-import type { JiraComment, JiraDevCommit, JiraDevInfo, JiraDevPull, JiraIssueDetail, JiraIssueSummary, JiraSearchResult, JiraUser, JiraWorklog, JiraWorklogQuery, JiraWorklogResult } from '@shared/types'
+import type { JiraComment, JiraDevCommit, JiraDevInfo, JiraDevPull, JiraIssueDetail, JiraIssueSummary, JiraSearchResult, JiraTransition, JiraUser, JiraWorklog, JiraWorklogQuery, JiraWorklogResult } from '@shared/types'
 import { AbortError } from '../executors/GitExecutor'
 import { adfToHtml } from './adf'
 import { JIRA_TOO_BIG, JiraApiError, type JiraClient, type JiraCredential } from './client'
@@ -72,6 +72,28 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
     created: str(f['created']),
     descriptionHtml: bodyHtml(c, f['description'], obj(raw['renderedFields'])['description'])
   }
+}
+
+/** 지금 실행 가능한 전환 목록(권한·워크플로 조건을 통과한 것만 온다) */
+export async function getTransitions(client: JiraClient, c: JiraCredential, key: string, signal?: AbortSignal): Promise<JiraTransition[]> {
+  const raw = obj(
+    await client.get<unknown>(`${apiBase(c)}/issue/${encodeURIComponent(key)}/transitions`, {
+      notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다',
+      ...(signal ? { signal } : {})
+    })
+  )
+  return arr(raw['transitions'])
+    .map((x) => {
+      const t = obj(x)
+      const to = obj(t['to'])
+      return { id: str(t['id']), name: str(t['name']), to: { name: str(to['name']), category: str(obj(to['statusCategory'])['key']) } }
+    })
+    .filter((t) => t.id && t.name)
+}
+
+/** 전환 실행. 성공하면 본문 없이 204 가 온다 */
+export async function doTransition(client: JiraClient, c: JiraCredential, key: string, transitionId: string): Promise<void> {
+  await client.post(`${apiBase(c)}/issue/${encodeURIComponent(key)}/transitions`, { transition: { id: transitionId } }, { notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다' })
 }
 
 export async function getComments(client: JiraClient, c: JiraCredential, key: string, signal?: AbortSignal): Promise<JiraComment[]> {

@@ -8,6 +8,8 @@ export interface RecordedReq {
   /** 경로 + 쿼리 */
   url: string
   headers: IncomingMessage['headers']
+  /** 요청 본문(없으면 빈 문자열) */
+  body: string
 }
 
 export type Handler = (req: RecordedReq, res: ServerResponse, n: number) => void
@@ -24,9 +26,13 @@ export interface FakeJira {
 export async function startFakeJira(handler: Handler): Promise<FakeJira> {
   const requests: RecordedReq[] = []
   const server: Server = createServer((req, res) => {
-    const rec: RecordedReq = { method: req.method ?? 'GET', url: req.url ?? '/', headers: req.headers }
-    requests.push(rec)
-    handler(rec, res, requests.length)
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => {
+      const rec: RecordedReq = { method: req.method ?? 'GET', url: req.url ?? '/', headers: req.headers, body: Buffer.concat(chunks).toString('utf8') }
+      requests.push(rec)
+      handler(rec, res, requests.length)
+    })
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as AddressInfo).port

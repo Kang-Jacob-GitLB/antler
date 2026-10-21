@@ -9,6 +9,7 @@ import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '
 import { HtmlBody, useRelative } from '../github/GhBits'
 import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
+import { JiraTransitionMenu } from './JiraTransitionMenu'
 import { WorklogView } from './worklog/WorklogView'
 import { isoToEpoch, issueSub, JiraStatus, JiraType, statusCat } from './JiraBits'
 import '../github/GitHubView.css'
@@ -318,7 +319,7 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
                 <h3 className="jira-panel__title">{t('jira.details')}</h3>
                 <dl className="jira-props">
                   <Prop label={t('jira.status')}>
-                    <JiraStatus name={d.status} category={d.statusCategory} />
+                    <JiraTransitionMenu issueKey={view.key} status={d.status} category={d.statusCategory} />
                   </Prop>
                   <Prop label={t('jira.type')}>
                     <JiraType type={d.issueType} withName />

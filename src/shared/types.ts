@@ -945,7 +945,7 @@ export interface WipDiffRequest {
   full?: boolean
 }
 
-// ── Jira (읽기 전용, 자격 증명은 main 에만 있다) ──────────────
+// ── Jira (조회 + 이슈 상태 전환, 자격 증명은 main 에만 있다) ──────────────
 
 /** cloud: *.atlassian.net(이메일 + API 토큰, Basic) / server: Data Center·Server(Personal Access Token, Bearer) */
 export type JiraKind = 'cloud' | 'server'
@@ -969,6 +969,14 @@ export interface JiraConnectInput {
   /** cloud 에서만 */
   email?: string
   token: string
+}
+
+/** 이슈에서 지금 실행할 수 있는 상태 전환(워크플로 전환) */
+export interface JiraTransition {
+  id: string
+  name: string
+  /** 전환 뒤의 상태 */
+  to: { name: string; /** new | indeterminate | done (Jira statusCategory) */ category: string }
 }
 
 export interface JiraIssueSummary {
