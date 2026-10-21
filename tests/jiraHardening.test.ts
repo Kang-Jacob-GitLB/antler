@@ -1,5 +1,5 @@
 // 응답 크기 상한·ADF 방어·Data Center 댓글·오류 문구·설정 검증(리뷰 반영분)
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -9,6 +9,7 @@ import { JiraClient, type JiraCredential } from '../src/main/jira/client'
 import { JIRA_META_FILE, JIRA_TOKEN_FILE, JiraService } from '../src/main/jira/service'
 import { jqlQuote, parseUserSearch, parseWorklogQuery } from '../src/main/jira/validate'
 import { ConfigStore } from '../src/main/services/ConfigStore'
+import type { UiPrefs } from '../src/shared/types'
 import { sendJson, startFakeJira, type FakeJira } from './jiraFake'
 
 const SECRET = 'tok_SECRET_0123456789'
@@ -222,6 +223,34 @@ describe('ConfigStore 의 사이트별 Jira 설정', () => {
     expect(() => store.setUi({ jiraSites: { x: { recent: [{ key: 'abc-1', summary: 's' }] } } })).toThrow('Jira 설정')
     expect(() => store.setUi({ jiraSites: { x: { filters: [{ name: 'a'.repeat(101), jql: 'b' }] } } })).toThrow('Jira 설정')
     expect(() => store.setUi({ jiraSites: [] as never })).toThrow('Jira 설정')
+  })
+
+  it('워크로그 하루 표시 시각은 정수·범위·시작<종료를 검사한다(저장된 반대쪽 값과도)', () => {
+    const store = new ConfigStore(join(dir, 'cfg-hours.json'))
+    expect(store.setUi({ worklogDayStart: 9, worklogDayEnd: 18 }).ui).toMatchObject({ worklogDayStart: 9, worklogDayEnd: 18 })
+    expect(store.setUi({ worklogDayStart: 0, worklogDayEnd: 24 }).ui.worklogDayEnd).toBe(24)
+    const bads: Partial<UiPrefs>[] = [{ worklogDayStart: 18, worklogDayEnd: 9 }, { worklogDayStart: 9, worklogDayEnd: 9 }, { worklogDayStart: -1 }, { worklogDayEnd: 25 }, { worklogDayStart: 24 }, { worklogDayEnd: 0 }, { worklogDayStart: 7.5 }, { worklogDayEnd: '18' as never }]
+    for (const bad of bads) expect(() => store.setUi(bad)).toThrow('Jira 설정')
+    // 한쪽만 바꿔 저장된 다른 쪽과 어긋나는 경우
+    store.setUi({ worklogDayStart: 9, worklogDayEnd: 18 })
+    expect(() => store.setUi({ worklogDayStart: 20 })).toThrow('Jira 설정')
+    expect(() => store.setUi({ worklogDayEnd: 8 })).toThrow('Jira 설정')
+    // 거절된 패치는 저장값을 바꾸지 않는다
+    expect(store.get().ui).toMatchObject({ worklogDayStart: 9, worklogDayEnd: 18 })
+  })
+
+  it('손상된 저장 시각은 load 에서 버려지고 무관한 setUi 는 성공한다', () => {
+    for (const ui of [{ worklogDayStart: 22 }, { worklogDayStart: '9', worklogDayEnd: 18 }, { worklogDayStart: 20, worklogDayEnd: 10 }, { worklogDayStart: 9.5, worklogDayEnd: 18 }]) {
+      const file = join(dir, 'cfg-corrupt.json')
+      writeFileSync(file, JSON.stringify({ version: 1, ui }))
+      const store = new ConfigStore(file)
+      expect(store.get().ui.worklogDayStart).toBeUndefined()
+      expect(store.get().ui.worklogDayEnd).toBeUndefined()
+      expect(store.setUi({ theme: 'dark' }).ui.theme).toBe('dark')
+    }
+    const file = join(dir, 'cfg-ok.json')
+    writeFileSync(file, JSON.stringify({ version: 1, ui: { worklogDayStart: 9, worklogDayEnd: 18 } }))
+    expect(new ConfigStore(file).get().ui).toMatchObject({ worklogDayStart: 9, worklogDayEnd: 18 })
   })
 })
 

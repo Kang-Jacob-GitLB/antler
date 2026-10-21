@@ -48,6 +48,11 @@ function checkJiraPrefs(patch: Partial<UiPrefs>): void {
   if (keys !== undefined && (!Array.isArray(keys) || keys.length > 50 || !keys.every((k) => typeof k === 'string' && /^[A-Z][A-Z0-9_]{1,19}$/.test(k)))) bad()
   if (layout !== undefined && layout !== 'list' && layout !== 'board') bad()
   if (hidden !== undefined && (!Array.isArray(hidden) || !hidden.every((c) => c === 'new' || c === 'indeterminate' || c === 'done') || new Set(hidden).size !== hidden.length)) bad()
+  // 워크로그 하루 표시 시각: 한쪽만 바꿔도 저장된 다른 쪽과 어긋나지 않게 호출부(setUi)가 합친 값을 다시 확인한다
+  const { worklogDayStart: ds, worklogDayEnd: de } = patch
+  if (ds !== undefined && (!Number.isInteger(ds) || ds < 0 || ds > 23)) bad()
+  if (de !== undefined && (!Number.isInteger(de) || de < 1 || de > 24)) bad()
+  if (ds !== undefined && de !== undefined && ds >= de) bad()
   if (sites === undefined) return
   if (!sites || typeof sites !== 'object' || Array.isArray(sites) || Object.keys(sites).length > 20) bad()
   for (const [site, d] of Object.entries(sites)) {
@@ -138,6 +143,7 @@ export class ConfigStore {
     checkLaunchpadPrefs(patch)
     checkRepoListPrefs(patch)
     const ui = { ...this.config.ui, ...patch }
+    if (('worklogDayStart' in patch || 'worklogDayEnd' in patch) && (ui.worklogDayStart ?? 7) >= (ui.worklogDayEnd ?? 21)) throw new Error('잘못된 Jira 설정입니다')
     // 보일 그룹이 빈 목록이면 제한 없음이다(패치로는 키를 지울 수 없어 빈 목록으로 알린다)
     if (ui.visibleGroups?.length === 0) delete ui.visibleGroups
     return this.update({ ...this.config, ui })
@@ -235,6 +241,15 @@ export class ConfigStore {
       const ui: UiPrefs = { ...base.ui, ...raw.ui }
       // 예전 버전이 남긴 프로필 표시는 버린다(다음 저장 때 파일에서도 사라진다. raw.profiles 도 옮기지 않는다)
       delete (ui as { activeProfileId?: unknown }).activeProfileId
+      // 손상된 하루 표시 시각은 두 키 모두 버려 기본값으로 돌린다(그대로 두면 이후 setUi 가 계속 실패한다)
+      const { worklogDayStart: ds, worklogDayEnd: de } = ui
+      if (ds !== undefined || de !== undefined) {
+        const ok = Number.isInteger(ds) && Number.isInteger(de) && ds! >= 0 && de! <= 24 && ds! < de!
+        if (!ok) {
+          delete ui.worklogDayStart
+          delete ui.worklogDayEnd
+        }
+      }
       const win = sanitizeWindowState(raw.window)
       return {
         version: 1,

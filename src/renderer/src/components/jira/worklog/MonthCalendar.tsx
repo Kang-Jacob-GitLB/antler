@@ -8,7 +8,7 @@ import { bucketByDay, DAY_TARGET_SEC, dayStatus, fmtDuration, isWeekend, parseYm
 const CELL_CHROME_PX = 54
 const CHIP_ROW_PX = 22
 
-/** 월 캘린더: 월~일 7열. 셀 = 날짜 · 그날 합계 · 이슈별 칩 · 하루 기준 대비 막대 */
+/** 월 캘린더: 일~토 7열. 셀 = 날짜 · 그날 합계 · 이슈별 칩 · 하루 기준 대비 막대 */
 export function MonthCalendar({ gridDays, logs, users, anchor, today, locale }: WorklogPaneProps): React.JSX.Element {
   const t = useT()
   const buckets = useMemo(() => bucketByDay(logs), [logs])

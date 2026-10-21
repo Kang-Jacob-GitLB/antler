@@ -83,6 +83,9 @@ export interface UiPrefs {
   editorExePath?: string
   /** 저장소 목록에 보일 그룹(없으면 전부, config:setUi 에 빈 목록을 보내면 지운다). 그룹 없는 저장소는 항상 보인다 */
   visibleGroups?: string[]
+  /** Jira 워크로그 시간 그리드의 하루 표시 시작·종료 시각(정수 시, 0≤시작<종료≤24). 없으면 7–21. 이 밖의 항목이 있으면 그만큼 넓혀 보인다 */
+  worklogDayStart?: number
+  worklogDayEnd?: number
 }
 
 export type EditorKind = 'vscode' | 'cursor' | 'jetbrains' | 'custom'
