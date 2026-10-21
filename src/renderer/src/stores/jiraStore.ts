@@ -51,6 +51,8 @@ interface JiraState {
   setDialogOpen(open: boolean): void
   show(view: JiraView | null): void
   openIssue(key: string): void
+  /** 이슈의 상태 전환을 실행하고 성공하면 상세·목록을 새로 읽는다. 실패는 이슈 오류로 보인다 */
+  transitionIssue(key: string, transitionId: string): Promise<void>
   loadMine(): Promise<void>
   loadList(jql: string, more?: boolean): Promise<void>
   saveFilter(f: JiraSavedFilter): void
@@ -105,13 +107,15 @@ export const useJiraStore = create<JiraState>((set, get) => {
     }
   }
 
-  const loadIssue = async (key: string): Promise<void> => {
+  /** keep: 같은 이슈를 새로 고칠 때 받아 둔 내용을 응답이 올 때까지 그대로 보인다(깜박임 방지) */
+  const loadIssue = async (key: string, keep = false): Promise<void> => {
     const seq = ++issueSeq
     cancelIssueReqs()
     const reqIssue = newRequestId('jira')
     const reqComments = newRequestId('jira')
     issueReqs = [reqIssue, reqComments]
-    set({ issue: { key, detail: null, comments: null, error: null, commentsError: null } })
+    const prev = get().issue
+    set({ issue: keep && prev?.key === key ? { ...prev, error: null, commentsError: null } : { key, detail: null, comments: null, error: null, commentsError: null } })
     const patch = (p: Partial<JiraIssueState>): void => {
       const cur = get().issue
       if (seq === issueSeq && cur?.key === key) set({ issue: { ...cur, ...p } })
@@ -216,6 +220,26 @@ export const useJiraStore = create<JiraState>((set, get) => {
     openIssue(key) {
       const cur = get().view
       get().show({ kind: 'issue', key, from: cur?.kind === 'issue' ? cur.from : cur })
+    },
+
+    async transitionIssue(key, transitionId) {
+      const setError = (error: string | null): void => {
+        const cur = get().issue
+        if (cur?.key === key) set({ issue: { ...cur, error } })
+      }
+      setError(null)
+      try {
+        await api.invoke('jira:transition', key, transitionId)
+      } catch (err) {
+        setError(errorMessage(err))
+        return
+      }
+      // 전환하는 사이 연결을 끊었거나 다른 화면·이슈로 옮겼으면 그쪽 요청을 건드리지 않는다
+      const { auth, view } = get()
+      if (!auth.connected) return
+      // 상세는 아직 그 이슈를 보고 있을 때만 새로 읽는다. 목록은 다시 열 때마다 조회하므로(show) 여기서 되돌리지 않는다
+      if (view?.kind === 'issue' && view.key === key) void loadIssue(key, true)
+      void fetchList('mine', MINE_JQL, false)
     },
 
     loadMine: () => fetchList('mine', MINE_JQL, false),

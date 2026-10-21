@@ -1,10 +1,10 @@
-// Jira 연동의 진입점(읽기 전용). 자격 증명·연결 상태·API 클라이언트를 소유하고 IPC 계층에는 가공된 결과만 돌려준다.
+// Jira 연동의 진입점(조회 + 이슈 상태 전환). 자격 증명·연결 상태·API 클라이언트를 소유하고 IPC 계층에는 가공된 결과만 돌려준다.
 // 토큰은 이 객체 밖으로 나가지 않는다 — 반환값은 JiraAuthState(토큰 없음)와 API 응답을 변환한 공유 타입뿐이다.
-import type { JiraAuthState, JiraComment, JiraConnectInput, JiraDevInfo, JiraIssueDetail, JiraSearchResult, JiraUser, JiraWorklogResult } from '@shared/types'
+import type { JiraAuthState, JiraComment, JiraConnectInput, JiraDevInfo, JiraIssueDetail, JiraSearchResult, JiraTransition, JiraUser, JiraWorklogResult } from '@shared/types'
 import type { TokenStore } from '../github/tokenStore'
 import * as api from './api'
 import { JiraApiError, JiraClient, type JiraCredential, type SleepFn } from './client'
-import { allowedJiraUrl, parseConnectInput, parseIssueKey, parseSearchQuery, parseUserSearch, parseWorklogQuery, type SiteOptions } from './validate'
+import { allowedJiraUrl, parseConnectInput, parseIssueKey, parseSearchQuery, parseTransitionId, parseUserSearch, parseWorklogQuery, type SiteOptions } from './validate'
 
 /** 자격 증명을 담는 파일 이름(GitHub 토큰 파일과 같은 safeStorage 방식, 파일만 따로) */
 export const JIRA_TOKEN_FILE = 'jira-credential.bin'
@@ -108,6 +108,19 @@ export class JiraService {
   async issue(key: unknown, requestId?: string): Promise<JiraIssueDetail> {
     const k = parseIssueKey(key)
     return this.data(requestId, (c, signal) => api.getIssue(this.client, c, k, signal))
+  }
+
+  /** 이슈에서 실행할 수 있는 상태 전환 목록 */
+  async transitions(key: unknown, requestId?: string): Promise<JiraTransition[]> {
+    const k = parseIssueKey(key)
+    return this.data(requestId, (c, signal) => api.getTransitions(this.client, c, k, signal))
+  }
+
+  /** 상태 전환 실행(쓰기). requestId 로 취소하지 않는다 — 도중에 끊으면 적용 여부를 알 수 없게 되므로. 연결 해제 때만 중단된다 */
+  async transition(key: unknown, transitionId: unknown): Promise<void> {
+    const k = parseIssueKey(key)
+    const id = parseTransitionId(transitionId)
+    return this.data(undefined, (c) => api.doTransition(this.client, c, k, id))
   }
 
   async comments(key: unknown, requestId?: string): Promise<JiraComment[]> {

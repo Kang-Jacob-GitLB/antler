@@ -64,6 +64,26 @@
   background: color-mix(in srgb, var(--added) 20%, transparent);
 }
 
+/* 상태 전환 메뉴를 여는 상태 칩 버튼(칩 + ▾) */
+.jira-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.jira-status-btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+.jira-props dd > .menu-btn {
+  display: inline-block;
+}
+
 /* ── 이슈 상세: 왼쪽 본문(설명·댓글) + 오른쪽 세부 정보·개발. 좁으면 한 줄로 쌓는다 ── */
 .jira-view {
   container-type: inline-size;

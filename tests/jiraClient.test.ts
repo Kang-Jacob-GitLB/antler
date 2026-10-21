@@ -121,6 +121,49 @@ describe('오류 처리', () => {
   })
 })
 
+describe('POST', () => {
+  it('JSON 본문과 Content-Type · X-Atlassian-Token 을 싣고, 204 빈 본문은 undefined', async () => {
+    fake = await startFakeJira((_req, res) => {
+      res.writeHead(204)
+      res.end()
+    })
+    const out = await clientFor(cloud(fake.origin)).post('/rest/api/3/issue/ABC-1/transitions', { transition: { id: '31' } })
+    expect(out).toBeUndefined()
+    const r = fake.requests[0]!
+    expect(r.method).toBe('POST')
+    expect(JSON.parse(r.body)).toEqual({ transition: { id: '31' } })
+    expect(r.headers['content-type']).toBe('application/json')
+    expect(r.headers['x-atlassian-token']).toBe('no-check')
+    expect(r.headers['authorization']).toBe(authHeader(cloud(fake.origin)))
+  })
+
+  it('GET 에는 쓰기용 헤더를 싣지 않는다', async () => {
+    fake = await startFakeJira((_req, res) => sendJson(res, {}))
+    await clientFor(cloud(fake.origin)).get('/x')
+    expect(fake.requests[0]!.headers['x-atlassian-token']).toBeUndefined()
+  })
+
+  it('429 는 Retry-After 가 짧아도 다시 보내지 않는다', async () => {
+    fake = await startFakeJira((_req, res) => sendJson(res, {}, 429, { 'retry-after': '1' }))
+    const waits: number[] = []
+    const err = await clientFor(cloud(fake.origin), async (ms) => void waits.push(ms)).post('/x', {}).catch((e: unknown) => e)
+    expect(err).toMatchObject({ code: 'JIRA_RATE_LIMIT', status: 429 })
+    expect(fake.requests).toHaveLength(1)
+    expect(waits).toEqual([])
+  })
+
+  it('다른 origin 경로와 리다이렉트는 GET 과 같이 거부한다', async () => {
+    fake = await startFakeJira((_req, res) => {
+      res.writeHead(302, { location: '/elsewhere' })
+      res.end()
+    })
+    const c = clientFor(cloud(fake.origin))
+    await expect(c.post('//evil.example/x', {})).rejects.toThrow('invalid api path')
+    await expect(c.post('/x', {})).rejects.toMatchObject({ code: 'JIRA_REDIRECT' })
+    expect(fake.requests).toHaveLength(1)
+  })
+})
+
 describe('429 Retry-After', () => {
   it('짧으면 기다렸다 한 번 다시 시도한다', async () => {
     fake = await startFakeJira((_req, res, n) => (n === 1 ? sendJson(res, {}, 429, { 'retry-after': '2' }) : sendJson(res, { ok: 1 })))

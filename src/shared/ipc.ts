@@ -34,6 +34,7 @@ import type {
   JiraIssueDetail,
   JiraSearchQuery,
   JiraSearchResult,
+  JiraTransition,
   JiraUser,
   JiraWorklogQuery,
   JiraWorklogResult,
@@ -139,12 +140,16 @@ export interface IpcContract {
    */
   'gh:launchpad': { args: [requestId: string, fresh?: boolean]; result: GhLaunchpadResult }
 
-  // ── Jira (읽기 전용, 자격 증명은 main 에만 있다) ──
+  // ── Jira (조회 + 이슈 상태 전환, 자격 증명은 main 에만 있다) ──
   'jira:auth': { args: []; result: JiraAuthState }
   /** 자격 증명을 확인(/myself)한 뒤 safeStorage 로 암호화 저장 */
   'jira:connect': { args: [input: JiraConnectInput]; result: JiraAuthState }
   'jira:disconnect': { args: []; result: JiraAuthState }
   'jira:issue': { args: [key: string, requestId?: string]; result: JiraIssueDetail }
+  /** 이슈에서 지금 실행할 수 있는 상태 전환 목록 */
+  'jira:transitions': { args: [key: string, requestId?: string]; result: JiraTransition[] }
+  /** 상태 전환 실행(Jira 에 쓰는 유일한 채널). transitionId 는 jira:transitions 의 id */
+  'jira:transition': { args: [key: string, transitionId: string]; result: void }
   /** 최근 댓글 몇 개(최신순) */
   'jira:comments': { args: [key: string, requestId?: string]; result: JiraComment[] }
   'jira:search': { args: [query: JiraSearchQuery, requestId?: string]; result: JiraSearchResult }
@@ -265,6 +270,8 @@ export const IPC_CHANNELS = [
   'jira:connect',
   'jira:disconnect',
   'jira:issue',
+  'jira:transitions',
+  'jira:transition',
   'jira:comments',
   'jira:search',
   'jira:dev',

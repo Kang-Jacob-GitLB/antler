@@ -1,4 +1,4 @@
-// Jira REST 클라이언트(읽기 전용 GET). 자격 증명은 credProvider 로만 읽고 요청 헤더에만 싣는다(반환값·에러 메시지·로그에 넣지 않는다).
+// Jira REST 클라이언트(GET · 상태 전환용 POST). 자격 증명은 credProvider 로만 읽고 요청 헤더에만 싣는다(반환값·에러 메시지·로그에 넣지 않는다).
 // 리다이렉트는 따라가지 않는다 — 다른 호스트(또는 같은 호스트의 http)로 인증 헤더가 새어 나가는 일을 원천 차단한다.
 import { AbortError } from '../executors/GitExecutor'
 
@@ -73,16 +73,10 @@ export class JiraClient {
 
   /** REST GET. path 는 '/rest/api/…' 처럼 '/' 로 시작하는 사이트 상대 경로(세그먼트는 호출자가 인코딩한다) */
   async get<T>(path: string, opts: GetOptions = {}): Promise<T> {
-    if (!path.startsWith('/') || path.startsWith('//')) throw new Error('invalid api path')
-    const cred = opts.credential ?? this.credProvider()
-    if (!cred) throw new JiraApiError('Jira 에 연결되어 있지 않습니다', 'JIRA_AUTH')
-    const site = new URL(cred.siteUrl)
-    const url = new URL(cred.siteUrl + path)
-    if (url.origin !== site.origin) throw new Error('invalid api path')
-    for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v))
+    const { cred, url } = this.target(path, opts)
 
     for (let attempt = 0; ; attempt++) {
-      const { res, timeout } = await this.request(url.href, cred, opts.signal)
+      const { res, timeout } = await this.request('GET', url.href, cred, opts.signal)
       if (res.status === 429 && attempt === 0) {
         const wait = parseRetryAfter(res.headers.get('retry-after'))
         if (wait !== null && wait <= AUTO_RETRY_MAX_SEC) {
@@ -104,14 +98,55 @@ export class JiraClient {
     }
   }
 
-  private async request(href: string, cred: JiraCredential, signal: AbortSignal | undefined): Promise<{ res: Response; timeout: AbortSignal }> {
+  /**
+   * REST POST(JSON 본문). 쓰기이므로 429 자동 재시도를 하지 않는다 — 요청이 이미 적용됐을 수 있어 중복 실행을 피한다.
+   * 2xx 의 빈 본문(204)은 undefined. X-Atlassian-Token 은 Data Center 의 XSRF 검사를 통과시킨다
+   */
+  async post<T = undefined>(path: string, body: unknown, opts: GetOptions = {}): Promise<T> {
+    const { cred, url } = this.target(path, opts)
+    const { res, timeout } = await this.request('POST', url.href, cred, opts.signal, JSON.stringify(body))
+    const text = await readText(res, opts.signal, timeout, opts.maxBytes ?? MAX_BODY_BYTES)
+    if (!res.ok) throw httpError(res, text, cred.kind, opts.notFound)
+    if (!text.trim()) return undefined as T
+    try {
+      return JSON.parse(text) as T
+    } catch {
+      throw new JiraApiError('Jira 응답을 해석할 수 없습니다', 'JIRA_HTTP', res.status)
+    }
+  }
+
+  /** 경로 검증(사이트 상대 경로, 같은 origin)과 자격 증명·쿼리를 합친 요청 대상 */
+  private target(path: string, opts: GetOptions): { cred: JiraCredential; url: URL } {
+    if (!path.startsWith('/') || path.startsWith('//')) throw new Error('invalid api path')
+    const cred = opts.credential ?? this.credProvider()
+    if (!cred) throw new JiraApiError('Jira 에 연결되어 있지 않습니다', 'JIRA_AUTH')
+    const site = new URL(cred.siteUrl)
+    const url = new URL(cred.siteUrl + path)
+    if (url.origin !== site.origin) throw new Error('invalid api path')
+    for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined) url.searchParams.set(k, String(v))
+    return { cred, url }
+  }
+
+  private async request(
+    method: 'GET' | 'POST',
+    href: string,
+    cred: JiraCredential,
+    signal: AbortSignal | undefined,
+    body?: string
+  ): Promise<{ res: Response; timeout: AbortSignal }> {
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
     const sig = signal ? AbortSignal.any([timeout, signal]) : timeout
     let res: Response
     try {
       res = await this.fetchImpl(href, {
-        method: 'GET',
-        headers: { Accept: 'application/json', Authorization: authHeader(cred), 'User-Agent': 'Antler' },
+        method,
+        headers: {
+          Accept: 'application/json',
+          Authorization: authHeader(cred),
+          'User-Agent': 'Antler',
+          ...(body !== undefined ? { 'Content-Type': 'application/json', 'X-Atlassian-Token': 'no-check' } : {})
+        },
+        ...(body !== undefined ? { body } : {}),
         redirect: 'manual',
         signal: sig
       })
@@ -171,12 +206,17 @@ export function parseRetryAfter(v: string | null, now = Date.now()): number | nu
   return Number.isFinite(at) ? Math.max(0, Math.ceil((at - now) / 1000)) : null
 }
 
-/** Jira 오류 본문의 errorMessages[0] 또는 message(있다면). 길이는 제한한다 */
+/** Jira 오류 본문의 errorMessages[0] 또는 message, 없으면 필드별 오류(errors)의 값들(있다면). 길이는 제한한다 */
 function bodyMessage(text: string): string {
   try {
-    const b = JSON.parse(text) as { errorMessages?: unknown; message?: unknown }
-    const m = Array.isArray(b.errorMessages) && typeof b.errorMessages[0] === 'string' ? b.errorMessages[0] : b.message
-    return typeof m === 'string' ? m.replace(/\s+/g, ' ').slice(0, 200) : ''
+    const b = JSON.parse(text) as { errorMessages?: unknown; errors?: unknown; message?: unknown }
+    let m: unknown = Array.isArray(b.errorMessages) && typeof b.errorMessages[0] === 'string' ? b.errorMessages[0] : b.message
+    if (typeof m !== 'string' || !m) {
+      const fields = b.errors && typeof b.errors === 'object' ? Object.values(b.errors).filter((v): v is string => typeof v === 'string') : []
+      if (fields.length) m = fields.join(' / ')
+    }
+    // 공백 정리가 개행·탭 등 제어문자도 없앤다
+    return typeof m === 'string' ? m.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200) : ''
   } catch {
     return ''
   }

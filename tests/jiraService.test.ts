@@ -238,6 +238,77 @@ describe('JiraService', () => {
   })
 })
 
+describe('상태 전환', () => {
+  const transitionsBody = {
+    transitions: [
+      { id: '11', name: '진행 시작', to: { name: '진행 중', statusCategory: { key: 'indeterminate' } } },
+      { id: '31', name: '완료', to: { name: '완료됨', statusCategory: { key: 'done' } } },
+      { name: 'id 없음', to: { name: 'x' } }
+    ]
+  }
+  const handler = (req: RecordedReq, res: import('node:http').ServerResponse): void => {
+    if (req.url.endsWith('/myself')) return sendJson(res, { displayName: '홍길동' })
+    if (/\/issue\/ABC-1\/transitions$/.test(req.url)) {
+      if (req.method === 'POST') {
+        res.writeHead(204)
+        return void res.end()
+      }
+      return sendJson(res, transitionsBody)
+    }
+    return sendJson(res, {}, 404)
+  }
+
+  it.each([
+    ['cloud', '/rest/api/3'],
+    ['server', '/rest/api/2']
+  ] as const)('%s: 전환 목록 매핑과 전환 POST(%s)', async (kind, base) => {
+    fake = await startFakeJira(handler)
+    const svc = newService()
+    await svc.connect(kind === 'cloud' ? { kind, siteUrl: fake.origin, email: 'a@b.c', token: SECRET } : { kind, siteUrl: fake.origin, token: SECRET })
+    expect(await svc.transitions('ABC-1')).toEqual([
+      { id: '11', name: '진행 시작', to: { name: '진행 중', category: 'indeterminate' } },
+      { id: '31', name: '완료', to: { name: '완료됨', category: 'done' } }
+    ])
+    await expect(svc.transition('ABC-1', '31')).resolves.toBeUndefined()
+    const post = fake.requests.find((r) => r.method === 'POST')!
+    expect(post.url).toBe(`${base}/issue/ABC-1/transitions`)
+    expect(JSON.parse(post.body)).toEqual({ transition: { id: '31' } })
+    expect(post.headers['x-atlassian-token']).toBe('no-check')
+    expect(post.headers['content-type']).toBe('application/json')
+  })
+
+  it('잘못된 키·전환 id 는 요청 없이 거부한다', async () => {
+    fake = await startFakeJira(handler)
+    const svc = newService()
+    await svc.connect({ kind: 'server', siteUrl: fake.origin, token: SECRET })
+    const before = fake.requests.length
+    await expect(svc.transition('abc-1', '31')).rejects.toThrow()
+    await expect(svc.transition('ABC-1', '../31')).rejects.toThrow()
+    await expect(svc.transition('ABC-1', '')).rejects.toThrow()
+    await expect(svc.transition('ABC-1', '12345678901')).rejects.toThrow()
+    await expect(svc.transition('ABC-1', 31)).rejects.toThrow()
+    await expect(svc.transitions('x/../y')).rejects.toThrow()
+    expect(fake.requests).toHaveLength(before)
+  })
+
+  it('Jira 가 400 으로 거절하면 오류로 알린다', async () => {
+    fake = await startFakeJira((req, res) => (req.method === 'POST' ? sendJson(res, { errorMessages: ['전환할 수 없습니다'] }, 400) : handler(req, res)))
+    const svc = newService()
+    await svc.connect({ kind: 'server', siteUrl: fake.origin, token: SECRET })
+    await expect(svc.transition('ABC-1', '31')).rejects.toThrow('전환할 수 없습니다')
+  })
+
+  it('필드별 오류(errors)만 있는 400 도 메시지에 담고 제어문자는 뺀다', async () => {
+    fake = await startFakeJira((req, res) =>
+      req.method === 'POST' ? sendJson(res, { errorMessages: [], errors: { resolution: '해결 사유는\n필수입니다', assignee: '담당자가 필요합니다' } }, 400) : handler(req, res)
+    )
+    const svc = newService()
+    await svc.connect({ kind: 'server', siteUrl: fake.origin, token: SECRET })
+    const err = (await svc.transition('ABC-1', '31').catch((e: unknown) => e)) as Error
+    expect(err.message).toBe('Jira API 오류(400): 해결 사유는 필수입니다 / 담당자가 필요합니다')
+  })
+})
+
 describe('입력 검증', () => {
   it('사이트 주소: https 만, 자격 증명·쿼리 거부, 컨텍스트 경로 유지', () => {
     expect(parseSiteUrl('https://x.atlassian.net/')).toBe('https://x.atlassian.net')
