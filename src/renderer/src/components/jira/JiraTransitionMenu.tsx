@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { JiraTransition } from '@shared/types'
 import { useT } from '../../i18n'
 import { api, errorMessage } from '../../lib/api'
 import { useJiraStore } from '../../stores/jiraStore'
+import { IconChevronDown } from '../icons'
 import { JiraStatus } from './JiraBits'
 import '../MenuButton.css'
 
@@ -18,6 +19,7 @@ export function JiraTransitionMenu({ issueKey, status, category }: { issueKey: s
   const [error, setError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   // 이슈나 상태가 바뀌면 메뉴를 닫고 전환 목록을 버린다(전환 가능 목록은 현재 상태에 따라 달라진다)
@@ -46,6 +48,18 @@ export function JiraTransitionMenu({ issueKey, status, category }: { issueKey: s
       document.removeEventListener('mousedown', onDown)
     }
   }, [open, issueKey])
+
+  // 기본은 버튼 왼쪽 끝에 맞춰 오른쪽으로 펼친다. 화면 오른쪽을 넘으면(좁은 사이드 패널) 오른쪽 끝에 맞춰 왼쪽으로 펼친다
+  useLayoutEffect(() => {
+    const el = popRef.current
+    if (!open || !el) return
+    el.style.left = '0'
+    el.style.right = 'auto'
+    if (el.getBoundingClientRect().right > window.innerWidth - 8) {
+      el.style.left = 'auto'
+      el.style.right = '0'
+    }
+  }, [open, items, error])
 
   // 목록이 도착하면 첫 항목에 포커스
   useEffect(() => {
@@ -107,10 +121,10 @@ export function JiraTransitionMenu({ issueKey, status, category }: { issueKey: s
         }}
       >
         <JiraStatus name={status} category={category} />
-        <span aria-hidden="true">▾</span>
+        <IconChevronDown size={14} />
       </button>
       {open && (
-        <div className="menu-btn__pop" style={{ left: 0, right: 'auto' }} role="menu" aria-label={t('jira.transition.title')} onKeyDown={onMenuKey}>
+        <div ref={popRef} className="menu-btn__pop jira-transition-pop" role="menu" aria-label={t('jira.transition.title')} onKeyDown={onMenuKey}>
           <div className="menu-btn__title">{t('jira.transition.title')}</div>
           {!items && !error && <div className="menu-btn__title">{t('jira.transition.loading')}</div>}
           {error && (

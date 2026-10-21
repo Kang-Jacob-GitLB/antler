@@ -86,6 +86,8 @@ export interface UiPrefs {
   /** Jira 워크로그 시간 그리드의 하루 표시 시작·종료 시각(정수 시, 0≤시작<종료≤24). 없으면 7–21. 이 밖의 항목이 있으면 그만큼 넓혀 보인다 */
   worklogDayStart?: number
   worklogDayEnd?: number
+  /** Jira 워크로그 캘린더의 마지막 보기(일·주·월). 없으면 월 */
+  worklogMode?: 'day' | 'week' | 'month'
 }
 
 export type EditorKind = 'vscode' | 'cursor' | 'jetbrains' | 'custom'

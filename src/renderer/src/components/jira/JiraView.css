@@ -80,6 +80,40 @@
   opacity: 0.5;
   cursor: default;
 }
+.jira-status-btn:hover {
+  color: var(--text-secondary);
+}
+.jira-status-btn > svg {
+  flex-shrink: 0;
+}
+/* 전환 메뉴: 부모(.menu-btn 은 좁은 dd 안의 inline-block)의 폭에 눌리지 않게 내용 폭으로 펼친다.
+   항목은 한 줄 — 이름은 말줄임, 대상 상태 칩은 오른쪽에 밀어 붙여 겹치지 않는다 */
+.jira-transition-pop {
+  width: max-content;
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 16px));
+  box-sizing: border-box;
+}
+.jira-transition-pop .menu-btn__title {
+  white-space: nowrap;
+}
+.jira-transition-pop .menu-btn__item {
+  flex-shrink: 0;
+  gap: var(--space-3);
+  min-width: 0;
+  white-space: nowrap;
+}
+.jira-transition-pop .menu-btn__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jira-transition-pop .menu-btn__item .jira-status {
+  margin-left: auto;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .jira-props dd > .menu-btn {
   display: inline-block;
 }

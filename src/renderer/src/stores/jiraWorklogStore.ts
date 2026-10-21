@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { JiraUser, JiraWorklogResult } from '@shared/types'
 import { rangeFor, shiftAnchor, todayYmd, type WorklogGroup, type WorklogMode } from '../components/jira/worklog/worklogModel'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { useAppStore } from './appStore'
 import { useJiraStore } from './jiraStore'
 
 export type WorklogTab = 'calendar' | 'report'
@@ -81,6 +82,22 @@ const initial = (): Pick<WorklogState, 'includeMe' | 'selectedTeam' | 'data' | '
   collapsed: []
 })
 
+/** 마지막으로 본 일·주·월 보기를 설정에 남긴다(다음에 열 때 그대로 나오게) */
+function remember(mode: WorklogMode): void {
+  if (useAppStore.getState().config?.ui.worklogMode !== mode) void useAppStore.getState().setUi({ worklogMode: mode })
+}
+
+let modeHydrated = false
+/** 앱을 켠 뒤 처음 워크로그를 열 때 한 번, 저장된 보기를 불러온다(그 뒤에는 세션 안의 선택이 우선). 설정이 아직 없으면 다음에 다시 시도 */
+export function hydrateWorklogMode(): void {
+  if (modeHydrated) return
+  const cfg = useAppStore.getState().config
+  if (!cfg) return
+  modeHydrated = true
+  const m = cfg.ui.worklogMode
+  if (m === 'day' || m === 'week' || m === 'month') useWorklogStore.setState({ mode: m })
+}
+
 export const useWorklogStore = create<WorklogState>((set, get) => {
   const change = (patch: Partial<WorklogState>): void => {
     set(patch)
@@ -94,10 +111,16 @@ export const useWorklogStore = create<WorklogState>((set, get) => {
     ...initial(),
 
     setTab: (tab) => set({ tab }),
-    setMode: (mode) => change({ mode }),
+    setMode: (mode) => {
+      remember(mode)
+      change({ mode })
+    },
     shift: (dir) => change({ anchor: shiftAnchor(get().mode, get().anchor, dir) }),
     goToday: () => change({ anchor: todayYmd() }),
-    openDay: (ymd) => change({ mode: 'day', anchor: ymd }),
+    openDay: (ymd) => {
+      remember('day')
+      change({ mode: 'day', anchor: ymd })
+    },
 
     setReportGroup: (reportGroup) => set({ reportGroup }),
     toggleCollapsed: (id) => set((s) => ({ collapsed: s.collapsed.includes(id) ? s.collapsed.filter((x) => x !== id) : [...s.collapsed, id] })),

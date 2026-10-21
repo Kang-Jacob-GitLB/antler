@@ -1,9 +1,21 @@
 // 워크로그 화면의 순수 로직(날짜 범위 · 시간 표기 · 일별 버킷 · 겹침 열 배치 · 리포트 집계 · TSV). React·스토어에 의존하지 않는다.
 // 날짜는 모두 로컬 달력 기준 'YYYY-MM-DD' 문자열이고, 주는 일요일에 시작한다.
 import type { JiraUser, JiraWorklog } from '@shared/types'
+import { fnv1a } from '../../../lib/laneColor'
 
 export type WorklogMode = 'day' | 'week' | 'month'
 export type WorklogGroup = 'user' | 'issue'
+
+/** 이슈 색 팔레트 크기(--wl-issue-0 … 9, WorklogView.css) */
+export const ISSUE_COLOR_COUNT = 10
+
+/** 이슈 키 → 팔레트 번호. 키 이름 해시라 세션이 바뀌어도 같은 이슈는 같은 색이고, 순서가 아니라 이름으로 정해져 무작위처럼 흩어진다 */
+export function issueColorIndex(issueKey: string): number {
+  return fnv1a(issueKey) % ISSUE_COLOR_COUNT
+}
+
+/** 이슈 키의 색(CSS 변수 참조) */
+export const issueColorVar = (issueKey: string): string => `var(--wl-issue-${issueColorIndex(issueKey)})`
 
 /** 하루 기준 근무 시간(초) */
 export const DAY_TARGET_SEC = 8 * 3600

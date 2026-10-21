@@ -53,6 +53,8 @@ function checkJiraPrefs(patch: Partial<UiPrefs>): void {
   if (ds !== undefined && (!Number.isInteger(ds) || ds < 0 || ds > 23)) bad()
   if (de !== undefined && (!Number.isInteger(de) || de < 1 || de > 24)) bad()
   if (ds !== undefined && de !== undefined && ds >= de) bad()
+  const wm = patch.worklogMode
+  if (wm !== undefined && wm !== 'day' && wm !== 'week' && wm !== 'month') bad()
   if (sites === undefined) return
   if (!sites || typeof sites !== 'object' || Array.isArray(sites) || Object.keys(sites).length > 20) bad()
   for (const [site, d] of Object.entries(sites)) {
@@ -250,6 +252,9 @@ export class ConfigStore {
           delete ui.worklogDayEnd
         }
       }
+      // 알 수 없는 워크로그 보기 값은 버린다(기본 월 보기)
+      const wm: unknown = ui.worklogMode
+      if (wm !== undefined && wm !== 'day' && wm !== 'week' && wm !== 'month') delete ui.worklogMode
       const win = sanitizeWindowState(raw.window)
       return {
         version: 1,

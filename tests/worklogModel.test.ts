@@ -1,7 +1,7 @@
 // 워크로그 모델: 주 시작(일요일) · 월 격자 · 하루 표시 시각 · 점심 띠
 import { describe, expect, it } from 'vitest'
 import type { JiraWorklog } from '../src/shared/types'
-import { hourRange, isWeekend, layoutBlocks, lunchBand, rangeFor, weekdayIndex, weekStart } from '../src/renderer/src/components/jira/worklog/worklogModel'
+import { hourRange, ISSUE_COLOR_COUNT, issueColorIndex, issueColorVar, isWeekend, layoutBlocks, lunchBand, rangeFor, weekdayIndex, weekStart } from '../src/renderer/src/components/jira/worklog/worklogModel'
 
 // 2026-10-21 은 수요일
 const log = (started: string, seconds: number): JiraWorklog => ({ id: started, issueKey: 'A-1', issueSummary: 's', issueType: 'Task', authorId: 'u', author: 'u', started, seconds, comment: '' }) as JiraWorklog
@@ -59,5 +59,23 @@ describe('lunchBand', () => {
     expect(lunchBand('2026-10-21', 7, 12)).toBeNull()
     expect(lunchBand('2026-10-21', 7, 13)).toEqual({ start: 720, end: 780 })
     expect(lunchBand('2026-10-21', 12, 21)).toEqual({ start: 720, end: 780 })
+  })
+})
+
+describe('이슈 키 색', () => {
+  it('같은 키는 항상 같은 색 번호, 번호는 팔레트 범위 안', () => {
+    expect(issueColorIndex('PROJ-123')).toBe(issueColorIndex('PROJ-123'))
+    for (const k of ['A-1', 'PROJ-123', 'ZZ_9-99999', '']) {
+      const i = issueColorIndex(k)
+      expect(Number.isInteger(i) && i >= 0 && i < ISSUE_COLOR_COUNT).toBe(true)
+      expect(issueColorVar(k)).toBe(`var(--wl-issue-${i})`)
+    }
+  })
+  it('값이 고정돼 있다(세션·버전이 바뀌어도 색이 바뀌지 않는다)', () => {
+    expect(['PROJ-1', 'PROJ-2', 'PROJ-3'].map(issueColorIndex)).toEqual([2, 9, 0])
+  })
+  it('연속된 키도 팔레트 대부분에 흩어진다', () => {
+    const used = new Set(Array.from({ length: 60 }, (_, n) => issueColorIndex(`PROJ-${n + 1}`)))
+    expect(used.size).toBeGreaterThanOrEqual(8)
   })
 })

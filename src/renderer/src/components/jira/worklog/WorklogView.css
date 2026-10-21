@@ -342,6 +342,31 @@ button.wl-pop__item:disabled {
   gap: 2px;
   min-width: 0;
 }
+/* 이슈별 색(이슈 키 해시 → --wl-issue-N). 칩·블록은 옅은 면 + 왼쪽 진한 띠라 글자는 항상 기본 글자색 */
+:root {
+  --wl-issue-0: #D9A441;
+  --wl-issue-1: #7FA06A;
+  --wl-issue-2: #C4624A;
+  --wl-issue-3: #6E9AA6;
+  --wl-issue-4: #A5809F;
+  --wl-issue-5: #5B8DD6;
+  --wl-issue-6: #D2789A;
+  --wl-issue-7: #8FB3A0;
+  --wl-issue-8: #C98B5A;
+  --wl-issue-9: #9A9CD8;
+}
+:root[data-theme='light'] {
+  --wl-issue-0: #B8821C;
+  --wl-issue-1: #6A8C55;
+  --wl-issue-2: #B5543D;
+  --wl-issue-3: #5A8794;
+  --wl-issue-4: #92698C;
+  --wl-issue-5: #3F73BE;
+  --wl-issue-6: #B95C7F;
+  --wl-issue-7: #5E8F76;
+  --wl-issue-8: #B0703F;
+  --wl-issue-9: #6F72BF;
+}
 .wl-chip {
   display: flex;
   align-items: center;
@@ -349,13 +374,13 @@ button.wl-pop__item:disabled {
   gap: var(--space-1);
   min-width: 0;
   height: 20px;
-  padding: 0 6px;
+  padding: 0 6px 0 8px;
   border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: color-mix(in srgb, var(--wl-c, var(--text-muted)) 16%, var(--bg-surface));
+  box-shadow: inset 3px 0 0 var(--wl-c, var(--border)), inset 0 0 0 1px color-mix(in srgb, var(--wl-c, var(--border)) 28%, transparent);
 }
 .wl-cell.is-weekend .wl-chip {
-  background: var(--list-bg);
+  background: color-mix(in srgb, var(--wl-c, var(--text-muted)) 16%, var(--list-bg));
 }
 .wl-chip .wl-key {
   font-size: var(--fs-xs);

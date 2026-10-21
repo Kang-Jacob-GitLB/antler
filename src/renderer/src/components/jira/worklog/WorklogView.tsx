@@ -1,9 +1,9 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useMemo } from 'react'
 import type { JiraUser } from '@shared/types'
 import { useT } from '../../../i18n'
 import { useAppStore } from '../../../stores/appStore'
 import { useJiraSiteData, useJiraStore } from '../../../stores/jiraStore'
-import { queryUsers, requestKey, useWorklogStore, type WorklogTab } from '../../../stores/jiraWorklogStore'
+import { hydrateWorklogMode, queryUsers, requestKey, useWorklogStore, type WorklogTab } from '../../../stores/jiraWorklogStore'
 import { IconChevronRight, IconRefresh } from '../../icons'
 import { MonthCalendar } from './MonthCalendar'
 import { DayList, TimeGrid } from './TimeGrid'
@@ -27,6 +27,8 @@ export function WorklogView(): React.JSX.Element {
   const rawEnd = useAppStore((x) => x.config?.ui.worklogDayEnd)
   const [dayStart, dayEnd] = dayHoursOf(rawStart, rawEnd)
   const s = useWorklogStore()
+  // 저장된 보기(일·주·월)를 첫 페인트 전에(그리고 아래 load 보다 먼저) 반영한다
+  useLayoutEffect(() => hydrateWorklogMode(), [])
   const team = useJiraSiteData().team ?? NO_TEAM
   const site = useJiraStore((x) => x.auth.siteUrl)
   const { setTab, setMode, shift, goToday, load } = useWorklogStore.getState()

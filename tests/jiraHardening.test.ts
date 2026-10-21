@@ -252,6 +252,20 @@ describe('ConfigStore 의 사이트별 Jira 설정', () => {
     writeFileSync(file, JSON.stringify({ version: 1, ui: { worklogDayStart: 9, worklogDayEnd: 18 } }))
     expect(new ConfigStore(file).get().ui).toMatchObject({ worklogDayStart: 9, worklogDayEnd: 18 })
   })
+
+  it('워크로그 마지막 보기(worklogMode)는 day·week·month 만 저장하고 load 에서 잘못된 값은 버린다', () => {
+    const store = new ConfigStore(join(dir, 'cfg-mode.json'))
+    for (const m of ['day', 'week', 'month'] as const) expect(store.setUi({ worklogMode: m }).ui.worklogMode).toBe(m)
+    for (const bad of ['year', '', 3, null, 'Day']) expect(() => store.setUi({ worklogMode: bad as never })).toThrow('Jira 설정')
+    expect(store.get().ui.worklogMode).toBe('month')
+    const file = join(dir, 'cfg-mode-corrupt.json')
+    writeFileSync(file, JSON.stringify({ version: 1, ui: { worklogMode: 'year' } }))
+    const loaded = new ConfigStore(file)
+    expect(loaded.get().ui.worklogMode).toBeUndefined()
+    expect(loaded.setUi({ theme: 'dark' }).ui.theme).toBe('dark')
+    writeFileSync(file, JSON.stringify({ version: 1, ui: { worklogMode: 'week' } }))
+    expect(new ConfigStore(file).get().ui.worklogMode).toBe('week')
+  })
 })
 
 describe('워크로그 조회·사용자 검색 입력 검증', () => {
