@@ -162,7 +162,7 @@ export function registerIpc(
   handle('update:cancel', () => updates.cancel())
   handle('update:install', () => updates.install())
   handle('update:dismiss', (_e, action, version) => updates.dismiss(action, version))
-  handle('update:releaseNotes', () => updates.releaseNotes())
+  handle('update:releaseNotes', (_e, version) => updates.releaseNotes(version))
   handle('config:get', () => config.get())
   handle('config:setUi', (_e, patch) => {
     const next = config.setUi(patch)

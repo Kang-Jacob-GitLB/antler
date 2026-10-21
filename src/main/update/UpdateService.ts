@@ -4,7 +4,7 @@
 import type { ReleaseNotes, UpdateDismissAction, UpdateMode, UpdateState } from '@shared/types'
 import { findManualUpdate, downloadVerified, type ManualUpdate } from './manual'
 import { fetchReleaseNotes } from './releaseNotes'
-import { UpdatePolicy, detectInstallKind, isOfferable, modeFor, parseDismiss, releaseNotesUrl, sanitizeError, verifyFile, type InstallKind, type InstallProbe } from './logic'
+import { UpdatePolicy, detectInstallKind, isOfferable, modeFor, parseDismiss, parseSemver, releaseNotesUrl, sanitizeError, verifyFile, type InstallKind, type InstallProbe } from './logic'
 
 /** electron-updater 를 감싼 최소 인터페이스(autoBackend.ts 가 구현, 테스트는 모의) */
 export interface AutoBackend {
@@ -94,16 +94,22 @@ export class UpdateService {
     return this.state
   }
 
-  private notes: { at: number; value: Promise<ReleaseNotes> } | null = null
+  private notes = new Map<string, { at: number; value: Promise<ReleaseNotes> }>()
 
-  /** 현재 버전의 릴리스 노트. 성공한 결과는 10분 동안 재사용하고, 실패하면 다음 요청 때 다시 가져온다 */
-  releaseNotes(): Promise<ReleaseNotes> {
-    if (this.notes && Date.now() - this.notes.at < 10 * 60 * 1000) return this.notes.value
-    const value = fetchReleaseNotes(this.d.fetch ?? fetch, this.d.currentVersion, AbortSignal.timeout(15_000))
+  /**
+   * 그 버전(생략하면 현재 버전)의 릴리스 노트. 업데이트 알림은 새 버전을 넘긴다.
+   * 성공한 결과는 버전별로 10분 동안 재사용하고, 실패하면 다음 요청 때 다시 가져온다
+   */
+  releaseNotes(version?: unknown): Promise<ReleaseNotes> {
+    if (version !== undefined && (typeof version !== 'string' || !parseSemver(version))) return Promise.reject(new Error('잘못된 버전입니다'))
+    const key = (version ?? this.d.currentVersion).replace(/^v/, '')
+    const hit = this.notes.get(key)
+    if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value
+    const value = fetchReleaseNotes(this.d.fetch ?? fetch, key, AbortSignal.timeout(15_000))
     const entry = { at: Date.now(), value }
-    this.notes = entry
+    this.notes.set(key, entry)
     value.catch(() => {
-      if (this.notes === entry) this.notes = null
+      if (this.notes.get(key) === entry) this.notes.delete(key)
     })
     return value
   }

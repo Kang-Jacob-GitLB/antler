@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useT } from '../i18n'
-import { api } from '../lib/api'
+import { usePaletteStore } from '../stores/paletteStore'
 import { useUpdateStore } from '../stores/updateStore'
 import { IconClose } from './icons'
 import './UpdateSnackbar.css'
@@ -56,8 +56,9 @@ export function UpdateSnackbar(): React.JSX.Element {
       s.status === 'error' ||
       (manual && (s.status === 'checking' || s.status === 'not-available')))
 
+  // 새 버전의 릴리스 노트를 앱 안 팝업으로 먼저 보여 준다. GitHub 페이지는 팝업의 '더보기'로 연다
   const openNotes = (): void => {
-    if (s?.notesUrl) void api.invoke('gh:openExternal', s.notesUrl).catch(() => {})
+    if (s?.version) usePaletteStore.getState().setNotesOpen(true, s.version)
   }
 
   let msg = ''
