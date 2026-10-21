@@ -14,16 +14,17 @@ import './CommandPalette.css'
 import './github/GitHubView.css'
 import './ReleaseNotesDialog.css'
 
-/** 현재 버전의 릴리스 노트를 마크다운으로 렌더링해 보여 준다. '더보기'는 GitHub 릴리스 페이지 */
+/** 릴리스 노트(현재 버전, 또는 업데이트 알림에서 연 새 버전)를 마크다운으로 렌더링해 보여 준다. '더보기'는 GitHub 릴리스 페이지 */
 export function ReleaseNotesDialog(): React.JSX.Element | null {
   const open = usePaletteStore((s) => s.notesOpen)
+  const version = usePaletteStore((s) => s.notesVersion)
   if (!open) return null
-  return <Body />
+  return <Body key={version ?? ''} version={version} />
 }
 
 type Load = { status: 'loading' } | { status: 'error'; error: string } | { status: 'ok'; notes: ReleaseNotes }
 
-function Body(): React.JSX.Element {
+function Body({ version }: { version: string | null }): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
   const ref = useRef<HTMLDivElement>(null)
@@ -35,7 +36,7 @@ function Body(): React.JSX.Element {
   useEffect(() => {
     let alive = true
     api
-      .invoke('update:releaseNotes')
+      .invoke('update:releaseNotes', version ?? undefined)
       .then((notes) => alive && setLoad({ status: 'ok', notes }))
       .catch((err: unknown) => alive && setLoad({ status: 'error', error: err instanceof Error ? err.message : String(err) }))
     bodyRef.current?.focus()
@@ -51,7 +52,7 @@ function Body(): React.JSX.Element {
       alive = false
       window.removeEventListener('keydown', onKey)
     }
-  }, [])
+  }, [version])
 
   const notes = load.status === 'ok' ? load.notes : null
   const html = useMemo(() => (notes?.body ? markdownToHtml(notes.body) : ''), [notes])

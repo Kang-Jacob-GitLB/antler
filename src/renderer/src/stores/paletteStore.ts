@@ -8,18 +8,21 @@ interface PaletteState {
   shortcutsOpen: boolean
   /** 릴리스 노트 팝업 */
   notesOpen: boolean
+  /** 팝업에 보여 줄 버전(업데이트 알림에서 연 새 버전). 없으면 현재 앱 버전 */
+  notesVersion: string | null
   setPaletteOpen(open: boolean): void
   setShortcutsOpen(open: boolean): void
-  setNotesOpen(open: boolean): void
+  setNotesOpen(open: boolean, version?: string): void
 }
 
 export const usePaletteStore = create<PaletteState>((set) => ({
   paletteOpen: false,
   shortcutsOpen: false,
   notesOpen: false,
+  notesVersion: null,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
-  setNotesOpen: (notesOpen) => set({ notesOpen })
+  setNotesOpen: (notesOpen, version) => set({ notesOpen, notesVersion: notesOpen ? (version ?? null) : null })
 }))
 
 /**
