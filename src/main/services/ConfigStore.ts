@@ -207,7 +207,18 @@ export class ConfigStore {
     const used = new Set(repos.map((r) => r.sourceId))
     const sources = this.config.sources.filter((s) => s.id === LOCAL_SOURCE_ID || used.has(s.id))
     const { [id]: _gone, ...fetchApprovals } = this.config.fetchApprovals ?? {}
-    return this.update({ ...this.config, ui, repos, sources, fetchApprovals })
+    const { [id]: _untrusted, ...trustedConfigs } = this.config.trustedConfigs ?? {}
+    return this.update({ ...this.config, ui, repos, sources, fetchApprovals, trustedConfigs })
+  }
+
+  trustedConfig(repoId: string): string | undefined {
+    return this.config.trustedConfigs?.[repoId]
+  }
+
+  /** fetch 확인 창에서 항상 허용한 저장소 설정 지문을 기록한다. main 에서만 호출한다 */
+  setTrustedConfig(repoId: string, fingerprint: string): void {
+    if (this.config.trustedConfigs?.[repoId] === fingerprint) return
+    this.update({ ...this.config, trustedConfigs: { ...this.config.trustedConfigs, [repoId]: fingerprint } })
   }
 
   fetchApproval(repoId: string): string | undefined {
@@ -262,6 +273,7 @@ export class ConfigStore {
         repos: raw.repos ?? [],
         ui,
         ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {}),
+        ...(raw.trustedConfigs ? { trustedConfigs: raw.trustedConfigs } : {}),
         ...(win ? { window: win } : {})
       }
     } catch {

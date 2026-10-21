@@ -110,10 +110,14 @@ async function checkEnvInput(e: IpcMainInvokeEvent, input: unknown, withPath: bo
 const approvedSshHosts = new Set<string>()
 
 /**
- * 저장소 설정에 외부 명령을 실행할 수 있는 항목이 있을 때 수동 fetch 전에 묻는다. 허용은 이번 세션의 같은 설정에만 유효하다.
- * 기본 선택은 취소다.
+ * 저장소 설정에 외부 명령을 실행할 수 있는 항목이 있을 때 수동 fetch 전에 묻는다. 허용은 같은 설정(키·값 지문)에만
+ * 유효하며, true 는 이번 실행 동안, 'always' 는 앱을 다시 켜도 유지된다. 기본 선택은 취소다.
  */
-async function confirmDangerousConfig(e: IpcMainInvokeEvent, name: string, items: { key: string; value: string }[]): Promise<boolean> {
+async function confirmDangerousConfig(
+  e: IpcMainInvokeEvent,
+  name: string,
+  items: { key: string; value: string }[]
+): Promise<boolean | 'always'> {
   const win = BrowserWindow.fromWebContents(e.sender)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
     win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)
@@ -137,14 +141,14 @@ async function confirmDangerousConfig(e: IpcMainInvokeEvent, name: string, items
   }
   const res = await show({
     type: 'warning',
-    buttons: ['이번만 fetch', '취소'],
-    defaultId: 1,
-    cancelId: 1,
+    buttons: ['이번만 fetch', '이 저장소에서 항상 허용', '취소'],
+    defaultId: 2,
+    cancelId: 2,
     title: 'fetch 확인',
     message: title,
-    detail: `${items.map((i) => formatItem(i.key, i.value)).join('\n')}\n\n직접 만든 설정이거나 신뢰하는 저장소일 때만 허용하세요. 허용은 이번 실행 동안 같은 설정에만 적용됩니다.`
+    detail: `${items.map((i) => formatItem(i.key, i.value)).join('\n')}\n\n직접 만든 설정이거나 신뢰하는 저장소일 때만 허용하세요. "이번만"은 이번 실행 동안, "항상"은 앱을 다시 켜도 적용되며, 어느 쪽이든 위 키·값이 바뀌면 다시 묻습니다. 값이 가리키는 스크립트·파일의 내용이 바뀌는 것은 확인하지 않습니다.`
   })
-  return res.response === 0
+  return res.response === 0 ? true : res.response === 1 ? 'always' : false
 }
 
 export function registerIpc(

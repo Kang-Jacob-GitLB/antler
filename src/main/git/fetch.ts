@@ -25,6 +25,7 @@ export interface ConfigEntry {
  *    core.bare 는 false 일 때만 허용한다(true 로 두면 체크아웃된 브랜치 보호가 꺼진다).
  *    core.hooksPath 는 husky 등이 흔히 쓰는데, fetch 에는 -c 로 빈 디렉터리를 덮어쓰므로(tests 로 확인) 허용한다.
  *    core.fsmonitor 는 true/false 값일 때만(그 밖의 값은 실행할 훅 경로) 허용한다.
+ *    core.excludesFile 은 무시 패턴 파일 경로다(읽기만 하고 실행하지 않는다).
  *  - remote.<n>.{url,pushurl,tagopt,prune,mirror,skipdefaultupdate,skipfetchall,promisor,partialclonefilter}
  *    URL 은 따로 unsafeRemoteUrl·userinfo 검사를 거친다. uploadpack·receivepack·vcs·proxy 는 명령/접속이라 뺀다.
  *    prunetags 는 뺀다(로컬 태그 삭제). remote.<n>.fetch 는 값이 refs/remotes/<n>/ 아래로만 쓰는 형태일 때만 허용한다(fetchRefspecOk).
@@ -40,7 +41,7 @@ export interface ConfigEntry {
  * gui/i18n/color.* 는 모두 "알 수 없는 설정"이다.
  */
 const ALLOWED_KEYS: RegExp[] = [
-  /^core\.(repositoryformatversion|filemode|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|eol|safecrlf|longpaths|quotepath|checkstat|trustctime|untrackedcache|fscache|preloadindex|commentchar|hidedotfiles|abbrev|whitespace|worktree|sparsecheckout|sparsecheckoutcone|hookspath)$/,
+  /^core\.(repositoryformatversion|filemode|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|eol|safecrlf|longpaths|quotepath|checkstat|trustctime|untrackedcache|fscache|preloadindex|commentchar|hidedotfiles|abbrev|whitespace|worktree|sparsecheckout|sparsecheckoutcone|hookspath|excludesfile)$/,
   /^remote\..+\.(url|pushurl|push|tagopt|prune|mirror|skipdefaultupdate|skipfetchall|promisor|partialclonefilter)$/,
   /^branch\..+\.(remote|merge|rebase|pushremote|description|vscode-merge-base|github-pr-owner-number)$/,
   /^user\.(name|email)$/,
@@ -119,13 +120,21 @@ export function unsafeRemoteUrl(url: string): string | null {
 export function parseConfigList(out: string): ConfigEntry[] {
   const entries: ConfigEntry[] = []
   const tokens = out.split('\0')
-  for (let i = 0; i + 1 < tokens.length; i += 2) {
-    const scope = tokens[i]!
-    const rec = tokens[i + 1]!
-    const nl = rec.indexOf('\n')
-    entries.push({ scope, key: (nl < 0 ? rec : rec.slice(0, nl)).toLowerCase(), value: nl < 0 ? null : rec.slice(nl + 1) })
-  }
+  for (let i = 0; i + 1 < tokens.length; i += 2) entries.push(parseRecord(tokens[i]!, tokens[i + 1]!))
   return entries
+}
+
+/** --show-scope 없는 `git config --<scope> --list -z` 출력 파싱. 항목은 `key\nvalue\0` 한 토큰씩이고 scope 는 호출자가 정한다 */
+export function parseScopedConfigList(out: string, scope: string): ConfigEntry[] {
+  return out
+    .split('\0')
+    .filter(Boolean)
+    .map((rec) => parseRecord(scope, rec))
+}
+
+function parseRecord(scope: string, rec: string): ConfigEntry {
+  const nl = rec.indexOf('\n')
+  return { scope, key: (nl < 0 ? rec : rec.slice(0, nl)).toLowerCase(), value: nl < 0 ? null : rec.slice(nl + 1) }
 }
 
 export interface ConfigInspection {
@@ -213,11 +222,43 @@ async function inspectRemoteUrls(exec: GitExecutor, repoPath: string, ins: Confi
 
 export async function inspectConfig(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigInspection> {
   const r = await exec.run(repoPath, ['config', '--list', '--show-scope', '--includes', '-z'], opts)
-  // 설정을 읽지 못하면(옛 git 의 --show-scope 미지원 등) 검사할 수 없으므로 fetch 하지 않는다
-  if (r.code !== 0) throw new GitError(`저장소 설정을 검사하지 못해 fetch 하지 않습니다: ${r.stderr.trim()}`, r.code, r.stderr, ['config'])
-  const ins = inspectEntries(parseConfigList(r.stdout.toString('utf8')))
+  let entries: ConfigEntry[]
+  if (r.code === 0) entries = parseConfigList(r.stdout.toString('utf8'))
+  else if (/unknown option.*show-scope/i.test(r.stderr)) entries = await readConfigByScope(exec, repoPath, opts)
+  // 설정을 읽지 못하면 검사할 수 없으므로 fetch 하지 않는다
+  else throw configReadError(r.code, r.stderr)
+  const ins = inspectEntries(entries)
   await inspectRemoteUrls(exec, repoPath, ins, opts)
   return ins
+}
+
+/** `--worktree` 를 모르는 git, 또는 config.worktree 가 없음(GIT_ENV 가 LC_ALL=C.UTF-8 이라 메시지는 영어다) */
+const WORKTREE_CONFIG_ABSENT = /unknown option [`']worktree'|unable to read config file '[^']*config\.worktree': No such file or directory/
+
+function configReadError(code: number, stderr: string): GitError {
+  return new GitError(`저장소 설정을 검사하지 못해 fetch 하지 않습니다: ${stderr.trim()}`, code, stderr, ['config'])
+}
+
+/**
+ * --show-scope 가 없는 git(2.26 미만, 예: Ubuntu 18.04 의 2.17)용: 범위마다 따로 읽는다. 순서는 git 이 적용하는 순서와 같다.
+ *  - system·global 은 파일이 없으면 실패하므로 비어 있는 것으로 본다(사용자 설정이라 검사 대상도 아니고 core.sshCommand 만 읽는다)
+ *  - local 은 반드시 읽혀야 한다
+ *  - worktree(2.20+)는 extensions.worktreeConfig 가 켜져 있을 때만 읽는다(꺼져 있으면 --worktree 가 .git/config 를 다시
+ *    돌려줘 local 과 겹친다). 옵션을 모르는 git(2.20 미만)은 config.worktree 를 아예 적용하지 않고, 파일이 없으면 적용할 것이
+ *    없으므로 둘 다 비어 있는 것으로 본다. 그 밖의 이유로 읽지 못하면 검사할 수 없으므로 실패한다
+ */
+async function readConfigByScope(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigEntry[]> {
+  const entries: ConfigEntry[] = []
+  for (const scope of ['system', 'global', 'local', 'worktree']) {
+    // git 의 참 값(값 없는 키·true·yes·on·0 이 아닌 수)이면 켜진 것으로 본다 — 애매하면 읽는 쪽으로
+    const on = entries.some((e) => e.key === 'extensions.worktreeconfig' && (e.value === null || !/^(false|no|off|0|)$/i.test(e.value.trim())))
+    if (scope === 'worktree' && !on) continue
+    const r = await exec.run(repoPath, ['config', `--${scope}`, '--list', '--includes', '-z'], opts)
+    if (r.code === 0) entries.push(...parseScopedConfigList(r.stdout.toString('utf8'), scope))
+    else if (scope === 'local') throw configReadError(r.code, r.stderr)
+    else if (scope === 'worktree' && !WORKTREE_CONFIG_ABSENT.test(r.stderr)) throw configReadError(r.code, r.stderr)
+  }
+  return entries
 }
 
 // ── git 버전 ────────────────────────────────────────────────────────────
