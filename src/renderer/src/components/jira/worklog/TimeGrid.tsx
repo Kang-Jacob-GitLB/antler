@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JiraUser, JiraWorklog } from '@shared/types'
 import { useT } from '../../../i18n'
+import { useAppStore } from '../../../stores/appStore'
 import { useJiraStore } from '../../../stores/jiraStore'
 import { useWorklogStore } from '../../../stores/jiraWorklogStore'
 import { IssueKey, makeColorOf, type WorklogPaneProps } from './WorklogBits'
 import {
   bucketByDay,
+  dayHoursOf,
   fmtClock,
   fmtDuration,
   hourRange,
   isWeekend,
+  lunchBand,
   layoutBlocks,
   localYmd,
   minutesOfDay,
@@ -24,6 +27,11 @@ const HOUR_H = 48
 const NARROW_PX = 72
 const TINY_PX = 40
 const MIN_COL_PX = 96
+/** 코멘트 한 줄의 높이(px) = 글자 크기 11 × 줄 간격 1.25 = 13.75 → 14 */
+const COMMENT_LINE_PX = 14
+/** 블록 안 줄 사이 간격(flex gap 1px)과 위아래 패딩(2px×2) */
+const BLOCK_GAP_PX = 1
+const BLOCK_PAD_PX = 4
 const GUTTER_PX = 52
 
 /** 이슈를 보고 돌아왔을 때 스크롤 위치를 되살리기 위한 기억(범위 키별 하나) */
@@ -49,7 +57,10 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
     const buckets = bucketByDay(logs)
     return gridDays.map((d) => ({ key: d, ymd: d, user: null as JiraUser | null, seconds: buckets.get(d)?.seconds ?? 0, blocks: layoutBlocks(buckets.get(d)?.logs ?? []) }))
   }, [logs, gridDays, users, byUser])
-  const [h0, h1] = useMemo(() => hourRange(perCol.flatMap((d) => d.blocks)), [perCol])
+  const rawStart = useAppStore((s) => s.config?.ui.worklogDayStart)
+  const rawEnd = useAppStore((s) => s.config?.ui.worklogDayEnd)
+  const [dayStart, dayEnd] = dayHoursOf(rawStart, rawEnd)
+  const [h0, h1] = useMemo(() => hourRange(perCol.flatMap((d) => d.blocks), [dayStart, dayEnd]), [perCol, dayStart, dayEnd])
   const hours = Array.from({ length: h1 - h0 }, (_, i) => h0 + i)
 
   // 지금 시각 줄(오늘 열에만). 1분마다 갱신
@@ -73,9 +84,10 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
     return () => ro.disconnect()
   }, [perCol.length])
 
-  // 처음 열 때 첫 항목(없으면 업무 시작 시각) 근처가 보이게. 이슈를 보고 돌아오면 있던 자리로
-  const firstStart = Math.min(...perCol.flatMap((d) => d.blocks.map((b) => b.start)), 9 * 60)
-  const scrollKey = `${gridDays[0]}|${gridDays.length}|${byUser}`
+  // 처음 열 때 첫 항목(없으면 표시 시작 시각) 근처가 보이게. 이슈를 보고 돌아오면 있던 자리로
+  const starts = perCol.flatMap((d) => d.blocks.map((b) => b.start))
+  const firstStart = starts.length ? Math.min(...starts) : dayStart * 60
+  const scrollKey = `${gridDays[0]}|${gridDays.length}|${byUser}|${h0}`
   useEffect(() => {
     const el = scroller.current
     if (!el) return
@@ -134,6 +146,10 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
         </div>
         {perCol.map((d) => (
           <div key={d.key} className={`wl-tg__col${isWeekend(d.ymd) ? ' is-weekend' : ''}${d.ymd === today ? ' is-today' : ''}`}>
+            {(() => {
+              const lunch = lunchBand(d.ymd, h0, h1)
+              return lunch && <div className="wl-tg__lunch" style={{ top: ((lunch.start - h0 * 60) / 60) * HOUR_H, height: ((lunch.end - lunch.start) / 60) * HOUR_H }} />
+            })()}
             {d.blocks.map((b) => (
               <Block key={b.log.id} b={b} h0={h0} color={colorOf(b.log.authorId)} width={colW / b.cols - 2} goDay={single ? null : openDay} />
             ))}
@@ -155,6 +171,8 @@ function Block({ b, h0, color, width, goDay }: { b: TimeBlock; h0: number; color
   const top = ((b.start - h0 * 60) / 60) * HOUR_H
   const height = ((b.end - b.start) / 60) * HOUR_H
   const tip = [`${log.issueKey} ${log.issueSummary}`, log.author, `${fmtClock(b.start)} – ${fmtClock(b.start + log.seconds / 60)} (${fmtDuration(log.seconds)})`, log.comment].filter(Boolean).join('\n')
+  // 패딩과 제목·시간 두 줄(줄 사이 gap 2개 포함)을 빼고 남는 높이만큼 코멘트 줄 수(블록이 짧으면 0)
+  const lines = Math.max(0, Math.floor((Math.max(height - 1, 14) - BLOCK_PAD_PX - 2 * COMMENT_LINE_PX - 2 * BLOCK_GAP_PX) / COMMENT_LINE_PX))
   const tiny = width < TINY_PX
   const narrow = width < NARROW_PX
   const open = (): void => (goDay ? goDay(localYmd(log.started) ?? '') : useJiraStore.getState().openIssue(log.issueKey))
@@ -183,6 +201,7 @@ function Block({ b, h0, color, width, goDay }: { b: TimeBlock; h0: number; color
             <span className="wl-block__time">{fmtDuration(log.seconds)}</span>
           </span>
           {!narrow && <span className="wl-block__text">{log.issueSummary}</span>}
+          {!narrow && log.comment && lines > 0 && <span className="wl-block__comment" style={{ WebkitLineClamp: lines }}>{log.comment}</span>}
         </>
       )}
     </div>

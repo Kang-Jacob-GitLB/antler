@@ -9,17 +9,23 @@ import { MonthCalendar } from './MonthCalendar'
 import { DayList, TimeGrid } from './TimeGrid'
 import { WorklogReport } from './WorklogReport'
 import { WorklogUsers } from './WorklogUsers'
-import { filterWorklogs, fmtDuration, rangeFor, rangeLabel, selectedUsers, sumSeconds, todayYmd, type WorklogMode } from './worklogModel'
+import { dayHoursOf, filterWorklogs, fmtDuration, rangeFor, rangeLabel, selectedUsers, sumSeconds, todayYmd, type WorklogMode } from './worklogModel'
 import './WorklogView.css'
 
 const NO_TEAM: JiraUser[] = []
 const TABS: WorklogTab[] = ['calendar', 'report']
 const MODES: WorklogMode[] = ['day', 'week', 'month']
+const HOURS = Array.from({ length: 25 }, (_, i) => i)
+const hh = (h: number): string => `${String(h).padStart(2, '0')}:00`
+const setDayHours = (a: number, b: number): void => void useAppStore.getState().setUi({ worklogDayStart: a, worklogDayEnd: b })
 
 /** 워크로그: 캘린더(일·주·월)와 리포트(팀원별 시간표). 읽기 전용 — 조회만 한다 */
 export function WorklogView(): React.JSX.Element {
   const t = useT()
   const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
+  const rawStart = useAppStore((x) => x.config?.ui.worklogDayStart)
+  const rawEnd = useAppStore((x) => x.config?.ui.worklogDayEnd)
+  const [dayStart, dayEnd] = dayHoursOf(rawStart, rawEnd)
   const s = useWorklogStore()
   const team = useJiraSiteData().team ?? NO_TEAM
   const site = useJiraStore((x) => x.auth.siteUrl)
@@ -90,6 +96,25 @@ export function WorklogView(): React.JSX.Element {
         <strong className="wl-range" aria-live="polite">
           {rangeLabel(s.mode, s.anchor, locale)}
         </strong>
+        {s.tab === 'calendar' && s.mode !== 'month' && (
+          <span className="wl-hours" role="group" aria-label={t('jira.worklog.dayHours')} title={t('jira.worklog.dayHours')}>
+            <select className="gh-select" value={dayStart} aria-label={t('jira.worklog.dayStart')} onChange={(e) => setDayHours(Number(e.target.value), dayEnd)}>
+              {HOURS.slice(0, 24).map((h) => (
+                <option key={h} value={h} disabled={h >= dayEnd}>
+                  {hh(h)}
+                </option>
+              ))}
+            </select>
+            <span aria-hidden>–</span>
+            <select className="gh-select" value={dayEnd} aria-label={t('jira.worklog.dayEnd')} onChange={(e) => setDayHours(dayStart, Number(e.target.value))}>
+              {HOURS.slice(1).map((h) => (
+                <option key={h} value={h} disabled={h <= dayStart}>
+                  {hh(h)}
+                </option>
+              ))}
+            </select>
+          </span>
+        )}
         <span className="wl-spacer" />
         <WorklogUsers team={team} me={s.me} />
       </div>

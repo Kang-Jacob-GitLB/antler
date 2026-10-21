@@ -841,3 +841,28 @@ button.wl-t__fold:hover {
 .wl-t tfoot td.is-under {
   background: color-mix(in srgb, var(--modified) 13%, var(--bg-surface));
 }
+
+/* ── 하루 표시 시각(시작–종료) 선택 ── */
+.wl-hours {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-muted);
+}
+
+/* ── 시간 그리드: 점심시간 띠(블록 아래, 클릭을 막지 않는다)와 블록의 코멘트 ── */
+.wl-tg__lunch {
+  position: absolute;
+  right: 0;
+  left: 0;
+  background: color-mix(in srgb, var(--text-muted) 9%, transparent);
+  pointer-events: none;
+}
+.wl-block__comment {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}

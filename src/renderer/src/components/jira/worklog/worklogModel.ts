@@ -1,5 +1,5 @@
 // 워크로그 화면의 순수 로직(날짜 범위 · 시간 표기 · 일별 버킷 · 겹침 열 배치 · 리포트 집계 · TSV). React·스토어에 의존하지 않는다.
-// 날짜는 모두 로컬 달력 기준 'YYYY-MM-DD' 문자열이고, 주는 월요일에 시작한다.
+// 날짜는 모두 로컬 달력 기준 'YYYY-MM-DD' 문자열이고, 주는 일요일에 시작한다.
 import type { JiraUser, JiraWorklog } from '@shared/types'
 
 export type WorklogMode = 'day' | 'week' | 'month'
@@ -32,19 +32,20 @@ export function todayYmd(now: Date = new Date()): string {
   return toYmd(now)
 }
 
-/** 그 날이 든 주의 월요일 */
+/** 그 날이 든 주의 일요일 */
 export function weekStart(ymd: string): string {
-  const dow = (parseYmd(ymd).getDay() + 6) % 7 // 월=0 … 일=6
-  return addDays(ymd, -dow)
+  return addDays(ymd, -weekdayIndex(ymd))
 }
 
-/** 월=0 … 일=6 */
+/** 일=0 … 토=6 */
 export function weekdayIndex(ymd: string): number {
-  return (parseYmd(ymd).getDay() + 6) % 7
+  return parseYmd(ymd).getDay()
 }
 
+/** 토·일 */
 export function isWeekend(ymd: string): boolean {
-  return weekdayIndex(ymd) >= 5
+  const i = weekdayIndex(ymd)
+  return i === 0 || i === 6
 }
 
 export function daysBetween(from: string, to: string): string[] {
@@ -63,7 +64,7 @@ export function monthEnd(ymd: string): string {
 }
 
 export interface WorklogRange {
-  /** 조회하는 범위(양끝 포함). 월간은 그 달 1일이 든 주 월요일 ~ 말일이 든 주 일요일 */
+  /** 조회하는 범위(양끝 포함). 월간은 그 달 1일이 든 주 일요일 ~ 말일이 든 주 토요일 */
   from: string
   to: string
   /** 화면에 격자로 깔리는 날짜 = from..to */
@@ -92,7 +93,7 @@ export function shiftAnchor(mode: WorklogMode, anchor: string, dir: -1 | 1): str
   return toYmd(new Date(d.getFullYear(), d.getMonth() + dir, 1))
 }
 
-/** 범위 라벨: 2026년 10월 / 10월 19일 – 25일 / 10월 19일 (월) */
+/** 범위 라벨: 2026년 10월 / 10월 18일 – 24일 / 10월 21일 (수) */
 export function rangeLabel(mode: WorklogMode, anchor: string, locale: 'ko' | 'en'): string {
   const ko = locale === 'ko'
   const fmt = (ymd: string, o: Intl.DateTimeFormatOptions): string => parseYmd(ymd).toLocaleDateString(ko ? 'ko-KR' : 'en-US', o)
@@ -249,14 +250,34 @@ export function layoutBlocks(logs: JiraWorklog[]): TimeBlock[] {
   return items
 }
 
-/** 타임라인의 시 범위. 기본 7–21 이고, 그 밖의 항목이 있으면 넓힌다([startHour, endHour) → 축은 endHour 시까지) */
-export function hourRange(blocks: TimeBlock[], def: [number, number] = [7, 21]): [number, number] {
+/** 하루 표시 시각(시)의 기본값 */
+export const DEFAULT_DAY_HOURS: [number, number] = [7, 21]
+
+/** 저장된 하루 표시 시각을 쓸 수 있는 값으로. 정수·0≤시작<종료≤24 가 아니면 기본값(NaN 그리드 방지) */
+export function dayHoursOf(start: number | undefined, end: number | undefined): [number, number] {
+  if (Number.isInteger(start) && Number.isInteger(end) && start! >= 0 && end! <= 24 && start! < end!) return [start!, end!]
+  return DEFAULT_DAY_HOURS
+}
+
+/** 타임라인의 시 범위. 기본은 설정한 하루 표시 시각(없으면 7–21)이고, 그 밖의 항목이 있으면 넓힌다([startHour, endHour) → 축은 endHour 시까지) */
+export function hourRange(blocks: TimeBlock[], def: [number, number] = DEFAULT_DAY_HOURS): [number, number] {
   let [a, b] = def
   for (const k of blocks) {
     a = Math.min(a, Math.floor(k.start / 60))
     b = Math.max(b, Math.ceil(k.end / 60))
   }
   return [Math.max(0, a), Math.min(24, b)]
+}
+
+/** 점심시간(로컬 분): 12:00–13:00 */
+export const LUNCH_MIN: [number, number] = [12 * 60, 13 * 60]
+
+/** 시간 그리드에 희미하게 깔 점심 구간(자정부터의 분). 주말이거나 보이는 시각 [h0,h1) 시 와 겹치지 않으면 null, 걸치면 보이는 만큼만 */
+export function lunchBand(ymd: string, h0: number, h1: number): { start: number; end: number } | null {
+  if (isWeekend(ymd)) return null
+  const start = Math.max(LUNCH_MIN[0], h0 * 60)
+  const end = Math.min(LUNCH_MIN[1], h1 * 60)
+  return start < end ? { start, end } : null
 }
 
 // ── 리포트 ─────────────────────────────────────────────
