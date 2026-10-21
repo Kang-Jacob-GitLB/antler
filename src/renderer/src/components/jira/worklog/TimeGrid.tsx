@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JiraUser, JiraWorklog } from '@shared/types'
 import { useT } from '../../../i18n'
 import { useAppStore } from '../../../stores/appStore'
@@ -12,6 +12,7 @@ import {
   fmtDuration,
   hourRange,
   isWeekend,
+  issueColorVar,
   lunchBand,
   layoutBlocks,
   localYmd,
@@ -21,8 +22,9 @@ import {
   type TimeBlock
 } from './worklogModel'
 
-/** 한 시간의 높이(px) */
-const HOUR_H = 48
+/** 한 시간의 높이(px): 표시 시간 수로 보이는 높이를 나눠 정하되 이보다 작아지지 않는다(그땐 스크롤). 측정 전 기본값은 DEFAULT */
+const MIN_HOUR_H = 28
+const DEFAULT_HOUR_H = 48
 /** 블록 폭(px) 기준: 이보다 좁으면 제목을 숨기고, 더 좁으면 시간만 세로로 */
 const NARROW_PX = 72
 const TINY_PX = 40
@@ -84,6 +86,26 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
     return () => ro.disconnect()
   }, [perCol.length])
 
+  // 한 시간의 높이 = (스크롤 영역 높이 − 날짜 머리줄) / 표시 시간 수. 일간은 바깥(.wl-day)이 스크롤 영역이다
+  const [hourH, setHourH] = useState(DEFAULT_HOUR_H)
+  const hourHRef = useRef(DEFAULT_HOUR_H)
+  const hourCount = hours.length
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    const sc = el.parentElement?.classList.contains('wl-day') ? el.parentElement : el
+    const measure = (): void => {
+      const headH = el.querySelector<HTMLElement>('.wl-tg__head')?.offsetHeight ?? 0
+      const h = Math.max(MIN_HOUR_H, (sc.clientHeight - headH) / Math.max(1, hourCount))
+      hourHRef.current = h
+      setHourH((prev) => (Math.abs(prev - h) < 0.01 ? prev : h))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(sc)
+    return () => ro.disconnect()
+  }, [hourCount])
+
   // 처음 열 때 첫 항목(없으면 표시 시작 시각) 근처가 보이게. 이슈를 보고 돌아오면 있던 자리로
   const starts = perCol.flatMap((d) => d.blocks.map((b) => b.start))
   const firstStart = starts.length ? Math.min(...starts) : dayStart * 60
@@ -95,7 +117,7 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
     const sc = el.parentElement?.classList.contains('wl-day') ? el.parentElement : el
     const saved = savedScroll?.key === scrollKey ? savedScroll.top : null
     if (saved !== null) sc.scrollTop = saved
-    else if (sc === el) el.scrollTop = Math.max(0, ((firstStart - h0 * 60) / 60) * HOUR_H - HOUR_H)
+    else if (sc === el) el.scrollTop = Math.max(0, ((firstStart - h0 * 60) / 60) * hourHRef.current - hourHRef.current)
     return () => {
       savedScroll = { key: scrollKey, top: sc.scrollTop }
     }
@@ -103,7 +125,7 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
   }, [scrollKey])
 
   return (
-    <div className="wl-tg" ref={scroller} style={{ '--wl-days': perCol.length, '--wl-hour-h': `${HOUR_H}px` } as React.CSSProperties}>
+    <div className="wl-tg" ref={scroller} style={{ '--wl-days': perCol.length, '--wl-hour-h': `${hourH}px` } as React.CSSProperties}>
       <div className="wl-tg__head">
         <div className="wl-tg__corner" />
         {perCol.map((d) => {
@@ -136,10 +158,10 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
           )
         })}
       </div>
-      <div className="wl-tg__body" style={{ height: hours.length * HOUR_H }}>
+      <div className="wl-tg__body" style={{ height: hours.length * hourH }}>
         <div className="wl-tg__gutter">
           {hours.map((h) => (
-            <div key={h} className="wl-tg__hour" style={{ height: HOUR_H }}>
+            <div key={h} className="wl-tg__hour" style={{ height: hourH }}>
               <span>{`${String(h).padStart(2, '0')}:00`}</span>
             </div>
           ))}
@@ -148,12 +170,12 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
           <div key={d.key} className={`wl-tg__col${isWeekend(d.ymd) ? ' is-weekend' : ''}${d.ymd === today ? ' is-today' : ''}`}>
             {(() => {
               const lunch = lunchBand(d.ymd, h0, h1)
-              return lunch && <div className="wl-tg__lunch" style={{ top: ((lunch.start - h0 * 60) / 60) * HOUR_H, height: ((lunch.end - lunch.start) / 60) * HOUR_H }} />
+              return lunch && <div className="wl-tg__lunch" style={{ top: ((lunch.start - h0 * 60) / 60) * hourH, height: ((lunch.end - lunch.start) / 60) * hourH }} />
             })()}
             {d.blocks.map((b) => (
-              <Block key={b.log.id} b={b} h0={h0} color={colorOf(b.log.authorId)} width={colW / b.cols - 2} goDay={single ? null : openDay} />
+              <Block key={b.log.id} b={b} h0={h0} hourH={hourH} color={issueColorVar(b.log.issueKey)} width={colW / b.cols - 2} goDay={single ? null : openDay} />
             ))}
-            {d.ymd === today && nowMin >= h0 * 60 && nowMin <= h1 * 60 && <div className="wl-tg__now" style={{ top: ((nowMin - h0 * 60) / 60) * HOUR_H }} />}
+            {d.ymd === today && nowMin >= h0 * 60 && nowMin <= h1 * 60 && <div className="wl-tg__now" style={{ top: ((nowMin - h0 * 60) / 60) * hourH }} />}
           </div>
         ))}
       </div>
@@ -166,10 +188,10 @@ export function TimeGrid({ gridDays, logs, users, today, locale }: WorklogPanePr
  * 주간(goDay 있음)에서는 블록을 누르면 그날 일간 보기로 가고(좁아서 읽을 수 없으니 상세는 거기서), 이슈 키만 이슈를 연다.
  * 일간에서는 블록을 누르면 이슈를 연다
  */
-function Block({ b, h0, color, width, goDay }: { b: TimeBlock; h0: number; color: string; width: number; goDay: ((ymd: string) => void) | null }): React.JSX.Element {
+function Block({ b, h0, hourH, color, width, goDay }: { b: TimeBlock; h0: number; hourH: number; color: string; width: number; goDay: ((ymd: string) => void) | null }): React.JSX.Element {
   const { log } = b
-  const top = ((b.start - h0 * 60) / 60) * HOUR_H
-  const height = ((b.end - b.start) / 60) * HOUR_H
+  const top = ((b.start - h0 * 60) / 60) * hourH
+  const height = ((b.end - b.start) / 60) * hourH
   const tip = [`${log.issueKey} ${log.issueSummary}`, log.author, `${fmtClock(b.start)} – ${fmtClock(b.start + log.seconds / 60)} (${fmtDuration(log.seconds)})`, log.comment].filter(Boolean).join('\n')
   // 패딩과 제목·시간 두 줄(줄 사이 gap 2개 포함)을 빼고 남는 높이만큼 코멘트 줄 수(블록이 짧으면 0)
   const lines = Math.max(0, Math.floor((Math.max(height - 1, 14) - BLOCK_PAD_PX - 2 * COMMENT_LINE_PX - 2 * BLOCK_GAP_PX) / COMMENT_LINE_PX))

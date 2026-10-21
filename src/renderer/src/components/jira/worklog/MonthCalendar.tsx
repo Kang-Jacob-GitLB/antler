@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '../../../i18n'
 import { useWorklogStore } from '../../../stores/jiraWorklogStore'
 import { IssueKey, type WorklogPaneProps } from './WorklogBits'
-import { bucketByDay, DAY_TARGET_SEC, dayStatus, fmtDuration, isWeekend, parseYmd, weekdayShort } from './worklogModel'
+import { bucketByDay, DAY_TARGET_SEC, dayStatus, fmtDuration, isWeekend, issueColorVar, parseYmd, weekdayShort } from './worklogModel'
 
 /** 셀에서 날짜 줄·여백·막대가 차지하는 높이(px)와 칩 한 줄(칩 20 + 간격 2) */
 const CELL_CHROME_PX = 54
@@ -76,7 +76,7 @@ export function MonthCalendar({ gridDays, logs, users, anchor, today, locale }: 
               </div>
               <div className="wl-cell__chips">
                 {b?.issues.slice(0, shownN).map((i) => (
-                  <span key={i.key} className="wl-chip" title={`${i.key} ${i.summary}`}>
+                  <span key={i.key} className="wl-chip" title={`${i.key} ${i.summary}`} style={{ '--wl-c': issueColorVar(i.key) } as React.CSSProperties}>
                     <IssueKey issueKey={i.key} title={`${i.key} ${i.summary}`} />
                     <span className="wl-chip__time">{fmtDuration(i.seconds)}</span>
                   </span>
