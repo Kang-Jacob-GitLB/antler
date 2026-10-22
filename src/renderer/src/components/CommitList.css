@@ -246,6 +246,28 @@
   font-size: var(--fs-xs);
   font-weight: 600;
 }
+/* ref 가 여럿인 행에 마우스를 대면 행 위에 띄우는 칩 목록. 첫 칩이 원래 자리에 오도록 칸 안쪽 여백을 맞춘다 */
+.ref-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: var(--col-refs);
+  max-width: calc(100% - var(--space-2));
+  min-height: 100%;
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-popover);
+}
+/* 그래프 canvas(z-index 1) 와 아래 행들 위로 올린다 */
+.commit-list__slot:has(.ref-overlay) {
+  z-index: 2;
+}
 
 /* ── 그래프 canvas: 스크롤 영역 맨 위에 sticky 로 붙어 행 위에 겹친다 ── */
 .graph-layer {
