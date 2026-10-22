@@ -230,6 +230,7 @@ export const ko = {
   'col.sha': 'SHA',
   'col.pr': 'PR',
   'pr.open': '#{n} 풀 리퀘스트 열기',
+  'pr.openDraft': '#{n} 초안 풀 리퀘스트 열기',
   'list.loading': '불러오는 중…',
   'list.noCommits': '이 저장소에는 아직 커밋이 없습니다',
   'list.count': '커밋 {n}개{more}',

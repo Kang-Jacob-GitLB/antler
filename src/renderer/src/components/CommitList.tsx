@@ -124,15 +124,21 @@ const RefChip = ({ chip, filterTitle }: { chip: Chip; filterTitle: string }): Re
 /** 검색 중 행 표시: 일치(match) / 불일치(dim) / 검색 아님(none) */
 type SearchMark = 'match' | 'current' | 'dim' | 'none'
 
-/** PR 열: 제목에서 읽은 번호. GitHub remote 가 있으면 앱 안의 PR 화면을 여는 칩(GitHub 로 가는 버튼은 그 화면에 있다), 없으면 그냥 글자 */
-function PrCell({ n, linkable, label }: { n: number | null; linkable: boolean; label: string }): React.JSX.Element {
+/** 커밋을 머리로 둔 열린 PR */
+interface OpenPr {
+  number: number
+  draft: boolean
+}
+
+/** PR 열: 제목에서 읽은 번호(없으면 이 커밋이 머리인 열린 PR). GitHub remote 가 있으면 앱 안의 PR 화면을 여는 칩(GitHub 로 가는 버튼은 그 화면에 있다), 없으면 그냥 글자 */
+function PrCell({ n, linkable, draft, label }: { n: number | null; linkable: boolean; draft: boolean; label: string }): React.JSX.Element {
   return (
     <div className="cell cell--pr">
       {n !== null &&
         (linkable ? (
           <button
             type="button"
-            className="pr-chip mono"
+            className={`pr-chip mono${draft ? ' pr-chip--draft' : ''}`}
             title={label}
             aria-label={label}
             // 행 선택(mousedown)으로 번지지 않게 하고, 키보드로도 누를 수 있게 버튼으로 둔다
@@ -157,6 +163,7 @@ const Row = memo(function Row({
   compared,
   showPr,
   prLinkable,
+  openPr,
   onSelect
 }: {
   commit: Commit
@@ -169,11 +176,16 @@ const Row = memo(function Row({
   showPr: boolean
   /** GitHub remote 가 있어 PR 화면을 열 수 있는지 */
   prLinkable: boolean
+  /** 이 커밋이 머리(head)인 열린 PR(초안 포함) */
+  openPr: OpenPr | undefined
   onSelect(i: number, e: React.MouseEvent): void
 }) {
   const t = useT()
   const chips = useMemo(() => toChips(commit.refs), [commit.refs])
-  const pr = useMemo(() => (showPr ? parsePrNumber(commit.subject) : null), [showPr, commit.subject])
+  const subjectPr = useMemo(() => (showPr ? parsePrNumber(commit.subject) : null), [showPr, commit.subject])
+  // 제목의 번호(머지된 PR)가 먼저, 없으면 이 커밋을 머리로 둔 열린 PR
+  const pr = subjectPr ?? (showPr && openPr ? openPr.number : null)
+  const draft = subjectPr === null && !!openPr?.draft
   const firstChip = chips[0]
   // ref 가 여럿이면 refs 칸에 마우스를 댈 때 행 위에 전부 펼친 오버레이를 띄운다(행 높이·배치는 그대로 두고 덮기만 한다)
   const [refsOpen, setRefsOpen] = useState(false)
@@ -213,7 +225,7 @@ const Row = memo(function Row({
         <span className="commit-subject">{commit.subject}</span>
         <CommitCheck hash={commit.hash} />
       </div>
-      {showPr && <PrCell n={pr} linkable={prLinkable} label={pr === null ? '' : t('pr.open', { n: pr })} />}
+      {showPr && <PrCell n={pr} linkable={prLinkable} draft={draft} label={pr === null ? '' : t(draft ? 'pr.openDraft' : 'pr.open', { n: pr })} />}
       <div className="cell cell--author">
         <AuthorAvatar email={commit.authorEmail} name={commit.authorName} size={18} />
         <span className="cell__text">{commit.authorName}</span>
@@ -306,6 +318,14 @@ export function CommitList(): React.JSX.Element {
   const ghRef = useGithubStore((s) => s.ref)
   const anyPr = useMemo(() => commits.some((c) => parsePrNumber(c.subject) !== null), [commits])
   const showPr = !!ghRef || anyPr
+  // 열린 PR(초안 포함)은 아직 머지 전이라 제목에 번호가 없다 — 사이드바가 받아 둔 열린 PR 목록의 머리 커밋으로 잇는다
+  const sidePulls = useGithubStore((s) => s.sidePulls.items)
+  const openPrs = useMemo(() => {
+    const m = new Map<string, OpenPr>()
+    // 목록은 최근 갱신 순이므로 같은 커밋을 머리로 둔 PR 이 여럿이면 최근 것을 쓴다
+    for (const p of sidePulls) if (p.state === 'open' && p.headSha && !m.has(p.headSha)) m.set(p.headSha, { number: p.number, draft: p.draft })
+    return m
+  }, [sidePulls])
   const showWip = wipDirtyNow && solo.length === 0 && commits.length > 0
   const wipOff = showWip ? ROW_H : 0
   const wipOn = showWip && wipSelected
@@ -463,6 +483,7 @@ export function CommitList(): React.JSX.Element {
                     compared={!!compareHash && commit.hash === compareHash}
                     showPr={showPr}
                     prLinkable={!!ghRef}
+                    openPr={openPrs.get(commit.hash)}
                     onSelect={selectCommit}
                   />
                 ) : (
