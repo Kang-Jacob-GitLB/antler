@@ -223,7 +223,7 @@ export function registerIpc(
   handle('repos:remove', async (_e, repoId) => {
     repos.invalidateGhRemotes(repoId)
     // 원격 전용 저장소는 캐시 폴더도 지운다 — 실행 중인 fetch·감시를 먼저 멈춰 git 이 폴더를 쥐고 있지 않게 한다.
-    // 폴더를 못 지우면(다른 프로세스가 쥐고 있음) 오류로 알리고 레코드는 남겨 다시 시도할 수 있게 한다
+    // 폴더를 못 지워도(다른 프로세스가 쥐고 있음) 레코드는 지운다 — 남은 폴더는 다음 시작 때 고아 캐시 정리가 지운다
     if (repos.isGithub(repoId)) {
       await fetcher.forgetAndWait(repoId)
       if (watcher.current === repoId) await watcher.watch(null)

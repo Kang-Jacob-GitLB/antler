@@ -6,7 +6,7 @@ import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
 import { DateText } from './DateText'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
-import { githubEmptyState } from '../lib/ghRepoList'
+import { githubEmptyState, shouldReloadAfterFetch, type FetchSeen } from '../lib/ghRepoList'
 import { isHidden } from '../lib/refView'
 import { useFetchStore } from '../stores/fetchStore'
 import { useAppStore } from '../stores/appStore'
@@ -429,14 +429,16 @@ export function CommitList(): React.JSX.Element {
   const ghStatus = useFetchStore((s) => (ghRepoId ? s.status[ghRepoId] : undefined))
   const ghState = ghRepoId && commits.length === 0 && !hasMore ? githubEmptyState(ghStatus) : 'empty'
   const ghFetching = ghStatus?.fetching === true
-  const wasFetching = useRef(false)
+  const fetchSeen = useRef<FetchSeen | null>(null)
   useEffect(() => {
-    // fetch 가 끝나면 목록을 다시 읽는다(처음 받은 이력을 보이고, 빈 저장소에서 났던 로그 오류를 지운다)
-    if (ghRepoId && wasFetching.current && !ghFetching) {
+    // 목록이 비어 있던 저장소의 fetch 가 끝나면 다시 읽는다(처음 받은 이력을 보이고, 빈 저장소에서 났던 로그 오류를 지운다).
+    // 이력이 있으면 repo:changed 의 softReload 에 맡겨 선택·비교·스크롤을 지킨다
+    const cur: FetchSeen = { repoId: ghRepoId, fetching: ghFetching }
+    if (shouldReloadAfterFetch(fetchSeen.current, cur, commits.length)) {
       useLogStore.getState().reload()
       void useAppStore.getState().refreshRefs()
     }
-    wasFetching.current = ghFetching
+    fetchSeen.current = cur
   }, [ghRepoId, ghFetching])
 
   return (

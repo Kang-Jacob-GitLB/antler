@@ -5,6 +5,7 @@ import {
   formatPushed,
   ghKey,
   githubEmptyState,
+  shouldReloadAfterFetch,
   githubUrl,
   listOwners,
   parseOwnerFilter,
@@ -134,6 +135,22 @@ describe('githubEmptyState', () => {
 
   it('받았는데 커밋이 없으면 빈 저장소', () => {
     expect(githubEmptyState(st({ lastOkAt: 1 }))).toBe('empty')
+  })
+})
+
+describe('shouldReloadAfterFetch', () => {
+  const seen = (repoId: string | null, fetching: boolean) => ({ repoId, fetching })
+  it('같은 저장소에서 fetch 가 끝났고 목록이 비었으면 다시 읽는다', () => {
+    expect(shouldReloadAfterFetch(seen('a', true), seen('a', false), 0)).toBe(true)
+  })
+  it('이력이 있으면 읽지 않는다(선택·스크롤 보존)', () => {
+    expect(shouldReloadAfterFetch(seen('a', true), seen('a', false), 5)).toBe(false)
+  })
+  it('저장소 전환·fetch 시작·이전 기록 없음은 읽지 않는다', () => {
+    expect(shouldReloadAfterFetch(seen('a', true), seen('b', false), 0)).toBe(false)
+    expect(shouldReloadAfterFetch(seen('a', false), seen('a', true), 0)).toBe(false)
+    expect(shouldReloadAfterFetch(null, seen('a', false), 0)).toBe(false)
+    expect(shouldReloadAfterFetch(seen('a', true), seen(null, false), 0)).toBe(false)
   })
 })
 

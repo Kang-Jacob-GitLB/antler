@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from
 import { dirname } from 'node:path'
 import { LAUNCHPAD_KEY_RE, MAX_LAUNCHPAD_PINS, MAX_LAUNCHPAD_SNOOZES } from '@shared/launchpad'
 import type { AppConfig, EditorKind, Repo, RepoPatch, Source, SourceKind, UiPrefs, WindowState } from '@shared/types'
-import { GITHUB_SOURCE_ID, isSafeBranch, sanitizeGithubLink } from '../git/githubCache'
+import { GITHUB_SOURCE_ID, githubCachePath, isSafeBranch, sanitizeGithubLink } from '../git/githubCache'
 import { sanitizeWindowState } from '../windowState'
 
 export const LOCAL_SOURCE_ID = 'local'
@@ -105,12 +105,21 @@ function checkRepoListPrefs(patch: Partial<UiPrefs>): void {
  * 저장된 저장소 목록의 GitHub 링크를 검증한다. github 소스의 저장소인데 링크가 틀렸으면 fetch 할 대상도 URL 을 확인할 기준도
  * 없으므로 그 항목을 버리고, github 소스가 아닌 저장소에 붙은 링크는 필드만 버린다.
  */
-function sanitizeRepos(repos: Repo[]): Repo[] {
+function sanitizeRepos(repos: Repo[], cacheDir?: string): Repo[] {
   const out: Repo[] = []
+  const githubPaths = new Set<string>()
   for (const r of repos) {
+    // null·비객체 항목 하나가 설정 전체를 손상 처리하지 않게 그 항목만 건너뛴다
+    if (!r || typeof r !== 'object' || Array.isArray(r)) continue
     if (r.sourceId === GITHUB_SOURCE_ID) {
       const link = sanitizeGithubLink(r.github)
-      if (link) out.push({ ...r, github: link })
+      if (!link) continue
+      // 캐시 경로는 저장된 절대경로를 믿지 않고 이 PC 의 캐시 폴더와 링크로 다시 정한다(설정 파일을 다른 PC·사용자로 옮겨도 맞도록).
+      // 대소문자만 다른 같은 저장소는 같은 경로가 되므로 처음 것만 남긴다
+      const path = cacheDir ? githubCachePath(cacheDir, link) : r.path
+      if (githubPaths.has(path)) continue
+      githubPaths.add(path)
+      out.push({ ...r, path, github: link })
     } else if (r.github !== undefined) {
       const { github: _stray, ...rest } = r
       out.push(rest)
@@ -130,11 +139,21 @@ function defaults(): AppConfig {
   }
 }
 
+export interface ConfigStoreOptions {
+  /** GitHub 원격 전용 저장소의 캐시 기준 폴더. 있으면 로드할 때 github 저장소의 path 를 이 폴더와 링크로 다시 정한다 */
+  cacheDir?: string
+}
+
 /** 소스·저장소 목록과 UI 설정을 JSON 파일 하나에 저장한다. 쓰기는 임시 파일 → rename 으로 원자적으로 한다. */
 export class ConfigStore {
   private config: AppConfig
+  /** 설정 파일이 있는데 읽거나 해석하지 못했다(저장소 목록이 비어 시작했다). 목록이 빈 것을 근거로 캐시를 지우면 안 된다 */
+  loadFailed = false
 
-  constructor(private readonly file: string) {
+  constructor(
+    private readonly file: string,
+    private readonly opts: ConfigStoreOptions = {}
+  ) {
     this.config = this.load()
   }
 
@@ -275,12 +294,13 @@ export class ConfigStore {
     let text: string
     try {
       text = readFileSync(this.file, 'utf8')
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') this.loadFailed = true
       return base // 첫 실행
     }
     try {
       const raw = JSON.parse(text) as Partial<AppConfig>
-      const repos = sanitizeRepos(raw.repos ?? [])
+      const repos = sanitizeRepos(raw.repos ?? [], this.opts.cacheDir)
       // github 소스는 정해진 모양 하나뿐이고, 저장소가 있을 때만 존재한다(파일에서 바뀐 값은 믿지 않고 다시 만든다)
       const hasGithub = repos.some((r) => r.sourceId === GITHUB_SOURCE_ID)
       const sources = (raw.sources?.length ? raw.sources : base.sources).filter((s) => s.id !== GITHUB_SOURCE_ID && s.kind !== 'github')
@@ -313,6 +333,7 @@ export class ConfigStore {
       }
     } catch {
       // 손상된 설정은 덮어쓰기 전에 보존해 둔다(사용자가 저장소 목록을 복구할 수 있게)
+      this.loadFailed = true
       try {
         copyFileSync(this.file, `${this.file}.corrupt-${Date.now()}.bak`)
       } catch {

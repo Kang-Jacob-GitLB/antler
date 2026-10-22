@@ -81,3 +81,18 @@ export function githubEmptyState(status: FetchStatus | undefined): 'fetching' | 
 export function githubUrl(link: { owner: string; repo: string }): string {
   return `https://github.com/${link.owner}/${link.repo}`
 }
+
+/** fetch 진행 상태를 저장소와 함께 기억한 값 */
+export interface FetchSeen {
+  repoId: string | null
+  fetching: boolean
+}
+
+/**
+ * 원격 전용 저장소에서 fetch 가 끝났을 때 로그를 처음부터 다시 읽을지.
+ * 같은 저장소에서 fetching 이 true → false 로 바뀌었고 목록이 비어 있을 때만(첫 이력 도착·빈 저장소 오류 해소).
+ * 이력이 이미 있으면 repo:changed 의 softReload 가 선택·스크롤을 지킨 채 갱신하므로 건드리지 않는다.
+ */
+export function shouldReloadAfterFetch(prev: FetchSeen | null, cur: FetchSeen, commitCount: number): boolean {
+  return !!cur.repoId && !!prev && prev.repoId === cur.repoId && prev.fetching && !cur.fetching && commitCount === 0
+}

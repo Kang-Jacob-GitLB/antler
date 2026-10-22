@@ -23,8 +23,10 @@ export const DEFAULT_AUTO_FETCH_MINUTES = 5
 const FIRST_DELAY_MS = 3_000
 /** fetch 한 번의 제한 시간 */
 const FETCH_TIMEOUT_MS = 60_000
-/** GitHub 원격 전용 저장소의 첫 fetch(아직 ref 가 없다)는 이력 전체를 받으므로 넉넉히 둔다 */
-const GITHUB_FIRST_FETCH_TIMEOUT_MS = 15 * 60_000
+/** GitHub 원격 전용 저장소의 첫 fetch(아직 ref 가 없다)는 이력 전체를 받으므로 넉넉히 둔다. 큐 슬롯을 얻은 뒤부터 잰다 */
+const GITHUB_FIRST_FETCH_TIMEOUT_MS = 60 * 60_000
+/** 저장소를 지우기 전에 진행 중인 fetch 가 끝나기를 기다리는 최대 시간(그 뒤에는 고아 캐시 정리가 안전망이다) */
+const FORGET_WAIT_MS = 5_000
 const MAX_ERROR_LEN = 300
 
 export interface FetchOptions {
@@ -165,11 +167,33 @@ export class FetchService {
     if (this.active === repoId) this.setActive(null)
   }
 
-  /** 저장소를 지우기 전: 진행 중인 fetch 를 끊고 끝날 때까지 기다린다(캐시 폴더를 지우기 전에 git 이 손을 떼야 한다) */
+  /**
+   * 저장소를 지우기 전: 진행 중인 fetch 를 끊고 끝날 때까지 기다린다(캐시 폴더를 지우기 전에 git 이 손을 떼야 한다).
+   * 끊어도 끝나지 않는 fetch 가 삭제를 붙잡지 않도록 FORGET_WAIT_MS 까지만 기다린다.
+   */
   async forgetAndWait(repoId: string): Promise<void> {
     const running = this.inflight.get(repoId)
     this.forget(repoId)
-    await running?.catch(() => {})
+    if (!running) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([running.then(() => {}, () => {}), new Promise<void>((resolve) => (timer = setTimeout(resolve, FORGET_WAIT_MS)))])
+    clearTimeout(timer)
+  }
+
+  /**
+   * GitHub 로그인 상태가 바뀌었다(로그인·로그아웃·토큰 만료): 인증 문제로 멈춰 있던 원격 전용 저장소의 자동 fetch 를 다시 연다.
+   * 저장소를 열고 있다면 아직 받은 것이 없는 경우에 바로 다시 시도한다.
+   */
+  resumeGithubAuth(): void {
+    for (const [repoId, s] of this.states) {
+      if (!s.authPaused || !this.repos.isGithub(repoId)) continue
+      s.authPaused = false
+      s.failures = 0
+      s.needsManual = false
+      this.emit(repoId)
+    }
+    this.schedule()
+    if (this.active) void this.fetchIfEmpty(this.active)
   }
 
   dispose(): void {
@@ -256,10 +280,16 @@ export class FetchService {
     const github = isGithub ? this.repos.githubTarget(repoId) : null
     const timeoutMs = github && (await this.repos.hasNoRefs(repoId).catch(() => false)) ? GITHUB_FIRST_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS
     let timedOut = false
-    const timeout = setTimeout(() => {
-      timedOut = true
-      ac.abort()
-    }, timeoutMs)
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    const arm = (): void => {
+      timeout = setTimeout(() => {
+        timedOut = true
+        ac.abort()
+      }, timeoutMs)
+    }
+    // 일반 저장소는 요청 때부터 잰다. GitHub 원격 전용 저장소의 첫 fetch 는 이력 전체를 받는 긴 작업이라, 다른 fetch 를 기다린
+    // 시간이 제한을 갉아먹지 않도록 큐 슬롯을 얻은 뒤부터 잰다
+    if (!isGithub) arm()
     const signal = ac.signal
     let approvedForRun = true
     let hasHttp = false
@@ -268,7 +298,10 @@ export class FetchService {
       const { exec, path, queue } = this.repos.fetchContext(repoId)
       const changed = await queue.run(
         async () => {
-          if (isGithub) return this.runGithub(repoId, github, exec, path, s, signal)
+          if (isGithub) {
+            arm()
+            return this.runGithub(repoId, github, exec, path, s, signal)
+          }
           const ins = await inspectConfig(exec, path, { signal })
           s.noRemote = !ins.hasRemote
           s.blocked = null
@@ -330,7 +363,7 @@ export class FetchService {
         s.error = null // 취소는 오류가 아니다
       } else {
         s.error = this.repos.redactSecrets(timedOut ? `시간 초과(${timeoutMs / 1000}초)` : errMessage(err)).slice(0, MAX_ERROR_LEN)
-        const kind = timedOut ? 'network' : classifyFailure(err)
+        const kind = timedOut ? 'network' : classifyFailure(err, { github: isGithub })
         if (kind === 'protocol') s.error = `자동 fetch 는 로컬 경로(file) remote 를 쓰지 않습니다. 새로고침으로 직접 fetch 하세요. ${s.error}`.slice(0, MAX_ERROR_LEN)
         if (kind === 'auth' && !opts.manual && !approvedForRun && hasHttp) s.needsManual = true
         if (kind !== 'network') s.authPaused = true
@@ -367,13 +400,14 @@ export class FetchService {
       s.blocked = { keys: problems, confirmable: false }
       return false
     }
-    const env = this.repos.githubFetchEnv()
+    await this.repos.githubReady()
+    const env = this.repos.githubFetchEnv(path)
     const hooksPath = hooksPathFor(exec.kind, this.noHooksDir)
     const before = await this.repos.signature(repoId, signal).catch(() => null)
-    await runFetch(exec, path, { ...inspectEntries([]), remoteNames: ['origin'] }, { signal, hooksPath, allowFile: false, credentialHelpers: false, env, filter: 'blob:none' })
+    await runFetch(exec, path, { ...inspectEntries([]), remoteNames: ['origin'] }, { signal, hooksPath, allowFile: false, credentialHelpers: false, env, filter: 'blob:none', followRedirects: 'false' })
     // HEAD 를 받아 온 기본 브랜치에 맞춘다. 실패해도 fetch 자체는 성공이다(취소만 그대로 올린다)
     try {
-      const branch = await ensureGithubHead(exec, path, github.link, { signal, env }, fetchConfigArgs(hooksPath))
+      const branch = await ensureGithubHead(exec, path, github.link, { signal, env }, fetchConfigArgs(hooksPath, { followRedirects: 'false' }))
       if (branch && branch !== github.link.defaultBranch) this.config.setGithubDefaultBranch(repoId, branch)
     } catch (err) {
       if (err instanceof AbortError) throw err

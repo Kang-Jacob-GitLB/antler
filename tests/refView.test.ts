@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildScope, canHide, isHidden, pruneView, remoteAllRef, sanitizeView, toggled, unhidden, type RefView } from '../src/renderer/src/lib/refView'
+import { buildScope, canHide, headRefId, isHidden, pruneView, remoteAllRef, sanitizeView, toggled, unhidden, type RefView } from '../src/renderer/src/lib/refView'
 import type { RefsSnapshot, ViewRef } from '../src/shared/types'
 
 const ref = (id: string, kind: ViewRef['kind'] = 'branch'): ViewRef => ({ id, label: id, kind })
@@ -16,6 +16,35 @@ describe('buildScope', () => {
     expect(buildScope({ solo: [], hide: [ref('refs/heads/main')] }, 'main')).toEqual({ hide: ['refs/heads/main'], includeHead: false })
     expect(buildScope({ solo: [], hide: [ref('refs/heads/x')] }, 'main')).toEqual({ hide: ['refs/heads/x'] })
     expect(buildScope({ solo: [], hide: [ref('refs/heads/main')] }, null)).toEqual({ hide: ['refs/heads/main'] })
+  })
+})
+
+describe('headRefId / 원격 추적 브랜치를 가리키는 HEAD', () => {
+  const br = (name: string, fullName: string) => ({ name, fullName, hash: H40 })
+  const refs = {
+    local: [br('feature/x', 'refs/heads/feature/x')],
+    remotes: [{ name: 'origin', branches: [br('origin/main', 'refs/remotes/origin/main'), br('origin/feature/x', 'refs/remotes/origin/feature/x')] }]
+  } as unknown as Pick<RefsSnapshot, 'local' | 'remotes'>
+
+  it('슬래시가 있어도 로컬 브랜치면 refs/heads/', () => {
+    expect(headRefId('feature/x', refs)).toBe('refs/heads/feature/x')
+  })
+  it('로컬에 없고 원격 추적 브랜치에 있으면 그 fullName', () => {
+    expect(headRefId('origin/main', refs)).toBe('refs/remotes/origin/main')
+  })
+  it('git 이 모호할 때 붙이는 접두사', () => {
+    expect(headRefId('remotes/origin/main', refs)).toBe('refs/remotes/origin/main')
+    expect(headRefId('heads/origin/main', refs)).toBe('refs/heads/origin/main')
+  })
+  it('스냅샷이 없거나 어디에도 없으면 refs/heads/, detached 는 null', () => {
+    expect(headRefId('main', null)).toBe('refs/heads/main')
+    expect(headRefId('nope', refs)).toBe('refs/heads/nope')
+    expect(headRefId(null, refs)).toBeNull()
+  })
+  it('원격 전용 저장소에서 현재 브랜치를 숨기면 includeHead=false', () => {
+    const hide = [ref('refs/remotes/origin/main')]
+    expect(buildScope({ solo: [], hide }, 'origin/main', headRefId('origin/main', refs))).toEqual({ hide: ['refs/remotes/origin/main'], includeHead: false })
+    expect(buildScope({ solo: [], hide }, 'origin/main')).toEqual({ hide: ['refs/remotes/origin/main'] })
   })
 })
 

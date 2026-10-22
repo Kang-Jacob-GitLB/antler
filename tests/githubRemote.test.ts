@@ -1,16 +1,25 @@
 // GitHub 원격 전용 저장소: owner/repo 검증 · 캐시 경로 · 설정 정확 일치 검사 · 실행 환경 · ConfigStore · 추가/삭제 ·
 // 실제 git 으로 partial clone fetch + lazy fetch. 네트워크는 쓰지 않는다(file:// 소스 저장소와 로컬 bare 저장소만).
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { FetchStatus, GithubRepoLink } from '../src/shared/types'
 import { GIT_ENV } from '../src/main/executors/GitExecutor'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
-import { commitDetail } from '../src/main/git/commands'
-import { fetchConfigArgs, inspectEntries, parseConfigList, runFetch, versionAtLeast, gitVersion, type ConfigEntry } from '../src/main/git/fetch'
+import { commitDetail, compareCommits } from '../src/main/git/commands'
+import {
+  classifyFailure,
+  fetchConfigArgs,
+  inspectEntries,
+  parseConfigList,
+  runFetch,
+  versionAtLeast,
+  gitVersion,
+  type ConfigEntry
+} from '../src/main/git/fetch'
 import {
   cachePathMatchesLink,
   checkGithubConfig,
@@ -22,6 +31,8 @@ import {
   githubRemoteUrl,
   initGithubRepo,
   inspectGithubRepo,
+  pickNetworkConfig,
+  readNetworkConfig,
   redactToken,
   sanitizeGithubLink,
   validateGithubLink
@@ -32,12 +43,32 @@ import { RepoService } from '../src/main/services/RepoService'
 import { RepoWatcher } from '../src/main/services/RepoWatcher'
 
 let root: string
+/** 훅 차단용 빈 디렉터리(githubEnv 의 core.hooksPath) */
+let noHooks: string
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'antler-ghremote-'))
+  noHooks = join(root, 'no-hooks')
+  mkdirSync(noHooks)
 })
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
 const tmpDir = (name: string): string => mkdtempSync(join(root, `${name}-`))
+/** 테스트용 github 환경(캐시 폴더 dir 로 고정). 프로토콜은 file 로 바꿀 수 있다 */
+const envOf = (dir: string, o: { allowProtocol?: string; token?: string | null } = {}): Record<string, string> =>
+  githubEnv(o.token ?? null, { gitDir: dir, hooksPath: noHooks.replace(/\\/g, '/'), ...(o.allowProtocol ? { allowProtocol: o.allowProtocol } : {}) })
+/** 환경 변수를 잠시 바꿔 fn 을 실행하고 되돌린다(사용자 전역 설정이 오염된 상황을 흉내 낸다) */
+async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+  const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]))
+  Object.assign(process.env, vars)
+  try {
+    return await fn()
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+  }
+}
 const link = (owner = 'octocat', repo = 'Hello-World', defaultBranch?: string): GithubRepoLink => ({ owner, repo, ...(defaultBranch ? { defaultBranch } : {}) })
 
 /** git config --list --show-scope -z 와 같은 모양의 항목 */
@@ -197,51 +228,139 @@ describe('설정 정확 일치 검사', () => {
   it('worktree scope 의 항목도 같은 기준으로 본다', () => {
     expect(check([...healthy(), entry('core.sshcommand', 'evil', 'worktree')])).toHaveLength(1)
   })
+
+  it('init 이 형식에 따라 덧붙이는 extensions.refstorage·objectformat 은 정해진 값일 때만 허용한다(git 3.0 기본은 reftable)', () => {
+    expect(check([...healthy(), entry('extensions.refstorage', 'reftable')])).toEqual([])
+    expect(check([...healthy(), entry('extensions.refstorage', 'files')])).toEqual([])
+    expect(check([...healthy(), entry('extensions.objectformat', 'sha1')])).toEqual([])
+    expect(check([...healthy(), entry('extensions.refstorage', 'evil')])).toEqual(['extensions.refstorage (예상과 다름)'])
+    expect(check([...healthy(), entry('extensions.objectformat', 'sha256')])).toEqual(['extensions.objectformat (예상과 다름)'])
+    // 필수 키가 아니므로 없어도 된다(위 healthy 가 이미 그렇다). 다른 extensions.* 는 여전히 막힌다
+    expect(check([...healthy(), entry('extensions.noop', 'true')])).toHaveLength(1)
+  })
 })
 
 describe('githubEnv', () => {
-  const base = {} as Record<string, string | undefined>
+  const dir = join(tmpdir(), 'antler-env-shape', 'remote-repos', 'octocat', 'hello.git')
+  /** command scope 로 넘어간 설정을 {키: 값} 으로 푼다 */
+  const configOf = (env: Record<string, string>): Record<string, string> => {
+    const n = Number(env['GIT_CONFIG_COUNT'])
+    return Object.fromEntries(Array.from({ length: n }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`]!, env[`GIT_CONFIG_VALUE_${i}`]!]))
+  }
 
   it('lazy fetch 를 열고 https 만 허용하며 자격 증명 도우미를 비운다', () => {
-    const env = githubEnv(null, { base })
+    const env = envOf(dir)
     expect(GIT_ENV['GIT_NO_LAZY_FETCH']).toBe('1')
     expect(env['GIT_NO_LAZY_FETCH']).toBe('0')
     expect(env['GIT_ALLOW_PROTOCOL']).toBe('https')
     expect(env['GIT_LFS_SKIP_SMUDGE']).toBe('1')
     expect(env['GIT_TERMINAL_PROMPT']).toBe('0')
-    expect(env['GIT_CONFIG_COUNT']).toBe('1')
-    expect(env['GIT_CONFIG_KEY_0']).toBe('credential.helper')
-    expect(env['GIT_CONFIG_VALUE_0']).toBe('')
+    expect(configOf(env)['credential.helper']).toBe('')
     // 읽기 전용 보호는 그대로
     expect(env['GIT_NO_REPLACE_OBJECTS']).toBe('1')
     expect(env['GIT_LITERAL_PATHSPECS']).toBe('1')
   })
 
+  it('저장소를 고정하고 사용자 시스템·전역 설정을 끊는다', () => {
+    const env = envOf(dir)
+    expect(env['GIT_DIR']).toBe(resolve(dir))
+    // 상위 탐색 한계는 캐시 폴더의 부모(슬래시 표기)
+    expect(env['GIT_CEILING_DIRECTORIES']).toBe(dirname(resolve(dir)).replace(/\\/g, '/'))
+    expect(env['GIT_CONFIG_NOSYSTEM']).toBe('1')
+    expect(env['GIT_CONFIG_GLOBAL']).toBe(process.platform === 'win32' ? 'NUL' : '/dev/null')
+    expect(env['GIT_CONFIG_PARAMETERS']).toBe('')
+  })
+
+  it('하드닝 설정을 command scope 로 준다', () => {
+    const cfg = configOf(envOf(dir))
+    expect(cfg).toMatchObject({
+      'maintenance.auto': 'false',
+      'gc.auto': '0',
+      'core.hooksPath': noHooks.replace(/\\/g, '/'),
+      'transfer.bundleURI': 'false',
+      'http.followRedirects': 'false'
+    })
+  })
+
   it('토큰은 github.com 에만 붙는 Authorization 헤더로 간다', () => {
-    const env = githubEnv('ghp_secret', { base })
-    expect(env['GIT_CONFIG_COUNT']).toBe('2')
-    expect(env['GIT_CONFIG_KEY_1']).toBe('http.https://github.com/.extraheader')
-    expect(env['GIT_CONFIG_VALUE_1']).toBe(`Authorization: Basic ${Buffer.from('x-access-token:ghp_secret').toString('base64')}`)
-    // 토큰은 이 두 값 밖에는 어디에도 없다
+    const env = envOf(dir, { token: 'ghp_secret' })
+    expect(configOf(env)['http.https://github.com/.extraheader']).toBe(`Authorization: Basic ${Buffer.from('x-access-token:ghp_secret').toString('base64')}`)
+    // 토큰은 이 값 밖에는 어디에도 없다
     const holders = Object.entries(env).filter(([, v]) => v.includes('ghp_secret') || v.includes(Buffer.from('x-access-token:ghp_secret').toString('base64')))
-    expect(holders.map(([k]) => k)).toEqual(['GIT_CONFIG_VALUE_1'])
+    expect(holders).toHaveLength(1)
+    expect(holders[0]![0]).toMatch(/^GIT_CONFIG_VALUE_\d+$/)
   })
 
   it('쓸 수 없는 토큰(개행 등)은 헤더에 넣지 않는다', () => {
-    expect(githubEnv('a\nb', { base })['GIT_CONFIG_COUNT']).toBe('1')
-    expect(githubEnv('', { base })['GIT_CONFIG_COUNT']).toBe('1')
+    expect(configOf(envOf(dir, { token: 'a\nb' }))).not.toHaveProperty(['http.https://github.com/.extraheader'])
+    expect(configOf(envOf(dir, { token: '' }))).not.toHaveProperty(['http.https://github.com/.extraheader'])
   })
 
-  it('이미 GIT_CONFIG_COUNT 가 있으면 그 뒤에 이어 붙인다', () => {
-    const env = githubEnv('t', { base: { GIT_CONFIG_COUNT: '2' } })
-    expect(env['GIT_CONFIG_COUNT']).toBe('4')
-    expect(env['GIT_CONFIG_KEY_2']).toBe('credential.helper')
-    expect(env['GIT_CONFIG_KEY_3']).toBe('http.https://github.com/.extraheader')
-    expect(env['GIT_CONFIG_KEY_0']).toBeUndefined() // 앞 두 칸은 사용자의 것(process.env 에서 상속)
+  it('상속된 GIT_CONFIG_COUNT·PARAMETERS 는 쓰지 않는다(사용자의 insteadOf 등이 섞이지 않는다)', async () => {
+    const env = await withEnv(
+      { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.ssh://x/.insteadof', GIT_CONFIG_VALUE_0: 'https://github.com/', GIT_CONFIG_PARAMETERS: "'url.ssh://x/.insteadof=https://github.com/'" },
+      async () => envOf(dir)
+    )
+    // 우리 값이 같은 칸을 덮어쓰고 개수도 우리 것이다
+    expect(configOf(env)).not.toHaveProperty(['url.ssh://x/.insteadof'])
+    expect(env['GIT_CONFIG_PARAMETERS']).toBe('')
+  })
+
+  it('사용자 설정에서 가져온 네트워크 키를 command scope 로 옮긴다', () => {
+    const env = githubEnv('t', { gitDir: dir, hooksPath: '/h', netConfig: [['http.proxy', 'http://proxy.corp:8080'], ['http.sslcainfo', '/etc/ca.pem']] })
+    expect(configOf(env)).toMatchObject({ 'http.proxy': 'http://proxy.corp:8080', 'http.sslcainfo': '/etc/ca.pem', 'credential.helper': '' })
   })
 
   it('프로토콜은 테스트에서만 바꾼다', () => {
-    expect(githubEnv(null, { base, allowProtocol: 'file' })['GIT_ALLOW_PROTOCOL']).toBe('file')
+    expect(envOf(dir, { allowProtocol: 'file' })['GIT_ALLOW_PROTOCOL']).toBe('file')
+  })
+
+  it('네트워크 키만 고른다: 시스템·전역 scope 의 프록시·인증서, 보안을 낮추는 키·insteadOf·credential 은 뺀다', () => {
+    const picked = pickNetworkConfig([
+      entry('http.proxy', 'http://old', 'system'),
+      entry('http.proxy', 'http://proxy.corp:8080', 'global'),
+      entry('http.sslcainfo', 'C:/ca.pem', 'global'),
+      entry('http.sslcapath', '/certs', 'system'),
+      entry('http.sslbackend', 'schannel', 'system'),
+      entry('http.schannelcheckrevoke', 'false', 'global'),
+      entry('http.schannelusesslcainfo', 'true', 'global'),
+      entry('http.noproxy', 'localhost', 'global'),
+      entry('http.sslverify', 'false', 'global'),
+      entry('http.extraheader', 'X: y', 'global'),
+      entry('url.ssh://x/.insteadof', 'https://github.com/', 'global'),
+      entry('credential.helper', 'evil', 'global'),
+      entry('http.proxy', 'http://repo-local', 'local'),
+      entry('http.proxy', 'http://from-env', 'command')
+    ])
+    expect(Object.fromEntries(picked)).toEqual({
+      'http.proxy': 'http://proxy.corp:8080',
+      'http.sslcainfo': 'C:/ca.pem',
+      'http.sslcapath': '/certs',
+      'http.sslbackend': 'schannel',
+      'http.schannelcheckrevoke': 'false',
+      'http.schannelusesslcainfo': 'true',
+      'http.noproxy': 'localhost'
+    })
+  })
+
+  it('readNetworkConfig 는 실제 git 설정 파일에서 네트워크 키만 읽고, 환경의 GIT_CONFIG_* 에 오염되지 않는다', async () => {
+    const file = join(tmpDir('netcfg'), 'gitconfig')
+    writeFileSync(
+      file,
+      ['[http]', '\tproxy = http://proxy.corp:8080', '\tsslCAInfo = /etc/ca.pem', '\tsslVerify = false', '[url "ssh://x/"]', '\tinsteadOf = https://github.com/', '[credential]', '\thelper = evil', ''].join('\n')
+    )
+    const got = await readNetworkConfig('git', {
+      ...process.env,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: file,
+      // 환경으로 주입된 설정(command scope)은 가져오지 않는다
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'http.proxy',
+      GIT_CONFIG_VALUE_0: 'http://from-env:1'
+    })
+    expect(Object.fromEntries(got)).toEqual({ 'http.proxy': 'http://proxy.corp:8080', 'http.sslcainfo': '/etc/ca.pem' })
+    // git 을 실행하지 못하면 빈 목록이다
+    expect(await readNetworkConfig('git-does-not-exist')).toEqual([])
   })
 
   it('redactToken 은 토큰과 base64 형태를 가린다', () => {
@@ -329,6 +448,58 @@ describe('ConfigStore: github 소스·링크', () => {
     c.setGithubDefaultBranch(r.id, 'trunk')
     expect(c.repo(r.id)?.github?.defaultBranch).toBe('trunk')
   })
+
+  it('cacheDir 를 주면 로드할 때 github 저장소의 path 를 이 PC 의 캐시 폴더로 다시 정하고, 같은 저장소의 중복은 하나만 남긴다', () => {
+    const file = tmp()
+    const cache = join(root, 'new-pc', 'remote-repos')
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        sources: [{ id: 'local', kind: 'local', label: 'Local' }],
+        repos: [
+          { id: 'g1', sourceId: 'github', path: 'C:\\Users\\old\\AppData\\remote-repos\\octocat\\hello.git', name: 'hello', github: { owner: 'OctoCat', repo: 'Hello' } },
+          { id: 'g2', sourceId: 'github', path: '/home/other/remote-repos/octocat/hello.git', name: 'hello2', github: { owner: 'octocat', repo: 'hello' } },
+          { id: 'l1', sourceId: 'local', path: '/w/a', name: 'a' }
+        ],
+        ui: {}
+      })
+    )
+    const c = new ConfigStore(file, { cacheDir: cache })
+    expect(c.get().repos.map((r) => r.id)).toEqual(['g1', 'l1'])
+    expect(c.repo('g1')?.path).toBe(join(cache, 'octocat', 'hello.git'))
+    expect(c.repo('l1')?.path).toBe('/w/a')
+    // cacheDir 가 없으면 저장된 경로를 그대로 둔다
+    expect(new ConfigStore(file).repo('g1')?.path).toBe('C:\\Users\\old\\AppData\\remote-repos\\octocat\\hello.git')
+  })
+
+  it('repos 배열의 null·비객체 항목은 그 항목만 건너뛰고 설정 전체를 손상 처리하지 않는다', () => {
+    const file = tmp()
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        sources: [{ id: 'local', kind: 'local', label: 'Local' }],
+        repos: [null, 3, 'x', [], { id: 'l1', sourceId: 'local', path: '/w/a', name: 'a' }],
+        ui: { theme: 'dark' }
+      })
+    )
+    const c = new ConfigStore(file)
+    expect(c.get().repos.map((r) => r.id)).toEqual(['l1'])
+    expect(c.get().ui.theme).toBe('dark')
+    expect(c.loadFailed).toBe(false)
+  })
+
+  it('설정 파일이 손상됐거나 읽을 수 없으면 loadFailed 이고, 없으면(첫 실행) 아니다', () => {
+    const bad = tmp()
+    writeFileSync(bad, '{ not json')
+    expect(new ConfigStore(bad).loadFailed).toBe(true)
+    expect(new ConfigStore(tmp()).loadFailed).toBe(false)
+    // 파일 자리에 폴더가 있으면 읽기 오류(EISDIR)
+    const dirAsFile = join(mkdtempSync(join(root, 'cfg-')), 'antler.config.json')
+    mkdirSync(dirAsFile)
+    expect(new ConfigStore(dirAsFile).loadFailed).toBe(true)
+  })
 })
 
 // ── 실제 git ──────────────────────────────────────────────────────────────
@@ -354,8 +525,8 @@ describe('실제 git: 초기화 → fetch(blob:none) → lazy fetch', () => {
   let src: { url: string; first: string; second: string }
   let version: [number, number, number] | null = null
   // 테스트 전용: 프로토콜은 file, URL 은 소스 저장소. 프로덕션 경로(githubEnv 기본값·githubRemoteUrl 기본값)는 https+github.com 이다
-  const testEnv = githubEnv(null, { allowProtocol: 'file' })
-  const lazyOn = new LocalExecutor('git', () => testEnv)
+  const testEnv = (dir: string): Record<string, string> => envOf(dir, { allowProtocol: 'file' })
+  const lazyOn = new LocalExecutor('git', testEnv)
   const lazyOff = new LocalExecutor()
   const l = link('octocat', 'hello')
 
@@ -366,7 +537,7 @@ describe('실제 git: 초기화 → fetch(blob:none) → lazy fetch', () => {
 
   // 한 번의 fetch 를 실제 FetchService.runGithub 와 같은 인자로 돌린다
   const fetchOnce = (dir: string): Promise<void> =>
-    runFetch(lazyOn, dir, { ...inspectEntries([]), remoteNames: ['origin'] }, { hooksPath: '/dev/null', allowFile: false, credentialHelpers: false, env: testEnv, filter: 'blob:none' })
+    runFetch(lazyOn, dir, { ...inspectEntries([]), remoteNames: ['origin'] }, { hooksPath: '/dev/null', allowFile: false, credentialHelpers: false, env: testEnv(dir), filter: 'blob:none' })
 
   it('init 결과가 정확 일치 검사를 통과하고 fetch 뒤에도 통과한다', async () => {
     const dir = join(root, 'cache1')
@@ -404,12 +575,30 @@ describe('실제 git: 초기화 → fetch(blob:none) → lazy fetch', () => {
     await fetchOnce(dir)
     // git 2.48+ 는 fetch 때 refs/remotes/origin/HEAD 를 만든다. 없는 경우(옛 git)도 같게 되는지 지우고 확인한다
     execFileSync('git', ['-C', dir, 'update-ref', '-d', '--no-deref', 'refs/remotes/origin/HEAD'], { stdio: 'ignore' })
-    expect(await ensureGithubHead(lazyOn, dir, l, { env: testEnv })).toBe('main')
+    expect(await ensureGithubHead(lazyOn, dir, l, { env: testEnv(dir) })).toBe('main')
     expect(git(dir, 'symbolic-ref', 'HEAD')).toBe('refs/remotes/origin/main')
     expect(git(dir, 'symbolic-ref', 'refs/remotes/origin/HEAD')).toBe('refs/remotes/origin/main')
     expect(git(dir, 'rev-parse', 'HEAD')).toBe(src.second)
     // 레코드의 기본 브랜치가 실제와 다르면(이름이 바뀜) 원격에 물어 알아낸다
-    expect(await ensureGithubHead(lazyOn, dir, { ...l, defaultBranch: 'gone' }, { env: testEnv })).toBe('main')
+    expect(await ensureGithubHead(lazyOn, dir, { ...l, defaultBranch: 'gone' }, { env: testEnv(dir) })).toBe('main')
+  })
+
+  it('원격에서 기본 브랜치 이름이 바뀌면(옛 브랜치가 사라짐) 다시 알아내 HEAD 를 옮긴다', async () => {
+    const source = join(root, 'source-rename')
+    const s = makeSource(source)
+    const dir = join(root, 'cache-rename')
+    mkdirSync(dir)
+    const link2 = { ...l, defaultBranch: 'main' }
+    await initGithubRepo(lazyOn, dir, link2, { url: s.url })
+    await fetchOnce(dir)
+    expect(await ensureGithubHead(lazyOn, dir, link2, { env: testEnv(dir) })).toBe('main')
+    git(source, 'branch', '-m', 'main', 'trunk')
+    await fetchOnce(dir) // --prune 이 refs/remotes/origin/main 을 지운다
+    expect((await lazyOn.run(dir, ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'])).code).not.toBe(0)
+    // 레코드(main)가 가리키는 ref 가 없으니 origin/HEAD → ls-remote 순서로 trunk 를 찾는다
+    expect(await ensureGithubHead(lazyOn, dir, link2, { env: testEnv(dir) })).toBe('trunk')
+    expect(git(dir, 'symbolic-ref', 'HEAD')).toBe('refs/remotes/origin/trunk')
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(s.second)
   })
 
   it('기본 브랜치를 미리 알면 init 이 HEAD 를 가리켜 두고, 받기 전에도 조회가 빈 결과다', async () => {
@@ -425,7 +614,7 @@ describe('실제 git: 초기화 → fetch(blob:none) → lazy fetch', () => {
     mkdirSync(dir)
     await initGithubRepo(lazyOn, dir, l, { url: src.url })
     await fetchOnce(dir)
-    await ensureGithubHead(lazyOn, dir, l, { env: testEnv })
+    await ensureGithubHead(lazyOn, dir, l, { env: testEnv(dir) })
     // 커밋·트리는 있고 blob 은 없다
     expect(git(dir, 'rev-list', '--objects', '--missing=print', 'HEAD')).toMatch(/^\?/m)
 
@@ -459,10 +648,138 @@ describe('실제 git: 초기화 → fetch(blob:none) → lazy fetch', () => {
   it('fetch 인자에 필터가 들어가고 토큰은 인자에 없다', () => {
     const cfg = fetchConfigArgs('/dev/null', { credentialHelpers: false })
     expect(cfg).toContain('credential.helper=')
-    const env = githubEnv('ghp_secret', { base: {} })
+    const env = envOf(join(root, 'o', 'r.git'), { token: 'ghp_secret' })
     expect(cfg.join(' ')).not.toContain('ghp_secret')
     expect(JSON.stringify(cfg)).not.toContain(Buffer.from('x-access-token:ghp_secret').toString('base64'))
-    expect(env['GIT_CONFIG_VALUE_1']).toContain('Basic ')
+    expect(Object.values(env).some((v) => v.includes('Basic '))).toBe(true)
+  })
+
+  it('커밋 상세·비교: github 저장소가 오프라인이면(lenient) 던지지 않고 통계 없는 파일 목록을 돌려준다', async (ctx) => {
+    if (!versionAtLeast(version, [2, 45, 1])) return ctx.skip()
+    // 이름 변경(+약간의 수정)이 든 커밋: -M 유사도 검사도 blob 이 필요하다
+    const source = join(root, 'source-rename-commit')
+    execFileSync('git', ['init', '-q', '-b', 'main', source])
+    git(source, 'config', 'uploadpack.allowFilter', 'true')
+    git(source, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
+    writeFileSync(join(source, 'a.txt'), 'line1\nline2\nline3\nline4\nline5\nline6\n')
+    writeFileSync(join(source, 'b.txt'), 'x\n')
+    git(source, 'add', '.')
+    git(source, 'commit', '-q', '-m', 'one')
+    const one = git(source, 'rev-parse', 'HEAD')
+    renameSync(join(source, 'a.txt'), join(source, 'a2.txt'))
+    appendFileSync(join(source, 'a2.txt'), 'line7\n')
+    appendFileSync(join(source, 'b.txt'), 'y\n')
+    git(source, 'add', '-A')
+    git(source, 'commit', '-q', '-m', 'two')
+    const two = git(source, 'rev-parse', 'HEAD')
+
+    const dir = join(root, 'cache-offline')
+    mkdirSync(dir)
+    await initGithubRepo(lazyOn, dir, l, { url: pathToFileURL(source).href })
+    await fetchOnce(dir)
+    // 연결이 끊긴 상태: 받아 올 곳이 없다
+    git(dir, 'config', '--local', 'remote.origin.url', pathToFileURL(join(root, 'does-not-exist')).href)
+
+    await expect(commitDetail(lazyOn, dir, two)).rejects.toThrow()
+    await expect(compareCommits(lazyOn, dir, one, two)).rejects.toThrow()
+    for (const d of [await commitDetail(lazyOn, dir, two, undefined, true), await compareCommits(lazyOn, dir, one, two, undefined, true)]) {
+      expect(d.files.map((f) => f.path).sort()).toEqual(['a.txt', 'a2.txt', 'b.txt'])
+      // 통계를 알 수 없다: 파일은 additions/deletions 가 null 이고 binary 는 false(바이너리와 구분), 합계는 0
+      expect(d.files.every((f) => f.additions === null && f.deletions === null && !f.binary)).toBe(true)
+      expect([d.additions, d.deletions]).toEqual([0, 0])
+    }
+    // 온라인이 되면(blob 을 받을 수 있으면) 완전한 결과가 나온다
+    git(dir, 'config', '--local', 'remote.origin.url', pathToFileURL(source).href)
+    const full = await commitDetail(lazyOn, dir, two, undefined, true)
+    expect(full.files.find((f) => f.path === 'b.txt')).toMatchObject({ additions: 1, deletions: 0 })
+    expect(full.files.find((f) => f.status === 'R')).toMatchObject({ path: 'a2.txt', oldPath: 'a.txt' })
+  })
+})
+
+describe('실제 git: 사용자 git 설정과 격리', () => {
+  let src: { url: string; first: string; second: string }
+  let version: [number, number, number] | null = null
+  const lazyOn = new LocalExecutor('git', (dir) => envOf(dir, { allowProtocol: 'file' }))
+  const l = link('octocat', 'iso')
+
+  beforeAll(async () => {
+    src = makeSource(join(root, 'source-iso'))
+    version = await gitVersion(new LocalExecutor())
+  })
+
+  const fetchOnce = (dir: string): Promise<void> =>
+    runFetch(lazyOn, dir, { ...inspectEntries([]), remoteNames: ['origin'] }, { hooksPath: '/dev/null', allowFile: false, credentialHelpers: false, env: envOf(dir, { allowProtocol: 'file' }), filter: 'blob:none' })
+
+  /** 추가 → 설정 검사 → fetch → 기본 브랜치 → log → numstat(lazy fetch) 이 한 번에 되는지 */
+  async function wholeFlow(dir: string): Promise<void> {
+    mkdirSync(dir, { recursive: true })
+    await initGithubRepo(lazyOn, dir, l, { url: src.url })
+    expect(await inspectGithubRepo(lazyOn, dir, l, undefined, src.url)).toEqual([])
+    await fetchOnce(dir)
+    expect(await ensureGithubHead(lazyOn, dir, l, { env: envOf(dir, { allowProtocol: 'file' }) })).toBe('main')
+    const log = await lazyOn.run(dir, ['log', '--format=%s', 'HEAD'])
+    expect(log.code).toBe(0)
+    expect(log.stdout.toString('utf8').trim().split('\n')).toEqual(['second', 'first'])
+    if (versionAtLeast(version, [2, 45, 1])) {
+      const numstat = await lazyOn.run(dir, ['diff-tree', '-r', '--numstat', '--no-commit-id', src.first, src.second])
+      expect(numstat.stderr).toBe('')
+      expect(numstat.stdout.toString('utf8')).toContain('1\t0\tf.txt')
+    }
+  }
+
+  it('전역 설정이 insteadOf(전송 금지에 걸리는 ssh)·safe.bareRepository=explicit·reftable 기본값이어도 끝까지 동작한다', async () => {
+    const globalFile = join(tmpDir('hostile-global'), 'gitconfig')
+    writeFileSync(
+      globalFile,
+      [`[url "ssh://nowhere.invalid/"]`, `\tinsteadOf = ${src.url}`, '[safe]', '\tbareRepository = explicit', '[init]', '\tdefaultRefFormat = reftable', ''].join('\n')
+    )
+    const dir = join(root, 'cache-hostile-global')
+    await withEnv({ GIT_CONFIG_GLOBAL: globalFile }, async () => {
+      // 대조: 격리하지 않은 환경에서는 이 전역 설정이 bare 저장소 접근을 막는다(git 2.38+)
+      if (versionAtLeast(version, [2, 38, 0])) {
+        const control = join(root, 'control-bare')
+        execFileSync('git', ['init', '-q', '--bare', control])
+        expect((await new LocalExecutor().run(control, ['rev-parse', '--git-dir'])).code).not.toBe(0)
+      }
+      await wholeFlow(dir)
+    })
+  })
+
+  it('init 이 reftable 저장소를 만들어도(git 3.0 기본) 설정 검사를 통과하고 fetch·log 가 된다', async (ctx) => {
+    if (!versionAtLeast(version, [2, 45, 0])) return ctx.skip() // GIT_DEFAULT_REF_FORMAT 은 git 2.45+
+    const dir = join(root, 'cache-reftable')
+    await withEnv({ GIT_DEFAULT_REF_FORMAT: 'reftable' }, () => wholeFlow(dir))
+    const fmt = await lazyOn.run(dir, ['config', '--local', 'extensions.refstorage'])
+    expect(fmt.stdout.toString('utf8').trim()).toBe('reftable')
+  })
+
+  it('실제로 적용되는 http.followRedirects 는 false 다(fetch 의 -c 가 환경 설정을 덮어쓰지 않는다)', async () => {
+    const dir = join(root, 'cache-redirects')
+    mkdirSync(dir)
+    await initGithubRepo(lazyOn, dir, l, { url: src.url })
+    const effective = async (cfg: string[]): Promise<string> => (await lazyOn.run(dir, [...cfg, 'config', '--get', 'http.followRedirects'])).stdout.toString('utf8').trim()
+    expect(await effective([])).toBe('false')
+    // 일반 저장소용 기본값은 initial 이라 그대로 쓰면 환경의 false 를 이긴다 — github 경로는 false 를 명시한다
+    expect(await effective(fetchConfigArgs('/dev/null'))).toBe('initial')
+    expect(await effective(fetchConfigArgs('/dev/null', { followRedirects: 'false' }))).toBe('false')
+  })
+
+  it('캐시 폴더가 비었거나 깨져 있으면 상위 폴더의 저장소로 올라가지 않고 실패한다(config 쓰기 포함)', async () => {
+    const outer = join(root, 'outer-repo')
+    execFileSync('git', ['init', '-q', outer])
+    const dir = join(outer, 'remote-repos', 'octocat', 'iso.git')
+    mkdirSync(dir, { recursive: true })
+    const before = readFileSync(join(outer, '.git', 'config'), 'utf8')
+    const write = await lazyOn.run(dir, ['config', '--local', 'remote.origin.promisor', 'true'])
+    expect(write.code).not.toBe(0)
+    expect((await lazyOn.run(dir, ['log', '--format=%H'])).code).not.toBe(0)
+    expect((await lazyOn.run(dir, ['rev-parse', '--git-dir'])).code).not.toBe(0)
+    // 설정 검사도 상위 저장소의 설정을 보지 않으므로 fetch 앞에서 차단된다(필수 키 없음)
+    expect((await inspectGithubRepo(lazyOn, dir, l).catch(() => ['read failed'])).length).toBeGreaterThan(0)
+    expect(readFileSync(join(outer, '.git', 'config'), 'utf8')).toBe(before)
+    // 대조: 격리가 없으면 같은 명령이 상위 저장소에 쓴다
+    expect((await new LocalExecutor().run(dir, ['config', '--local', 'remote.origin.promisor', 'true'])).code).toBe(0)
+    expect(readFileSync(join(outer, '.git', 'config'), 'utf8')).not.toBe(before)
   })
 })
 
@@ -481,9 +798,25 @@ describe('RepoService: 원격 전용 저장소', () => {
   function setup(token: string | null = null): { svc: RepoService; config: ConfigStore; cacheDir: string } {
     const cacheDir = join(tmpDir('remote-repos'), 'remote-repos')
     const config = new ConfigStore(join(tmpDir('cfg'), 'antler.config.json'))
-    svc = new RepoService(config, { cacheDir, githubToken: () => token })
+    svc = new RepoService(config, { cacheDir, githubToken: () => token, noHooksDir: noHooks })
     return { svc, config, cacheDir }
   }
+
+  it('같은 경로를 동시에 추가해도 서로의 폴더를 지우지 않고 하나만 등록된다', async () => {
+    const { svc, config, cacheDir } = setup()
+    const results = await Promise.all([
+      svc.addGithubRepos({ repos: [link('Race', 'Repo')] }),
+      svc.addGithubRepos({ repos: [link('race', 'repo')], group: 'g' }),
+      svc.addGithubRepos({ repos: [link('race', 'repo'), link('race', 'other')] })
+    ])
+    expect(results.flatMap((r) => r.failed)).toEqual([])
+    const ids = new Set(results.flatMap((r) => r.added.filter((a) => a.name.toLowerCase() === 'repo').map((a) => a.id)))
+    expect(ids.size).toBe(1)
+    expect(config.get().repos).toHaveLength(2)
+    const dir = join(cacheDir, 'race', 'repo.git')
+    expect(git(dir, 'rev-parse', '--is-bare-repository')).toBe('true')
+    expect(await inspectGithubRepo(new LocalExecutor(), dir, link('Race', 'Repo'))).toEqual([])
+  })
 
   it('캐시에 bare 저장소를 만들어 등록하고, 같은 저장소를 다시 추가하면 기존 항목을 돌려준다', async () => {
     const { svc, config, cacheDir } = setup()
@@ -581,7 +914,9 @@ describe('RepoService: 원격 전용 저장소', () => {
     const { svc, config, cacheDir } = setup('ghp_secret')
     const id = (await svc.addGithubRepos({ repos: [link('o', 'r')] })).added[0]!.id
     expect(svc.githubTarget(id)?.path).toBe(join(cacheDir, 'o', 'r.git'))
-    expect(svc.githubFetchEnv()['GIT_CONFIG_VALUE_1']).toContain('Basic ')
+    const fetchEnv = svc.githubFetchEnv(join(cacheDir, 'o', 'r.git'))
+    expect(Object.values(fetchEnv).some((v) => v.includes('Basic '))).toBe(true)
+    expect(fetchEnv['GIT_DIR']).toBe(join(cacheDir, 'o', 'r.git'))
     expect(svc.redactSecrets('boom ghp_secret')).toBe('boom ***')
     // 캐시 밖 경로나 링크와 맞지 않는 경로의 github 레코드는 대상이 아니다
     const outside = config.addRepo({ sourceId: 'github', path: join(root, 'elsewhere.git'), name: 'e', github: link('o', 'e') }, sourceFor('github'))
@@ -664,6 +999,117 @@ describe('RepoService: 원격 전용 저장소', () => {
       const r = config.addRepo({ sourceId: 'github', path: join(cacheDir, 'o', 'r.git'), name: 'r', github: link('o', 'r') }, sourceFor('github'))
       expect(svc.removeGithubCache(r.id)).toBe(false)
       expect(existsSync(join(target, 'r.git', 'keep.txt'))).toBe(true)
+    })
+
+    it('레코드의 owner/repo 와 캐시 경로가 맞지 않으면 지우지 않는다(다른 저장소의 캐시를 가리키는 레코드)', async () => {
+      const { svc, config, cacheDir } = setup()
+      const [a] = (await svc.addGithubRepos({ repos: [link('o', 'a')] })).added
+      // 같은 폴더를 다르게 적은 경로(끝의 /)로 중복 판정을 피해 등록한다
+      const liar = config.addRepo({ sourceId: 'github', path: `${a!.path}/`, name: 'liar', github: link('o', 'liar') })
+      expect(svc.removeGithubCache(liar.id)).toBe(false)
+      expect(existsSync(join(cacheDir, 'o', 'a.git'))).toBe(true)
+    })
+
+    it('폴더를 지우지 못해도(다른 프로세스가 쥐고 있음) 던지지 않는다', async () => {
+      const { svc, cacheDir } = setup()
+      const [a] = (await svc.addGithubRepos({ repos: [link('o', 'busy')] })).added
+      // 열린 파일 핸들(Windows 에서 삭제를 막는다). 다른 OS 는 지워지므로 결과만 확인한다
+      const fd = openSync(join(cacheDir, 'o', 'busy.git', 'HEAD'), 'r')
+      try {
+        expect(() => svc.removeGithubCache(a!.id)).not.toThrow()
+      } finally {
+        closeSync(fd)
+      }
+    })
+  })
+
+  describe('시작 시 고아 캐시 정리', () => {
+    it('어떤 레코드도 가리키지 않는 <owner>/<repo>.git 만 지우고 빈 소유자 폴더를 정리하며, 다른 것은 건드리지 않는다', async () => {
+      const { svc, cacheDir } = setup()
+      const kept = (await svc.addGithubRepos({ repos: [link('o', 'kept')] })).added[0]!
+      const orphan = (p: string): void => {
+        mkdirSync(p, { recursive: true })
+        writeFileSync(join(p, 'HEAD'), 'x')
+      }
+      orphan(join(cacheDir, 'o', 'orphan.git')) // 형제가 등록돼 있어도 지운다
+      orphan(join(cacheDir, 'gone', 'a.git')) // 소유자 폴더째
+      orphan(join(cacheDir, 'gone', 'b.git'))
+      mkdirSync(join(cacheDir, 'empty-owner'), { recursive: true }) // 비어 있는 소유자 폴더
+      // 모양이 다른 것은 그대로
+      const keepers = [join(cacheDir, 'Upper', 'r.git'), join(cacheDir, 'o', 'plain'), join(cacheDir, 'deep', 'a', 'b.git')]
+      for (const p of keepers) {
+        mkdirSync(p, { recursive: true })
+        writeFileSync(join(p, 'keep.txt'), 'x')
+      }
+      writeFileSync(join(cacheDir, 'stray.txt'), 'x')
+
+      expect(await svc.cleanupGithubCache()).toBe(3)
+      expect(existsSync(join(cacheDir, 'o', 'orphan.git'))).toBe(false)
+      expect(existsSync(join(cacheDir, 'gone'))).toBe(false)
+      expect(existsSync(join(cacheDir, 'empty-owner'))).toBe(false)
+      expect(existsSync(kept.path)).toBe(true)
+      expect(git(kept.path, 'rev-parse', '--is-bare-repository')).toBe('true')
+      for (const p of keepers) expect(existsSync(join(p, 'keep.txt'))).toBe(true)
+      expect(existsSync(join(cacheDir, 'stray.txt'))).toBe(true)
+      // 캐시 폴더가 없어도 조용히 끝난다
+      expect(await setup().svc.cleanupGithubCache()).toBe(0)
+    })
+
+    it('로드 때 버려진 레코드(링크가 틀림)의 폴더도 고아로 지운다', async () => {
+      const cacheDir = join(tmpDir('remote-repos'), 'remote-repos')
+      mkdirSync(join(cacheDir, 'o', 'dropped.git'), { recursive: true })
+      const file = join(tmpDir('cfg'), 'antler.config.json')
+      writeFileSync(file, JSON.stringify({ version: 1, sources: [], repos: [{ id: 'x', sourceId: 'github', path: join(cacheDir, 'o', 'dropped.git'), name: 'd', github: { owner: '../..', repo: 'd' } }], ui: {} }))
+      const config = new ConfigStore(file, { cacheDir })
+      svc = new RepoService(config, { cacheDir, githubToken: () => null, noHooksDir: noHooks })
+      expect(config.get().repos).toEqual([])
+      expect(await svc.cleanupGithubCache()).toBe(1)
+      expect(existsSync(join(cacheDir, 'o'))).toBe(false)
+    })
+
+    it('설정 파일을 읽지 못한 채 시작했으면(저장소 목록이 빈 것이 사실이 아니다) 아무것도 지우지 않는다', async () => {
+      const cacheDir = join(tmpDir('remote-repos'), 'remote-repos')
+      mkdirSync(join(cacheDir, 'o', 'precious.git'), { recursive: true })
+      const file = join(tmpDir('cfg'), 'antler.config.json')
+      writeFileSync(file, '{ corrupt')
+      const config = new ConfigStore(file, { cacheDir })
+      svc = new RepoService(config, { cacheDir, githubToken: () => null, noHooksDir: noHooks })
+      expect(await svc.cleanupGithubCache()).toBe(0)
+      expect(existsSync(join(cacheDir, 'o', 'precious.git'))).toBe(true)
+    })
+
+    it('소유자 폴더가 링크면 따라가지 않는다', async (ctx) => {
+      const { svc, cacheDir } = setup()
+      const target = tmpDir('link-target2')
+      mkdirSync(join(target, 'r.git'))
+      writeFileSync(join(target, 'r.git', 'keep.txt'), 'x')
+      mkdirSync(cacheDir, { recursive: true })
+      try {
+        symlinkSync(target, join(cacheDir, 'o'), 'junction')
+      } catch {
+        return ctx.skip()
+      }
+      expect(await svc.cleanupGithubCache()).toBe(0)
+      expect(existsSync(join(target, 'r.git', 'keep.txt'))).toBe(true)
+    })
+  })
+
+  describe('fetch 실패 분류', () => {
+    const fail = (msg: string): Error => new Error(msg)
+    it.each([
+      ["remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found"],
+      ['fatal: could not read Username for \'https://github.com\': terminal prompts disabled'],
+      ["fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403"],
+      ['remote: Invalid username or token. Password authentication is not supported for Git operations.']
+    ])('github 저장소는 인증 문제로 본다(백오프하지 않고 멈춤): %s', (msg) => {
+      expect(classifyFailure(fail(msg), { github: true })).toBe('auth')
+    })
+
+    it('일반 저장소의 분류는 그대로다', () => {
+      expect(classifyFailure(fail('remote: Repository not found.'))).toBe('network')
+      expect(classifyFailure(fail('The requested URL returned error: 403'))).toBe('network')
+      expect(classifyFailure(fail('fatal: could not read Username'))).toBe('auth')
+      expect(classifyFailure(fail('Could not resolve host: github.com'), { github: true })).toBe('network')
     })
   })
 

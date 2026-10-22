@@ -1,5 +1,6 @@
 import { lstatSync, mkdirSync, rmSync, rmdirSync, type Stats } from 'node:fs'
-import { dirname } from 'node:path'
+import { readdir, rmdir } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import type {
   AddGithubReposInput,
   AddGithubReposResult,
@@ -43,6 +44,7 @@ import { WslExecutor } from '../executors/WslExecutor'
 import { uncFromWsl, wslFromUnc } from '../executors/wslPaths'
 import { commitActivity } from '../git/activity'
 import * as git from '../git/commands'
+import { hooksPathFor } from '../git/fetch'
 import * as fileInsight from '../git/fileInsight'
 import { LogCursor } from '../git/logCursor'
 import * as extras from '../git/repoExtras'
@@ -51,10 +53,12 @@ import {
   cachePathMatchesLink,
   githubCachePath,
   githubCacheSlug,
+  GITHUB_SOURCE_ID,
   githubEnv,
   initGithubRepo,
   MAX_ADD_GITHUB,
   redactToken,
+  type NetworkConfigEntry,
   validateGithubLink
 } from '../git/githubCache'
 import { DiffParser } from '../git/parsers/diff'
@@ -141,6 +145,12 @@ export interface GithubDeps {
   cacheDir: string
   /** git 에 줄 GitHub 토큰(로그인하지 않았으면 null). 호출 때마다 읽는다 — 로그인·로그아웃이 바로 반영된다 */
   githubToken: () => string | null
+  /** core.hooksPath 로 쓸 앱 소유의 빈 디렉터리(FetchService 가 만든다). Windows 에서는 필수다 — 없으면 github 환경을 만들지 못한다 */
+  noHooksDir?: string | null
+  /** 사용자 전역·시스템 설정에서 읽은 네트워크 키(readNetworkConfig). 읽는 데 시간이 걸려 getter 로 받는다 */
+  netConfig?: () => readonly NetworkConfigEntry[]
+  /** netConfig 를 다 읽으면 풀린다. 창은 기다리지 않고, github fetch 만 이것을 기다린다 */
+  netReady?: Promise<unknown>
 }
 
 /** 삭제 중 Windows 에서 방금 끊은 git 프로세스·백신이 잠깐 파일을 쥐고 있을 수 있다 */
@@ -172,6 +182,8 @@ export class RepoService {
   private readonly compareCache = new LruCache<string, CompareResult>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
   private readonly diffCache = new LruCache<string, FileDiff>(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES)
   private readonly inflight = new Map<string, Inflight<unknown>>()
+  /** 캐시 경로별로 직렬화하는 작업(GitHub 저장소 추가·고아 정리)의 마지막 꼬리 */
+  private readonly pathLocks = new Map<string, Promise<void>>()
   /** 커밋 활동 집계 캐시: 저장소+ref 별로 ref 시그니처와 함께 보관한다(시그니처가 같으면 이력이 같다) */
   private readonly activityCache = new Map<string, { sig: string; value: CommitActivity }>()
   private readonly ghRepoCache = new Map<string, { at: number; value: GhRepoRef | null }>()
@@ -209,9 +221,15 @@ export class RepoService {
     return this.repoKind(repoId) === 'github'
   }
 
-  /** FetchService 용: github 저장소를 fetch·조회할 때의 환경. 토큰은 여기서 읽어 환경 변수로만 넘긴다 */
-  githubFetchEnv(): Record<string, string> {
-    return githubEnv(this.github?.githubToken() ?? null)
+  /** FetchService 용: github 저장소(path)를 fetch·조회할 때의 환경. 토큰은 여기서 읽어 환경 변수로만 넘긴다 */
+  /** 네트워크 설정(프록시·인증서)을 다 읽을 때까지 기다린다. 실패해도 풀린다(그때는 사용자 네트워크 키 없이 간다) */
+  async githubReady(): Promise<void> {
+    await this.github?.netReady?.catch(() => {})
+  }
+
+  githubFetchEnv(path: string): Record<string, string> {
+    if (!this.github) throw new Error('GitHub 원격 저장소를 쓸 수 없는 환경입니다')
+    return githubEnvFor(this.github, path)
   }
 
   /** 오류 메시지·로그에 토큰이 남지 않게 가린다(GitHub 토큰이 없으면 그대로) */
@@ -247,28 +265,13 @@ export class RepoService {
     try {
       for (const raw of input.repos) {
         const label = raw && typeof raw === 'object' ? `${String((raw as GithubRepoLink).owner)}/${String((raw as GithubRepoLink).repo)}`.slice(0, 200) : '?'
-        let created: string | null = null
         try {
           const link = validateGithubLink(raw)
           const path = githubCachePath(deps.cacheDir, link)
-          let repo = this.config.get().repos.find((r) => r.sourceId === source.id && r.path === path)
-          if (!repo) {
-            // 등록되지 않은 같은 이름의 폴더는 이전 실패·삭제 실패가 남긴 찌꺼기다 — 우리 캐시 모양일 때만 지우고 새로 만든다
-            this.removeCacheDir(deps.cacheDir, path)
-            if (lstatOrNull(path) || lstatOrNull(dirname(path))?.isSymbolicLink()) throw new Error('캐시 폴더를 정리하지 못했습니다')
-            mkdirSync(path, { recursive: true })
-            created = path
-            await initGithubRepo(rt.exec, path, link)
-            repo = this.config.addRepo({ sourceId: source.id, path, name: link.repo, ...(group ? { group } : {}), github: link }, source)
-            created = null
-          } else if (group && repo.group !== group) {
-            // 이미 등록된 저장소를 다시 추가하면서 그룹을 골랐으면 그 그룹으로 옮긴다
-            this.config.updateRepo(repo.id, { group })
-          }
-          const latest = this.config.repo(repo.id) ?? repo
+          // 같은 경로를 동시에 추가하면 서로의 폴더를 지우고 만드는 경쟁이 생긴다 — 경로 단위로 차례로 처리한다(뒤 호출은 앞 호출이 등록한 항목을 돌려받는다)
+          const latest = await this.withPathLock(path, () => this.addGithubOne(rt, deps, source, link, path, group))
           if (!added.some((r) => r.id === latest.id)) added.push(latest)
         } catch (err) {
-          if (created) this.removeCacheDir(deps.cacheDir, created)
           failed.push({ fullName: label, error: err instanceof Error ? err.message : String(err) })
         }
       }
@@ -278,9 +281,48 @@ export class RepoService {
     return { added, failed }
   }
 
+  /** 저장소 하나를 추가한다(addGithubRepos 의 경로 잠금 안에서만 부른다). 실패하면 만든 폴더를 지우고 던진다 */
+  private async addGithubOne(rt: Runtime, deps: GithubDeps, source: Source, link: GithubRepoLink, path: string, group: string): Promise<Repo> {
+    let created: string | null = null
+    try {
+      let repo = this.config.get().repos.find((r) => r.sourceId === source.id && r.path === path)
+      if (!repo) {
+        // 등록되지 않은 같은 이름의 폴더는 이전 실패·삭제 실패가 남긴 찌꺼기다 — 우리 캐시 모양일 때만 지우고 새로 만든다
+        this.removeCacheDir(deps.cacheDir, path)
+        if (lstatOrNull(path) || lstatOrNull(dirname(path))?.isSymbolicLink()) throw new Error('캐시 폴더를 정리하지 못했습니다')
+        mkdirSync(path, { recursive: true })
+        created = path
+        await initGithubRepo(rt.exec, path, link)
+        repo = this.config.addRepo({ sourceId: source.id, path, name: link.repo, ...(group ? { group } : {}), github: link }, source)
+        created = null
+      } else if (group && repo.group !== group) {
+        // 이미 등록된 저장소를 다시 추가하면서 그룹을 골랐으면 그 그룹으로 옮긴다
+        this.config.updateRepo(repo.id, { group })
+      }
+      return this.config.repo(repo.id) ?? repo
+    } catch (err) {
+      if (created) this.removeCacheDir(deps.cacheDir, created)
+      throw err
+    }
+  }
+
+  /** 캐시 경로 하나에 대한 작업(추가·고아 정리)을 차례로 실행한다. 앞 작업이 실패해도 뒤 작업은 이어서 실행한다 */
+  private withPathLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+    const run = (this.pathLocks.get(path) ?? Promise.resolve()).then(fn)
+    const tail = run.then(
+      () => {},
+      () => {}
+    )
+    this.pathLocks.set(path, tail)
+    void tail.then(() => {
+      if (this.pathLocks.get(path) === tail) this.pathLocks.delete(path)
+    })
+    return run
+  }
+
   /**
    * 캐시 폴더를 지운다(`<cacheDir>/<owner>/<repo>.git` 모양일 때만, 심볼릭 링크를 따라가지 않는다). 지웠으면 true.
-   * 폴더가 없거나 모양이 틀리면 아무것도 지우지 않고 false.
+   * 폴더가 없거나 모양이 틀리면 아무것도 지우지 않고 false. 파일을 쥔 프로세스가 있어 지우지 못하면 던진다.
    */
   private removeCacheDir(cacheDir: string, path: string): boolean {
     if (!githubCacheSlug(cacheDir, path)) return false
@@ -301,14 +343,65 @@ export class RepoService {
 
   /**
    * GitHub 원격 전용 저장소의 캐시 폴더를 지운다(repos:remove). 열려 있는 커서(pack 파일 핸들)를 먼저 닫는다.
-   * 호출자가 실행 중인 fetch·감시를 먼저 멈춰야 한다. 모양이 틀린 경로는 지우지 않는다(false).
+   * 호출자가 실행 중인 fetch·감시를 먼저 멈춰야 한다. 캐시 경로가 이 레코드의 owner/repo 의 것일 때만 지우고,
+   * 아니거나 지우지 못하면(다른 프로세스가 쥐고 있음) 던지지 않고 false 를 돌려준다 — 레코드는 어차피 지우며,
+   * 남은 폴더는 다음 시작 때 cleanupGithubCache 가 고아로 지운다.
    */
   removeGithubCache(repoId: string): boolean {
     const repo = this.config.repo(repoId)
-    if (!repo || !this.github || this.config.source(repo.sourceId)?.kind !== 'github') return false
+    if (!repo?.github || !this.github || this.config.source(repo.sourceId)?.kind !== 'github') return false
     for (const [k, c] of this.cursors) if (k.startsWith(`${repoId}\0`)) this.retire(k, c)
     for (const k of [...this.anchors.keys()]) if (k.startsWith(`${repoId}\0`)) this.anchors.delete(k)
-    return this.removeCacheDir(this.github.cacheDir, repo.path)
+    if (!cachePathMatchesLink(this.github.cacheDir, repo.path, repo.github)) return false
+    try {
+      return this.removeCacheDir(this.github.cacheDir, repo.path)
+    } catch {
+      return false
+    }
+  }
+
+  /**
+   * 시작할 때 한 번: 캐시 기준 폴더 아래에서 어떤 저장소 레코드도 가리키지 않는 `<owner>/<repo>.git` 폴더를 지운다
+   * (삭제에 실패했거나, 로드 때 버려진 레코드, 추가하다 중단된 폴더). 정확히 그 모양이고 링크가 아닌 폴더만 지우며,
+   * 그 밖의 파일·폴더는 건드리지 않는다. 비게 된 소유자 폴더도 정리한다. 지운 폴더 수를 돌려준다.
+   * 설정 파일을 읽지 못한 채 시작했으면(저장소 목록이 빈 것이 사실이 아니다) 아무것도 지우지 않는다.
+   */
+  async cleanupGithubCache(): Promise<number> {
+    const deps = this.github
+    if (!deps || this.config.loadFailed) return 0
+    const owners = await readdir(deps.cacheDir, { withFileTypes: true }).catch(() => [])
+    let removed = 0
+    for (const o of owners) {
+      if (!o.isDirectory()) continue // 링크·파일은 따라가지도 지우지도 않는다
+      const ownerDir = join(deps.cacheDir, o.name)
+      const entries = await readdir(ownerDir, { withFileTypes: true }).catch(() => [])
+      for (const e of entries) {
+        const path = join(ownerDir, e.name)
+        if (!e.isDirectory() || !githubCacheSlug(deps.cacheDir, path)) continue
+        // 추가 중인 폴더를 지우지 않도록 같은 경로 잠금 안에서, 등록 여부를 다시 확인한 뒤 지운다
+        removed += await this.withPathLock(path, async () => {
+          if (this.githubRecordPaths(deps).has(path)) return 0
+          try {
+            return this.removeCacheDir(deps.cacheDir, path) ? 1 : 0
+          } catch {
+            return 0 // 아직 쥐고 있다 — 다음 시작 때 다시 시도한다
+          }
+        })
+      }
+      await rmdir(ownerDir).catch(() => {}) // 비어 있을 때만 지워진다
+    }
+    return removed
+  }
+
+  /** 레코드가 가리키는 캐시 폴더들(저장된 경로와, 링크로 다시 계산한 경로) */
+  private githubRecordPaths(deps: GithubDeps): Set<string> {
+    const paths = new Set<string>()
+    for (const r of this.config.get().repos) {
+      if (r.sourceId !== GITHUB_SOURCE_ID) continue
+      paths.add(join(r.path))
+      if (r.github) paths.add(githubCachePath(deps.cacheDir, r.github))
+    }
+    return paths
   }
 
   /**
@@ -706,9 +799,12 @@ export class RepoService {
     const key = `${repoId}\0${hash.toLowerCase()}`
     const cached = this.commitCache.get(key)
     if (cached) return Promise.resolve(cached)
+    // 원격 전용 저장소는 오프라인·로그아웃이면 통계에 필요한 blob 을 받지 못한다 — 던지지 않고 파일 목록만 보여 준다
+    const lenient = this.isGithub(repoId)
     return this.shared(key, requestId, async (signal) => {
-      const detail = await rt.queue.run(() => git.commitDetail(rt.exec, repo.path, hash, { signal }), { signal })
-      this.commitCache.set(key, detail, estimateCommitBytes(detail))
+      const detail = await rt.queue.run(() => git.commitDetail(rt.exec, repo.path, hash, { signal }, lenient), { signal })
+      // 통계를 못 읽은 결과는 캐시하지 않는다(다시 연결되면 완전한 결과를 받는다)
+      if (!lenient || hasLineStats(detail.files)) this.commitCache.set(key, detail, estimateCommitBytes(detail))
       return detail
     })
   }
@@ -719,9 +815,10 @@ export class RepoService {
     const key = `compare\0${repoId}\0${String(from).toLowerCase()}\0${String(to).toLowerCase()}`
     const cached = this.compareCache.get(key)
     if (cached) return Promise.resolve(cached)
+    const lenient = this.isGithub(repoId)
     return this.shared(key, requestId, async (signal) => {
-      const result = await rt.queue.run(() => git.compareCommits(rt.exec, repo.path, from, to, { signal }), { signal })
-      this.compareCache.set(key, result, estimateCompareBytes(result))
+      const result = await rt.queue.run(() => git.compareCommits(rt.exec, repo.path, from, to, { signal }, lenient), { signal })
+      if (!lenient || hasLineStats(result.files)) this.compareCache.set(key, result, estimateCompareBytes(result))
       return result
     })
   }
@@ -993,6 +1090,20 @@ function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; tar
   return { kind: input.kind, target, path }
 }
 
+/** 파일마다 +/- 통계가 있는가(바이너리는 null 이지만 binary=true 로 구분된다). 통계 없이 읽은 목록(additions null, binary false)이면 false */
+function hasLineStats(files: { additions: number | null; binary: boolean }[]): boolean {
+  return files.every((f) => f.additions !== null || f.binary)
+}
+
+/** 앱 캐시 안의 github 저장소(path)에서 git 을 실행할 때의 환경 */
+function githubEnvFor(github: GithubDeps, path: string): Record<string, string> {
+  return githubEnv(github.githubToken(), {
+    gitDir: path,
+    hooksPath: hooksPathFor('local', github.noHooksDir ?? null),
+    netConfig: github.netConfig?.() ?? []
+  })
+}
+
 function lstatOrNull(path: string): Stats | null {
   try {
     return lstatSync(path)
@@ -1008,7 +1119,7 @@ function createExecutor(source: Source, github?: GithubDeps): GitExecutor {
     case 'github': {
       // 앱 캐시 안의 저장소에서만 lazy fetch(https)와 토큰을 열고, 그 밖의 경로는 기본 환경(전송 금지)이다
       if (!github) throw new Error('GitHub 원격 저장소를 쓸 수 없는 환경입니다')
-      return new LocalExecutor('git', (repoPath) => (githubCacheSlug(github.cacheDir, repoPath) ? githubEnv(github.githubToken()) : GIT_ENV))
+      return new LocalExecutor('git', (repoPath) => (githubCacheSlug(github.cacheDir, repoPath) ? githubEnvFor(github, repoPath) : GIT_ENV))
     }
     case 'wsl':
       if (process.platform !== 'win32') throw new Error('WSL 저장소는 Windows 에서만 열 수 있습니다')

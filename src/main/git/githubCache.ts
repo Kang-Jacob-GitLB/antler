@@ -1,10 +1,12 @@
 // GitHub 원격 전용 저장소: 작업 폴더 없이 앱 캐시(<userData>/remote-repos/<owner>/<repo>.git)에 bare + blob:none partial 저장소를
 // 만들어 두고 fetch 만 한다. 이 파일은 그 저장소의 검증·경로·설정·실행 환경·초기화를 모은다.
 // 프로덕션 경로는 https + github.com 으로 고정이고, 테스트만 url·프로토콜을 인자로 바꿀 수 있다.
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { execFile } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { GithubRepoLink } from '@shared/types'
 import { GIT_ENV, GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
-import { isAllowedConfig, readConfigEntries, type ConfigEntry } from './fetch'
+import { isAllowedConfig, parseConfigList, readConfigEntries, type ConfigEntry } from './fetch'
 
 export const GITHUB_SOURCE_ID = 'github'
 /** 앱 캐시 아래 저장소 폴더 이름의 접미사 */
@@ -134,11 +136,20 @@ export function expectedGithubConfig(link: Pick<GithubRepoLink, 'owner' | 'repo'
 const INIT_EXTRA_KEYS = new Set(['core.filemode', 'core.symlinks', 'core.ignorecase', 'core.logallrefupdates', 'core.precomposeunicode'])
 
 /**
+ * init 이 저장소 형식에 따라 덧붙일 수 있는 키와 허용 값. git 3.0 은 기본 ref 저장 형식이 reftable 이라 init 이
+ * extensions.refstorage=reftable 을 쓴다. 이 키들은 없어도 되고(필수 아님), 있으면 여기 적힌 값이어야 한다.
+ */
+const INIT_FORMAT_VALUES: Record<string, string[]> = {
+  'extensions.refstorage': ['files', 'reftable'],
+  'extensions.objectformat': ['sha1']
+}
+
+/**
  * 원격 전용 저장소의 로컬(local/worktree scope) 설정이 우리가 만든 것과 정확히 같은지 본다. 문제가 없으면 빈 목록,
  * 있으면 사유가 붙은 키 목록(값은 담지 않는다).
  *  - 고정 키(expectedGithubConfig)는 값이 정확히 같고 정확히 한 번 있어야 한다. 허용 목록으로 되돌아가지 않는다
  *    (isAllowedConfig 는 remote.*.url·promisor 를 아무 값이나 통과시킨다)
- *  - 고정 키가 아닌 것은 INIT_EXTRA_KEYS 에 isAllowedConfig 를 통과하거나 core.bare=true 일 때만 허용한다.
+ *  - 고정 키가 아닌 것은 INIT_EXTRA_KEYS 에 isAllowedConfig 를 통과하거나 core.bare=true, 또는 INIT_FORMAT_VALUES 의 값일 때만 허용한다.
  *    include.path 는 고정 키를 가릴 수 있어 어느 쪽에도 없으므로 막힌다.
  */
 export function checkGithubConfig(entries: ConfigEntry[], expected: Map<string, string>): string[] {
@@ -152,6 +163,8 @@ export function checkGithubConfig(entries: ConfigEntry[], expected: Map<string, 
       if (e.value !== want) problems.push(`${e.key} (예상과 다름)`)
     } else if (e.key === 'core.bare') {
       if (e.value !== 'true') problems.push(`${e.key} (예상과 다름)`)
+    } else if (INIT_FORMAT_VALUES[e.key]) {
+      if (e.value === null || !INIT_FORMAT_VALUES[e.key]!.includes(e.value)) problems.push(`${e.key} (예상과 다름)`)
     } else if (!(INIT_EXTRA_KEYS.has(e.key) && isAllowedConfig(e.key, e.value))) {
       problems.push(`${e.key} (알 수 없는 설정)`)
     }
@@ -178,11 +191,66 @@ export async function inspectGithubRepo(exec: GitExecutor, dir: string, link: Gi
 
 // ── 실행 환경 ───────────────────────────────────────────────────────────
 
+/** 사용자 설정에서 가져온 네트워크 설정 하나([키, 값]. 키는 소문자) */
+export type NetworkConfigEntry = readonly [key: string, value: string]
+
+/**
+ * 격리된 github 환경으로 넘겨 주는 사용자 설정 키(전부 소문자). 회사 프록시·사설 인증서 뒤에서도 fetch 되게 하려는 것이다.
+ * http.sslVerify 처럼 보안을 낮추는 키와 url.*.insteadOf · credential.* 는 일부러 넣지 않는다.
+ */
+const NETWORK_CONFIG_KEYS = new Set([
+  'http.proxy',
+  'http.sslcainfo',
+  'http.sslcapath',
+  'http.sslbackend',
+  'http.schannelcheckrevoke',
+  'http.schannelusesslcainfo',
+  'http.noproxy'
+])
+
+/** `git config --list` 항목 중 시스템·전역 scope 의 네트워크 키만 고른다. 같은 키가 여럿이면 마지막 값(git 이 쓰는 값)만 남긴다 */
+export function pickNetworkConfig(entries: ConfigEntry[]): NetworkConfigEntry[] {
+  const last = new Map<string, string>()
+  for (const e of entries) {
+    if ((e.scope !== 'system' && e.scope !== 'global') || !NETWORK_CONFIG_KEYS.has(e.key) || e.value === null || e.value.length > 4096) continue
+    last.set(e.key, e.value)
+  }
+  return [...last]
+}
+
+/**
+ * 사용자 전역·시스템 git 설정에서 네트워크 키만 읽는다(앱 시작 때 한 번). github 환경은 사용자 설정을 통째로 끊으므로(githubEnv)
+ * 프록시·인증서만 이렇게 따로 옮긴다. 읽을 때는 GIT_CONFIG_COUNT/KEY/VALUE/PARAMETERS 와 GIT_DIR 류를 비워
+ * 이미 격리된 값이나 어떤 저장소의 설정이 섞이지 않게 한다. 읽지 못하면(git 없음·옛 git) 빈 목록이다.
+ */
+export async function readNetworkConfig(gitBinary = 'git', baseEnv: NodeJS.ProcessEnv = process.env): Promise<NetworkConfigEntry[]> {
+  const env: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(baseEnv)) {
+    if (/^GIT_CONFIG_(COUNT|PARAMETERS|KEY_\d+|VALUE_\d+)$/.test(k) || /^GIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY)$/.test(k)) continue
+    env[k] = v
+  }
+  return new Promise((resolveEntries) => {
+    execFile(
+      gitBinary,
+      ['config', '--list', '--show-scope', '-z'],
+      { env, cwd: tmpdir(), encoding: 'utf8', timeout: 10_000, windowsHide: true },
+      (err, stdout) => resolveEntries(err ? [] : pickNetworkConfig(parseConfigList(stdout)))
+    )
+  })
+}
+
+/** GIT_CONFIG_GLOBAL 에 줘서 사용자 전역 설정을 읽지 않게 하는 빈 파일(git 이 NUL·/dev/null 을 직접 처리한다) */
+export const EMPTY_GIT_CONFIG = process.platform === 'win32' ? 'NUL' : '/dev/null'
+
 export interface GithubEnvOpts {
+  /** 이 환경이 쓸 캐시 저장소 폴더. GIT_DIR 로 고정해, 폴더가 비었거나 깨져도 git 이 상위 폴더의 저장소로 올라가지 못하게 한다 */
+  gitDir: string
+  /** core.hooksPath 로 줄 앱 소유의 빈 디렉터리(hooksPathFor 의 결과) */
+  hooksPath: string
+  /** 사용자 설정에서 가져온 네트워크 키(readNetworkConfig). 기본: 없음 */
+  netConfig?: readonly NetworkConfigEntry[]
   /** 테스트 전용: 프로덕션은 https 로 고정이다 */
   allowProtocol?: string
-  /** 이 환경이 얹히는 기본 환경(기본: process.env). 이미 GIT_CONFIG_COUNT 를 쓰고 있으면 그 뒤에 이어 붙인다 */
-  base?: Record<string, string | undefined>
 }
 
 /** 환경 변수·헤더에 넣어도 되는 토큰인가(개행 등이 든 값은 헤더를 깨뜨린다) */
@@ -204,10 +272,15 @@ export function redactToken(text: string, token: string | null): string {
  *  - 전송은 https 만. LFS 객체는 받지 않는다. 프롬프트·askpass·GCM 대화는 막는다
  *  - credential.helper 를 비워 사용자 자격 증명 도우미(GCM 등)를 부르지 않고, 토큰이 있으면 github.com 에만 Authorization 헤더를 붙인다.
  *    토큰은 인자·디스크가 아니라 이 환경 변수(GIT_CONFIG_VALUE_n)로만 git 에 전달된다
+ *  - 격리: 시스템·전역 설정을 읽지 않고(GIT_CONFIG_NOSYSTEM · GIT_CONFIG_GLOBAL=빈 파일), 상속된 GIT_CONFIG_COUNT/PARAMETERS 도 버린다.
+ *    사용자의 insteadOf(ssh 로 바꿔 전송 금지에 걸림) · init.defaultRefFormat · safe.bareRepository 가 이 기능을 깨지 못하게 하려는 것이다.
+ *    프록시·인증서만 netConfig 로 command scope 에 옮긴다(HTTPS_PROXY 같은 환경 변수는 그대로 상속된다)
+ *  - GIT_DIR 로 저장소를 고정하고 GIT_CEILING_DIRECTORIES 로 상위 탐색을 막는다. 캐시 폴더가 비었거나 깨져 있으면 `-C <폴더>` 가
+ *    상위 폴더의 다른 저장소로 올라가 그 저장소에 config 를 쓰거나 lazy fetch 환경을 적용하는 일이 없도록 그냥 실패시킨다
+ *  - 유지보수·훅·번들 URI·리다이렉트 추종은 끈다(리다이렉트를 따라가면 Authorization 헤더가 다른 호스트로 갈 수 있다)
  */
-export function githubEnv(token: string | null, o: GithubEnvOpts = {}): Record<string, string> {
-  const base = o.base ?? process.env
-  const n = /^\d{1,3}$/.test(base['GIT_CONFIG_COUNT'] ?? '') ? Number(base['GIT_CONFIG_COUNT']) : 0
+export function githubEnv(token: string | null, o: GithubEnvOpts): Record<string, string> {
+  const gitDir = resolve(o.gitDir)
   const env: Record<string, string> = {
     ...GIT_ENV,
     GIT_NO_LAZY_FETCH: '0',
@@ -216,17 +289,30 @@ export function githubEnv(token: string | null, o: GithubEnvOpts = {}): Record<s
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: '',
     SSH_ASKPASS_REQUIRE: 'never',
-    GCM_INTERACTIVE: 'never'
+    GCM_INTERACTIVE: 'never',
+    GIT_DIR: gitDir,
+    GIT_CEILING_DIRECTORIES: dirname(gitDir).replace(/\\/g, '/'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: EMPTY_GIT_CONFIG,
+    GIT_CONFIG_PARAMETERS: ''
   }
-  const extra: [string, string][] = [['credential.helper', '']]
+  const extra: [string, string][] = [
+    ...(o.netConfig ?? []).map(([k, v]): [string, string] => [k, v]),
+    ['credential.helper', ''],
+    ['maintenance.auto', 'false'],
+    ['gc.auto', '0'],
+    ['core.hooksPath', o.hooksPath],
+    ['transfer.bundleURI', 'false'],
+    ['http.followRedirects', 'false']
+  ]
   if (usableToken(token)) {
     extra.push(['http.https://github.com/.extraheader', `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`])
   }
   extra.forEach(([k, v], i) => {
-    env[`GIT_CONFIG_KEY_${n + i}`] = k
-    env[`GIT_CONFIG_VALUE_${n + i}`] = v
+    env[`GIT_CONFIG_KEY_${i}`] = k
+    env[`GIT_CONFIG_VALUE_${i}`] = v
   })
-  env['GIT_CONFIG_COUNT'] = String(n + extra.length)
+  env['GIT_CONFIG_COUNT'] = String(extra.length)
   return env
 }
 

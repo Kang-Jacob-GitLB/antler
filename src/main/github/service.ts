@@ -54,6 +54,8 @@ export interface GitHubServiceDeps {
   avatarCacheFile?: string
   /** GitHub CLI(gh) 연동. 없으면 "CLI 로그인 가져오기"는 제공하지 않는다 */
   cli?: GhCli
+  /** 로그인·로그아웃·토큰 폐기로 토큰이 바뀌었을 때(원격 전용 저장소의 인증 실패 정지를 풀 때 쓴다) */
+  onAuthChanged?: () => void
 }
 
 /** 접근 가능한 저장소 목록 캐시 유효 시간 */
@@ -152,6 +154,7 @@ export class GitHubService {
     this.avatarResolver.resetSession()
     this.checkCache.clear()
     this.accessibleCache = null
+    this.deps.onAuthChanged?.()
     return this.state()
   }
 
@@ -166,6 +169,7 @@ export class GitHubService {
     this.avatarResolver.resetSession()
     this.checkCache.clear()
     this.accessibleCache = null
+    this.deps.onAuthChanged?.()
   }
 
   /**
