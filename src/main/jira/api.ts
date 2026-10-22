@@ -53,11 +53,69 @@ export async function myself(client: JiraClient, c: JiraCredential, signal?: Abo
   return str(me['displayName']) || str(me['name']) || str(me['emailAddress'])
 }
 
-export async function getIssue(client: JiraClient, c: JiraCredential, key: string, signal?: AbortSignal): Promise<JiraIssueDetail> {
+/**
+ * 시작·종료 날짜 커스텀 필드 후보 id(우선순위 순, 없으면 빈 배열).
+ * 팀 관리형 프로젝트는 프로젝트마다 같은 이름의 별개 필드를 만들 수 있어 후보를 모두 요청하고 이슈마다 값이 있는 첫 후보를 쓴다
+ */
+export interface DateFieldIds {
+  start: string[]
+  end: string[]
+}
+export const NO_DATE_FIELDS: DateFieldIds = { start: [], end: [] }
+
+/** 이름 우선순위(앞이 우선). 비교는 소문자·앞뒤 공백 제거 후 */
+const START_NAMES = ['start date', '시작 날짜', '시작일', 'target start']
+const END_NAMES = ['end date', '종료일', '종료 날짜', 'target end']
+/** 후보 id 상한 — 요청 URL(fields 쿼리) 길이를 묶는다 */
+export const MAX_DATE_FIELD_CANDIDATES = 8
+/** 요청 URL(fields 쿼리)에 들어가므로 이 모양만 받는다 */
+const CUSTOM_FIELD_RE = /^customfield_\d+$/
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}/
+
+/**
+ * 필드 목록에서 이름으로 날짜 필드 후보를 고른다.
+ * 순서: 이름 우선순위 > 같은 이름 안에서 scope 없는 전역 필드 > date·datetime 형식 > 응답 순서
+ */
+export function pickDateFields(list: unknown): DateFieldIds {
+  const found = arr(list)
+    .map(obj)
+    .filter((f) => CUSTOM_FIELD_RE.test(str(f['id'])))
+  const type = (f: Json): string => str(obj(f['schema'])['type'])
+  const pick = (names: string[]): string[] => {
+    const hits = found
+      .map((f, order) => ({ id: str(f['id']), name: names.indexOf(str(f['name']).trim().toLowerCase()), scoped: f['scope'] ? 1 : 0, typed: type(f) === 'date' || type(f) === 'datetime' ? 0 : 1, order }))
+      .filter((h) => h.name >= 0)
+      .sort((a, b) => a.name - b.name || a.scoped - b.scoped || a.typed - b.typed || a.order - b.order)
+    return [...new Set(hits.map((h) => h.id))].slice(0, MAX_DATE_FIELD_CANDIDATES)
+  }
+  return { start: pick(START_NAMES), end: pick(END_NAMES) }
+}
+
+/** 이 사이트의 필드 목록에서 시작·종료 날짜 필드 id 를 찾는다. 요청 실패는 던진다(캐시 여부는 호출자가 정한다) */
+export async function getDateFieldIds(client: JiraClient, c: JiraCredential, signal?: AbortSignal): Promise<DateFieldIds> {
+  const list = await client.get<unknown>(`${apiBase(c)}/field`, { notFound: '필드 목록을 찾을 수 없습니다', ...(signal ? { signal } : {}) })
+  return pickDateFields(list)
+}
+
+/**
+ * 날짜 문자열의 앞 'YYYY-MM-DD' 만(시각·시간대는 버린다). 형식이 다르면 빈 문자열.
+ * datetime 커스텀 필드도 앞 10자를 그대로 쓴다 — Jira 웹 화면이 프로필 시간대 기준의 날짜로 보여 주는 것과 일치시키려는 의도다
+ */
+const dateOnly = (v: unknown): string => DATE_ONLY_RE.exec(str(v))?.[0] ?? ''
+/** 후보 중 이 이슈에 값이 있는 첫 필드의 날짜 */
+const firstDate = (f: Json, ids: string[]): string => {
+  for (const id of ids) {
+    const d = dateOnly(f[id])
+    if (d) return d
+  }
+  return ''
+}
+
+export async function getIssue(client: JiraClient, c: JiraCredential, key: string, dates: DateFieldIds = NO_DATE_FIELDS, signal?: AbortSignal): Promise<JiraIssueDetail> {
   const raw = obj(
     await client.get<unknown>(`${apiBase(c)}/issue/${encodeURIComponent(key)}`, {
       // Cloud 는 ADF 를 직접 변환하므로 서버 렌더 HTML 이 필요 없다
-      query: { fields: DETAIL_FIELDS, expand: c.kind === 'server' ? 'renderedFields' : undefined },
+      query: { fields: [DETAIL_FIELDS, 'duedate', ...dates.start, ...dates.end].join(','), expand: c.kind === 'server' ? 'renderedFields' : undefined },
       notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다',
       ...(signal ? { signal } : {})
     })
@@ -70,6 +128,9 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
     url: `${c.siteUrl}/browse/${encodeURIComponent(key)}`,
     reporter: str(obj(f['reporter'])['displayName']),
     created: str(f['created']),
+    dueDate: dateOnly(f['duedate']),
+    startDate: firstDate(f, dates.start),
+    endDate: firstDate(f, dates.end),
     descriptionHtml: bodyHtml(c, f['description'], obj(raw['renderedFields'])['description'])
   }
 }
