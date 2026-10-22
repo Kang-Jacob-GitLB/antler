@@ -838,6 +838,12 @@ describe('RepoService: 원격 전용 저장소', () => {
     expect(config.get().repos).toHaveLength(1)
   })
 
+  it('다른 org 에 같은 이름의 저장소가 이미 있으면 owner 를 붙여 이름을 짓는다', async () => {
+    const { svc } = setup()
+    const res = await svc.addGithubRepos({ repos: [link('acme', 'web'), link('globex', 'Web'), link('acme', 'api')] })
+    expect(res.added.map((r) => r.name)).toEqual(['web', 'globex/Web', 'api'])
+  })
+
   it('잘못된 항목은 failed 로 담고 나머지는 추가하며, 실패한 폴더는 남기지 않는다', async () => {
     const { svc, config, cacheDir } = setup()
     const res = await svc.addGithubRepos({ repos: [link('..', 'x'), link('good', 'repo'), { owner: 'o', repo: 'a/b' } as GithubRepoLink] })

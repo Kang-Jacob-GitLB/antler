@@ -293,7 +293,10 @@ export class RepoService {
         mkdirSync(path, { recursive: true })
         created = path
         await initGithubRepo(rt.exec, path, link)
-        repo = this.config.addRepo({ sourceId: source.id, path, name: link.repo, ...(group ? { group } : {}), github: link }, source)
+        // 다른 org 의 같은 이름 저장소(acme/web · globex/web)가 이미 있으면 사이드바에서 구분되게 owner 를 붙인다
+        const taken = this.config.get().repos.some((r) => r.sourceId === source.id && r.name.toLowerCase() === link.repo.toLowerCase())
+        const name = taken ? `${link.owner}/${link.repo}` : link.repo
+        repo = this.config.addRepo({ sourceId: source.id, path, name, ...(group ? { group } : {}), github: link }, source)
         created = null
       } else if (group && repo.group !== group) {
         // 이미 등록된 저장소를 다시 추가하면서 그룹을 골랐으면 그 그룹으로 옮긴다
