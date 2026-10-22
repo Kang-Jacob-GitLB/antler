@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter, JiraStatusCategory } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
-import { formatAbsolute, initials } from '../../lib/format'
+import { formatAbsolute, formatCalendarDate, initials, isBeforeToday } from '../../lib/format'
 import { fnv1a, laneVar, LANE_COUNT } from '../../lib/laneColor'
 import { useAppStore } from '../../stores/appStore'
 import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
@@ -327,6 +327,11 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
                   <Prop label={t('jira.priority')}>{d.priority}</Prop>
                   <Prop label={t('jira.assignee')}>{d.assignee || <span className="gh-muted">{t('jira.unassigned')}</span>}</Prop>
                   <Prop label={t('jira.reporter')}>{d.reporter}</Prop>
+                  <Prop label={t('jira.startDate')}>{formatCalendarDate(d.startDate, locale)}</Prop>
+                  <Prop label={t('jira.dueDate')}>
+                    {d.dueDate && <span className={d.statusCategory && d.statusCategory !== 'done' && isBeforeToday(d.dueDate) ? 'jira-props__overdue' : undefined}>{formatCalendarDate(d.dueDate, locale)}</span>}
+                  </Prop>
+                  <Prop label={t('jira.endDate')}>{formatCalendarDate(d.endDate, locale)}</Prop>
                   <Prop label={t('jira.created')}>{d.created && formatAbsolute(isoToEpoch(d.created), locale)}</Prop>
                   <Prop label={t('jira.updated')}>{d.updated && formatAbsolute(isoToEpoch(d.updated), locale)}</Prop>
                 </dl>

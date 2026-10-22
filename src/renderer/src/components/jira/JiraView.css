@@ -220,6 +220,10 @@
   overflow-wrap: anywhere;
   color: var(--text-primary);
 }
+/* 기한이 지났고 아직 끝나지 않은 이슈 */
+.jira-props__overdue {
+  color: var(--removed-text);
+}
 .jira-props dd > .jira-status {
   display: inline-block;
 }

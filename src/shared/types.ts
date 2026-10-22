@@ -1053,6 +1053,10 @@ export interface JiraIssueSummary {
 export interface JiraIssueDetail extends JiraIssueSummary {
   reporter: string
   created: string
+  /** 기한·시작 날짜·종료일. 'YYYY-MM-DD'(시간대 없는 달력 날짜), 없으면 빈 문자열 */
+  dueDate: string
+  startDate: string
+  endDate: string
   /** 서버 렌더 HTML 또는 ADF 변환 결과. 화면에 넣기 전 renderer 가 한 번 더 정화한다 */
   descriptionHtml: string
   /** 브라우저로 열 주소 */

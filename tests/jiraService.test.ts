@@ -238,6 +238,128 @@ describe('JiraService', () => {
   })
 })
 
+describe('JiraService 날짜 필드(기한·시작·종료)', () => {
+  /** /field 와 이슈 응답을 줄 수 있는 가짜. fields 로 /field 응답을, status 로 그 상태 코드를 바꾼다 */
+  function dateHandler(opts: { fields?: unknown[]; fieldStatus?: number; issueFields?: Record<string, unknown> } = {}) {
+    return (req: RecordedReq, res: import('node:http').ServerResponse): void => {
+      const path = req.url.split('?')[0]!
+      if (path.endsWith('/myself')) return sendJson(res, { displayName: 'x' })
+      if (path.endsWith('/field')) return sendJson(res, opts.fieldStatus && opts.fieldStatus !== 200 ? { errorMessages: ['x'] } : (opts.fields ?? []), opts.fieldStatus ?? 200)
+      if (/\/issue\/ABC-1$/.test(path)) return sendJson(res, { key: 'ABC-1', fields: { summary: 's', ...opts.issueFields } })
+      return sendJson(res, {}, 404)
+    }
+  }
+  const FIELDS = [
+    { id: 'customfield_10015', name: 'Start date', schema: { type: 'date' } },
+    { id: 'customfield_10016', name: 'End date', schema: { type: 'date' } },
+    { id: 'duedate', name: 'Due date' }
+  ]
+  const connectCloud = async (svc: JiraService): Promise<void> => {
+    await svc.connect({ kind: 'cloud', siteUrl: fake!.origin, email: 'a@b.c', token: SECRET })
+  }
+  const fieldsParam = (): string[] => {
+    const r = fake!.requests.filter((x) => /\/issue\/ABC-1\?/.test(x.url)).at(-1)!
+    return new URL(r.url, 'http://x').searchParams.get('fields')!.split(',')
+  }
+  const fieldCalls = (): number => fake!.requests.filter((r) => r.url.split('?')[0]!.endsWith('/field')).length
+
+  it('/field 로 id 를 찾아 fields 에 싣고, 값은 날짜 부분만 돌려준다', async () => {
+    fake = await startFakeJira(
+      dateHandler({ fields: FIELDS, issueFields: { duedate: '2026-10-22', customfield_10015: '2026-10-01T09:00:00.000+0900', customfield_10016: '2026/10/30' } })
+    )
+    const svc = newService()
+    await connectCloud(svc)
+    const d = await svc.issue('ABC-1')
+    expect(fieldsParam()).toEqual(expect.arrayContaining(['duedate', 'customfield_10015', 'customfield_10016']))
+    expect(fake.requests.some((r) => r.url === '/rest/api/3/field')).toBe(true)
+    // datetime 은 날짜 부분만, 형식이 다르면 빈 값
+    expect(d).toMatchObject({ dueDate: '2026-10-22', startDate: '2026-10-01', endDate: '' })
+  })
+
+  it('/field 가 404·403 이어도 이슈 조회는 성공하고 해당 날짜만 빈다', async () => {
+    for (const status of [404, 403]) {
+      fake = await startFakeJira(dateHandler({ fieldStatus: status, issueFields: { duedate: '2026-10-22', customfield_10015: '2026-10-01' } }))
+      const svc = newService()
+      await connectCloud(svc)
+      expect(await svc.issue('ABC-1')).toMatchObject({ key: 'ABC-1', dueDate: '2026-10-22', startDate: '', endDate: '' })
+      expect(fieldsParam()).toEqual(['summary', 'status', 'issuetype', 'priority', 'assignee', 'updated', 'reporter', 'created', 'description', 'duedate'])
+      await fake.close()
+      fake = undefined
+    }
+  })
+
+  it('/field 는 연결 동안 한 번만 부르고(성공 캐시), 재연결하면 다시 부른다', async () => {
+    fake = await startFakeJira(dateHandler({ fields: FIELDS }))
+    const svc = newService()
+    await connectCloud(svc)
+    await Promise.all([svc.issue('ABC-1'), svc.issue('ABC-1')]) // 동시 호출은 같은 Promise
+    await svc.issue('ABC-1')
+    expect(fieldCalls()).toBe(1)
+    await connectCloud(svc)
+    await svc.issue('ABC-1')
+    expect(fieldCalls()).toBe(2)
+  })
+
+  it('/field 실패는 캐시하지 않지만 쿨다운 동안은 이슈마다 다시 묻지 않고, 재연결하면 다시 시도한다', async () => {
+    fake = await startFakeJira(dateHandler({ fieldStatus: 404 }))
+    const svc = newService()
+    await connectCloud(svc)
+    await svc.issue('ABC-1')
+    await svc.issue('ABC-1')
+    expect(fieldCalls()).toBe(1)
+    await connectCloud(svc)
+    await svc.issue('ABC-1')
+    expect(fieldCalls()).toBe(2)
+  })
+
+  it('Server(API v2) 는 /rest/api/2/field 를 쓴다', async () => {
+    fake = await startFakeJira(dateHandler({ fields: FIELDS, issueFields: { customfield_10016: '2026-11-02' } }))
+    const svc = newService()
+    await svc.connect({ kind: 'server', siteUrl: fake.origin, token: SECRET })
+    expect(await svc.issue('ABC-1')).toMatchObject({ endDate: '2026-11-02' })
+    expect(fake.requests.some((r) => r.url === '/rest/api/2/field')).toBe(true)
+  })
+
+  it('이상한 id(customfield_1; drop)는 버리고 요청에 싣지 않는다', async () => {
+    fake = await startFakeJira(
+      dateHandler({
+        fields: [
+          { id: 'customfield_1; drop', name: 'Start date', schema: { type: 'date' } },
+          { id: 'summary', name: 'End date', schema: { type: 'date' } },
+          { id: 'customfield_20', name: 'Target start' }
+        ]
+      })
+    )
+    const svc = newService()
+    await connectCloud(svc)
+    await svc.issue('ABC-1')
+    const f = fieldsParam()
+    expect(f).toContain('customfield_20')
+    expect(f.some((x) => /drop|;/.test(x))).toBe(false)
+    expect(f.filter((x) => x === 'summary')).toHaveLength(1)
+  })
+
+  it('동명 필드가 여럿이면 date 형식을 먼저, 이름은 대소문자·한글 별칭도 받는다', async () => {
+    fake = await startFakeJira(
+      dateHandler({
+        fields: [
+          { id: 'customfield_1', name: 'start date', schema: { type: 'string' } },
+          { id: 'customfield_2', name: 'Start Date', schema: { type: 'datetime' } },
+          { id: 'customfield_3', name: '종료일', schema: { type: 'string' } },
+          { id: 'customfield_4', name: '종료 날짜' }
+        ]
+      })
+    )
+    const svc = newService()
+    await connectCloud(svc)
+    await svc.issue('ABC-1')
+    // 시작: datetime 이 string 보다 우선 / 종료: date 형식이 없으면 첫 일치
+    expect(fieldsParam()).toEqual(expect.arrayContaining(['customfield_2', 'customfield_3']))
+    expect(fieldsParam()).not.toContain('customfield_1')
+    expect(fieldsParam()).not.toContain('customfield_4')
+  })
+})
+
 describe('상태 전환', () => {
   const transitionsBody = {
     transitions: [

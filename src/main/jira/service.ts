@@ -10,6 +10,9 @@ import { allowedJiraUrl, parseConnectInput, parseIssueKey, parseSearchQuery, par
 export const JIRA_TOKEN_FILE = 'jira-credential.bin'
 export const JIRA_META_FILE = 'jira-credential.json'
 
+/** 날짜 필드 목록 조회가 실패했을 때 다시 시도하기까지의 간격 */
+const DATE_FIELDS_COOLDOWN_MS = 5 * 60_000
+
 export interface JiraServiceDeps extends SiteOptions {
   store: TokenStore
   fetchImpl?: typeof fetch
@@ -28,6 +31,10 @@ export class JiraService {
   private readonly client: JiraClient
   /** /myself 로 알아낸 내 id. 연결이 바뀌거나 해제되면(epoch 교체) 비운다 */
   private me: JiraUser | null = null
+  /** /field 로 찾은 시작·종료 날짜 필드 id(성공만 캐시). 연결이 바뀌거나 해제되면 비운다 */
+  private dateFields: Promise<api.DateFieldIds> | null = null
+  /** /field 가 실패한 뒤 이 시각까지는 다시 묻지 않는다 */
+  private dateFieldsRetryAt = 0
 
   constructor(private readonly deps: JiraServiceDeps) {
     this.conn = this.load()
@@ -87,6 +94,8 @@ export class JiraService {
     this.epoch.abort()
     this.epoch = new AbortController()
     this.me = null
+    this.dateFields = null
+    this.dateFieldsRetryAt = 0
   }
 
   // ── 조회 ────────────────────────────────────────────
@@ -107,7 +116,27 @@ export class JiraService {
 
   async issue(key: unknown, requestId?: string): Promise<JiraIssueDetail> {
     const k = parseIssueKey(key)
-    return this.data(requestId, (c, signal) => api.getIssue(this.client, c, k, signal))
+    return this.data(requestId, async (c, signal) => api.getIssue(this.client, c, k, await this.dateFieldIds(c), signal))
+  }
+
+  /**
+   * 시작·종료 날짜 필드 id. 연결 단위로 캐시하고 동시 호출은 같은 Promise 를 쓴다.
+   * 실패해도 던지지 않는다(그 날짜만 생략) — 캐시하지 않고 쿨다운 동안은 다시 묻지 않는다.
+   * 개별 조회가 아니라 연결 세대(epoch)의 신호로 호출한다: 한 조회의 취소가 다른 조회에 번지지 않게
+   */
+  private dateFieldIds(c: JiraCredential): Promise<api.DateFieldIds> {
+    if (this.dateFields) return this.dateFields
+    if (Date.now() < this.dateFieldsRetryAt) return Promise.resolve(api.NO_DATE_FIELDS)
+    const epoch = this.epoch
+    const p: Promise<api.DateFieldIds> = api.getDateFieldIds(this.client, c, epoch.signal).catch(() => {
+      if (this.epoch === epoch) {
+        if (this.dateFields === p) this.dateFields = null
+        this.dateFieldsRetryAt = Date.now() + DATE_FIELDS_COOLDOWN_MS
+      }
+      return api.NO_DATE_FIELDS
+    })
+    this.dateFields = p
+    return p
   }
 
   /** 이슈에서 실행할 수 있는 상태 전환 목록 */

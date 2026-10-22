@@ -53,11 +53,46 @@ export async function myself(client: JiraClient, c: JiraCredential, signal?: Abo
   return str(me['displayName']) || str(me['name']) || str(me['emailAddress'])
 }
 
-export async function getIssue(client: JiraClient, c: JiraCredential, key: string, signal?: AbortSignal): Promise<JiraIssueDetail> {
+/** 시작·종료 날짜 커스텀 필드의 id(못 찾으면 빈 문자열) */
+export interface DateFieldIds {
+  start: string
+  end: string
+}
+export const NO_DATE_FIELDS: DateFieldIds = { start: '', end: '' }
+
+const START_NAMES = new Set(['start date', 'target start', '시작 날짜', '시작일'])
+const END_NAMES = new Set(['end date', 'target end', '종료일', '종료 날짜'])
+/** 요청 URL(fields 쿼리)에 들어가므로 이 모양만 받는다 */
+const CUSTOM_FIELD_RE = /^customfield_\d+$/
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}/
+
+/** 필드 목록에서 이름으로 날짜 필드를 고른다. 같은 이름이 여럿이면 date·datetime 형식을 우선하고, 그다음 첫 일치 */
+export function pickDateFields(list: unknown): DateFieldIds {
+  const found = arr(list)
+    .map(obj)
+    .filter((f) => CUSTOM_FIELD_RE.test(str(f['id'])))
+  const pick = (names: Set<string>): string => {
+    const hits = found.filter((f) => names.has(str(f['name']).trim().toLowerCase()))
+    const type = (f: Json): string => str(obj(f['schema'])['type'])
+    return str((hits.find((f) => type(f) === 'date' || type(f) === 'datetime') ?? hits[0])?.['id'])
+  }
+  return { start: pick(START_NAMES), end: pick(END_NAMES) }
+}
+
+/** 이 사이트의 필드 목록에서 시작·종료 날짜 필드 id 를 찾는다. 요청 실패는 던진다(캐시 여부는 호출자가 정한다) */
+export async function getDateFieldIds(client: JiraClient, c: JiraCredential, signal?: AbortSignal): Promise<DateFieldIds> {
+  const list = await client.get<unknown>(`${apiBase(c)}/field`, { notFound: '필드 목록을 찾을 수 없습니다', ...(signal ? { signal } : {}) })
+  return pickDateFields(list)
+}
+
+/** 날짜 문자열의 앞 'YYYY-MM-DD' 만(시각·시간대는 버린다). 형식이 다르면 빈 문자열 */
+const dateOnly = (v: unknown): string => DATE_ONLY_RE.exec(str(v))?.[0] ?? ''
+
+export async function getIssue(client: JiraClient, c: JiraCredential, key: string, dates: DateFieldIds = NO_DATE_FIELDS, signal?: AbortSignal): Promise<JiraIssueDetail> {
   const raw = obj(
     await client.get<unknown>(`${apiBase(c)}/issue/${encodeURIComponent(key)}`, {
       // Cloud 는 ADF 를 직접 변환하므로 서버 렌더 HTML 이 필요 없다
-      query: { fields: DETAIL_FIELDS, expand: c.kind === 'server' ? 'renderedFields' : undefined },
+      query: { fields: [DETAIL_FIELDS, 'duedate', dates.start, dates.end].filter(Boolean).join(','), expand: c.kind === 'server' ? 'renderedFields' : undefined },
       notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다',
       ...(signal ? { signal } : {})
     })
@@ -70,6 +105,9 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
     url: `${c.siteUrl}/browse/${encodeURIComponent(key)}`,
     reporter: str(obj(f['reporter'])['displayName']),
     created: str(f['created']),
+    dueDate: dateOnly(f['duedate']),
+    startDate: dates.start ? dateOnly(f[dates.start]) : '',
+    endDate: dates.end ? dateOnly(f[dates.end]) : '',
     descriptionHtml: bodyHtml(c, f['description'], obj(raw['renderedFields'])['description'])
   }
 }
