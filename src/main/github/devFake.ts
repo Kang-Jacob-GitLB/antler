@@ -15,7 +15,35 @@ interface Fixture {
   jobs?: Record<string, unknown[]>
   /** true 면 GraphQL 이 한도 초과로 실패한다 */
   rateLimited?: boolean
+  /** /user/repos 응답(없으면 DEFAULT_USER_REPOS) */
+  userRepos?: unknown[]
 }
+
+const rawRepo = (owner: string, type: 'User' | 'Organization', name: string, pushed: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  name,
+  full_name: `${owner}/${name}`,
+  owner: { login: owner, type },
+  private: false,
+  fork: false,
+  archived: false,
+  default_branch: 'main',
+  description: `${name} 저장소`,
+  pushed_at: pushed,
+  html_url: `https://github.com/${owner}/${name}`,
+  ...over
+})
+
+/** fixture 에 userRepos 가 없을 때 돌려주는 목록: 개인 3개 + org 두 곳 */
+const DEFAULT_USER_REPOS: unknown[] = [
+  rawRepo('fake-user', 'User', 'dotfiles', '2026-03-01T09:00:00Z', { private: true, description: null }),
+  rawRepo('fake-user', 'User', 'notes', '2026-02-10T09:00:00Z'),
+  rawRepo('fake-user', 'User', 'antler-fork', '2026-01-20T09:00:00Z', { fork: true, default_branch: 'develop' }),
+  rawRepo('acme', 'Organization', 'web', '2026-03-05T09:00:00Z', { private: true }),
+  rawRepo('acme', 'Organization', 'api', '2026-02-25T09:00:00Z', { private: true }),
+  rawRepo('acme', 'Organization', 'legacy-portal', '2025-06-01T09:00:00Z', { archived: true }),
+  rawRepo('globex', 'Organization', 'docs', '2026-02-01T09:00:00Z'),
+  rawRepo('globex', 'Organization', 'sdk', '2026-01-05T09:00:00Z', { fork: true })
+]
 
 const j = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
@@ -28,7 +56,8 @@ export function createDevFakeFetch(file: string): typeof fetch {
     const path = url.pathname
     if (url.origin !== 'https://api.github.com') return j({ message: 'Not Found' }, 404)
     if (path === '/user') return j({ login: 'fake-user', avatar_url: '' })
-    if (path === '/graphql' && init?.method === 'POST') {
+    if (path === '/user/repos') return j(fx.userRepos ?? DEFAULT_USER_REPOS)
+    if (path === '/graphql' &&init?.method === 'POST') {
       if (fx.rateLimited) return j({ errors: [{ type: 'RATE_LIMITED', message: 'rate limited' }] })
       const body = JSON.parse(String(init.body)) as { variables?: Record<string, string> }
       const vars = body.variables ?? {}

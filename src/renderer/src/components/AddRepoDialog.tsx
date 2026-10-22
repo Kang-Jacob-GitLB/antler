@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RepoScanResult, SourceKind, SshHostInfo } from '@shared/types'
 import { useT } from '../i18n'
 import { api, errorMessage } from '../lib/api'
+import { ghKey, registeredGhKeys } from '../lib/ghRepoList'
 import { useAppStore } from '../stores/appStore'
-import { IconCheck, IconFolder, IconMonitor, IconServer, IconTerminal } from './icons'
+import { IconCheck, IconFolder, IconGithub, IconMonitor, IconServer, IconTerminal } from './icons'
+import { GithubRepoPicker } from './GithubRepoPicker'
+import { useGhAccessibleRepos } from './useGhAccessibleRepos'
 import { RemoteFolderPicker } from './RemoteFolderPicker'
 import { GroupPicker } from './GroupChip'
 import './AddRepoDialog.css'
@@ -13,12 +16,13 @@ const isWindows = window.antler.platform === 'win32'
 /**
  * 로컬 · WSL · SSH 저장소 추가. 그 환경 안에서 git 최상위 경로를 확인한 뒤 저장한다.
  * 고른 폴더가 저장소가 아니고 바로 아래에 저장소들이 있으면 목록으로 보여 주고, 고른 것들을 한 번에 추가한다.
+ * GitHub 탭은 로그인한 계정이 접근할 수 있는 저장소를 검색해 여러 개 골라, 클론 없이 이력만 받는 원격 전용 저장소로 추가한다.
  */
 export function AddRepoDialog(): React.JSX.Element | null {
   const t = useT()
   const open = useAppStore((s) => s.addOpen)
   const config = useAppStore((s) => s.config)
-  const { openAddDialog, addRepo, addRepos } = useAppStore.getState()
+  const { openAddDialog, addRepo, addRepos, addGithubRepos } = useAppStore.getState()
 
   const [kind, setKind] = useState<SourceKind>('local')
   const [path, setPath] = useState('')
@@ -35,6 +39,9 @@ export function AddRepoDialog(): React.JSX.Element | null {
   // 고른 폴더 안의 저장소 찾기 결과(key = 환경+경로 — 하나라도 바뀌면 낡은 결과다)와 추가할 것으로 고른 경로
   const [scan, setScan] = useState<{ key: string; result: RepoScanResult } | null>(null)
   const [checked, setChecked] = useState<Set<string>>(() => new Set())
+  // GitHub 탭: 추가할 것으로 고른 저장소(ghKey)와 접근 가능한 저장소 목록
+  const [ghChecked, setGhChecked] = useState<Set<string>>(() => new Set())
+  const gh = useGhAccessibleRepos(open, kind === 'github')
   const scanSeq = useRef(0)
   // 지금 화면의 환경+경로(찾기를 기다리는 동안 입력이 바뀌었는지 보려고)
   const latestKey = useRef('')
@@ -58,6 +65,7 @@ export function AddRepoDialog(): React.JSX.Element | null {
     setBusy(null)
     setRemoteBrowse(false)
     setScan(null)
+    setGhChecked(new Set())
     if (isWindows) {
       void api.invoke('env:wslDistros').then((list) => {
         setDistros(list)
@@ -81,8 +89,16 @@ export function AddRepoDialog(): React.JSX.Element | null {
   latestKey.current = keyFor(path)
   const found = scan && scan.key === keyFor(path) && !scan.result.isRepo && scan.result.repos.length > 0 ? scan.result : null
   const picked = found ? found.repos.filter((r) => checked.has(r.path)) : []
+  // GitHub 탭: 이미 추가된 것은 고를 수 없고, 목록에 없어진 것(새로 받은 목록)은 제외한다
+  const ghRegistered = registeredGhKeys(config?.repos ?? [])
+  const ghPicked = (gh.result?.repos ?? []).filter((r) => {
+    const k = ghKey(r.owner, r.repo)
+    return ghChecked.has(k) && !ghRegistered.has(k)
+  })
   const canSubmit =
-    !!path.trim() && (kind !== 'wsl' || !!distro) && (kind !== 'ssh' || !!host.trim()) && !busy && (!found || picked.length > 0)
+    kind === 'github'
+      ? ghPicked.length > 0 && !busy
+      : !!path.trim() && (kind !== 'wsl' || !!distro) && (kind !== 'ssh' || !!host.trim()) && !busy && (!found || picked.length > 0)
 
   // 이미 목록에 있는 저장소인가(그 환경의 소스·경로로 비교). 로컬 탭에서 고른 WSL 공유 경로는 WSL 저장소로 본다
   const isRegistered = (p: string): boolean => {
@@ -165,8 +181,32 @@ export function AddRepoDialog(): React.JSX.Element | null {
     }
   }
 
+  /** 고른 GitHub 저장소를 원격 전용 저장소로 추가한다(앱 캐시에 등록만 하고, 이력은 처음 열 때 받는다) */
+  const submitGithub = async (): Promise<void> => {
+    const s = session.current
+    setBusy('add')
+    setError(null)
+    try {
+      const res = await addGithubRepos({
+        repos: ghPicked.map((r) => ({ owner: r.owner, repo: r.repo, defaultBranch: r.defaultBranch })),
+        ...(group.trim() ? { group: group.trim() } : {})
+      })
+      if (s !== session.current) return
+      if (res.failed.length === 0) return close()
+      // 실패한 것만 남겨 다시 시도할 수 있게 한다(추가된 것은 '이미 추가됨' 으로 바뀐다)
+      setGhChecked(new Set(res.failed.map((f) => f.fullName.toLowerCase())))
+      setError([t('add.someFailed', { n: res.failed.length }), ...res.failed.map((f) => `${f.fullName}: ${f.error}`)].join('\n'))
+      setBusy(null)
+    } catch (err) {
+      if (s !== session.current) return
+      setError(errorMessage(err))
+      setBusy(null)
+    }
+  }
+
   const submit = async (): Promise<void> => {
     if (!canSubmit) return
+    if (kind === 'github') return submitGithub()
     if (found) return submitMany()
     const s = session.current
     const key = keyFor(path)
@@ -195,14 +235,15 @@ export function AddRepoDialog(): React.JSX.Element | null {
   const tabs: { k: SourceKind; icon: React.JSX.Element; label: string }[] = [
     { k: 'local', icon: <IconMonitor size={14} />, label: t('add.local') },
     ...(isWindows ? [{ k: 'wsl' as const, icon: <IconTerminal size={14} />, label: 'WSL' }] : []),
-    { k: 'ssh', icon: <IconServer size={14} />, label: 'SSH' }
+    { k: 'ssh', icon: <IconServer size={14} />, label: 'SSH' },
+    { k: 'github', icon: <IconGithub size={14} />, label: t('add.gh.tab') }
   ]
 
   return (
     // 바깥을 누르면 닫는다. 원격 폴더 찾아보기가 떠 있으면 그것만 닫는다(입력한 주소·그룹은 남긴다) — Esc 와 같은 단계
     <div className="modal-backdrop" onMouseDown={() => (remoteBrowse ? setRemoteBrowse(false) : close())}>
       <form
-        className="add-dialog"
+        className={`add-dialog${kind === 'github' ? ' add-dialog--gh' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-title"
@@ -284,6 +325,14 @@ export function AddRepoDialog(): React.JSX.Element | null {
           </label>
         )}
 
+        {kind === 'github' && (
+          <>
+            <span className="field__hint">{t('add.gh.hint')}</span>
+            <GithubRepoPicker state={gh} registered={ghRegistered} checked={ghChecked} onChecked={setGhChecked} busy={busy === 'add'} />
+          </>
+        )}
+
+        {kind !== 'github' && (
         <label className="field">
           <span className="field__label">{t('add.path')}</span>
           <div className="field__row">
@@ -314,8 +363,9 @@ export function AddRepoDialog(): React.JSX.Element | null {
           </div>
           {kind !== 'local' && <span className="field__hint">{t('add.remotePathHint')}</span>}
         </label>
+        )}
 
-        {found && (
+        {kind !== 'github' && found && (
           <div className="field">
             <div className="add-found__head">
               <span className="field__label">{t('add.found', { n: found.repos.length })}</span>
@@ -391,7 +441,7 @@ export function AddRepoDialog(): React.JSX.Element | null {
         )}
 
         <div className="add-dialog__foot">
-          {kind !== 'local' && (
+          {(kind === 'wsl' || kind === 'ssh') && (
             <button
               type="button"
               className="btn"
@@ -410,9 +460,13 @@ export function AddRepoDialog(): React.JSX.Element | null {
               ? t('add.adding')
               : busy === 'scan'
                 ? t('add.scanning')
-                : found
-                  ? t('add.submitMany', { n: picked.length })
-                  : t('add.submit')}
+                : kind === 'github'
+                  ? ghPicked.length > 0
+                    ? t('add.submitMany', { n: ghPicked.length })
+                    : t('add.submit')
+                  : found
+                    ? t('add.submitMany', { n: picked.length })
+                    : t('add.submit')}
           </button>
         </div>
       </form>

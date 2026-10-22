@@ -220,14 +220,17 @@ async function inspectRemoteUrls(exec: GitExecutor, repoPath: string, ins: Confi
   ins.remotesFingerprint = createHash('sha256').update(JSON.stringify(ins.remotes.map((r) => [r.name, r.url]))).digest('hex')
 }
 
-export async function inspectConfig(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigInspection> {
+/** 저장소 설정 항목을 scope 와 함께 읽는다(include 포함). 읽지 못하면 검사할 수 없으므로 던진다 */
+export async function readConfigEntries(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigEntry[]> {
   const r = await exec.run(repoPath, ['config', '--list', '--show-scope', '--includes', '-z'], opts)
-  let entries: ConfigEntry[]
-  if (r.code === 0) entries = parseConfigList(r.stdout.toString('utf8'))
-  else if (/unknown option.*show-scope/i.test(r.stderr)) entries = await readConfigByScope(exec, repoPath, opts)
+  if (r.code === 0) return parseConfigList(r.stdout.toString('utf8'))
+  if (/unknown option.*show-scope/i.test(r.stderr)) return readConfigByScope(exec, repoPath, opts)
   // 설정을 읽지 못하면 검사할 수 없으므로 fetch 하지 않는다
-  else throw configReadError(r.code, r.stderr)
-  const ins = inspectEntries(entries)
+  throw configReadError(r.code, r.stderr)
+}
+
+export async function inspectConfig(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigInspection> {
+  const ins = inspectEntries(await readConfigEntries(exec, repoPath, opts))
   await inspectRemoteUrls(exec, repoPath, ins, opts)
   return ins
 }
@@ -393,6 +396,10 @@ export interface FetchRunOpts {
   allowFile: boolean
   /** 자격 증명 도우미를 쓴다(사용자가 직접 누른 fetch, 또는 같은 remote 가 수동 fetch 로 승인된 경우) */
   credentialHelpers: boolean
+  /** 주면 fetchEnv 대신 이 환경을 그대로 쓴다(GitHub 원격 전용 저장소: githubEnv 의 https 전용 환경) */
+  env?: Record<string, string>
+  /** `--filter=<값>` (partial clone). GitHub 원격 전용 저장소는 blob:none */
+  filter?: string
 }
 
 /**
@@ -409,7 +416,7 @@ export interface FetchRunOpts {
  */
 export async function runFetch(exec: GitExecutor, repoPath: string, ins: ConfigInspection, o: FetchRunOpts): Promise<void> {
   const runOpts: RunOpts = {
-    env: fetchEnv({ sshCommand: resolveSshCommand(ins, exec.kind), allowFile: o.allowFile }),
+    env: o.env ?? fetchEnv({ sshCommand: resolveSshCommand(ins, exec.kind), allowFile: o.allowFile }),
     ...(o.signal ? { signal: o.signal } : {})
   }
   const cfg = fetchConfigArgs(o.hooksPath, { credentialHelpers: o.credentialHelpers })
@@ -418,7 +425,7 @@ export async function runFetch(exec: GitExecutor, repoPath: string, ins: ConfigI
     const run = (extra: string[]) =>
       exec.run(
         repoPath,
-        [...cfg, ...FETCH_ARGS, ...extra, '--refmap=', '--', name, `+refs/heads/*:refs/remotes/${name}/*`],
+        [...cfg, ...FETCH_ARGS, ...(o.filter ? [`--filter=${o.filter}`] : []), ...extra, '--refmap=', '--', name, `+refs/heads/*:refs/remotes/${name}/*`],
         runOpts
       )
     let r = await run(['--no-write-fetch-head'])

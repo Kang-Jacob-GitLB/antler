@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type {
+  AddGithubReposInput,
+  AddGithubReposResult,
   AddRepoInput,
   AddReposInput,
   AddReposResult,
@@ -39,6 +41,8 @@ interface AppState {
   addRepo(input: AddRepoInput): Promise<void>
   /** 같은 환경의 여러 저장소를 한 번에 추가하고 첫 저장소를 연다. 실패한 경로는 결과로 돌려준다 */
   addRepos(input: AddReposInput): Promise<AddReposResult>
+  /** GitHub 원격 전용 저장소를 여러 개 추가하고 첫 저장소를 연다. 실패한 저장소는 결과로 돌려준다 */
+  addGithubRepos(input: AddGithubReposInput): Promise<AddGithubReposResult>
   updateRepo(id: string, patch: RepoPatch): Promise<void>
   removeRepo(id: string): Promise<void>
   setUi(patch: Partial<UiPrefs>): Promise<void>
@@ -137,6 +141,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async addRepos(input) {
     const result = await api.invoke('repos:addMany', input)
+    const first = result.added[0]
+    if (first) {
+      const config = await api.invoke('config:get')
+      set({ config })
+      get().selectRepo(first.id)
+    }
+    return result
+  },
+
+  async addGithubRepos(input) {
+    // 앱 캐시에 빈 저장소를 만들어 등록한다. 첫 이력은 저장소를 처음 열 때 main 이 fetch 한다
+    const result = await api.invoke('repos:addGithub', input)
     const first = result.added[0]
     if (first) {
       const config = await api.invoke('config:get')

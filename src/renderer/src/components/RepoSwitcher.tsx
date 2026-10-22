@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '../i18n'
+import { repoLocation } from '../lib/external'
 import { useAppStore } from '../stores/appStore'
 import { EnvBadge } from './EnvBadge'
 import { IconSearch } from './icons'
@@ -27,7 +28,7 @@ export function RepoSwitcher(): React.JSX.Element | null {
     if (!config) return []
     const q = query.trim().toLowerCase()
     return config.repos
-      .filter((r) => !q || r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q))
+      .filter((r) => !q || r.name.toLowerCase().includes(q) || repoLocation(r).toLowerCase().includes(q))
       .map((r) => ({ repo: r, source: config.sources.find((s) => s.id === r.sourceId) }))
   }, [config, query])
 
@@ -81,7 +82,7 @@ export function RepoSwitcher(): React.JSX.Element | null {
             >
               {source && <EnvBadge kind={source.kind} sourceId={source.id} />}
               <span className="switcher__name">{repo.name}</span>
-              <span className="switcher__path">{repo.path}</span>
+              <span className="switcher__path">{repoLocation(repo)}</span>
             </li>
           ))}
         </ul>

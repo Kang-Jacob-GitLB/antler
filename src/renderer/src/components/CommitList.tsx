@@ -6,7 +6,9 @@ import { graphEngine } from '../graph/graphEngine'
 import { useT } from '../i18n'
 import { DateText } from './DateText'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
+import { githubEmptyState } from '../lib/ghRepoList'
 import { isHidden } from '../lib/refView'
+import { useFetchStore } from '../stores/fetchStore'
 import { useAppStore } from '../stores/appStore'
 import { useGithubStore } from '../stores/githubStore'
 import { scopeOf, useVisibleChecks } from '../stores/checksStore'
@@ -21,7 +23,7 @@ import { AvatarBlockNotice } from './AvatarBlockNotice'
 import { CommitCheck } from './github/CommitCheck'
 import { CommitMinimap } from './CommitMinimap'
 import { ChipFlowDot } from './FlowBadge'
-import { IconCloud, IconMonitor, IconTag } from './icons'
+import { IconCloud, IconMonitor, IconRefresh, IconTag } from './icons'
 import { SearchBar } from './SearchBar'
 import { WipGraph } from './WipGraph'
 import './CommitList.css'
@@ -422,6 +424,21 @@ export function CommitList(): React.JSX.Element {
 
   const showEmpty = !loading && !hasMore && commits.length === 0
 
+  // GitHub 원격 전용 저장소: 처음엔 이력이 비어 있고 main 이 fetch 한다. 받는 중·실패를 빈 목록 대신 안내한다
+  const ghRepoId = useAppStore((s) => (s.config?.repos.find((r) => r.id === s.activeRepoId)?.github ? s.activeRepoId : null))
+  const ghStatus = useFetchStore((s) => (ghRepoId ? s.status[ghRepoId] : undefined))
+  const ghState = ghRepoId && commits.length === 0 && !hasMore ? githubEmptyState(ghStatus) : 'empty'
+  const ghFetching = ghStatus?.fetching === true
+  const wasFetching = useRef(false)
+  useEffect(() => {
+    // fetch 가 끝나면 목록을 다시 읽는다(처음 받은 이력을 보이고, 빈 저장소에서 났던 로그 오류를 지운다)
+    if (ghRepoId && wasFetching.current && !ghFetching) {
+      useLogStore.getState().reload()
+      void useAppStore.getState().refreshRefs()
+    }
+    wasFetching.current = ghFetching
+  }, [ghRepoId, ghFetching])
+
   return (
     <section className={`commit-list${showPr ? ' has-pr' : ''}`} style={{ '--col-graph': `${colGraph}px` } as React.CSSProperties}>
       <CommitMinimap scrollEl={scrollEl} rowHeight={ROW_H} topOffset={wipOff} />
@@ -454,10 +471,30 @@ export function CommitList(): React.JSX.Element {
           {showWip && <WipGraph scrollEl={scrollEl} rowHeight={ROW_H} left={graphBox.left} width={graphBox.width} topOffset={wipOff} />}
           <GraphCanvas scrollEl={scrollEl} rowHeight={ROW_H} left={graphBox.left} width={graphBox.width} commits={commits} topOffset={wipOff} />
         </div>
-        {(error || showEmpty) && (
-          <div className={`commit-list__notice${error ? ' is-error' : ''}`}>
-            {error ? t('error.generic', { msg: error }) : t('list.noCommits')}
+        {ghState !== 'empty' ? (
+          // 빈 bare 저장소의 로그 오류보다 fetch 상태를 먼저 안내한다
+          <div className={`commit-list__notice${ghState === 'failed' ? ' is-error' : ''}`} role="status">
+            <div className="commit-list__notice-title">{t(ghState === 'failed' ? 'list.ghFetchFailed' : 'list.ghFetching')}</div>
+            {ghState === 'failed' ? (
+              <>
+                {(ghStatus?.error || ghStatus?.blocked?.keys.join(', ')) && (
+                  <div className="commit-list__notice-msg selectable">{ghStatus?.error ?? ghStatus?.blocked?.keys.join(', ')}</div>
+                )}
+                <button type="button" className="btn btn--sm" onClick={() => void useFetchStore.getState().refresh()}>
+                  <IconRefresh size={13} />
+                  {t('list.ghRetry')}
+                </button>
+              </>
+            ) : (
+              <div className="commit-list__notice-hint">{t('list.ghFetchingHint')}</div>
+            )}
           </div>
+        ) : (
+          (error || showEmpty) && (
+            <div className={`commit-list__notice${error ? ' is-error' : ''}`}>
+              {error ? t('error.generic', { msg: error }) : t('list.noCommits')}
+            </div>
+          )
         )}
         {showWip && (
           <div className="commit-list__wip" style={{ height: ROW_H }}>

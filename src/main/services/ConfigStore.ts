@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from
 import { dirname } from 'node:path'
 import { LAUNCHPAD_KEY_RE, MAX_LAUNCHPAD_PINS, MAX_LAUNCHPAD_SNOOZES } from '@shared/launchpad'
 import type { AppConfig, EditorKind, Repo, RepoPatch, Source, SourceKind, UiPrefs, WindowState } from '@shared/types'
+import { GITHUB_SOURCE_ID, isSafeBranch, sanitizeGithubLink } from '../git/githubCache'
 import { sanitizeWindowState } from '../windowState'
 
 export const LOCAL_SOURCE_ID = 'local'
@@ -10,6 +11,8 @@ export const LOCAL_SOURCE_ID = 'local'
 /** 환경 하나를 나타내는 소스. id 가 결정적이라 같은 배포판·호스트는 같은 소스로 모인다 */
 export function sourceFor(kind: SourceKind, target?: string): Source {
   if (kind === 'local') return { id: LOCAL_SOURCE_ID, kind: 'local', label: 'Local' }
+  // GitHub 원격 전용 저장소는 환경이 하나뿐이다(앱 캐시). 저장소가 하나라도 있을 때만 소스가 존재한다
+  if (kind === 'github') return { id: GITHUB_SOURCE_ID, kind: 'github', label: 'GitHub' }
   if (!target) throw new Error(`${kind} 소스에는 ${kind === 'wsl' ? '배포판' : '호스트'} 이름이 필요합니다`)
   return kind === 'wsl'
     ? { id: `wsl:${target}`, kind, label: `WSL · ${target}`, distro: target }
@@ -96,6 +99,26 @@ function checkRepoListPrefs(patch: Partial<UiPrefs>): void {
   if (sourceOrder !== undefined && !isList(sourceOrder, 500)) bad()
   if (repoOrder !== undefined && !isList(repoOrder, 5000)) bad()
   if (groupOrder !== undefined && (!isMap(groupOrder, 500) || !Object.values(groupOrder).every((g) => isList(g, 500)))) bad()
+}
+
+/**
+ * 저장된 저장소 목록의 GitHub 링크를 검증한다. github 소스의 저장소인데 링크가 틀렸으면 fetch 할 대상도 URL 을 확인할 기준도
+ * 없으므로 그 항목을 버리고, github 소스가 아닌 저장소에 붙은 링크는 필드만 버린다.
+ */
+function sanitizeRepos(repos: Repo[]): Repo[] {
+  const out: Repo[] = []
+  for (const r of repos) {
+    if (r.sourceId === GITHUB_SOURCE_ID) {
+      const link = sanitizeGithubLink(r.github)
+      if (link) out.push({ ...r, github: link })
+    } else if (r.github !== undefined) {
+      const { github: _stray, ...rest } = r
+      out.push(rest)
+    } else {
+      out.push(r)
+    }
+  }
+  return out
 }
 
 function defaults(): AppConfig {
@@ -200,7 +223,15 @@ export class ConfigStore {
     return this.update({ ...this.config, repos })
   }
 
-  /** 저장소를 지우고, 더 이상 쓰는 저장소가 없는 WSL·SSH 소스도 함께 정리한다(로컬 소스는 항상 남긴다) */
+  /** main 전용: 첫 fetch 뒤 알아낸 GitHub 저장소의 기본 브랜치를 레코드에 남긴다 */
+  setGithubDefaultBranch(id: string, branch: string): void {
+    const cur = this.repo(id)
+    if (!cur?.github || cur.github.defaultBranch === branch || !isSafeBranch(branch)) return
+    const repos = this.config.repos.map((r) => (r.id === id ? { ...r, github: { ...cur.github!, defaultBranch: branch } } : r))
+    this.update({ ...this.config, repos })
+  }
+
+  /** 저장소를 지우고, 더 이상 쓰는 저장소가 없는 WSL·SSH·GitHub 소스도 함께 정리한다(로컬 소스는 항상 남긴다) */
   removeRepo(id: string): AppConfig {
     const ui = this.config.ui.lastRepoId === id ? { ...this.config.ui, lastRepoId: undefined } : this.config.ui
     const repos = this.config.repos.filter((r) => r.id !== id)
@@ -249,7 +280,11 @@ export class ConfigStore {
     }
     try {
       const raw = JSON.parse(text) as Partial<AppConfig>
-      const sources = raw.sources?.length ? raw.sources : base.sources
+      const repos = sanitizeRepos(raw.repos ?? [])
+      // github 소스는 정해진 모양 하나뿐이고, 저장소가 있을 때만 존재한다(파일에서 바뀐 값은 믿지 않고 다시 만든다)
+      const hasGithub = repos.some((r) => r.sourceId === GITHUB_SOURCE_ID)
+      const sources = (raw.sources?.length ? raw.sources : base.sources).filter((s) => s.id !== GITHUB_SOURCE_ID && s.kind !== 'github')
+      if (hasGithub) sources.push(sourceFor('github'))
       if (!sources.some((s) => s.id === LOCAL_SOURCE_ID)) sources.unshift(base.sources[0]!)
       const ui: UiPrefs = { ...base.ui, ...raw.ui }
       // 예전 버전이 남긴 프로필 표시는 버린다(다음 저장 때 파일에서도 사라진다. raw.profiles 도 옮기지 않는다)
@@ -270,7 +305,7 @@ export class ConfigStore {
       return {
         version: 1,
         sources,
-        repos: raw.repos ?? [],
+        repos,
         ui,
         ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {}),
         ...(raw.trustedConfigs ? { trustedConfigs: raw.trustedConfigs } : {}),

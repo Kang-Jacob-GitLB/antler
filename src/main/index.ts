@@ -134,7 +134,8 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   config = new ConfigStore(join(app.getPath('userData'), 'antler.config.json'))
-  repos = new RepoService(config)
+  // GitHub 원격 전용 저장소의 앱 캐시. 토큰은 호출 때마다 읽는다(gh 는 아래에서 만들어지지만 git 호출은 그 뒤에만 일어난다)
+  repos = new RepoService(config, { cacheDir: join(app.getPath('userData'), 'remote-repos'), githubToken: () => gh.gitToken() })
   // 활성 저장소의 ref 가 바뀌면(외부에서 커밋·fetch·체크아웃) renderer 에 알린다
   watcher = new RepoWatcher(repos, (repoId) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })

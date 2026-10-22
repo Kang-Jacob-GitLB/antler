@@ -157,6 +157,10 @@ input {
   background: var(--badge-ssh-bg);
   color: var(--badge-ssh-fg);
 }
+.env-badge--github {
+  background: var(--badge-github-bg);
+  color: var(--badge-github-fg);
+}
 /* 사용자가 고른 환경 색(hue) — 그룹 칩과 같은 채도·명도 */
 .env-badge.env-badge--custom {
   background: hsl(var(--env-hue) 55% 55% / 0.22);

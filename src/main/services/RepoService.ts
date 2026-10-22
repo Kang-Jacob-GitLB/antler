@@ -1,8 +1,13 @@
+import { lstatSync, mkdirSync, rmSync, rmdirSync, type Stats } from 'node:fs'
+import { dirname } from 'node:path'
 import type {
+  AddGithubReposInput,
+  AddGithubReposResult,
   AddRepoInput,
   AddReposInput,
   AddReposResult,
   CommitActivity,
+  GithubRepoLink,
   RemoteDirListing,
   RepoScanResult,
   CommitDetail,
@@ -29,7 +34,7 @@ import type {
   WipStatus
 } from '@shared/types'
 import { scopeKey } from '@shared/logScope'
-import { AbortError, GitError, type GitExecutor } from '../executors/GitExecutor'
+import { AbortError, GIT_ENV, GitError, type GitExecutor } from '../executors/GitExecutor'
 import { LocalExecutor } from '../executors/LocalExecutor'
 import { ProcessQueue } from '../executors/ProcessQueue'
 import { SshExecutor } from '../executors/SshExecutor'
@@ -42,13 +47,25 @@ import * as fileInsight from '../git/fileInsight'
 import { LogCursor } from '../git/logCursor'
 import * as extras from '../git/repoExtras'
 import * as wip from '../git/wip'
+import {
+  cachePathMatchesLink,
+  githubCachePath,
+  githubCacheSlug,
+  githubEnv,
+  initGithubRepo,
+  MAX_ADD_GITHUB,
+  redactToken,
+  validateGithubLink
+} from '../git/githubCache'
+import { DiffParser } from '../git/parsers/diff'
+import { WipStatusParser } from '../git/parsers/wipStatus'
 import { pickGithubRemote, pickGithubRemotes } from '../github/remoteUrl'
 import { LOCAL_SOURCE_ID, sourceFor, type ConfigStore } from './ConfigStore'
 import { LruCache } from './lru'
 import { scanFromListing, scanLocalRepos } from './repoScan'
 
 /** 환경별 동시 git 프로세스 상한(LogCursor 는 저장소당 하나라 큐 밖에서 돈다) */
-const CONCURRENCY: Record<SourceKind, number> = { local: 6, wsl: 4, ssh: 4 }
+const CONCURRENCY: Record<SourceKind, number> = { local: 6, wsl: 4, ssh: 4, github: 6 }
 /**
  * 이 시간 동안 안 쓰인 LogCursor 는 닫는다. 멈춘 git log 는 pack 파일 핸들을 쥐고 있어
  * 사용자의 `git gc`/`repack` 이나 폴더 이동을 막으므로 짧게 둔다.
@@ -118,6 +135,18 @@ export class StaleLogError extends Error {
   }
 }
 
+/** GitHub 원격 전용 저장소가 쓰는 앱 캐시 위치와 토큰 */
+export interface GithubDeps {
+  /** 캐시 기준 폴더(<userData>/remote-repos). 저장소는 그 아래 `<owner>/<repo>.git` */
+  cacheDir: string
+  /** git 에 줄 GitHub 토큰(로그인하지 않았으면 null). 호출 때마다 읽는다 — 로그인·로그아웃이 바로 반영된다 */
+  githubToken: () => string | null
+}
+
+/** 삭제 중 Windows 에서 방금 끊은 git 프로세스·백신이 잠깐 파일을 쥐고 있을 수 있다 */
+const REMOVE_RETRIES = 10
+const REMOVE_RETRY_DELAY_MS = 100
+
 interface Runtime {
   exec: GitExecutor
   queue: ProcessQueue
@@ -158,8 +187,128 @@ export class RepoService {
   private readonly sigApplied = new Map<string, number>()
   private readonly sweeper = setInterval(() => this.sweepIdleCursors(), CURSOR_SWEEP_MS)
 
-  constructor(private readonly config: ConfigStore) {
+  constructor(
+    private readonly config: ConfigStore,
+    private readonly github?: GithubDeps
+  ) {
     this.sweeper.unref?.()
+  }
+
+  /**
+   * 이 저장소가 GitHub 원격 전용 저장소면 그 링크와 캐시 경로(아니면 null). 소스가 github 이고 캐시 경로가 이 레코드의
+   * owner/repo 의 것일 때만 돌려준다 — 둘 중 하나라도 어긋난 레코드는 어떤 경우에도 github 환경(lazy fetch·토큰)을 받지 못한다.
+   */
+  githubTarget(repoId: string): { link: GithubRepoLink; path: string } | null {
+    const repo = this.config.repo(repoId)
+    if (!repo?.github || !this.github || this.config.source(repo.sourceId)?.kind !== 'github') return null
+    return cachePathMatchesLink(this.github.cacheDir, repo.path, repo.github) ? { link: repo.github, path: repo.path } : null
+  }
+
+  /** 소스가 github 인 저장소인가(캐시 경로가 어긋난 레코드도 포함한다. githubTarget 은 어긋나면 null) */
+  isGithub(repoId: string): boolean {
+    return this.repoKind(repoId) === 'github'
+  }
+
+  /** FetchService 용: github 저장소를 fetch·조회할 때의 환경. 토큰은 여기서 읽어 환경 변수로만 넘긴다 */
+  githubFetchEnv(): Record<string, string> {
+    return githubEnv(this.github?.githubToken() ?? null)
+  }
+
+  /** 오류 메시지·로그에 토큰이 남지 않게 가린다(GitHub 토큰이 없으면 그대로) */
+  redactSecrets(text: string): string {
+    return redactToken(text, this.github?.githubToken() ?? null)
+  }
+
+  /** ref 가 하나도 없는가(아직 한 번도 fetch 하지 못한 원격 전용 저장소) */
+  async hasNoRefs(repoId: string): Promise<boolean> {
+    const { repo, rt } = this.resolve(repoId)
+    const out = await rt.queue.run(async () => {
+      const r = await rt.exec.run(repo.path, ['for-each-ref', '--count=1', '--format=%(refname)'])
+      return r.code === 0 ? r.stdout.toString('utf8').trim() : 'x'
+    })
+    return out === ''
+  }
+
+  /**
+   * GitHub 원격 전용 저장소들을 추가한다. 저장소마다 앱 캐시에 빈 bare 저장소를 만들어 등록하고(네트워크 없음), 내용은 처음 열 때 fetch 한다.
+   * 하나가 실패해도 나머지는 추가하고, 실패한 폴더는 지운다. 이미 등록된 저장소는 기존 항목을 돌려준다.
+   */
+  async addGithubRepos(input: AddGithubReposInput): Promise<AddGithubReposResult> {
+    const added: Repo[] = []
+    const failed: AddGithubReposResult['failed'] = []
+    const deps = this.github
+    if (!deps) throw new Error('GitHub 원격 저장소를 쓸 수 없는 환경입니다')
+    if (!input || !Array.isArray(input.repos) || input.repos.length > MAX_ADD_GITHUB) throw new Error('잘못된 입력입니다')
+    const group = typeof input.group === 'string' ? input.group.trim() : ''
+    if (group.length > 200) throw new Error('잘못된 그룹 이름입니다')
+
+    const source = sourceFor('github')
+    const rt = this.holdRuntime(source)
+    try {
+      for (const raw of input.repos) {
+        const label = raw && typeof raw === 'object' ? `${String((raw as GithubRepoLink).owner)}/${String((raw as GithubRepoLink).repo)}`.slice(0, 200) : '?'
+        let created: string | null = null
+        try {
+          const link = validateGithubLink(raw)
+          const path = githubCachePath(deps.cacheDir, link)
+          let repo = this.config.get().repos.find((r) => r.sourceId === source.id && r.path === path)
+          if (!repo) {
+            // 등록되지 않은 같은 이름의 폴더는 이전 실패·삭제 실패가 남긴 찌꺼기다 — 우리 캐시 모양일 때만 지우고 새로 만든다
+            this.removeCacheDir(deps.cacheDir, path)
+            if (lstatOrNull(path) || lstatOrNull(dirname(path))?.isSymbolicLink()) throw new Error('캐시 폴더를 정리하지 못했습니다')
+            mkdirSync(path, { recursive: true })
+            created = path
+            await initGithubRepo(rt.exec, path, link)
+            repo = this.config.addRepo({ sourceId: source.id, path, name: link.repo, ...(group ? { group } : {}), github: link }, source)
+            created = null
+          } else if (group && repo.group !== group) {
+            // 이미 등록된 저장소를 다시 추가하면서 그룹을 골랐으면 그 그룹으로 옮긴다
+            this.config.updateRepo(repo.id, { group })
+          }
+          const latest = this.config.repo(repo.id) ?? repo
+          if (!added.some((r) => r.id === latest.id)) added.push(latest)
+        } catch (err) {
+          if (created) this.removeCacheDir(deps.cacheDir, created)
+          failed.push({ fullName: label, error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+    } finally {
+      this.dropRuntime(source.id)
+    }
+    return { added, failed }
+  }
+
+  /**
+   * 캐시 폴더를 지운다(`<cacheDir>/<owner>/<repo>.git` 모양일 때만, 심볼릭 링크를 따라가지 않는다). 지웠으면 true.
+   * 폴더가 없거나 모양이 틀리면 아무것도 지우지 않고 false.
+   */
+  private removeCacheDir(cacheDir: string, path: string): boolean {
+    if (!githubCacheSlug(cacheDir, path)) return false
+    try {
+      // owner 폴더나 저장소 폴더가 링크(junction 포함)면 링크 너머의 실제 폴더를 지우게 되므로 건드리지 않는다
+      if (lstatSync(dirname(path)).isSymbolicLink() || lstatSync(path).isSymbolicLink()) return false
+    } catch {
+      return false // 없다
+    }
+    rmSync(path, { recursive: true, force: true, maxRetries: REMOVE_RETRIES, retryDelay: REMOVE_RETRY_DELAY_MS })
+    try {
+      rmdirSync(dirname(path)) // 소유자 폴더가 비었으면 함께 정리한다(비어 있지 않으면 던지므로 무시)
+    } catch {
+      /* 다른 저장소가 있다 */
+    }
+    return true
+  }
+
+  /**
+   * GitHub 원격 전용 저장소의 캐시 폴더를 지운다(repos:remove). 열려 있는 커서(pack 파일 핸들)를 먼저 닫는다.
+   * 호출자가 실행 중인 fetch·감시를 먼저 멈춰야 한다. 모양이 틀린 경로는 지우지 않는다(false).
+   */
+  removeGithubCache(repoId: string): boolean {
+    const repo = this.config.repo(repoId)
+    if (!repo || !this.github || this.config.source(repo.sourceId)?.kind !== 'github') return false
+    for (const [k, c] of this.cursors) if (k.startsWith(`${repoId}\0`)) this.retire(k, c)
+    for (const k of [...this.anchors.keys()]) if (k.startsWith(`${repoId}\0`)) this.anchors.delete(k)
+    return this.removeCacheDir(this.github.cacheDir, repo.path)
   }
 
   /**
@@ -255,6 +404,7 @@ export class RepoService {
 
   /** 연결 테스트: 그 환경에서 git 버전을 돌려준다(SSH 인증·호스트 키·WSL 배포판 문제를 저장 전에 드러낸다) */
   async testEnv(input: Omit<AddRepoInput, 'path' | 'group'>): Promise<string> {
+    if (input.kind === 'github') throw new Error('GitHub 원격 저장소는 연결 테스트 대상이 아닙니다')
     const target = input.kind === 'wsl' ? input.distro : input.kind === 'ssh' ? input.sshHost?.trim() : undefined
     const source = sourceFor(input.kind, target)
     const rt = this.holdRuntime(source)
@@ -438,14 +588,24 @@ export class RepoService {
   /** 사이드바 ref 스냅샷(첫 화면용: 업스트림 ahead/behind·서브모듈은 refsDetails 로 따로 받는다) */
   refs(repoId: string): Promise<RefsSnapshot> {
     const { repo, rt } = this.resolve(repoId)
-    return rt.queue.run(() => git.refs(rt.exec, repo.path, undefined, true), { key: `refs:${repoId}` })
+    const github = this.isGithub(repoId)
+    return rt.queue.run(
+      async () => {
+        const snapshot = await git.refs(rt.exec, repo.path, undefined, true)
+        // bare 캐시 저장소 자신이 작업 트리 목록에 'bare' 항목으로 나온다 — 작업 트리가 없는 저장소이므로 비운다
+        return github ? { ...snapshot, worktrees: [] } : snapshot
+      },
+      { key: `refs:${repoId}` }
+    )
   }
 
   /** refs 에서 미룬 부가 정보. 비싼 조회이므로 첫 로그 페이지가 나간 뒤에 시작한다 */
   async refsDetails(repoId: string): Promise<RefsDetails> {
     await this.afterFirstPage(repoId)
     const { repo, rt } = this.resolve(repoId)
-    return rt.queue.run(() => git.refsDetails(rt.exec, repo.path), { key: `refsDetails:${repoId}` })
+    // 원격 전용 저장소는 작업 트리가 없어 서브모듈을 읽지 않는다(.gitmodules blob 을 받으러 가지 않게)
+    const skipSubmodules = this.isGithub(repoId)
+    return rt.queue.run(() => git.refsDetails(rt.exec, repo.path, undefined, skipSubmodules), { key: `refsDetails:${repoId}` })
   }
 
   /**
@@ -453,6 +613,9 @@ export class RepoService {
    * 저장소별로 짧게(60초) 캐시한다 — 목록·상세 조회마다 git 을 띄우지 않기 위해서다.
    */
   async ghRepo(repoId: string): Promise<GhRepoRef | null> {
+    // 원격 전용 저장소는 어느 GitHub 저장소인지 레코드가 안다 — git 을 부르지 않는다
+    const link = this.config.repo(repoId)?.github
+    if (link && this.isGithub(repoId)) return { owner: link.owner, repo: link.repo, remote: 'origin' }
     const hit = this.ghRepoCache.get(repoId)
     if (hit && Date.now() - hit.at < GH_REPO_TTL_MS) return hit.value
     await this.afterFirstPage(repoId)
@@ -612,6 +775,8 @@ export class RepoService {
    */
   wipStatus(repoId: string, requestId?: string): Promise<WipStatus> {
     const { repo, rt } = this.resolve(repoId)
+    // 작업 트리가 없는 원격 전용 저장소: 변경 없음
+    if (this.isGithub(repoId)) return Promise.resolve(new WipStatusParser().finish())
     return this.shared(`wip\0${repoId}`, requestId, async (signal) => {
       await this.afterFirstPage(repoId)
       return rt.queue.run(() => wip.wipStatus(rt.exec, repo.path, { signal }), { signal })
@@ -621,6 +786,7 @@ export class RepoService {
   /** 작업 트리 파일 하나의 diff. 파일이 계속 바뀔 수 있어 캐시하지 않는다 */
   wipDiff(repoId: string, req: WipDiffRequest, requestId?: string): Promise<FileDiff> {
     const { repo, rt } = this.resolve(repoId)
+    if (this.isGithub(repoId)) return Promise.resolve(new DiffParser(typeof req?.path === 'string' ? req.path : '').finish())
     return this.withSignal(requestId, (signal) =>
       rt.queue.run(() => wip.wipFileDiff(rt.exec, repo.path, req, signal ? { signal } : {}), signal ? { signal } : {})
     )
@@ -803,7 +969,7 @@ export class RepoService {
   private runtime(source: Source): Runtime {
     let rt = this.runtimes.get(source.id)
     if (!rt) {
-      rt = { exec: createExecutor(source), queue: new ProcessQueue(CONCURRENCY[source.kind]), fetchQueue: new ProcessQueue(1) }
+      rt = { exec: createExecutor(source, this.github), queue: new ProcessQueue(CONCURRENCY[source.kind]), fetchQueue: new ProcessQueue(1) }
       this.runtimes.set(source.id, rt)
     }
     return rt
@@ -815,6 +981,8 @@ export class RepoService {
  * git 을 돌려야 9P 파일 공유를 거치지 않아 빠르고 줄바꿈·권한이 정확하다).
  */
 function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; target?: string; path: string } {
+  // GitHub 원격 전용 저장소는 addGithubRepos 로만 만든다(임의 경로를 github 소스에 올리지 못하게)
+  if (input.kind === 'github') throw new Error('GitHub 원격 저장소는 여기서 추가할 수 없습니다')
   const path = input.path.trim()
   if (input.kind === 'local' || input.kind === 'wsl') {
     const unc = wslFromUnc(path)
@@ -824,10 +992,23 @@ function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; tar
   return { kind: input.kind, target, path }
 }
 
-function createExecutor(source: Source): GitExecutor {
+function lstatOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path)
+  } catch {
+    return null
+  }
+}
+
+function createExecutor(source: Source, github?: GithubDeps): GitExecutor {
   switch (source.kind) {
     case 'local':
       return new LocalExecutor()
+    case 'github': {
+      // 앱 캐시 안의 저장소에서만 lazy fetch(https)와 토큰을 열고, 그 밖의 경로는 기본 환경(전송 금지)이다
+      if (!github) throw new Error('GitHub 원격 저장소를 쓸 수 없는 환경입니다')
+      return new LocalExecutor('git', (repoPath) => (githubCacheSlug(github.cacheDir, repoPath) ? githubEnv(github.githubToken()) : GIT_ENV))
+    }
     case 'wsl':
       if (process.platform !== 'win32') throw new Error('WSL 저장소는 Windows 에서만 열 수 있습니다')
       return new WslExecutor(source.distro!)

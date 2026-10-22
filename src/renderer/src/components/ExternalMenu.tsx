@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react'
 import type { ExternalAction } from '@shared/types'
 import { useT, type MessageKey } from '../i18n'
-import { externalSupported, openExternal, sourceKindOf } from '../lib/external'
+import { externalSupported, openExternal, openOnGithub, sourceKindOf } from '../lib/external'
 import { useExternalMenuStore } from '../stores/externalMenuStore'
-import { IconCode, IconFolder, IconTerminal } from './icons'
+import { IconCode, IconFolder, IconGithub, IconTerminal } from './icons'
 
 export const EXTERNAL_ITEMS: { action: ExternalAction; label: MessageKey; icon: typeof IconFolder }[] = [
   { action: 'fileManager', label: 'ext.fileManager', icon: IconFolder },
@@ -53,7 +53,22 @@ function Body(): React.JSX.Element {
 
   return (
     <div ref={ref} className="side-ctx" role="menu" aria-label={t('ext.menu')} style={pos} onContextMenu={(e) => e.preventDefault()}>
-      {EXTERNAL_ITEMS.map(({ action, label, icon: Icon }, i) => {
+      {kind === 'github' && (
+        // 원격 전용 저장소: 작업 폴더가 없으므로 폴더·에디터·터미널 대신 GitHub 웹으로 연다
+        <button
+          className="side-ctx__item side-ctx__item--icon"
+          role="menuitem"
+          autoFocus
+          onClick={() => {
+            close()
+            void openOnGithub(menu.repoId)
+          }}
+        >
+          <IconGithub size={14} />
+          <span>{t('ext.openGithub')}</span>
+        </button>
+      )}
+      {kind !== 'github' && EXTERNAL_ITEMS.map(({ action, label, icon: Icon }, i) => {
         const ok = externalSupported(kind, action)
         return (
           <button

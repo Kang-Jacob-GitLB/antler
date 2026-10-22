@@ -259,10 +259,10 @@ export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts, 
 }
 
 /** refs(lite) 에서 미룬 부가 정보: 로컬 브랜치의 업스트림 ahead/behind 와 서브모듈. 둘 다 실패해도 빈 값이다 */
-export async function refsDetails(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsDetails> {
+export async function refsDetails(exec: GitExecutor, repoPath: string, opts?: RunOpts, skipSubmodules = false): Promise<RefsDetails> {
   const [trackOut, subs] = await Promise.all([
     okOrEmpty(exec, repoPath, REFS_TRACK_ARGS, opts),
-    submodules(exec, repoPath, opts).catch(() => [])
+    skipSubmodules ? Promise.resolve([]) : submodules(exec, repoPath, opts).catch(() => [])
   ])
   return { tracking: parseTracking(trackOut), submodules: subs }
 }

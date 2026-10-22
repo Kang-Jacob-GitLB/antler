@@ -23,6 +23,10 @@
   background: var(--bg-elevated);
   box-shadow: var(--shadow-popover);
 }
+/* GitHub 탭: 저장소 한 줄에 이름·설명·기본 브랜치·push 시각이 들어가므로 조금 넓게 */
+.add-dialog--gh {
+  width: min(640px, calc(100vw - 32px));
+}
 .add-dialog__title {
   margin: 0;
   font-size: var(--fs-lg);

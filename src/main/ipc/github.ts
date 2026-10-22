@@ -43,6 +43,7 @@ export function registerGithubIpc(handle: IpcHandle, gh: GitHubService, repos: R
     if (fresh === true) repos.invalidateGhRemotes()
     return gh.launchpad(parseId(requestId, '요청 ID'))
   })
+  handle('gh:accessibleRepos', (_e, requestId, fresh) => gh.accessibleRepos(parseId(requestId, '요청 ID'), fresh === true))
   handle('gh:openExternal', async (_e, url) => {
     const href = allowedExternalUrl(url)
     if (!href) throw new Error('GitHub(https://github.com/) 주소만 열 수 있습니다')

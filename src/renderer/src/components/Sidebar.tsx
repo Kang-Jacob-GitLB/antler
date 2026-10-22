@@ -34,6 +34,7 @@ import {
 import { GroupChip } from './GroupChip'
 import { Collapse } from './Collapse'
 import { ColorMenu } from './ColorMenu'
+import { repoLocation } from '../lib/external'
 import { permuteSlots, sortByOrder } from '../lib/repoOrder'
 import { useReorderDnd } from '../lib/useReorderDnd'
 import './Sidebar.css'
@@ -698,7 +699,7 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
                   depth={depth}
                   icon={<IconRepo size={13} />}
                   label={repo.name}
-                  title={`${source.label} · ${repo.path}`}
+                  title={`${source.label} · ${repoLocation(repo)}`}
                   active={repo.id === activeRepoId}
                   onClick={() => selectRepo(repo.id)}
                   drag={{

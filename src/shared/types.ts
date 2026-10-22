@@ -1,6 +1,7 @@
 // main ↔ renderer 공용 데이터 타입. 런타임 코드 없이 타입만 둔다.
 
-export type SourceKind = 'local' | 'wsl' | 'ssh'
+/** github: 작업 폴더 없이 앱 캐시에 받아 두는 GitHub 원격 전용 저장소(bare + blob:none, fetch 만 한다) */
+export type SourceKind = 'local' | 'wsl' | 'ssh' | 'github'
 
 /** 저장소가 존재하는 실행 환경. git 은 항상 이 환경 안에서 실행된다. */
 export interface Source {
@@ -20,6 +21,16 @@ export interface Repo {
   path: string
   name: string
   group?: string
+  /** 원격 전용 저장소(소스 kind === 'github')일 때만: 받아 오는 GitHub 저장소. path 는 앱 캐시 폴더다 */
+  github?: GithubRepoLink
+}
+
+/** 원격 전용 저장소가 받아 오는 GitHub 저장소 */
+export interface GithubRepoLink {
+  owner: string
+  repo: string
+  /** GitHub 의 기본 브랜치(HEAD 가 refs/remotes/origin/<이 브랜치> 를 가리킨다). 모르면 첫 fetch 때 원격에 묻는다 */
+  defaultBranch?: string
 }
 
 export type ThemePref = 'system' | 'dark' | 'light'
@@ -706,6 +717,44 @@ export interface AddReposResult {
   added: Repo[]
   /** 추가하지 못한 경로와 이유. 나머지는 그대로 추가된다 */
   failed: { path: string; error: string }[]
+}
+
+/** 원격 전용 저장소 추가. 저장소마다 앱 캐시에 빈 bare 저장소를 만들어 등록하고, 내용은 처음 열 때 fetch 로 받는다 */
+export interface AddGithubReposInput {
+  repos: GithubRepoLink[]
+  group?: string
+}
+
+export interface AddGithubReposResult {
+  added: Repo[]
+  /** 추가하지 못한 저장소(owner/repo)와 이유 */
+  failed: { fullName: string; error: string }[]
+}
+
+/** 로그인한 사용자가 접근할 수 있는 GitHub 저장소(본인·협업·소속 org). 저장소 추가 창의 원격 탭 목록 */
+export interface GhAccessibleRepo {
+  owner: string
+  repo: string
+  /** owner/repo */
+  fullName: string
+  ownerType: 'User' | 'Organization'
+  private: boolean
+  fork: boolean
+  archived: boolean
+  defaultBranch: string
+  description: string | null
+  /** epoch ms. 마지막 push */
+  pushedAt: number
+  htmlUrl: string
+}
+
+export interface GhAccessibleReposResult {
+  repos: GhAccessibleRepo[]
+  /** 로그인하지 않았다(목록은 비어 있다) */
+  needsLogin: boolean
+  /** 쪽 수 상한에 걸려 일부만 읽었다 */
+  truncated: boolean
+  fetchedAt: number
 }
 
 /** 고른 폴더 안의 저장소 찾기 결과. 바로 아래 하위 폴더만 본다 */

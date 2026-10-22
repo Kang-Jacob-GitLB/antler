@@ -13,7 +13,7 @@ import { usePaletteStore } from '../stores/paletteStore'
 import { useSearchStore } from '../stores/searchStore'
 import { useUpdateStore } from '../stores/updateStore'
 import type { CommandCategory, CommandCtx, CommandLike } from './commandFilter'
-import { externalSupported, openExternal, sourceKindOf } from './external'
+import { externalSupported, openExternal, openOnGithub, sourceKindOf } from './external'
 import { matchesShortcut, type KeyEventLike, type Shortcut } from './shortcuts'
 
 type T = ReturnType<typeof useT>
@@ -164,6 +164,18 @@ export const COMMAND_DEFS: CommandDef[] = [
       }
     })
   ),
+  {
+    // GitHub 원격 전용 저장소는 폴더·에디터·터미널 명령 대신 이것만 나온다
+    id: 'ext.github',
+    category: 'general',
+    title: (t) => t('cmd.extGithub'),
+    keywords: 'open github web browser repository',
+    when: (c) => c.hasRepo && c.sourceKind === 'github',
+    run: () => {
+      const id = useAppStore.getState().activeRepoId
+      if (id) void openOnGithub(id)
+    }
+  },
   ...EDITORS.map(
     (e): CommandDef => ({
       id: `editor.${e.v}`,

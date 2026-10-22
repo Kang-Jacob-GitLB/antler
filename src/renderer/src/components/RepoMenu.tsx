@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Repo, SourceKind } from '@shared/types'
 import { useT } from '../i18n'
-import { externalSupported, openExternal } from '../lib/external'
+import { externalSupported, openExternal, openOnGithub, repoLocation } from '../lib/external'
 import { EXTERNAL_ITEMS } from './ExternalMenu'
+import { IconGithub } from './icons'
 import { GroupPicker } from './GroupChip'
 import './RepoMenu.css'
 
@@ -79,7 +80,20 @@ export function RepoMenu({ repo, sourceKind, groups, onClose, onGroup, onRemove 
       />
       <div className="repo-menu__sep" />
       {/* 외부 도구로 열기: 파일 관리자 · 에디터 · 터미널(저장소 폴더) */}
-      {EXTERNAL_ITEMS.map(({ action, label, icon: Icon }) => {
+      {sourceKind === 'github' && (
+        // 원격 전용 저장소: 작업 폴더가 없으므로 GitHub 웹으로 연다
+        <button
+          className="repo-menu__item repo-menu__item--icon"
+          onClick={() => {
+            void openOnGithub(repo.id)
+            onClose()
+          }}
+        >
+          <IconGithub size={14} />
+          <span>{t('ext.openGithub')}</span>
+        </button>
+      )}
+      {sourceKind !== 'github' && EXTERNAL_ITEMS.map(({ action, label, icon: Icon }) => {
         const ok = externalSupported(sourceKind, action)
         return (
           <button
@@ -116,8 +130,8 @@ export function RepoMenu({ repo, sourceKind, groups, onClose, onGroup, onRemove 
           {t('sidebar.removeRepo')}
         </button>
       )}
-      <div className="repo-menu__path" title={repo.path}>
-        {repo.path}
+      <div className="repo-menu__path" title={repoLocation(repo)}>
+        {repoLocation(repo)}
       </div>
     </div>
   )

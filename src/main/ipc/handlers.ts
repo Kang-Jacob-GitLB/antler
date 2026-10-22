@@ -1,7 +1,8 @@
 import { BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { IpcArgs, IpcChannel, IpcEnvelope, IpcResult } from '@shared/ipc'
-import type { AddRepoInput, AddReposInput } from '@shared/types'
+import type { AddGithubReposInput, AddRepoInput, AddReposInput } from '@shared/types'
 import { isWslUnc, wslFromUnc } from '../executors/wslPaths'
+import { MAX_ADD_GITHUB } from '../git/githubCache'
 import { AbortError, GitError } from '../executors/GitExecutor'
 import { listSshHosts } from '../executors/SshExecutor'
 import { listWslDistros } from '../executors/WslExecutor'
@@ -204,6 +205,13 @@ export function registerIpc(
     await checkEnvInput(e, { kind: i.kind, distro: i.distro, sshHost: i.sshHost, group: i.group, path: i.paths[0] }, true)
     return repos.addRepos(i as AddReposInput)
   })
+  handle('repos:addGithub', (_e, input) => {
+    // 저장소별 owner/repo 검증은 서비스가 한다(틀린 항목은 failed 로 돌려준다). 여기서는 모양과 개수만 본다
+    const i = input as Partial<AddGithubReposInput> | null
+    if (!i || typeof i !== 'object' || !Array.isArray(i.repos) || i.repos.length === 0 || i.repos.length > MAX_ADD_GITHUB) throw new Error('잘못된 입력입니다')
+    if (i.group !== undefined && (typeof i.group !== 'string' || i.group.length > 200)) throw new Error('잘못된 그룹 이름입니다')
+    return repos.addGithubRepos(i as AddGithubReposInput)
+  })
   handle('repos:scan', async (e, input) => {
     await checkEnvInput(e, input, true)
     return repos.scanRepos(input)
@@ -214,6 +222,13 @@ export function registerIpc(
   })
   handle('repos:remove', async (_e, repoId) => {
     repos.invalidateGhRemotes(repoId)
+    // 원격 전용 저장소는 캐시 폴더도 지운다 — 실행 중인 fetch·감시를 먼저 멈춰 git 이 폴더를 쥐고 있지 않게 한다.
+    // 폴더를 못 지우면(다른 프로세스가 쥐고 있음) 오류로 알리고 레코드는 남겨 다시 시도할 수 있게 한다
+    if (repos.isGithub(repoId)) {
+      await fetcher.forgetAndWait(repoId)
+      if (watcher.current === repoId) await watcher.watch(null)
+      repos.removeGithubCache(repoId)
+    }
     const next = config.removeRepo(repoId)
     fetcher.forget(repoId)
     if (watcher.current === repoId) void watcher.watch(null)
