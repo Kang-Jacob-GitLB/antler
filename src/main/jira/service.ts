@@ -3,7 +3,8 @@
 import type { JiraAuthState, JiraComment, JiraConnectInput, JiraDevInfo, JiraIssueDetail, JiraSearchResult, JiraTransition, JiraUser, JiraWorklogResult } from '@shared/types'
 import type { TokenStore } from '../github/tokenStore'
 import * as api from './api'
-import { JiraApiError, JiraClient, type JiraCredential, type SleepFn } from './client'
+import { AbortError } from '../executors/GitExecutor'
+import { JIRA_TOO_BIG, JiraApiError, JiraClient, type JiraCredential, type SleepFn } from './client'
 import { allowedJiraUrl, parseConnectInput, parseIssueKey, parseSearchQuery, parseTransitionId, parseUserSearch, parseWorklogQuery, type SiteOptions } from './validate'
 
 /** 자격 증명을 담는 파일 이름(GitHub 토큰 파일과 같은 safeStorage 방식, 파일만 따로) */
@@ -12,11 +13,15 @@ export const JIRA_META_FILE = 'jira-credential.json'
 
 /** 날짜 필드 목록 조회가 실패했을 때 다시 시도하기까지의 간격 */
 const DATE_FIELDS_COOLDOWN_MS = 5 * 60_000
+/** 이슈 조회가 날짜 필드 목록(/field)을 기다리는 최대 시간 */
+const DATE_FIELDS_WAIT_MS = 4000
 
 export interface JiraServiceDeps extends SiteOptions {
   store: TokenStore
   fetchImpl?: typeof fetch
   sleep?: SleepFn
+  /** /field 대기 상한(ms). 테스트에서 줄여 쓴다 */
+  dateFieldsWaitMs?: number
 }
 
 interface Connection extends JiraCredential {
@@ -116,7 +121,7 @@ export class JiraService {
 
   async issue(key: unknown, requestId?: string): Promise<JiraIssueDetail> {
     const k = parseIssueKey(key)
-    return this.data(requestId, async (c, signal) => api.getIssue(this.client, c, k, await this.dateFieldIds(c), signal))
+    return this.data(requestId, async (c, signal) => api.getIssue(this.client, c, k, await this.dateFieldIds(c, signal), signal))
   }
 
   /**
@@ -124,19 +129,43 @@ export class JiraService {
    * 실패해도 던지지 않는다(그 날짜만 생략) — 캐시하지 않고 쿨다운 동안은 다시 묻지 않는다.
    * 개별 조회가 아니라 연결 세대(epoch)의 신호로 호출한다: 한 조회의 취소가 다른 조회에 번지지 않게
    */
-  private dateFieldIds(c: JiraCredential): Promise<api.DateFieldIds> {
+  private sharedDateFields(c: JiraCredential): Promise<api.DateFieldIds> {
     if (this.dateFields) return this.dateFields
     if (Date.now() < this.dateFieldsRetryAt) return Promise.resolve(api.NO_DATE_FIELDS)
     const epoch = this.epoch
-    const p: Promise<api.DateFieldIds> = api.getDateFieldIds(this.client, c, epoch.signal).catch(() => {
+    const p: Promise<api.DateFieldIds> = api.getDateFieldIds(this.client, c, epoch.signal).catch((err: unknown) => {
       if (this.epoch === epoch) {
-        if (this.dateFields === p) this.dateFields = null
-        this.dateFieldsRetryAt = Date.now() + DATE_FIELDS_COOLDOWN_MS
+        // 응답이 너무 크면 다시 물어도 같으므로 이 연결 동안 빈 결과를 캐시한다(p 를 그대로 둔다). 그 밖의 실패는 쿨다운 뒤 재시도
+        const tooBig = err instanceof JiraApiError && err.code === 'JIRA_HTTP' && err.message === JIRA_TOO_BIG
+        if (!tooBig) {
+          if (this.dateFields === p) this.dateFields = null
+          this.dateFieldsRetryAt = Date.now() + DATE_FIELDS_COOLDOWN_MS
+        }
       }
       return api.NO_DATE_FIELDS
     })
     this.dateFields = p
     return p
+  }
+
+  /**
+   * 공유 /field 요청을 이 조회에서 기다린다. 대기는 상한(dateFieldsWaitMs)까지만 — 넘으면 날짜 없이 진행하고
+   * 공유 요청은 계속 돌아 끝나면 캐시된다(다음 조회부터 날짜가 나온다). 이 조회가 취소되면 기다리지 않고 AbortError
+   */
+  private dateFieldIds(c: JiraCredential, signal: AbortSignal): Promise<api.DateFieldIds> {
+    const shared = this.sharedDateFields(c)
+    return new Promise((resolve, reject) => {
+      if (signal.aborted) return reject(new AbortError())
+      const done = (fn: () => void): void => {
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        fn()
+      }
+      const onAbort = (): void => done(() => reject(new AbortError()))
+      const timer = setTimeout(() => done(() => resolve(api.NO_DATE_FIELDS)), this.deps.dateFieldsWaitMs ?? DATE_FIELDS_WAIT_MS)
+      signal.addEventListener('abort', onAbort, { once: true })
+      void shared.then((v) => done(() => resolve(v)))
+    })
   }
 
   /** 이슈에서 실행할 수 있는 상태 전환 목록 */
