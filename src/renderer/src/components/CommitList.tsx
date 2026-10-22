@@ -175,6 +175,9 @@ const Row = memo(function Row({
   const chips = useMemo(() => toChips(commit.refs), [commit.refs])
   const pr = useMemo(() => (showPr ? parsePrNumber(commit.subject) : null), [showPr, commit.subject])
   const firstChip = chips[0]
+  // ref 가 여럿이면 refs 칸에 마우스를 댈 때 행 위에 전부 펼친 오버레이를 띄운다(행 높이·배치는 그대로 두고 덮기만 한다)
+  const [refsOpen, setRefsOpen] = useState(false)
+  const overlay = useRef<HTMLDivElement>(null)
   return (
     <div
       className={`commit-row${selected ? ' is-selected' : ''}${compared ? ' is-compared' : ''}${mark === 'none' ? '' : ` is-${mark}`}`}
@@ -182,14 +185,28 @@ const Row = memo(function Row({
       role="row"
       aria-selected={selected || compared}
     >
-      <div className="cell cell--refs">
+      <div
+        className="cell cell--refs"
+        onMouseEnter={chips.length > 1 ? () => setRefsOpen(true) : undefined}
+        // 오버레이가 이 칸을 덮으면 포인터가 오버레이로 넘어가므로, 그때는 닫지 않는다
+        onMouseLeave={(e) => {
+          if (!(e.relatedTarget instanceof Node && overlay.current?.contains(e.relatedTarget))) setRefsOpen(false)
+        }}
+      >
         {firstChip && <RefChip chip={firstChip} filterTitle={t('list.chipFilter')} />}
         {chips.length > 1 && (
-          <span className="ref-more" title={chips.slice(1).map((c) => c.label).join('\n')}>
+          <span className="ref-more" aria-label={chips.slice(1).map((c) => c.label).join(', ')}>
             +{chips.length - 1}
           </span>
         )}
       </div>
+      {refsOpen && chips.length > 1 && (
+        <div ref={overlay} className="ref-overlay" onMouseLeave={() => setRefsOpen(false)}>
+          {chips.map((c) => (
+            <RefChip key={c.key} chip={c} filterTitle={t('list.chipFilter')} />
+          ))}
+        </div>
+      )}
       {/* 그래프는 GraphCanvas 가 이 컬럼 위에 겹쳐 그린다 */}
       <div className="cell cell--graph" />
       <div className="cell cell--message">
