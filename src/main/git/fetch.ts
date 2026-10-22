@@ -220,14 +220,17 @@ async function inspectRemoteUrls(exec: GitExecutor, repoPath: string, ins: Confi
   ins.remotesFingerprint = createHash('sha256').update(JSON.stringify(ins.remotes.map((r) => [r.name, r.url]))).digest('hex')
 }
 
-export async function inspectConfig(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigInspection> {
+/** 저장소 설정 항목을 scope 와 함께 읽는다(include 포함). 읽지 못하면 검사할 수 없으므로 던진다 */
+export async function readConfigEntries(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigEntry[]> {
   const r = await exec.run(repoPath, ['config', '--list', '--show-scope', '--includes', '-z'], opts)
-  let entries: ConfigEntry[]
-  if (r.code === 0) entries = parseConfigList(r.stdout.toString('utf8'))
-  else if (/unknown option.*show-scope/i.test(r.stderr)) entries = await readConfigByScope(exec, repoPath, opts)
+  if (r.code === 0) return parseConfigList(r.stdout.toString('utf8'))
+  if (/unknown option.*show-scope/i.test(r.stderr)) return readConfigByScope(exec, repoPath, opts)
   // 설정을 읽지 못하면 검사할 수 없으므로 fetch 하지 않는다
-  else throw configReadError(r.code, r.stderr)
-  const ins = inspectEntries(entries)
+  throw configReadError(r.code, r.stderr)
+}
+
+export async function inspectConfig(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<ConfigInspection> {
+  const ins = inspectEntries(await readConfigEntries(exec, repoPath, opts))
   await inspectRemoteUrls(exec, repoPath, ins, opts)
   return ins
 }
@@ -296,7 +299,7 @@ export async function gitVersion(exec: GitExecutor): Promise<[number, number, nu
  * http.emptyAuth·allowNTLMAuth·delegation, credential.allowWindowsAuth 는 Windows 통합 인증(NTLM/Negotiate)을
  * 무인 fetch 중에 공격자의 https remote 로 흘리지 않게 한다(모르는 키는 옛 git 도 무시한다).
  */
-export function fetchConfigArgs(hooksPath: string, opts: { credentialHelpers?: boolean } = {}): string[] {
+export function fetchConfigArgs(hooksPath: string, opts: { credentialHelpers?: boolean; followRedirects?: 'initial' | 'false' } = {}): string[] {
   return [
     // 값이 빈 credential.helper 는 도우미 목록을 비운다 — 무인(자동) fetch 가 사용자가 쓴 적 없는 호스트에 도우미를 부르지 않게 한다
     ...(opts.credentialHelpers ? [] : ['-c', 'credential.helper=']),
@@ -315,7 +318,8 @@ export function fetchConfigArgs(hooksPath: string, opts: { credentialHelpers?: b
     '-c',
     'transfer.bundleURI=false',
     '-c',
-    'http.followRedirects=initial',
+    // -c 는 환경(GIT_CONFIG_COUNT)의 설정을 이기므로 github 환경이 정한 값(false)을 여기서 다시 덮어쓰지 않게 값을 받는다
+    `http.followRedirects=${opts.followRedirects ?? 'initial'}`,
     '-c',
     'http.emptyAuth=false',
     '-c',
@@ -393,6 +397,12 @@ export interface FetchRunOpts {
   allowFile: boolean
   /** 자격 증명 도우미를 쓴다(사용자가 직접 누른 fetch, 또는 같은 remote 가 수동 fetch 로 승인된 경우) */
   credentialHelpers: boolean
+  /** 주면 fetchEnv 대신 이 환경을 그대로 쓴다(GitHub 원격 전용 저장소: githubEnv 의 https 전용 환경) */
+  env?: Record<string, string>
+  /** `--filter=<값>` (partial clone). GitHub 원격 전용 저장소는 blob:none */
+  filter?: string
+  /** http.followRedirects 값(기본 initial). GitHub 원격 전용 저장소는 Authorization 헤더가 리다이렉트 너머로 가지 않게 false */
+  followRedirects?: 'initial' | 'false'
 }
 
 /**
@@ -409,16 +419,16 @@ export interface FetchRunOpts {
  */
 export async function runFetch(exec: GitExecutor, repoPath: string, ins: ConfigInspection, o: FetchRunOpts): Promise<void> {
   const runOpts: RunOpts = {
-    env: fetchEnv({ sshCommand: resolveSshCommand(ins, exec.kind), allowFile: o.allowFile }),
+    env: o.env ?? fetchEnv({ sshCommand: resolveSshCommand(ins, exec.kind), allowFile: o.allowFile }),
     ...(o.signal ? { signal: o.signal } : {})
   }
-  const cfg = fetchConfigArgs(o.hooksPath, { credentialHelpers: o.credentialHelpers })
+  const cfg = fetchConfigArgs(o.hooksPath, { credentialHelpers: o.credentialHelpers, ...(o.followRedirects ? { followRedirects: o.followRedirects } : {}) })
   let firstError: GitError | null = null
   for (const name of ins.remoteNames) {
     const run = (extra: string[]) =>
       exec.run(
         repoPath,
-        [...cfg, ...FETCH_ARGS, ...extra, '--refmap=', '--', name, `+refs/heads/*:refs/remotes/${name}/*`],
+        [...cfg, ...FETCH_ARGS, ...(o.filter ? [`--filter=${o.filter}`] : []), ...extra, '--refmap=', '--', name, `+refs/heads/*:refs/remotes/${name}/*`],
         runOpts
       )
     let r = await run(['--no-write-fetch-head'])
@@ -436,10 +446,12 @@ export type FetchFailure = 'auth' | 'network' | 'protocol'
  * 오류 종류: 인증 문제·허용되지 않은 전송(file)은 재시도해도 소용없어 자동 fetch 를 멈추고,
  * 그 밖은 지수 백오프로 다시 시도한다.
  */
-export function classifyFailure(err: unknown): FetchFailure {
+export function classifyFailure(err: unknown, o: { github?: boolean } = {}): FetchFailure {
   if (err instanceof AbortError) return 'network'
   const text = err instanceof Error ? err.message : String(err)
   if (/transport '[^']*' not allowed/i.test(text)) return 'protocol'
+  // GitHub 는 권한이 없는 저장소를 "Repository not found"(404)로 숨긴다. 로그아웃·토큰 만료·권한 없음은 재시도해도 소용없다
+  if (o.github && /repository not found|returned error: (401|403|404)|invalid username or token|bad credentials/i.test(text)) return 'auth'
   return /authentication failed|permission denied|could not read (username|password)|terminal prompts disabled|host key verification failed|publickey|access denied|invalid credentials/i.test(
     text
   )

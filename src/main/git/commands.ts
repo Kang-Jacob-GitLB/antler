@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import type { CommitDetail, CompareResult, FileChange, FileDiff, FileDiffRequest, HeadInfo, LogScope, RefsDetails, RefsSnapshot, SearchResult, SubmoduleInfo } from '@shared/types'
 import { isRemoteAll, isValidScopeRef, SCOPE_HASH_RE, SCOPE_MAX_ITEMS } from '@shared/logScope'
-import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
+import { GitError, type GitExecutor, type RunOpts, type RunResult } from '../executors/GitExecutor'
 import { pickDefaultBranch } from './defaultBranch'
 import { parseChanges } from './parsers/changes'
 import { COMMIT_FORMAT_ARGS, parseCommitMeta } from './parsers/commit'
@@ -259,10 +259,10 @@ export async function refs(exec: GitExecutor, repoPath: string, opts?: RunOpts, 
 }
 
 /** refs(lite) 에서 미룬 부가 정보: 로컬 브랜치의 업스트림 ahead/behind 와 서브모듈. 둘 다 실패해도 빈 값이다 */
-export async function refsDetails(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<RefsDetails> {
+export async function refsDetails(exec: GitExecutor, repoPath: string, opts?: RunOpts, skipSubmodules = false): Promise<RefsDetails> {
   const [trackOut, subs] = await Promise.all([
     okOrEmpty(exec, repoPath, REFS_TRACK_ARGS, opts),
-    submodules(exec, repoPath, opts).catch(() => [])
+    skipSubmodules ? Promise.resolve([]) : submodules(exec, repoPath, opts).catch(() => [])
   ])
   return { tracking: parseTracking(trackOut), submodules: subs }
 }
@@ -348,22 +348,37 @@ export function assertHex(value: string | undefined, what: string): asserts valu
  * 커밋 상세: 메타데이터 + 첫 부모 대비 변경 파일 목록(+/- 통계).
  * 첫 부모를 알아야 하므로 메타데이터를 먼저 읽고, 이어서 name-status 와 numstat 을 동시에 돌린다.
  * 루트 커밋은 `--root`(빈 트리 대비), merge 는 첫 부모 대비다.
+ * lenient: 통계를 못 읽어도(blob:none 저장소가 오프라인이라 blob 을 받지 못함) 던지지 않고 파일 목록만 돌려준다 — changedFiles 참고
  */
-export async function commitDetail(exec: GitExecutor, repoPath: string, hash: string, opts?: RunOpts): Promise<CommitDetail> {
+export async function commitDetail(exec: GitExecutor, repoPath: string, hash: string, opts?: RunOpts, lenient = false): Promise<CommitDetail> {
   assertHex(hash, 'commit hash')
   // 해시는 위 정규식으로 hex 만 허용하므로 옵션으로 해석될 수 없다
   const metaOut = await ok(exec, repoPath, ['log', '-1', ...COMMIT_FORMAT_ARGS, hash, '--'], opts)
   const meta = parseCommitMeta(metaOut)
   const baseParent = meta.parents[0] ?? null
 
-  const base = ['diff-tree', '-r', '-z', '-M', '--no-commit-id', '--no-ext-diff']
   const range = baseParent ? [baseParent, meta.hash] : ['--root', meta.hash]
-  const [nameStatus, numstat] = await Promise.all([
-    ok(exec, repoPath, [...base, '--name-status', ...range, '--'], opts),
-    ok(exec, repoPath, [...base, '--numstat', ...range, '--'], opts)
-  ])
-  const { files, additions, deletions, truncated } = summarizeChanges(parseChanges(nameStatus, numstat))
+  const { files, additions, deletions, truncated } = summarizeChanges(await changedFiles(exec, repoPath, range, lenient, opts))
   return { ...meta, baseParent, files, additions, deletions, truncated }
+}
+
+/**
+ * 변경 파일 목록(name-status)에 +/- 통계(numstat)를 합쳐 읽는다. 둘을 동시에 돌린다.
+ * lenient 이고 어느 쪽이 실패하면 가능한 만큼만 돌려준다: 통계가 없으면 additions/deletions 가 null 이고 binary 가 false 인 파일
+ * (바이너리는 binary=true 라 구분된다), -M(이름 변경 감지)이 blob 을 받지 못해 실패하면 이름 변경 감지 없이 읽는다.
+ * 그것마저 실패하면 던진다.
+ */
+async function changedFiles(exec: GitExecutor, repoPath: string, range: string[], lenient: boolean, opts?: RunOpts): Promise<FileChange[]> {
+  const run = (rename: boolean, mode: string): Promise<RunResult> =>
+    exec.run(repoPath, ['diff-tree', '-r', '-z', ...(rename ? ['-M'] : []), '--no-commit-id', '--no-ext-diff', mode, ...range, '--'], opts)
+  const fail = (r: RunResult, mode: string): GitError => new GitError(r.stderr.trim() || `git diff-tree ${mode} failed (${r.code})`, r.code, r.stderr, ['diff-tree', mode])
+  const [nameStatus, numstat] = await Promise.all([run(true, '--name-status'), run(true, '--numstat')])
+  if (nameStatus.code === 0 && numstat.code === 0) return parseChanges(nameStatus.stdout, numstat.stdout)
+  if (!lenient) throw fail(nameStatus.code !== 0 ? nameStatus : numstat, nameStatus.code !== 0 ? '--name-status' : '--numstat')
+  if (nameStatus.code === 0) return parseChanges(nameStatus.stdout, Buffer.alloc(0))
+  const plain = await run(false, '--name-status')
+  if (plain.code !== 0) throw fail(plain, '--name-status')
+  return parseChanges(plain.stdout, Buffer.alloc(0))
 }
 
 /** 변경 파일 목록에 +/- 합계를 매기고 상한(COMMIT_FILES_LIMIT)에서 자른다. 합계는 잘리기 전 전체 기준이다 */
@@ -384,15 +399,10 @@ function summarizeChanges(all: FileChange[]): { files: FileChange[]; additions: 
  * 커밋 상세와 같은 파서·상한을 쓴다. 두 값 모두 hex 해시만 받아 옵션으로 해석될 수 없다.
  * 파일 하나의 diff 는 fileDiff 에 hash=to, parent=from 으로 요청하면 같은 비교가 된다.
  */
-export async function compareCommits(exec: GitExecutor, repoPath: string, from: string, to: string, opts?: RunOpts): Promise<CompareResult> {
+export async function compareCommits(exec: GitExecutor, repoPath: string, from: string, to: string, opts?: RunOpts, lenient = false): Promise<CompareResult> {
   assertHex(from, 'from hash')
   assertHex(to, 'to hash')
-  const base = ['diff-tree', '-r', '-z', '-M', '--no-commit-id', '--no-ext-diff']
-  const [nameStatus, numstat] = await Promise.all([
-    ok(exec, repoPath, [...base, '--name-status', from, to, '--'], opts),
-    ok(exec, repoPath, [...base, '--numstat', from, to, '--'], opts)
-  ])
-  return { from, to, ...summarizeChanges(parseChanges(nameStatus, numstat)) }
+  return { from, to, ...summarizeChanges(await changedFiles(exec, repoPath, [from, to], lenient, opts)) }
 }
 
 /**

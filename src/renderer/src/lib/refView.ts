@@ -39,16 +39,39 @@ export function toggled(list: readonly ViewRef[], ref: ViewRef): ViewRef[] {
 }
 
 /**
- * main 에 보낼 범위. solo 가 있으면 hide 는 적용하지 않는다.
- * 현재 브랜치를 숨기면 HEAD 로 다시 닿지 않도록 시작점에서 HEAD 를 뺀다.
+ * HEAD 가 가리키는 ref 의 전체 이름. head.branch 는 `symbolic-ref --short HEAD` 라 로컬(feature/x)과
+ * 원격 추적(origin/main — 원격 전용 저장소의 HEAD)을 이름만으론 구분할 수 없다. 스냅샷에 실제로 있는 ref 로 가린다:
+ * 같은 이름의 로컬 브랜치가 있으면 그것, 없고 원격 브랜치가 있으면 그 fullName, 아무것도 없으면 refs/heads/ 로 본다.
+ * (git 이 모호할 때 붙이는 heads/·remotes/ 접두사도 받는다)
  */
-export function buildScope(view: RefView, headBranch: string | null): LogScope | undefined {
+export function headRefId(headBranch: string | null, refs: Pick<RefsSnapshot, 'local' | 'remotes'> | null | undefined): string | null {
+  if (!headBranch) return null
+  if (refs) {
+    if (headBranch.startsWith('heads/')) return `refs/${headBranch}`
+    if (headBranch.startsWith('remotes/')) return `refs/${headBranch}`
+    if (!refs.local.some((b) => b.name === headBranch)) {
+      for (const r of refs.remotes) {
+        const hit = r.branches.find((b) => b.name === headBranch)
+        if (hit) return hit.fullName
+      }
+    }
+  }
+  return `refs/heads/${headBranch}`
+}
+
+/**
+ * main 에 보낼 범위. solo 가 있으면 hide 는 적용하지 않는다.
+ * 현재 브랜치(HEAD 가 가리키는 ref)를 숨기면 HEAD 로 다시 닿지 않도록 시작점에서 HEAD 를 뺀다.
+ * headRef 는 headRefId() 의 결과 — 주지 않으면 refs/heads/<headBranch> 로 본다.
+ */
+export function buildScope(view: RefView, headBranch: string | null, headRef?: string | null): LogScope | undefined {
   // main 이 거부할 항목은 보내기 전에 버린다(한 항목 때문에 그래프 전체가 오류가 되지 않게)
   const solo = view.solo.map((r) => r.id).filter(isValidScopeRef)
   if (solo.length) return { solo }
   const hide = view.hide.map((r) => r.id).filter((id) => isValidScopeRef(id) && id.startsWith('refs/'))
   if (!hide.length) return undefined
-  return { hide, ...(headBranch && hide.includes(`refs/heads/${headBranch}`) ? { includeHead: false } : {}) }
+  const headId = headRef ?? (headBranch ? `refs/heads/${headBranch}` : null)
+  return { hide, ...(headId && hide.includes(headId) ? { includeHead: false } : {}) }
 }
 
 /** 저장돼 있던 값을 믿지 않고 형식·종류를 다시 걸러 낸다 */

@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from
 import { dirname } from 'node:path'
 import { LAUNCHPAD_KEY_RE, MAX_LAUNCHPAD_PINS, MAX_LAUNCHPAD_SNOOZES } from '@shared/launchpad'
 import type { AppConfig, EditorKind, Repo, RepoPatch, Source, SourceKind, UiPrefs, WindowState } from '@shared/types'
+import { GITHUB_SOURCE_ID, githubCachePath, isSafeBranch, sanitizeGithubLink } from '../git/githubCache'
 import { sanitizeWindowState } from '../windowState'
 
 export const LOCAL_SOURCE_ID = 'local'
@@ -10,6 +11,8 @@ export const LOCAL_SOURCE_ID = 'local'
 /** 환경 하나를 나타내는 소스. id 가 결정적이라 같은 배포판·호스트는 같은 소스로 모인다 */
 export function sourceFor(kind: SourceKind, target?: string): Source {
   if (kind === 'local') return { id: LOCAL_SOURCE_ID, kind: 'local', label: 'Local' }
+  // GitHub 원격 전용 저장소는 환경이 하나뿐이다(앱 캐시). 저장소가 하나라도 있을 때만 소스가 존재한다
+  if (kind === 'github') return { id: GITHUB_SOURCE_ID, kind: 'github', label: 'GitHub' }
   if (!target) throw new Error(`${kind} 소스에는 ${kind === 'wsl' ? '배포판' : '호스트'} 이름이 필요합니다`)
   return kind === 'wsl'
     ? { id: `wsl:${target}`, kind, label: `WSL · ${target}`, distro: target }
@@ -98,6 +101,35 @@ function checkRepoListPrefs(patch: Partial<UiPrefs>): void {
   if (groupOrder !== undefined && (!isMap(groupOrder, 500) || !Object.values(groupOrder).every((g) => isList(g, 500)))) bad()
 }
 
+/**
+ * 저장된 저장소 목록의 GitHub 링크를 검증한다. github 소스의 저장소인데 링크가 틀렸으면 fetch 할 대상도 URL 을 확인할 기준도
+ * 없으므로 그 항목을 버리고, github 소스가 아닌 저장소에 붙은 링크는 필드만 버린다.
+ */
+function sanitizeRepos(repos: Repo[], cacheDir?: string): Repo[] {
+  const out: Repo[] = []
+  const githubPaths = new Set<string>()
+  for (const r of repos) {
+    // null·비객체 항목 하나가 설정 전체를 손상 처리하지 않게 그 항목만 건너뛴다
+    if (!r || typeof r !== 'object' || Array.isArray(r)) continue
+    if (r.sourceId === GITHUB_SOURCE_ID) {
+      const link = sanitizeGithubLink(r.github)
+      if (!link) continue
+      // 캐시 경로는 저장된 절대경로를 믿지 않고 이 PC 의 캐시 폴더와 링크로 다시 정한다(설정 파일을 다른 PC·사용자로 옮겨도 맞도록).
+      // 대소문자만 다른 같은 저장소는 같은 경로가 되므로 처음 것만 남긴다
+      const path = cacheDir ? githubCachePath(cacheDir, link) : r.path
+      if (githubPaths.has(path)) continue
+      githubPaths.add(path)
+      out.push({ ...r, path, github: link })
+    } else if (r.github !== undefined) {
+      const { github: _stray, ...rest } = r
+      out.push(rest)
+    } else {
+      out.push(r)
+    }
+  }
+  return out
+}
+
 function defaults(): AppConfig {
   return {
     version: 1,
@@ -107,11 +139,21 @@ function defaults(): AppConfig {
   }
 }
 
+export interface ConfigStoreOptions {
+  /** GitHub 원격 전용 저장소의 캐시 기준 폴더. 있으면 로드할 때 github 저장소의 path 를 이 폴더와 링크로 다시 정한다 */
+  cacheDir?: string
+}
+
 /** 소스·저장소 목록과 UI 설정을 JSON 파일 하나에 저장한다. 쓰기는 임시 파일 → rename 으로 원자적으로 한다. */
 export class ConfigStore {
   private config: AppConfig
+  /** 설정 파일이 있는데 읽거나 해석하지 못했다(저장소 목록이 비어 시작했다). 목록이 빈 것을 근거로 캐시를 지우면 안 된다 */
+  loadFailed = false
 
-  constructor(private readonly file: string) {
+  constructor(
+    private readonly file: string,
+    private readonly opts: ConfigStoreOptions = {}
+  ) {
     this.config = this.load()
   }
 
@@ -200,7 +242,15 @@ export class ConfigStore {
     return this.update({ ...this.config, repos })
   }
 
-  /** 저장소를 지우고, 더 이상 쓰는 저장소가 없는 WSL·SSH 소스도 함께 정리한다(로컬 소스는 항상 남긴다) */
+  /** main 전용: 첫 fetch 뒤 알아낸 GitHub 저장소의 기본 브랜치를 레코드에 남긴다 */
+  setGithubDefaultBranch(id: string, branch: string): void {
+    const cur = this.repo(id)
+    if (!cur?.github || cur.github.defaultBranch === branch || !isSafeBranch(branch)) return
+    const repos = this.config.repos.map((r) => (r.id === id ? { ...r, github: { ...cur.github!, defaultBranch: branch } } : r))
+    this.update({ ...this.config, repos })
+  }
+
+  /** 저장소를 지우고, 더 이상 쓰는 저장소가 없는 WSL·SSH·GitHub 소스도 함께 정리한다(로컬 소스는 항상 남긴다) */
   removeRepo(id: string): AppConfig {
     const ui = this.config.ui.lastRepoId === id ? { ...this.config.ui, lastRepoId: undefined } : this.config.ui
     const repos = this.config.repos.filter((r) => r.id !== id)
@@ -244,12 +294,17 @@ export class ConfigStore {
     let text: string
     try {
       text = readFileSync(this.file, 'utf8')
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') this.loadFailed = true
       return base // 첫 실행
     }
     try {
       const raw = JSON.parse(text) as Partial<AppConfig>
-      const sources = raw.sources?.length ? raw.sources : base.sources
+      const repos = sanitizeRepos(raw.repos ?? [], this.opts.cacheDir)
+      // github 소스는 정해진 모양 하나뿐이고, 저장소가 있을 때만 존재한다(파일에서 바뀐 값은 믿지 않고 다시 만든다)
+      const hasGithub = repos.some((r) => r.sourceId === GITHUB_SOURCE_ID)
+      const sources = (raw.sources?.length ? raw.sources : base.sources).filter((s) => s.id !== GITHUB_SOURCE_ID && s.kind !== 'github')
+      if (hasGithub) sources.push(sourceFor('github'))
       if (!sources.some((s) => s.id === LOCAL_SOURCE_ID)) sources.unshift(base.sources[0]!)
       const ui: UiPrefs = { ...base.ui, ...raw.ui }
       // 예전 버전이 남긴 프로필 표시는 버린다(다음 저장 때 파일에서도 사라진다. raw.profiles 도 옮기지 않는다)
@@ -270,7 +325,7 @@ export class ConfigStore {
       return {
         version: 1,
         sources,
-        repos: raw.repos ?? [],
+        repos,
         ui,
         ...(raw.fetchApprovals ? { fetchApprovals: raw.fetchApprovals } : {}),
         ...(raw.trustedConfigs ? { trustedConfigs: raw.trustedConfigs } : {}),
@@ -278,6 +333,7 @@ export class ConfigStore {
       }
     } catch {
       // 손상된 설정은 덮어쓰기 전에 보존해 둔다(사용자가 저장소 목록을 복구할 수 있게)
+      this.loadFailed = true
       try {
         copyFileSync(this.file, `${this.file}.corrupt-${Date.now()}.bak`)
       } catch {

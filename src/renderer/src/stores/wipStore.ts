@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import type { FileChange, WipArea, WipStatus } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { useAppStore } from './appStore'
+
+/** 저장소가 GitHub 원격 전용(작업 폴더 없음)인가 */
+function isRemoteOnly(repoId: string): boolean {
+  return !!useAppStore.getState().config?.repos.find((r) => r.id === repoId)?.github
+}
 
 /** 변경 파일 한 줄: 어느 영역(스테이지/작업 트리/추적 안 됨)의 파일인지 함께 든다 */
 export interface WipEntry {
@@ -61,6 +67,8 @@ export const useWipStore = create<WipState>((set, get) => ({
   async refresh() {
     const { repoId, pending } = get()
     if (!repoId) return
+    // GitHub 원격 전용 저장소는 작업 폴더가 없다 — 변경(WIP)을 읽지 않는다
+    if (isRemoteOnly(repoId)) return
     if (pending) {
       // 멈춘 요청(응답 없는 원격)이 갱신을 영영 막지 않도록 오래되면 끊고 다시 읽는다
       if (Date.now() - pendingSince < STUCK_MS) return

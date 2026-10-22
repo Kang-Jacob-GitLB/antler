@@ -1,6 +1,8 @@
 // GitHub 연동의 진입점. 토큰·로그인 상태·API 클라이언트를 소유하고 IPC 계층에는 가공된 결과만 돌려준다.
 // 토큰은 이 객체 밖으로 나가지 않는다 — 반환값은 GhAuthState(토큰 없음)와 API 응답을 변환한 공유 타입뿐이다.
+// 유일한 예외는 gitToken(): 원격 전용 저장소를 git 이 fetch 할 때 헤더로 넘기는 main 내부 용도다.
 import type {
+  GhAccessibleReposResult,
   GhAuthState,
   GhAvatarQuery,
   GhAvatarResult,
@@ -24,6 +26,7 @@ import type {
   GhUser
 } from '@shared/types'
 import { AbortError } from '../executors/GitExecutor'
+import { accessibleLoginRequired, fetchAccessibleRepos } from './accessibleRepos'
 import * as api from './api'
 import { AvatarResolver, FALLBACK_SHAS } from './avatars'
 import { CheckStateCache, fetchCheckDetails, fetchCommitChecks, listJobs, listRuns } from './checks'
@@ -51,7 +54,12 @@ export interface GitHubServiceDeps {
   avatarCacheFile?: string
   /** GitHub CLI(gh) 연동. 없으면 "CLI 로그인 가져오기"는 제공하지 않는다 */
   cli?: GhCli
+  /** 로그인·로그아웃·토큰 폐기로 토큰이 바뀌었을 때(원격 전용 저장소의 인증 실패 정지를 풀 때 쓴다) */
+  onAuthChanged?: () => void
 }
+
+/** 접근 가능한 저장소 목록 캐시 유효 시간 */
+const ACCESSIBLE_TTL_MS = 5 * 60_000
 
 export class GitHubService {
   private token: string | null
@@ -69,6 +77,8 @@ export class GitHubService {
   /** 커밋 체크 요약 캐시(계정이 바뀌면 보이는 범위가 달라지므로 로그인·로그아웃 때 비운다) */
   private readonly checkCache = new CheckStateCache()
   private cliAvailable: boolean | undefined
+  /** 접근 가능한 저장소 목록 캐시(계정이 바뀌면 보이는 범위가 달라지므로 로그인·로그아웃 때 비운다) */
+  private accessibleCache: { result: GhAccessibleReposResult; at: number } | null = null
 
   constructor(private readonly deps: GitHubServiceDeps) {
     const stored = deps.store.load()
@@ -143,6 +153,8 @@ export class GitHubService {
     // 한도·"로그인 필요" 표시는 비로그인 기준이었으니 비우고 다시 묻게 한다
     this.avatarResolver.resetSession()
     this.checkCache.clear()
+    this.accessibleCache = null
+    this.deps.onAuthChanged?.()
     return this.state()
   }
 
@@ -156,6 +168,16 @@ export class GitHubService {
     this.client.clearCache()
     this.avatarResolver.resetSession()
     this.checkCache.clear()
+    this.accessibleCache = null
+    this.deps.onAuthChanged?.()
+  }
+
+  /**
+   * 현재 로그인 토큰(없으면 null). 원격 전용 저장소(앱 캐시의 bare 저장소)를 github.com 에서 fetch 할 때
+   * git 에 헤더로만 넘기는 용도다. renderer·로그로 내보내지 않는다.
+   */
+  gitToken(): string | null {
+    return this.token
   }
 
   async loginPat(raw: string): Promise<GhAuthState> {
@@ -360,6 +382,30 @@ export class GitHubService {
           },
           signal
         )
+      } catch (err) {
+        if (this.token === tok && err instanceof GitHubApiError && err.code === 'GH_AUTH') await this.validate()
+        throw err
+      }
+    })
+  }
+
+  /**
+   * 로그인한 사용자가 접근할 수 있는 저장소(본인·협업·소속 org). 로그인하지 않았으면 조회하지 않고 needsLogin 으로 알린다.
+   * 결과는 5분 메모리 캐시에 둔다(fresh 면 무시하고 다시 읽는다).
+   */
+  accessibleRepos(requestId: string, fresh = false): Promise<GhAccessibleReposResult> {
+    const epoch = this.epoch.signal
+    return this.withSignal(requestId, async (own) => {
+      const tok = this.token
+      if (!tok) return accessibleLoginRequired()
+      const hit = this.accessibleCache
+      if (!fresh && hit && Date.now() - hit.at < ACCESSIBLE_TTL_MS) return hit.result
+      const signal = AbortSignal.any([epoch, own])
+      try {
+        const result = await fetchAccessibleRepos(this.client, signal)
+        // 읽는 동안 계정이 바뀌었으면 캐시에 넣지 않는다
+        if (this.token === tok) this.accessibleCache = { result, at: Date.now() }
+        return result
       } catch (err) {
         if (this.token === tok && err instanceof GitHubApiError && err.code === 'GH_AUTH') await this.validate()
         throw err

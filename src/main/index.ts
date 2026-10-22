@@ -12,6 +12,7 @@ import { registerIpc } from './ipc/handlers'
 import { allowedExternalUrl } from './github/validate'
 import { ConfigStore } from './services/ConfigStore'
 import { FetchService } from './services/FetchService'
+import { readNetworkConfig, type NetworkConfigEntry } from './git/githubCache'
 import { RepoService } from './services/RepoService'
 import { RepoWatcher } from './services/RepoWatcher'
 import { createAutoBackend } from './update/autoBackend'
@@ -132,9 +133,20 @@ function createWindow(): BrowserWindow {
   return win
 }
 
-app.whenReady().then(() => {
-  config = new ConfigStore(join(app.getPath('userData'), 'antler.config.json'))
-  repos = new RepoService(config)
+app.whenReady().then(async () => {
+  // GitHub 원격 전용 저장소의 앱 캐시. 설정을 읽을 때 github 저장소의 경로를 이 폴더 기준으로 다시 정한다(다른 PC 에서 옮겨 온 설정 대응)
+  const cacheDir = join(app.getPath('userData'), 'remote-repos')
+  // 로컬 git 의 core.hooksPath 로 쓸 앱 소유의 빈 디렉터리(Windows 에서 /dev/null 은 드라이브 루트의 \dev\null 로 풀린다)
+  const noHooksDir = join(app.getPath('userData'), 'no-hooks')
+  config = new ConfigStore(join(app.getPath('userData'), 'antler.config.json'), { cacheDir })
+  // github 환경은 사용자 git 설정을 끊으므로, 회사 프록시·인증서 같은 네트워크 키만 미리 읽어 둔다
+  // (창은 기다리지 않는다 — github fetch 가 netReady 를 기다린다)
+  let netConfig: readonly NetworkConfigEntry[] = []
+  const netReady = readNetworkConfig().then((c) => {
+    netConfig = c
+  })
+  // 토큰은 호출 때마다 읽는다(gh 는 아래에서 만들어지지만 git 호출은 그 뒤에만 일어난다)
+  repos = new RepoService(config, { cacheDir, githubToken: () => gh.gitToken(), noHooksDir, netConfig: () => netConfig, netReady })
   // 활성 저장소의 ref 가 바뀌면(외부에서 커밋·fetch·체크아웃) renderer 에 알린다
   watcher = new RepoWatcher(repos, (repoId) => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })
@@ -148,8 +160,7 @@ app.whenReady().then(() => {
     (repoId) => {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send('repo:changed', { repoId })
     },
-    // 로컬 git 의 core.hooksPath 로 쓸 앱 소유의 빈 디렉터리(Windows 에서 /dev/null 은 드라이브 루트의 \dev\null 로 풀린다)
-    join(app.getPath('userData'), 'no-hooks')
+    noHooksDir
   )
   // 화면 검증용 가짜 GitHub: 패키징되지 않은 빌드에서만 켜진다. 토큰은 메모리에만 두고, 저장소 경로도 존재하지 않는 임시 경로라
   // 실제 userData 의 토큰 파일은 읽지도(load) 지우지도(clear) 않는다
@@ -164,6 +175,8 @@ app.whenReady().then(() => {
     store: ghStore,
     ...(devFake ? { fetchImpl: createDevFakeFetch(devFake) } : {}),
     cli: createGhCli(),
+    // 로그인·로그아웃이 바뀌면 인증 실패로 멈춘 원격 전용 저장소의 자동 fetch 를 다시 연다
+    onAuthChanged: () => fetcher?.resumeGithubAuth(),
     ...(devFake ? {} : { avatarCacheFile: join(app.getPath('userData'), AVATAR_CACHE_FILE) }),
     ...fakeGithubApi()
   })
@@ -207,6 +220,8 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  // 어떤 레코드도 가리키지 않는 원격 전용 저장소 캐시(삭제 실패·버려진 레코드·중단된 추가의 찌꺼기)를 백그라운드에서 정리한다
+  repos.cleanupGithubCache().catch((err) => console.error('원격 저장소 캐시 정리 실패:', err))
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

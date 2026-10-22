@@ -87,6 +87,8 @@
   --badge-wsl-fg: var(--added-text);
   --badge-ssh-bg: color-mix(in srgb, var(--velvet) 45%, transparent);
   --badge-ssh-fg: var(--velvet-text);
+  --badge-github-bg: color-mix(in srgb, var(--text-muted) 24%, transparent);
+  --badge-github-fg: var(--text-secondary);
   --ref-head-ring: var(--accent);
   --diff-add-bg: color-mix(in srgb, var(--added) 13%, transparent);
   --diff-del-bg: color-mix(in srgb, var(--removed) 13%, transparent);

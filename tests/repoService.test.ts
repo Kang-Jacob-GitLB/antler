@@ -53,6 +53,18 @@ describe('RepoService.log', { timeout: 30_000 }, () => {
     const fresh = await svc.log(repoId, { skip: 0, count: 1 })
     expect(fresh.commits[0]!.subject).toBe('new')
   })
+
+  it('빈 저장소에서 끝까지 읽은 커서를 다시 쓰지 않아, 첫 커밋이 생기면 처음부터 읽을 때 보인다', async () => {
+    const config = new ConfigStore(join(mkdtempSync(join(root, 'cfg-')), 'antler.config.json'))
+    const empty = join(mkdtempSync(join(root, 'empty-')), 'repo')
+    execFileSync('git', ['init', '-q', empty])
+    const repo = config.addRepo({ sourceId: 'local', path: empty, name: 'empty' })
+    svc = new RepoService(config)
+    expect((await svc.log(repo.id, { skip: 0, count: 50 })).commits).toEqual([])
+    execFileSync('git', ['-C', empty, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'first'])
+    const page = await svc.log(repo.id, { skip: 0, count: 50 })
+    expect(page.commits.map((c) => c.subject)).toEqual(['first'])
+  })
 })
 
 describe('RepoService 첫 페이지 문', { timeout: 30_000 }, () => {

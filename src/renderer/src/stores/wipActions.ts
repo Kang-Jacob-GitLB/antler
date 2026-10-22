@@ -37,8 +37,9 @@ export function useWipSync(): void {
   useEffect(() => {
     const wip = useWipStore.getState()
     wip.reset(repoId)
-    if (!repoId) return
-    const every = kind === 'local' ? POLL_LOCAL_MS : POLL_REMOTE_MS
+    // GitHub 원격 전용 저장소는 작업 폴더가 없어 변경(WIP)을 읽지 않는다(폴링도 하지 않는다)
+    if (!repoId || kind === 'github') return
+    const every =kind === 'local' ? POLL_LOCAL_MS : POLL_REMOTE_MS
     let timer: ReturnType<typeof setTimeout> | undefined
     let stopped = false
     const tick = async (): Promise<void> => {

@@ -3,7 +3,7 @@ import { scopeKey } from '@shared/logScope'
 import type { Commit, LogScope, ViewRef } from '@shared/types'
 import { graphEngine } from '../graph/graphEngine'
 import { api, errorMessage, isAbort, isStale, newRequestId } from '../lib/api'
-import { buildScope, canHide, EMPTY_VIEW, inList, pruneView, sanitizeView, toggled, unhidden, type RefView } from '../lib/refView'
+import { buildScope, canHide, headRefId, EMPTY_VIEW, inList, pruneView, sanitizeView, toggled, unhidden, type RefView } from '../lib/refView'
 import { useAppStore } from './appStore'
 import { useCompareStore } from './compareStore'
 import { useDetailStore } from './detailStore'
@@ -151,7 +151,8 @@ export const useLogStore = create<LogState>((set, get) => ({
 
   open(repoId, view, keepHash) {
     const { solo, hide } = view ?? savedView(repoId)
-    const scope = buildScope({ solo, hide }, useAppStore.getState().head?.branch ?? null)
+    const app = useAppStore.getState()
+    const scope = buildScope({ solo, hide }, app.head?.branch ?? null, headRefId(app.head?.branch ?? null, app.refs))
     awaitingRefs = !!repoId && !useAppStore.getState().refs && solo.length === 0 && hide.length > 0
     keepAfterReload = keepHash ?? null
     useCompareStore.getState().clear()
@@ -254,7 +255,7 @@ export const useLogStore = create<LogState>((set, get) => ({
     const cur: RefView = { solo: s.solo, hide: s.hide }
     const pruned = pruneView(cur, refs)
     const prunedChanged = pruned !== cur
-    const scope = buildScope(pruned, refs.head.branch)
+    const scope = buildScope(pruned, refs.head.branch, headRefId(refs.head.branch, refs))
     const scopeSigNext = scopeKey(scope)
     const waiting = awaitingRefs
     if (!waiting && !prunedChanged && scopeSigNext === s.scopeSig) return

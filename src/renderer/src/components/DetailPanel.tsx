@@ -94,11 +94,14 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
     <div className="file-list">
       <div className="file-list__head">
         <span>{title ?? t('detail.files', { n: detail.files.length.toLocaleString() })}</span>
-        <span className="file-list__totals">
-          <span className="is-add">+{detail.additions.toLocaleString()}</span>
-          <span className="is-del">−{detail.deletions.toLocaleString()}</span>
-          <ChangeBar add={detail.additions} del={detail.deletions} />
-        </span>
+        {/* 원격 전용 저장소가 오프라인이라 줄 수를 못 셌으면(모든 파일이 null) 0/0 대신 합계를 숨긴다 */}
+        {(detail.files.length === 0 || detail.files.some((f) => f.binary || f.additions !== null)) && (
+          <span className="file-list__totals">
+            <span className="is-add">+{detail.additions.toLocaleString()}</span>
+            <span className="is-del">−{detail.deletions.toLocaleString()}</span>
+            <ChangeBar add={detail.additions} del={detail.deletions} />
+          </span>
+        )}
       </div>
       {(detail.parents?.length ?? 0) > 1 && <div className="file-list__note">{t('detail.mergeBase')}</div>}
       {detail.truncated && <div className="file-list__note">{t('detail.filesTruncated')}</div>}

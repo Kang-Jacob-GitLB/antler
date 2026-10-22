@@ -65,7 +65,8 @@ export class RepoWatcher {
       if (gen === this.generation) this.baselining = false
     }
     const kind = this.repos.repoKind(repoId)
-    if (kind === 'local') await this.watchLocal(repoId, gen)
+    // GitHub 원격 전용 저장소는 앱 캐시의 bare 저장소라 git-dir 이 곧 저장소 경로다(로컬과 같은 방식으로 감시한다)
+    if (kind === 'local' || kind === 'github') await this.watchLocal(repoId, gen)
     this.schedule(gen)
   }
 
@@ -123,7 +124,7 @@ export class RepoWatcher {
     if (this.timer) clearTimeout(this.timer)
     const kind = this.repoId ? this.repos.repoKind(this.repoId) : null
     if (!kind) return
-    const base = kind === 'local' ? LOCAL_SAFETY_POLL_MS : POLL_MS[kind]
+    const base = kind === 'local' || kind === 'github' ? LOCAL_SAFETY_POLL_MS : POLL_MS[kind]
     this.timer = setTimeout(
       () => {
         void this.check(gen).finally(() => {

@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type {
+  AddGithubReposInput,
+  AddGithubReposResult,
   AddRepoInput,
   AddReposInput,
   AddReposResult,
@@ -15,6 +17,9 @@ import type {
 import { api, errorMessage } from '../lib/api'
 import { carryDetails, withDetails } from '../lib/refsDetails'
 import { setTitleBarDark } from '../lib/titleBarSync'
+
+/** main 의 repos:addGithub 가 한 번에 받는 최대 개수(handlers 의 MAX_ADD_GITHUB) */
+const GITHUB_ADD_CHUNK = 200
 
 type ResolvedTheme = 'dark' | 'light'
 
@@ -39,6 +44,8 @@ interface AppState {
   addRepo(input: AddRepoInput): Promise<void>
   /** 같은 환경의 여러 저장소를 한 번에 추가하고 첫 저장소를 연다. 실패한 경로는 결과로 돌려준다 */
   addRepos(input: AddReposInput): Promise<AddReposResult>
+  /** GitHub 원격 전용 저장소를 여러 개 추가하고 첫 저장소를 연다. 실패한 저장소는 결과로 돌려준다 */
+  addGithubRepos(input: AddGithubReposInput): Promise<AddGithubReposResult>
   updateRepo(id: string, patch: RepoPatch): Promise<void>
   removeRepo(id: string): Promise<void>
   setUi(patch: Partial<UiPrefs>): Promise<void>
@@ -137,6 +144,31 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async addRepos(input) {
     const result = await api.invoke('repos:addMany', input)
+    const first = result.added[0]
+    if (first) {
+      const config = await api.invoke('config:get')
+      set({ config })
+      get().selectRepo(first.id)
+    }
+    return result
+  },
+
+  async addGithubRepos(input) {
+    // 앱 캐시에 빈 저장소를 만들어 등록한다. 첫 이력은 저장소를 처음 열 때 main 이 fetch 한다
+    // main 은 한 번에 200개까지만 받는다 — 나눠서 순서대로 보내고 결과를 합친다
+    const result: AddGithubReposResult = { added: [], failed: [] }
+    for (let i = 0; i < input.repos.length; i += GITHUB_ADD_CHUNK) {
+      const repos = input.repos.slice(i, i + GITHUB_ADD_CHUNK)
+      try {
+        const part = await api.invoke('repos:addGithub', { ...input, repos })
+        result.added.push(...part.added)
+        result.failed.push(...part.failed)
+      } catch (err) {
+        // 앞 묶음에서 이미 등록된 저장소를 잃지 않도록, 이 묶음만 실패로 돌린다
+        const error = errorMessage(err)
+        result.failed.push(...repos.map((r) => ({ fullName: `${r.owner}/${r.repo}`, error })))
+      }
+    }
     const first = result.added[0]
     if (first) {
       const config = await api.invoke('config:get')

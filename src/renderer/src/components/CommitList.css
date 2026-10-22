@@ -100,6 +100,24 @@
 .commit-list__notice.is-error {
   color: var(--removed-text);
 }
+/* 원격 전용 저장소의 첫 fetch 안내(받는 중·실패) */
+.commit-list__notice-title {
+  font-weight: 600;
+}
+.commit-list__notice-hint {
+  margin-top: var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.commit-list__notice-msg {
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.commit-list__notice .btn {
+  color: var(--text-primary);
+}
 
 .cell {
   display: flex;

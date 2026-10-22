@@ -1,11 +1,14 @@
 // IPC 계약. 채널 이름과 인자·결과 타입을 한곳에서 정의해 main/preload/renderer 가 공유한다.
 import type {
+  AddGithubReposInput,
+  AddGithubReposResult,
   AddRepoInput,
   AddReposInput,
   AddReposResult,
   AppConfig,
   CommitActivity,
   FetchStatus,
+  GhAccessibleReposResult,
   GhAuthState,
   GhAvatarQuery,
   GhAvatarResult,
@@ -82,6 +85,8 @@ export interface IpcContract {
   'repos:add': { args: [input: AddRepoInput]; result: Repo }
   /** 같은 환경의 여러 경로를 한 번에 추가한다(폴더 안 저장소 찾기 뒤). 실패한 경로는 failed 로 돌려준다 */
   'repos:addMany': { args: [input: AddReposInput]; result: AddReposResult }
+  /** GitHub 원격 전용 저장소를 추가한다(앱 캐시에 빈 bare 저장소를 만들고 등록, 내용은 처음 열 때 fetch). 실패한 저장소는 failed 로 돌려준다 */
+  'repos:addGithub': { args: [input: AddGithubReposInput]; result: AddGithubReposResult }
   /** 고른 폴더가 저장소인지, 아니면 바로 아래에 어떤 저장소들이 있는지 찾는다 */
   'repos:scan': { args: [input: Omit<AddRepoInput, 'group'>]; result: RepoScanResult }
   /** 이름·그룹 변경 */
@@ -139,6 +144,8 @@ export interface IpcContract {
    * 로그인하지 않았으면 needsLogin. fresh 면 저장소 remote 캐시도 새로 읽는다. requestId 로 취소
    */
   'gh:launchpad': { args: [requestId: string, fresh?: boolean]; result: GhLaunchpadResult }
+  /** 로그인한 사용자가 접근할 수 있는 저장소(본인·협업·소속 org) 목록. 로그인하지 않았으면 needsLogin. fresh 면 캐시를 무시한다. requestId 로 취소 */
+  'gh:accessibleRepos': { args: [requestId: string, fresh?: boolean]; result: GhAccessibleReposResult }
 
   // ── Jira (조회 + 이슈 상태 전환, 자격 증명은 main 에만 있다) ──
   'jira:auth': { args: []; result: JiraAuthState }
@@ -236,6 +243,7 @@ export const IPC_CHANNELS = [
   'repos:remove',
   'repos:add',
   'repos:addMany',
+  'repos:addGithub',
   'repos:scan',
   'repos:update',
   'repos:watch',
@@ -266,6 +274,7 @@ export const IPC_CHANNELS = [
   'gh:runJobs',
   'gh:openExternal',
   'gh:launchpad',
+  'gh:accessibleRepos',
   'jira:auth',
   'jira:connect',
   'jira:disconnect',

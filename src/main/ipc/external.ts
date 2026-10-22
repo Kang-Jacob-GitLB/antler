@@ -29,6 +29,8 @@ export function registerExternalIpc(handle: IpcHandle, config: ConfigStore, open
     const repo = typeof repoId === 'string' ? config.repo(repoId) : undefined
     const source = repo && config.source(repo.sourceId)
     if (!repo || !source) throw new Error('저장소를 찾을 수 없습니다')
+    // 원격 전용 저장소는 작업 폴더가 없다(path 는 앱 캐시) — 폴더·에디터·터미널로 열 대상이 아니다
+    if (source.kind === 'github') throw new Error('원격 전용 저장소는 작업 폴더가 없어 열 수 없습니다')
     const target: Target =
       source.kind === 'wsl'
         ? { kind: 'wsl', root: repo.path, distro: source.distro ?? '' }
