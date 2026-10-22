@@ -856,9 +856,10 @@ export class RepoService {
     if (skip === 0) this.anchors.delete(key)
 
     let cursor = this.cursors.get(key)
-    // 예약된 다음 위치가 맞고 살아 있는 커서만 이어 쓴다
+    // 예약된 다음 위치가 맞고 살아 있는 커서만 이어 쓴다. 끝까지 읽은 커서는 다시 열어야 그 뒤의 커밋이 보인다
+    // (빈 저장소의 첫 페이지 뒤 위치가 0 으로 돌아가 같은 커서를 계속 이어 쓰면, 첫 fetch 가 끝나도 목록이 빈 채로 남는다)
     let verify: string | null = null
-    if (!cursor || !cursor.usable || cursor.nextPosition !== skip) {
+    if (!cursor || !cursor.usable || cursor.ended || cursor.nextPosition !== skip) {
       if (cursor) this.retire(key, cursor)
       // 닫힌 커서의 마지막 커밋 위치에서 다시 시작하면, 그 커밋이 그대로인지 한 개 겹쳐 읽어 확인한다
       const anchor = this.anchors.get(key)

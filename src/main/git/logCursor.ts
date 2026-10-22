@@ -49,6 +49,11 @@ export class LogCursor {
     return this.iter !== null && !this.failed
   }
 
+  /** 끝까지 읽어 더 내보낼 커밋이 없다. 그 뒤에 생긴 커밋(첫 fetch·첫 커밋)은 이 커서로는 볼 수 없다 */
+  get ended(): boolean {
+    return this.done && this.buffered.length === 0 && this.pending === 0
+  }
+
   /** 읽는 중이거나 대기 중인 요청이 있는지 */
   get reading(): boolean {
     return this.pending > 0
