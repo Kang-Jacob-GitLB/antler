@@ -232,6 +232,7 @@ export const en: Messages = {
   'col.sha': 'SHA',
   'col.pr': 'PR',
   'pr.open': 'Open pull request #{n}',
+  'pr.openDraft': 'Open draft pull request #{n}',
   'list.loading': 'Loading…',
   'list.noCommits': 'This repository has no commits yet',
   'list.count': '{n} commits{more}',

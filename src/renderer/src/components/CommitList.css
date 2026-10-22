@@ -188,6 +188,15 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+/* 초안 PR: GitHub 처럼 회색으로, 점선 테두리로 머지 전임을 드러낸다 */
+.pr-chip--draft {
+  color: var(--text-muted);
+  outline: 1px dashed var(--border-strong);
+  outline-offset: -1px;
+}
+.pr-chip--draft:hover {
+  background: var(--bg-elevated);
+}
 .pr-text {
   padding: 0 5px;
 }
