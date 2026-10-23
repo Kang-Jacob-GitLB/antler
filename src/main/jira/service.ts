@@ -15,6 +15,12 @@ export const JIRA_META_FILE = 'jira-credential.json'
 const DATE_FIELDS_COOLDOWN_MS = 5 * 60_000
 /** 이슈 조회가 날짜 필드 목록(/field)을 기다리는 최대 시간 */
 const DATE_FIELDS_WAIT_MS = 4000
+/** 프로필 사진 캐시: 항목 수 상한, 받은 사진 / 받지 못한 주소의 유효 기간(사진이 바뀌면 Jira 가 주소를 바꾼다) */
+const AVATAR_CACHE_MAX = 300
+const AVATAR_TTL_MS = 24 * 3_600_000
+const AVATAR_FAIL_TTL_MS = 10 * 60_000
+/** 사진을 동시에 받는 수(목록 한 화면의 담당자가 여럿이라도 Jira 에 몰리지 않게) */
+const AVATAR_CONCURRENCY = 4
 
 export interface JiraServiceDeps extends SiteOptions {
   store: TokenStore
@@ -40,6 +46,11 @@ export class JiraService {
   private dateFields: Promise<api.DateFieldIds> | null = null
   /** /field 가 실패한 뒤 이 시각까지는 다시 묻지 않는다 */
   private dateFieldsRetryAt = 0
+  /** 프로필 사진: 주소 → data URL(null=받을 수 없음). Map 의 순서를 최근 사용 순으로 쓴다. 연결이 바뀌거나 해제되면 비운다 */
+  private readonly avatars = new Map<string, { data: string | null; t: number }>()
+  private readonly avatarInflight = new Map<string, Promise<string | null>>()
+  private avatarActive = 0
+  private readonly avatarWaiting: (() => void)[] = []
 
   constructor(private readonly deps: JiraServiceDeps) {
     this.conn = this.load()
@@ -101,6 +112,8 @@ export class JiraService {
     this.me = null
     this.dateFields = null
     this.dateFieldsRetryAt = 0
+    this.avatars.clear()
+    this.avatarInflight.clear()
   }
 
   // ── 조회 ────────────────────────────────────────────
@@ -215,6 +228,51 @@ export class JiraService {
   async userSearch(text: unknown, requestId?: string): Promise<JiraUser[]> {
     const t = parseUserSearch(text)
     return this.data(requestId, (c, signal) => api.searchUsers(this.client, c, t, signal))
+  }
+
+  /**
+   * 프로필 사진(이슈·댓글의 avatarUrls 주소)을 data URL 로. 받을 수 없으면 null — 사진은 보조 기능이라 던지지 않는다.
+   * 인증이 필요한 Data Center 사진도 renderer 가 토큰 없이 보일 수 있게 main 이 받아 넘긴다(받을 수 있는 주소는 JiraClient.image 가 정한다)
+   */
+  async avatar(raw: unknown): Promise<string | null> {
+    if (typeof raw !== 'string' || raw.length === 0 || raw.length > api.AVATAR_URL_MAX || !this.conn) return null
+    const hit = this.avatars.get(raw)
+    if (hit && Date.now() - hit.t < (hit.data ? AVATAR_TTL_MS : AVATAR_FAIL_TTL_MS)) {
+      this.avatars.delete(raw)
+      this.avatars.set(raw, hit)
+      return hit.data
+    }
+    const pending = this.avatarInflight.get(raw)
+    if (pending) return pending
+    const epoch = this.epoch
+    const p = this.avatarSlot(async () => {
+      if (epoch.signal.aborted) return null
+      const img = await this.client.image(raw, epoch.signal).catch(() => null)
+      const data = img ? `data:${img.type};base64,${img.bytes.toString('base64')}` : null
+      if (this.epoch === epoch) {
+        this.avatars.delete(raw)
+        this.avatars.set(raw, { data, t: Date.now() })
+        while (this.avatars.size > AVATAR_CACHE_MAX) this.avatars.delete(this.avatars.keys().next().value!)
+      }
+      return data
+    }).finally(() => {
+      if (this.avatarInflight.get(raw) === p) this.avatarInflight.delete(raw)
+    })
+    this.avatarInflight.set(raw, p)
+    return p
+  }
+
+  /** 사진 받기의 동시성 제한(AVATAR_CONCURRENCY). 슬롯이 나면 대기 중인 다음 작업에 그대로 넘긴다 */
+  private async avatarSlot<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.avatarActive >= AVATAR_CONCURRENCY) await new Promise<void>((res) => this.avatarWaiting.push(res))
+    else this.avatarActive++
+    try {
+      return await fn()
+    } finally {
+      const next = this.avatarWaiting.shift()
+      if (next) next()
+      else this.avatarActive--
+    }
   }
 
   /** jira:openExternal 이 쓸 검증된 주소(연결한 사이트의 것만). 아니면 null */

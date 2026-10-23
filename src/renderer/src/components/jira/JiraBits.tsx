@@ -1,5 +1,9 @@
 // Jira 화면 공용 조각
 import type { JiraIssueSummary, JiraStatusCategory } from '@shared/types'
+import { initials } from '../../lib/format'
+import { fnv1a, laneVar, LANE_COUNT } from '../../lib/laneColor'
+import { useJiraAvatar } from '../../stores/jiraAvatarStore'
+import '../AuthorAvatar.css'
 import './JiraView.css'
 
 /** 상태 분류. Jira 가 모르는 값(undefined 등)을 주면 '할 일'로 본다 */
@@ -63,4 +67,25 @@ export function isoToEpoch(iso: string): number {
 /** 목록 행의 보조 정보 한 줄: 우선순위 · 담당자(유형은 JiraType 칩으로 따로 보인다) */
 export function issueSub(i: JiraIssueSummary, unassigned: string): string {
   return [i.priority, i.assignee || unassigned].filter(Boolean).join(' · ')
+}
+
+/** Jira 사용자 아바타: 프로필 사진을 받았으면 사진을, 없거나 받는 중이면 이니셜을 보여 준다. 크기는 CSS(.avatar + className)가 정한다 */
+export function JiraAvatar({ name, url, className = '' }: { name: string; url?: string | undefined; className?: string }): React.JSX.Element {
+  const data = useJiraAvatar(url)
+  return (
+    <span className={`avatar ${className}`} style={{ '--avatar': laneVar(fnv1a(name) % LANE_COUNT) } as React.CSSProperties} aria-hidden="true">
+      {initials(name)}
+      {data && <img className="avatar__img is-loaded" src={data} alt="" draggable={false} />}
+    </span>
+  )
+}
+
+/** 이름 앞에 아바타를 붙인 사람 표시(세부 정보의 담당자·보고자) */
+export function JiraPerson({ name, url }: { name: string; url?: string | undefined }): React.JSX.Element {
+  return (
+    <span className="jira-person">
+      <JiraAvatar name={name} url={url} />
+      <span className="jira-person__name">{name}</span>
+    </span>
+  )
 }

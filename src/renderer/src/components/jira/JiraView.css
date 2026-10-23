@@ -224,6 +224,23 @@
 .jira-props__overdue {
   color: var(--removed-text);
 }
+/* 담당자·보고자: 아바타 + 이름 */
+.jira-person {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  vertical-align: middle;
+}
+.jira-person__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jira-card__avatar {
+  margin-left: auto;
+}
 .jira-props dd > .jira-status {
   display: inline-block;
 }

@@ -1047,11 +1047,14 @@ export interface JiraIssueSummary {
   issueType: string
   priority: string
   assignee: string
+  /** 담당자 프로필 사진 주소(Jira avatarUrls, 없으면 생략). 화면은 jira:avatar 로 받아서 보여 준다 */
+  assigneeAvatar?: string
   updated: string
 }
 
 export interface JiraIssueDetail extends JiraIssueSummary {
   reporter: string
+  reporterAvatar?: string
   created: string
   /** 기한·시작 날짜·종료일. 'YYYY-MM-DD'(시간대 없는 달력 날짜), 없으면 빈 문자열 */
   dueDate: string
@@ -1065,6 +1068,7 @@ export interface JiraIssueDetail extends JiraIssueSummary {
 
 export interface JiraComment {
   author: string
+  authorAvatar?: string
   created: string
   bodyHtml: string
 }

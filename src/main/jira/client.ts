@@ -59,6 +59,26 @@ export const defaultSleep: SleepFn = (ms, signal) =>
     )
   })
 
+/** 프로필 사진 응답 상한과 받는 형식(SVG 는 받지 않는다) */
+const IMAGE_MAX_BYTES = 256 * 1024
+const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+/** 사이트 밖에서 받아도 되는 사진 호스트: Cloud avatarUrls 의 gravatar·Atlassian 사진 저장소, gravatar 가 기본 사진을 넘겨주는 wp.com 프록시 */
+const PUBLIC_AVATAR_HOST_RE = /^(?:secure\.gravatar\.com|i[0-3]\.wp\.com|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.atl-paas\.net)$/
+const IMAGE_REDIRECTS = 3
+
+export interface JiraImage {
+  /** IMAGE_TYPES 중 하나 */
+  type: string
+  bytes: Buffer
+}
+
+/** 주소가 연결한 사이트 안(같은 origin, 사이트 경로 아래)인가 */
+function inSite(url: URL, siteUrl: string): boolean {
+  const site = new URL(siteUrl)
+  const base = site.pathname.replace(/\/+$/, '')
+  return url.origin === site.origin && (base === '' || url.pathname === base || url.pathname.startsWith(`${base}/`))
+}
+
 /** Authorization 헤더 값. Cloud 는 이메일:API 토큰 Basic, Data Center 는 PAT Bearer */
 export function authHeader(c: JiraCredential): string {
   return c.kind === 'cloud' ? `Basic ${Buffer.from(`${c.email}:${c.token}`, 'utf8').toString('base64')}` : `Bearer ${c.token}`
@@ -115,6 +135,67 @@ export class JiraClient {
     }
   }
 
+  /**
+   * 프로필 사진(avatarUrls) 한 장. 연결한 사이트 안의 주소면 인증을 붙이고 리다이렉트를 따라가지 않는다(Data Center 는 인증해야 사진을 준다).
+   * 사이트 밖은 Cloud 의 공개 사진 호스트만 https·인증 없이 받고, 그 호스트들 사이의 리다이렉트만 따라간다(gravatar 의 기본 사진).
+   * 자격 증명은 처음 요청한 주소가 사이트 안일 때만 실린다. 받을 수 없거나 허용한 이미지 형식이 아니면 null — 취소만 AbortError 로 던진다
+   */
+  async image(href: string, signal?: AbortSignal): Promise<JiraImage | null> {
+    const cred = this.credProvider()
+    if (!cred) return null
+    let url: URL
+    try {
+      url = new URL(href)
+    } catch {
+      return null
+    }
+    for (let hop = 0; hop <= IMAGE_REDIRECTS; hop++) {
+      if (url.username || url.password) return null
+      // 리다이렉트로 온 주소에는 인증을 붙이지 않는다(사이트 안이라도)
+      const own = hop === 0 && inSite(url, cred.siteUrl)
+      if (!own && !(url.protocol === 'https:' && url.port === '' && PUBLIC_AVATAR_HOST_RE.test(url.hostname))) return null
+      const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+      const sig = signal ? AbortSignal.any([timeout, signal]) : timeout
+      let res: Response
+      try {
+        res = await this.fetchImpl(url.href, {
+          method: 'GET',
+          headers: { Accept: 'image/*', 'User-Agent': 'Antler', ...(own ? { Authorization: authHeader(cred) } : {}) },
+          redirect: 'manual',
+          signal: sig
+        })
+      } catch {
+        if (signal?.aborted) throw new AbortError()
+        return null
+      }
+      if (res.status >= 300 && res.status < 400) {
+        await res.body?.cancel().catch(() => undefined)
+        // 사이트 안의 리다이렉트는 대개 로그인 화면이다 — 따라가지 않는다
+        const loc = res.headers.get('location')
+        if (own || !loc) return null
+        try {
+          url = new URL(loc, url)
+        } catch {
+          return null
+        }
+        continue
+      }
+      const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
+      if (!res.ok || !IMAGE_TYPES.has(type)) {
+        await res.body?.cancel().catch(() => undefined)
+        return null
+      }
+      try {
+        const bytes = await readBytes(res, signal, timeout, IMAGE_MAX_BYTES)
+        return bytes.length > 0 ? { type, bytes } : null
+      } catch (err) {
+        if (err instanceof AbortError) throw err
+        return null
+      }
+    }
+    return null
+  }
+
   /** 경로 검증(사이트 상대 경로, 같은 origin)과 자격 증명·쿼리를 합친 요청 대상 */
   private target(path: string, opts: GetOptions): { cred: JiraCredential; url: URL } {
     if (!path.startsWith('/') || path.startsWith('//')) throw new Error('invalid api path')
@@ -165,15 +246,19 @@ export class JiraClient {
   }
 }
 
-/** 본문을 읽으며 바이트를 센다. 상한을 넘으면 읽기를 중단(reader.cancel)하고 오류 — chunked 거대 응답도 메모리에 다 받지 않는다 */
 async function readText(res: Response, signal: AbortSignal | undefined, timeout: AbortSignal, limit: number): Promise<string> {
+  return (await readBytes(res, signal, timeout, limit)).toString('utf8')
+}
+
+/** 본문을 읽으며 바이트를 센다. 상한을 넘으면 읽기를 중단(reader.cancel)하고 오류 — chunked 거대 응답도 메모리에 다 받지 않는다 */
+async function readBytes(res: Response, signal: AbortSignal | undefined, timeout: AbortSignal, limit: number): Promise<Buffer> {
   const tooBig = (): JiraApiError => new JiraApiError(JIRA_TOO_BIG, 'JIRA_HTTP', res.status)
   const len = Number(res.headers.get('content-length'))
   if (Number.isFinite(len) && len > limit) {
     await res.body?.cancel().catch(() => undefined)
     throw tooBig()
   }
-  if (!res.body) return ''
+  if (!res.body) return Buffer.alloc(0)
   const reader = res.body.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
@@ -194,7 +279,7 @@ async function readText(res: Response, signal: AbortSignal | undefined, timeout:
     if (timeout.aborted) throw new JiraApiError(`Jira 응답이 ${REQUEST_TIMEOUT_MS / 1000}초 안에 오지 않았습니다`, 'JIRA_TIMEOUT')
     throw new JiraApiError('Jira 응답을 읽는 중 연결이 끊겼습니다', 'JIRA_NETWORK', res.status)
   }
-  return Buffer.concat(chunks).toString('utf8')
+  return Buffer.concat(chunks)
 }
 
 /** Retry-After: 초 또는 HTTP-date → 남은 초(올림). 해석할 수 없으면 null */

@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter, JiraStatusCategory } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
-import { formatAbsolute, formatCalendarDate, initials, isBeforeToday } from '../../lib/format'
-import { fnv1a, laneVar, LANE_COUNT } from '../../lib/laneColor'
+import { formatAbsolute, formatCalendarDate, isBeforeToday } from '../../lib/format'
 import { useAppStore } from '../../stores/appStore'
 import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
@@ -11,7 +10,7 @@ import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
 import { JiraTransitionMenu } from './JiraTransitionMenu'
 import { WorklogView } from './worklog/WorklogView'
-import { isoToEpoch, issueSub, JiraStatus, JiraType, statusCat } from './JiraBits'
+import { isoToEpoch, issueSub, JiraAvatar, JiraPerson, JiraStatus, JiraType, statusCat } from './JiraBits'
 import '../github/GitHubView.css'
 import './JiraView.css'
 
@@ -216,6 +215,7 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
                   <span className="jira-key mono">{i.key}</span>
                   <JiraType type={i.issueType} />
                   <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
+                  {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
                 </div>
                 <div className="jira-card__when">{rel(isoToEpoch(i.updated))}</div>
               </div>
@@ -239,6 +239,7 @@ function IssueRow({ i, when, onOpen }: { i: JiraIssueSummary; when: string; onOp
         </div>
         <div className="gh-row__sub">{issueSub(i, t('jira.unassigned'))}</div>
       </div>
+      <div className="gh-row__people">{i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} />}</div>
       <JiraStatus name={i.status} category={i.statusCategory} />
       <span className="gh-row__when">{when}</span>
     </div>
@@ -299,7 +300,7 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
                 {cur?.comments?.length === 0 && <p className="gh-muted">{t('jira.noComments')}</p>}
                 {cur?.comments?.map((c, n) => (
                   <article key={n} className="jira-cmt">
-                    <NameAvatar name={c.author} />
+                    <JiraAvatar name={c.author} url={c.authorAvatar} className="jira-cmt__avatar" />
                     <div className="jira-cmt__main">
                       <header className="jira-cmt__head">
                         <strong>{c.author}</strong>
@@ -325,8 +326,8 @@ function IssueView({ view }: { view: Extract<View, { kind: 'issue' }> }): React.
                     <JiraType type={d.issueType} withName />
                   </Prop>
                   <Prop label={t('jira.priority')}>{d.priority}</Prop>
-                  <Prop label={t('jira.assignee')}>{d.assignee || <span className="gh-muted">{t('jira.unassigned')}</span>}</Prop>
-                  <Prop label={t('jira.reporter')}>{d.reporter}</Prop>
+                  <Prop label={t('jira.assignee')}>{d.assignee ? <JiraPerson name={d.assignee} url={d.assigneeAvatar} /> : <span className="gh-muted">{t('jira.unassigned')}</span>}</Prop>
+                  <Prop label={t('jira.reporter')}>{d.reporter && <JiraPerson name={d.reporter} url={d.reporterAvatar} />}</Prop>
                   <Prop label={t('jira.startDate')}>{formatCalendarDate(d.startDate, locale)}</Prop>
                   <Prop label={t('jira.dueDate')}>
                     {d.dueDate && <span className={d.statusCategory && d.statusCategory !== 'done' && isBeforeToday(d.dueDate) ? 'jira-props__overdue' : undefined}>{formatCalendarDate(d.dueDate, locale)}</span>}
@@ -353,14 +354,5 @@ function Prop({ label, children }: { label: string; children: React.ReactNode })
       <dt>{label}</dt>
       <dd>{children}</dd>
     </>
-  )
-}
-
-/** 이름만 아는 사람(Jira 댓글 작성자)의 이니셜 아바타. 색은 이름으로 정한다 */
-function NameAvatar({ name }: { name: string }): React.JSX.Element {
-  return (
-    <span className="avatar jira-cmt__avatar" style={{ '--avatar': laneVar(fnv1a(name) % LANE_COUNT) } as React.CSSProperties} aria-hidden="true">
-      {initials(name)}
-    </span>
   )
 }

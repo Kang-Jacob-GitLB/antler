@@ -166,6 +166,8 @@ export interface IpcContract {
   'jira:worklogs': { args: [query: JiraWorklogQuery, requestId?: string]; result: JiraWorklogResult }
   /** 팀원 추가용 사용자 검색. 사용자 찾아보기 권한이 없으면 JIRA_FORBIDDEN */
   'jira:userSearch': { args: [text: string, requestId?: string]; result: JiraUser[] }
+  /** 프로필 사진(이슈·댓글이 준 avatarUrls 주소) → data URL. 받을 수 없으면 null */
+  'jira:avatar': { args: [url: string]; result: string | null }
   /** Jira 사이트 호스트의 https 주소만 기본 브라우저로 연다 */
   'jira:openExternal': { args: [url: string]; result: void }
   /** 사이드바용 ref 스냅샷(HEAD·브랜치·리모트·태그·워크트리·스태시) */
@@ -286,6 +288,7 @@ export const IPC_CHANNELS = [
   'jira:dev',
   'jira:worklogs',
   'jira:userSearch',
+  'jira:avatar',
   'jira:openExternal',
   'git:refs',
   'git:refsDetails',
