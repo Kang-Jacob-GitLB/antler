@@ -503,6 +503,7 @@ export const en: Messages = {
   'jira.layout.board': 'Board',
   'jira.lane.epic': 'Epics',
   'jira.lane.work': 'Work items',
+  'jira.toTop': 'Back to top',
   'jira.filteredOut': 'No loaded issues match ({n} hidden)',
   'jira.worklog.title': 'Worklog',
   'jira.worklog.tab.calendar': 'Calendar',

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter, JiraStatusCategory } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
@@ -6,7 +6,7 @@ import { formatAbsolute, formatCalendarDate, isBeforeToday } from '../../lib/for
 import { useAppStore } from '../../stores/appStore'
 import { MINE_VIEW_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
-import { IconBoard, IconChevronDown, IconChevronRight, IconRefresh, IconRows, IconSearch } from '../icons'
+import { IconArrowUp, IconBoard, IconChevronDown, IconChevronRight, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
 import { JiraTransitionMenu } from './JiraTransitionMenu'
 import { WorklogView } from './worklog/WorklogView'
@@ -247,33 +247,51 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
                 </button>
               )}
               {open && (
-                <div className="jira-lane__body">
-                  <div className="jira-lane__grid">
-                    {columns.map((col) => (
-                      <div key={col.name} className="jira-cell" role="group" aria-label={col.name}>
-                        {lane.cells.get(col.name)?.map((i) => (
-                          <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
-                            <div className="jira-card__title">{i.summary}</div>
-                            <div className="jira-card__meta">
-                              <span className="jira-key mono">{i.key}</span>
-                              <JiraType type={i.issueType} />
-                              <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
-                              {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
-                            </div>
-                            <div className="jira-card__when">
-                              <IssueWhen i={i} rel={rel} />
-                            </div>
+                <LaneBody>
+                  {columns.map((col) => (
+                    <div key={col.name} className="jira-cell" role="group" aria-label={col.name}>
+                      {lane.cells.get(col.name)?.map((i) => (
+                        <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
+                          <div className="jira-card__title">{i.summary}</div>
+                          <div className="jira-card__meta">
+                            <span className="jira-key mono">{i.key}</span>
+                            <JiraType type={i.issueType} />
+                            <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
+                            {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
                           </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                          <div className="jira-card__when">
+                            <IssueWhen i={i} rel={rel} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </LaneBody>
               )}
             </section>
           )
         })}
       </div>
+    </div>
+  )
+}
+
+/** 칸반 영역의 배경 상자 + 스크롤 격자. 내려가 있으면 위쪽 가운데에 "맨 위로" 버튼을 띄운다 */
+function LaneBody({ children }: { children: React.ReactNode }): React.JSX.Element {
+  const t = useT()
+  const grid = useRef<HTMLDivElement>(null)
+  const [down, setDown] = useState(false)
+  return (
+    <div className="jira-lane__body">
+      <div ref={grid} className="jira-lane__grid" onScroll={(e) => setDown(e.currentTarget.scrollTop > 80)}>
+        {children}
+      </div>
+      {down && (
+        <button className="jira-lane__top" onClick={() => grid.current?.scrollTo({ top: 0, behavior: 'smooth' })}>
+          <IconArrowUp size={12} />
+          {t('jira.toTop')}
+        </button>
+      )}
     </div>
   )
 }

@@ -482,6 +482,7 @@
  * 스크롤은 상자 안쪽 격자가 해서, 스크롤 중에도 카드가 테두리가 아니라 안쪽 여백 선에서 잘린다
  */
 .jira-lane__body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -495,6 +496,32 @@
   min-height: 0;
   align-items: start;
   overflow-y: auto;
+}
+.jira-lane__top {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px var(--space-2);
+  border: 0;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+.jira-lane__top:hover {
+  color: var(--accent);
+}
+.jira-lane__top:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-popover), var(--focus-ring);
 }
 .jira-col__head {
   display: flex;
