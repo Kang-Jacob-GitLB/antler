@@ -23,6 +23,9 @@ function typeTone(type: string): TypeTone {
   return 'other'
 }
 
+/** 에픽인가(칸반에서 에픽 줄을 따로 나눌 때 쓴다) */
+export const isEpic = (type: string): boolean => typeTone(type) === 'epic'
+
 /** 색 네모 안의 흰 기호(16px 격자): 에픽 번개 · 작업 체크 · 버그 점 · 스토리 책갈피 · 그 밖 가로줄 */
 const TYPE_GLYPH: Record<TypeTone, React.JSX.Element> = {
   epic: <path d="M9 3.5 5.5 8.6h2.6L7 12.5l3.5-5.1H7.9z" fill="#fff" />,

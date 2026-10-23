@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter, JiraStatusCategory } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
@@ -10,7 +10,7 @@ import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
 import { JiraTransitionMenu } from './JiraTransitionMenu'
 import { WorklogView } from './worklog/WorklogView'
-import { isoToEpoch, issueSub, JiraAvatar, JiraPerson, JiraStatus, JiraType, statusCat } from './JiraBits'
+import { isEpic, isoToEpoch, issueSub, JiraAvatar, JiraPerson, JiraStatus, JiraType, statusCat } from './JiraBits'
 import '../github/GitHubView.css'
 import './JiraView.css'
 
@@ -184,44 +184,69 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
   )
 }
 
-/** 칸반: 상태 이름별 열. 열 순서는 할 일 → 진행 중 → 완료, 같은 분류 안에서는 목록에 처음 나온 순서 */
+type BoardLane = 'epic' | 'work'
+
+/**
+ * 칸반: 상태 이름별 열. 열 순서는 할 일 → 진행 중 → 완료, 같은 분류 안에서는 목록에 처음 나온 순서.
+ * 에픽과 그 밖의 작업 항목은 같은 칸에 섞지 않고 줄(스윔레인)을 나눈다 — 열은 두 줄이 함께 쓴다
+ */
 function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: number): string; onOpen(key: string): void }): React.JSX.Element {
   const t = useT()
-  const columns = useMemo(() => {
-    const byStatus = new Map<string, { name: string; cat: JiraStatusCategory; items: JiraIssueSummary[] }>()
+  const { columns, lanes } = useMemo(() => {
+    const byStatus = new Map<string, { name: string; cat: JiraStatusCategory; n: number }>()
+    const cells: Record<BoardLane, Map<string, JiraIssueSummary[]>> = { epic: new Map(), work: new Map() }
+    const count: Record<BoardLane, number> = { epic: 0, work: 0 }
     for (const i of items) {
       const name = i.status || '—'
-      let col = byStatus.get(name)
-      if (!col) byStatus.set(name, (col = { name, cat: statusCat(i.statusCategory), items: [] }))
-      col.items.push(i)
+      const col = byStatus.get(name) ?? byStatus.set(name, { name, cat: statusCat(i.statusCategory), n: 0 }).get(name)!
+      col.n++
+      const lane: BoardLane = isEpic(i.issueType) ? 'epic' : 'work'
+      const cell = cells[lane].get(name) ?? cells[lane].set(name, []).get(name)!
+      cell.push(i)
+      count[lane]++
     }
-    return [...byStatus.values()].sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat))
+    const lanes = (['epic', 'work'] as const).filter((l) => count[l] > 0).map((l) => ({ id: l, n: count[l], cells: cells[l] }))
+    return { columns: [...byStatus.values()].sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat)), lanes }
   }, [items])
+  // 한 종류뿐이면 줄 머리는 군더더기라 뺀다
+  const laneHeads = lanes.length > 1
 
   return (
-    <div className="jira-board">
+    <div className="jira-board" style={{ '--jira-cols': columns.length } as React.CSSProperties}>
       {columns.map((col) => (
-        <section key={col.name} className={`jira-col jira-col--${col.cat}`} aria-label={col.name}>
-          <header className="jira-col__head">
-            <span className="jira-cat__dot" />
-            <span className="jira-col__name">{col.name}</span>
-            <span className="jira-cat__n">{col.items.length}</span>
-          </header>
-          <div className="jira-col__body">
-            {col.items.map((i) => (
-              <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
-                <div className="jira-card__title">{i.summary}</div>
-                <div className="jira-card__meta">
-                  <span className="jira-key mono">{i.key}</span>
-                  <JiraType type={i.issueType} />
-                  <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
-                  {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
+        <header key={col.name} className={`jira-col__head jira-col--${col.cat}`}>
+          <span className="jira-cat__dot" />
+          <span className="jira-col__name">{col.name}</span>
+          <span className="jira-cat__n">{col.n}</span>
+        </header>
+      ))}
+      {lanes.map((lane) => (
+        <Fragment key={lane.id}>
+          {laneHeads && (
+            <div className="jira-lane">
+              <span className="jira-lane__label">
+                {t(`jira.lane.${lane.id}`)}
+                <span className="jira-cat__n">{lane.n}</span>
+              </span>
+            </div>
+          )}
+          {columns.map((col) => (
+            <section key={col.name} className="jira-cell" aria-label={laneHeads ? `${t(`jira.lane.${lane.id}`)} · ${col.name}` : col.name}>
+              {lane.cells.get(col.name)?.map((i) => (
+                <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
+                  <div className="jira-card__title">{i.summary}</div>
+                  <div className="jira-card__meta">
+                    <span className="jira-key mono">{i.key}</span>
+                    <JiraType type={i.issueType} />
+                    <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
+                    {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
+                  </div>
+                  <div className="jira-card__when">{rel(isoToEpoch(i.updated))}</div>
                 </div>
-                <div className="jira-card__when">{rel(isoToEpoch(i.updated))}</div>
-              </div>
-            ))}
-          </div>
-        </section>
+              ))}
+            </section>
+          ))}
+        </Fragment>
       ))}
     </div>
   )
