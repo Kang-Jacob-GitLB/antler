@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { JiraIssueSummary, JiraSavedFilter, JiraStatusCategory } from '@shared/types'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
@@ -6,7 +6,7 @@ import { formatAbsolute, formatCalendarDate, isBeforeToday } from '../../lib/for
 import { useAppStore } from '../../stores/appStore'
 import { MINE_VIEW_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
-import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
+import { IconBoard, IconChevronDown, IconChevronRight, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
 import { JiraTransitionMenu } from './JiraTransitionMenu'
 import { WorklogView } from './worklog/WorklogView'
@@ -188,7 +188,8 @@ type BoardLane = 'epic' | 'work'
 
 /**
  * 칸반: 상태 이름별 열. 열 순서는 할 일 → 진행 중 → 완료, 같은 분류 안에서는 목록에 처음 나온 순서.
- * 에픽과 그 밖의 작업 항목은 같은 칸에 섞지 않고 줄(스윔레인)을 나눈다 — 열은 두 줄이 함께 쓴다
+ * 에픽과 그 밖의 작업 항목은 같은 칸에 섞지 않고 영역을 나눈다 — 두 영역이 높이를 반씩 쓰고 각자 세로로 스크롤하며,
+ * 영역 머리를 눌러 접으면 남은 영역이 높이를 다 쓴다. 열 머리는 두 영역이 함께 쓴다
  */
 function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: number): string; onOpen(key: string): void }): React.JSX.Element {
   const t = useT()
@@ -212,48 +213,65 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
     const lanes = (['epic', 'work'] as const).filter((l) => count[l] > 0).map((l) => ({ id: l, n: count[l], cells: cells[l] }))
     return { columns: [...byStatus.values()].sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat)), lanes }
   }, [items])
-  // 한 종류뿐이면 줄 머리는 군더더기라 뺀다
+  // 한 종류뿐이면 줄 머리(접기)는 군더더기라 빼고 그 줄이 높이를 다 쓴다
   const laneHeads = lanes.length > 1
+  const [folded, setFolded] = useState<ReadonlySet<BoardLane>>(new Set())
+  const toggle = (id: BoardLane): void =>
+    setFolded((s) => {
+      const next = new Set(s)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
 
   return (
-    <div className="jira-board" style={{ '--jira-cols': columns.length } as React.CSSProperties}>
-      {columns.map((col) => (
-        <header key={col.name} className={`jira-col__head jira-col--${col.cat}`}>
-          <span className="jira-cat__dot" />
-          <span className="jira-col__name">{col.name}</span>
-          <span className="jira-cat__n">{col.n}</span>
-        </header>
-      ))}
-      {lanes.map((lane) => (
-        <Fragment key={lane.id}>
-          {laneHeads && (
-            <div className="jira-lane">
-              <span className="jira-lane__label">
-                {t(`jira.lane.${lane.id}`)}
-                <span className="jira-cat__n">{lane.n}</span>
-              </span>
-            </div>
-          )}
+    <div className="jira-board">
+      <div className="jira-board__inner" style={{ '--jira-cols': columns.length } as React.CSSProperties}>
+        <div className="jira-board__heads">
           {columns.map((col) => (
-            <section key={col.name} className="jira-cell" aria-label={laneHeads ? `${t(`jira.lane.${lane.id}`)} · ${col.name}` : col.name}>
-              {lane.cells.get(col.name)?.map((i) => (
-                <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
-                  <div className="jira-card__title">{i.summary}</div>
-                  <div className="jira-card__meta">
-                    <span className="jira-key mono">{i.key}</span>
-                    <JiraType type={i.issueType} />
-                    <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
-                    {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
-                  </div>
-                  <div className="jira-card__when">
-                    <IssueWhen i={i} rel={rel} />
-                  </div>
-                </div>
-              ))}
-            </section>
+            <header key={col.name} className={`jira-col__head jira-col--${col.cat}`}>
+              <span className="jira-cat__dot" />
+              <span className="jira-col__name">{col.name}</span>
+              <span className="jira-cat__n">{col.n}</span>
+            </header>
           ))}
-        </Fragment>
-      ))}
+        </div>
+        {lanes.map((lane) => {
+          const open = !laneHeads || !folded.has(lane.id)
+          return (
+            <section key={lane.id} className={`jira-lane${open ? '' : ' is-folded'}`} aria-label={t(`jira.lane.${lane.id}`)}>
+              {laneHeads && (
+                <button className="jira-lane__head" aria-expanded={open} onClick={() => toggle(lane.id)}>
+                  {open ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+                  {t(`jira.lane.${lane.id}`)}
+                  <span className="jira-cat__n">{lane.n}</span>
+                </button>
+              )}
+              {open && (
+                <div className="jira-lane__body">
+                  {columns.map((col) => (
+                    <div key={col.name} className="jira-cell" role="group" aria-label={col.name}>
+                      {lane.cells.get(col.name)?.map((i) => (
+                        <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
+                          <div className="jira-card__title">{i.summary}</div>
+                          <div className="jira-card__meta">
+                            <span className="jira-key mono">{i.key}</span>
+                            <JiraType type={i.issueType} />
+                            <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
+                            {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
+                          </div>
+                          <div className="jira-card__when">
+                            <IssueWhen i={i} rel={rel} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )
+        })}
+      </div>
     </div>
   )
 }

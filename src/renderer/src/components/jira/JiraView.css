@@ -411,23 +411,78 @@
 }
 
 /*
- * 칸반: 상태별 열 × 줄(에픽 / 작업 항목). 격자 하나로 그려 두 줄의 열 폭을 맞추고,
- * 가로·세로 스크롤은 보드 전체가 함께 한다(열 머리는 위에, 줄 머리 글자는 왼쪽에 붙어 있다)
+ * 칸반: 열 머리 한 줄 + 영역(에픽 / 작업 항목). 열은 가로 폭을 꽉 채우고(좁으면 열마다 최소 폭을 지키며 가로 스크롤),
+ * 두 영역은 남은 높이를 반씩 쓰며 각자 세로로 스크롤한다. 접은 영역은 머리만 남고 다른 영역이 높이를 다 쓴다
  */
 .jira-board {
-  display: grid;
-  grid-template-columns: repeat(var(--jira-cols, 1), 272px);
-  align-content: start;
+  display: flex;
   flex: 1;
   min-height: 0;
-  gap: var(--space-2);
   padding: 0 var(--space-3) var(--space-2);
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.jira-board__inner {
+  --jira-col-min: 220px;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: calc(var(--jira-cols, 1) * var(--jira-col-min));
+  min-height: 0;
+}
+/* 열 머리와 영역 본문은 같은 격자 — 본문의 세로 스크롤 막대 자리를 머리에도 비워 둬 열 경계를 맞춘다 */
+.jira-board__heads,
+.jira-lane__body {
+  display: grid;
+  grid-template-columns: repeat(var(--jira-cols, 1), minmax(0, 1fr));
+  gap: var(--space-2);
+  scrollbar-gutter: stable;
+}
+.jira-board__heads {
+  flex-shrink: 0;
+  overflow-y: hidden;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+.jira-lane {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+}
+.jira-lane.is-folded {
+  flex: 0 0 auto;
+}
+.jira-lane__head {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  padding: 2px var(--space-1);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  color: var(--text-secondary, var(--text-primary));
+  cursor: pointer;
+}
+.jira-lane__head:hover {
+  background: var(--row-hover);
+}
+.jira-lane__head:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.jira-lane__body {
+  flex: 1;
+  min-height: 0;
+  align-items: start;
+  overflow-y: auto;
 }
 .jira-col__head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -435,27 +490,13 @@
   font-size: var(--fs-sm);
   font-weight: 650;
   color: var(--text-primary);
-  background: var(--list-bg);
-  box-shadow: inset 0 -1px 0 var(--border);
-}
-.jira-lane {
-  grid-column: 1 / -1;
-  margin-top: var(--space-2);
-}
-.jira-lane__label {
-  position: sticky;
-  left: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-sm);
-  font-weight: 650;
-  color: var(--text-secondary, var(--text-primary));
+  min-width: 0;
 }
 .jira-cell {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+  min-width: 0;
   min-height: 48px;
   padding: var(--space-2);
   border-radius: var(--radius-md);
@@ -472,6 +513,7 @@
 .jira-card {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 4px;
   padding: var(--space-2);
   border-radius: var(--radius-sm);
