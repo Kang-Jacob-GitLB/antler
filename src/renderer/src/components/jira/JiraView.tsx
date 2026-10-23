@@ -205,6 +205,13 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
       cell.push(i)
       count[lane]++
     }
+    // 칸 안은 기한 순: 완료 열은 최근 기한이 위, 나머지는 급한 기한이 위. 기한 없는 것은 맨 아래, 같으면 받은 순서
+    for (const lane of Object.values(cells)) {
+      for (const [name, cell] of lane) {
+        const sign = byStatus.get(name)?.cat === 'done' ? -1 : 1
+        cell.sort((a, b) => (!a.dueDate || !b.dueDate ? Number(!a.dueDate) - Number(!b.dueDate) : sign * a.dueDate.localeCompare(b.dueDate)))
+      }
+    }
     const lanes = (['epic', 'work'] as const).filter((l) => count[l] > 0).map((l) => ({ id: l, n: count[l], cells: cells[l] }))
     return { columns: [...byStatus.values()].sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat)), lanes }
   }, [items])
