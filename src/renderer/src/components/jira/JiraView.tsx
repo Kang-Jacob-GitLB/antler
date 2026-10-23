@@ -248,24 +248,26 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
               )}
               {open && (
                 <div className="jira-lane__body">
-                  {columns.map((col) => (
-                    <div key={col.name} className="jira-cell" role="group" aria-label={col.name}>
-                      {lane.cells.get(col.name)?.map((i) => (
-                        <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
-                          <div className="jira-card__title">{i.summary}</div>
-                          <div className="jira-card__meta">
-                            <span className="jira-key mono">{i.key}</span>
-                            <JiraType type={i.issueType} />
-                            <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
-                            {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
+                  <div className="jira-lane__grid">
+                    {columns.map((col) => (
+                      <div key={col.name} className="jira-cell" role="group" aria-label={col.name}>
+                        {lane.cells.get(col.name)?.map((i) => (
+                          <div key={i.key} className="jira-card" role="button" tabIndex={0} onClick={() => onOpen(i.key)} onKeyDown={(e) => e.key === 'Enter' && onOpen(i.key)}>
+                            <div className="jira-card__title">{i.summary}</div>
+                            <div className="jira-card__meta">
+                              <span className="jira-key mono">{i.key}</span>
+                              <JiraType type={i.issueType} />
+                              <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
+                              {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
+                            </div>
+                            <div className="jira-card__when">
+                              <IssueWhen i={i} rel={rel} />
+                            </div>
                           </div>
-                          <div className="jira-card__when">
-                            <IssueWhen i={i} rel={rel} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
+                        ))}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </section>

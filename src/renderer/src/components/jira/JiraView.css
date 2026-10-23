@@ -433,7 +433,7 @@
 }
 /* 열 머리와 영역 본문은 같은 격자 — 본문의 세로 스크롤 막대 자리를 머리에도 비워 둬 열 경계를 맞춘다 */
 .jira-board__heads,
-.jira-lane__body {
+.jira-lane__grid {
   display: grid;
   grid-template-columns: repeat(var(--jira-cols, 1), minmax(0, 1fr));
   gap: var(--space-2);
@@ -477,16 +477,23 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
-/* 영역 하나가 배경 상자 하나 — 열(할 일·진행 중·완료)은 그 안에서 칸만 나누고 따로 상자를 두지 않는다 */
+/*
+ * 영역 하나가 배경 상자 하나 — 열(할 일·진행 중·완료)은 그 안에서 칸만 나누고 따로 상자를 두지 않는다.
+ * 스크롤은 상자 안쪽 격자가 해서, 스크롤 중에도 카드가 테두리가 아니라 안쪽 여백 선에서 잘린다
+ */
 .jira-lane__body {
+  display: flex;
   flex: 1;
   min-height: 0;
-  align-items: start;
-  /* 아래 여백은 칸(.jira-cell)이 진다 — 스크롤 영역의 아래 padding 은 끝까지 내려도 보이지 않는다 */
-  padding: var(--space-2) var(--space-2) 0;
+  padding: var(--space-2);
   border-radius: var(--radius-md);
   background: var(--bg-surface, var(--bg-base));
   box-shadow: inset 0 0 0 1px var(--border);
+}
+.jira-lane__grid {
+  flex: 1;
+  min-height: 0;
+  align-items: start;
   overflow-y: auto;
 }
 .jira-col__head {
@@ -504,7 +511,6 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
-  padding-bottom: var(--space-2);
 }
 .jira-col__name {
   flex: 1;
