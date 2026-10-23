@@ -362,6 +362,10 @@
 .jira-tools {
   flex-wrap: wrap;
 }
+/* 상태별 켜고 끄기: 여럿이 함께 켜지므로(한 개만 고르는 분절 버튼과 달리) 켜진 배경끼리 붙지 않게 띄운다 */
+.jira-cats {
+  gap: 3px;
+}
 .jira-cat {
   gap: 6px;
 }
@@ -433,7 +437,7 @@
 }
 /* 열 머리와 영역 본문은 같은 격자 — 본문의 세로 스크롤 막대 자리를 머리에도 비워 둬 열 경계를 맞춘다 */
 .jira-board__heads,
-.jira-lane__body {
+.jira-lane__grid {
   display: grid;
   grid-template-columns: repeat(var(--jira-cols, 1), minmax(0, 1fr));
   gap: var(--space-2);
@@ -441,6 +445,7 @@
 }
 .jira-board__heads {
   flex-shrink: 0;
+  padding-inline: var(--space-2);
   overflow-y: hidden;
   box-shadow: inset 0 -1px 0 var(--border);
 }
@@ -476,11 +481,51 @@
   outline: none;
   box-shadow: var(--focus-ring);
 }
+/*
+ * 영역 하나가 배경 상자 하나 — 열(할 일·진행 중·완료)은 그 안에서 칸만 나누고 따로 상자를 두지 않는다.
+ * 스크롤은 상자 안쪽 격자가 해서, 스크롤 중에도 카드가 테두리가 아니라 안쪽 여백 선에서 잘린다
+ */
 .jira-lane__body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface, var(--bg-base));
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.jira-lane__grid {
   flex: 1;
   min-height: 0;
   align-items: start;
   overflow-y: auto;
+}
+.jira-lane__top {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px var(--space-2);
+  border: 0;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  font: inherit;
+  font-size: var(--fs-xs);
+  color: var(--text-primary);
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+.jira-lane__top:hover {
+  color: var(--accent);
+}
+.jira-lane__top:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-popover), var(--focus-ring);
 }
 .jira-col__head {
   display: flex;
@@ -497,11 +542,6 @@
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
-  min-height: 48px;
-  padding: var(--space-2);
-  border-radius: var(--radius-md);
-  background: var(--bg-surface, var(--bg-base));
-  box-shadow: inset 0 0 0 1px var(--border);
 }
 .jira-col__name {
   flex: 1;

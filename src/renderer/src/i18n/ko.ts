@@ -501,6 +501,7 @@ export const ko = {
   'jira.layout.board': '칸반',
   'jira.lane.epic': '에픽',
   'jira.lane.work': '작업 항목',
+  'jira.toTop': '맨 위로',
   'jira.filteredOut': '불러온 이슈 중 조건에 맞는 것이 없습니다({n}개 숨김)',
   'jira.worklog.title': '워크로그',
   'jira.worklog.tab.calendar': '캘린더',

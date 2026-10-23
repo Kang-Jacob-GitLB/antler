@@ -62,6 +62,11 @@ export const IconArrowLeft = (p: P) => (
     <path d="M13 8H3.5M7.5 4 3.5 8l4 4" />
   </Svg>
 )
+export const IconArrowUp = (p: P) => (
+  <Svg {...p}>
+    <path d="M8 13V3.5M4 7.5l4-4 4 4" />
+  </Svg>
+)
 /** 왼쪽 패널 토글: 창 테두리 + 왼쪽 띠(켜져 있으면 띠를 채운다) */
 export const IconPanelLeft = ({ on, ...p }: P & { on?: boolean }) => (
   <Svg {...p}>
