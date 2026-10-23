@@ -7,10 +7,10 @@ import { useGithubStore } from './githubStore'
 /** "나에게 할당" 개수(Jira 화면 왼쪽 목록)·Launchpad 가 쓰는 JQL(고정): 아직 해결 안 된 것만 */
 export const MINE_JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC'
 /**
- * "나에게 할당" 목록 화면의 JQL(고정): 미해결 + 최근 30일 안에 해결한 것(완료 열이 Jira 사이트처럼 보이게).
- * 해결한 지 오래된 것까지 다 받으면 역대 이슈가 전부 들어오므로 기간을 둔다. 정렬은 기한 → 수정일
+ * "나에게 할당" 목록 화면의 JQL(고정): 해결 여부와 상관없이 전부(완료 열이 Jira 사이트처럼 보이게), 기한 내림차순 → 수정일.
+ * 첫 페이지만으로는 열이 비므로 이 목록은 끝까지(MAX_PAGES 까지) 이어 받는다
  */
-export const MINE_VIEW_JQL = 'assignee = currentUser() AND (resolution = Unresolved OR resolved >= -30d) ORDER BY duedate ASC, updated DESC'
+export const MINE_VIEW_JQL = 'assignee = currentUser() ORDER BY duedate DESC, updated DESC'
 const MAX_RECENT = 15
 const MAX_FILTERS = 50
 /** 워크로그 리포트에 둘 수 있는 팀원 수(main 의 조회 상한과 같다) */
@@ -98,14 +98,23 @@ export const useJiraStore = create<JiraState>((set, get) => {
     const prev = get()[key]
     const seq = ++listSeq[key]
     const base: JiraList = more && prev.jql === jql ? prev : emptyList(jql)
-    const page = more ? base.page + 1 : 1
     // 같은 목록을 새로 고칠 때는 받아 둔 항목을 그대로 보여 주다가 응답이 오면 바꾼다(빈 화면 깜박임 방지)
     const shown = !more && prev.jql === jql ? prev : base
     set({ [key]: { ...shown, jql, loading: true, error: null } } as Partial<JiraState>)
+    // "나에게 할당" 목록 화면은 다 받은 뒤 한 번에 바꾼다(페이지마다 칸반 칸이 늘었다 줄었다 하지 않게)
+    const all = key === 'list' && jql === MINE_VIEW_JQL
     try {
-      const res = await api.invoke('jira:search', { jql, page, ...(more && base.nextCursor ? { cursor: base.nextCursor } : {}) })
-      if (seq !== listSeq[key]) return
-      set({ [key]: { jql, items: more ? [...base.items, ...res.items] : res.items, nextCursor: res.nextCursor, page, loading: false, error: null } } as Partial<JiraState>)
+      let items = more ? base.items : []
+      let cursor = more ? base.nextCursor : undefined
+      let page = more ? base.page : 0
+      do {
+        page++
+        const res = await api.invoke('jira:search', { jql, page, ...(cursor ? { cursor } : {}) })
+        if (seq !== listSeq[key]) return
+        items = [...items, ...res.items]
+        cursor = res.nextCursor
+      } while (all && cursor)
+      set({ [key]: { jql, items, nextCursor: cursor, page, loading: false, error: null } } as Partial<JiraState>)
     } catch (err) {
       if (seq !== listSeq[key] || isAbort(err)) return
       set({ [key]: { ...base, jql, loading: false, error: errorMessage(err) } } as Partial<JiraState>)
