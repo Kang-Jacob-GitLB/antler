@@ -4,8 +4,13 @@ import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
 import { useAppStore } from './appStore'
 import { useGithubStore } from './githubStore'
 
-/** "나에게 할당"(Jira 화면 왼쪽 목록 개수 · Launchpad)과 그 목록이 쓰는 JQL(고정) */
+/** "나에게 할당" 개수(Jira 화면 왼쪽 목록)·Launchpad 가 쓰는 JQL(고정): 아직 해결 안 된 것만 */
 export const MINE_JQL = 'assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC'
+/**
+ * "나에게 할당" 목록 화면의 JQL(고정): 미해결 + 최근 30일 안에 해결한 것(완료 열이 Jira 사이트처럼 보이게).
+ * 해결한 지 오래된 것까지 다 받으면 역대 이슈가 전부 들어오므로 기간을 둔다. 정렬은 기한 → 수정일
+ */
+export const MINE_VIEW_JQL = 'assignee = currentUser() AND (resolution = Unresolved OR resolved >= -30d) ORDER BY duedate ASC, updated DESC'
 const MAX_RECENT = 15
 const MAX_FILTERS = 50
 /** 워크로그 리포트에 둘 수 있는 팀원 수(main 의 조회 상한과 같다) */
@@ -153,7 +158,7 @@ export const useJiraStore = create<JiraState>((set, get) => {
     dialogOpen: false,
     view: null,
     mine: emptyList(MINE_JQL),
-    list: emptyList(MINE_JQL),
+    list: emptyList(MINE_VIEW_JQL),
     issue: null,
 
     async refreshAuth() {
@@ -188,7 +193,7 @@ export const useJiraStore = create<JiraState>((set, get) => {
       listSeq.mine++
       listSeq.list++
       // Jira 화면은 열어 둔 채 '연결 안 됨' 안내로 바꾼다
-      set({ auth, view: get().view ? { kind: 'list', source: 'mine' } : null, issue: null, mine: emptyList(MINE_JQL), list: emptyList(MINE_JQL) })
+      set({ auth, view: get().view ? { kind: 'list', source: 'mine' } : null, issue: null, mine: emptyList(MINE_JQL), list: emptyList(MINE_VIEW_JQL) })
     },
 
     setDialogOpen(dialogOpen) {
@@ -205,7 +210,7 @@ export const useJiraStore = create<JiraState>((set, get) => {
           void loadIssue(view.key)
         } else if (view.kind === 'list' && view.source !== 'custom') {
           const apps = siteData().filters ?? []
-          const jql = view.source === 'mine' ? MINE_JQL : apps[view.source]?.jql
+          const jql = view.source === 'mine' ? MINE_VIEW_JQL : apps[view.source]?.jql
           if (!jql) return
           // 목록으로 올 때마다 다시 조회한다(받아 둔 결과는 응답이 올 때까지 그대로 보인다)
           void fetchList('list', jql, false)

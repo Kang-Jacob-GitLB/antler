@@ -305,7 +305,7 @@ describe('JiraService 날짜 필드(기한·시작·종료)', () => {
       const svc = newService()
       await connectCloud(svc)
       expect(await svc.issue('ABC-1')).toMatchObject({ key: 'ABC-1', dueDate: '2026-10-22', startDate: '', endDate: '' })
-      expect(fieldsParam()).toEqual(['summary', 'status', 'issuetype', 'priority', 'assignee', 'updated', 'reporter', 'created', 'description', 'duedate'])
+      expect(fieldsParam()).toEqual(['summary', 'status', 'issuetype', 'priority', 'assignee', 'updated', 'duedate', 'reporter', 'created', 'description'])
       await fake.close()
       fake = undefined
     }

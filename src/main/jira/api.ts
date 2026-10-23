@@ -5,7 +5,7 @@ import { adfToHtml } from './adf'
 import { JIRA_TOO_BIG, JiraApiError, type JiraClient, type JiraCredential } from './client'
 import { jqlQuote, MAX_PAGES, PAGE_SIZE, USER_ID_RE } from './validate'
 
-const LIST_FIELDS = 'summary,status,issuetype,priority,assignee,updated'
+const LIST_FIELDS = 'summary,status,issuetype,priority,assignee,updated,duedate'
 const DETAIL_FIELDS = `${LIST_FIELDS},reporter,created,description`
 const COMMENT_COUNT = 5
 /** jira:avatar 가 받는 주소 길이 상한과 같다 */
@@ -42,7 +42,8 @@ export function mapSummary(issue: unknown): JiraIssueSummary {
     priority: str(obj(f['priority'])['name']),
     assignee: str(obj(f['assignee'])['displayName']),
     ...withAvatar('assigneeAvatar', f['assignee']),
-    updated: str(f['updated'])
+    updated: str(f['updated']),
+    dueDate: dateOnly(f['duedate'])
   }
 }
 
@@ -130,7 +131,7 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
   const raw = obj(
     await client.get<unknown>(`${apiBase(c)}/issue/${encodeURIComponent(key)}`, {
       // Cloud 는 ADF 를 직접 변환하므로 서버 렌더 HTML 이 필요 없다
-      query: { fields: [DETAIL_FIELDS, 'duedate', ...dates.start, ...dates.end].join(','), expand: c.kind === 'server' ? 'renderedFields' : undefined },
+      query: { fields: [DETAIL_FIELDS, ...dates.start, ...dates.end].join(','), expand: c.kind === 'server' ? 'renderedFields' : undefined },
       notFound: '이슈를 찾을 수 없거나 볼 권한이 없습니다',
       ...(signal ? { signal } : {})
     })
@@ -144,7 +145,6 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
     reporter: str(obj(f['reporter'])['displayName']),
     ...withAvatar('reporterAvatar', f['reporter']),
     created: str(f['created']),
-    dueDate: dateOnly(f['duedate']),
     startDate: firstDate(f, dates.start),
     endDate: firstDate(f, dates.end),
     descriptionHtml: bodyHtml(c, f['description'], obj(raw['renderedFields'])['description'])
