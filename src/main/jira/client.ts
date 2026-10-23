@@ -72,10 +72,14 @@ export interface JiraImage {
   bytes: Buffer
 }
 
-/** 주소가 연결한 사이트 안(같은 origin, 사이트 경로 아래)인가 */
+/**
+ * 주소가 연결한 사이트 안(같은 origin, 사이트 경로 아래)인가. 인코딩된 '/'·'\'·'.' 이 든 경로는 앞단 프록시가 풀어
+ * 사이트 경로 밖으로 보낼 수 있어 사이트 안으로 보지 않는다
+ */
 function inSite(url: URL, siteUrl: string): boolean {
   const site = new URL(siteUrl)
   const base = site.pathname.replace(/\/+$/, '')
+  if (/%(?:2f|5c|2e)/i.test(url.pathname)) return false
   return url.origin === site.origin && (base === '' || url.pathname === base || url.pathname.startsWith(`${base}/`))
 }
 

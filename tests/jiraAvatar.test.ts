@@ -82,6 +82,9 @@ describe('JiraClient.image', () => {
     expect(await c.image(`${fake.altOrigin}/jira/secure/useravatar`)).toBeNull()
     expect(await c.image('http://secure.gravatar.com/avatar/x')).toBeNull()
     expect(await c.image('not a url')).toBeNull()
+    // 프록시가 풀면 사이트 경로 밖이 되는 인코딩된 경로
+    expect(await c.image(`${fake.origin}/jira/..%2Fadmin/secure/useravatar`)).toBeNull()
+    expect(await c.image(`${fake.origin}/jira/%2e%2e/admin`)).toBeNull()
     expect(fake.requests).toHaveLength(0)
   })
 
