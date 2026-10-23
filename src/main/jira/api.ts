@@ -8,12 +8,26 @@ import { jqlQuote, MAX_PAGES, PAGE_SIZE, USER_ID_RE } from './validate'
 const LIST_FIELDS = 'summary,status,issuetype,priority,assignee,updated'
 const DETAIL_FIELDS = `${LIST_FIELDS},reporter,created,description`
 const COMMENT_COUNT = 5
+/** jira:avatar 가 받는 주소 길이 상한과 같다 */
+export const AVATAR_URL_MAX = 2048
 
 type Json = Record<string, unknown>
 const obj = (v: unknown): Json => (v && typeof v === 'object' ? (v as Json) : {})
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
 
 const apiBase = (c: JiraCredential): string => (c.kind === 'cloud' ? '/rest/api/3' : '/rest/api/2')
+
+/** 사용자 객체의 프로필 사진 주소(avatarUrls 의 48x48, 없으면 더 작은 것). http(s) 가 아니거나 너무 길면 빈 문자열 — 받을지는 JiraClient.image 가 다시 판단한다 */
+export function avatarOf(user: unknown): string {
+  const urls = obj(obj(user)['avatarUrls'])
+  const url = str(urls['48x48']) || str(urls['32x32']) || str(urls['24x24'])
+  return url.length <= AVATAR_URL_MAX && /^https?:\/\//i.test(url) ? url : ''
+}
+/** 사진 주소 필드: 있을 때만 싣는다 */
+const withAvatar = <K extends string>(key: K, user: unknown): Partial<Record<K, string>> => {
+  const url = avatarOf(user)
+  return url ? ({ [key]: url } as Record<K, string>) : {}
+}
 
 export function mapSummary(issue: unknown): JiraIssueSummary {
   const i = obj(issue)
@@ -27,6 +41,7 @@ export function mapSummary(issue: unknown): JiraIssueSummary {
     issueType: str(obj(f['issuetype'])['name']),
     priority: str(obj(f['priority'])['name']),
     assignee: str(obj(f['assignee'])['displayName']),
+    ...withAvatar('assigneeAvatar', f['assignee']),
     updated: str(f['updated'])
   }
 }
@@ -127,6 +142,7 @@ export async function getIssue(client: JiraClient, c: JiraCredential, key: strin
     // 응답의 key 가 아니라 요청한 key 로 주소를 만든다(이동된 이슈는 Jira 가 /browse/옛키 를 새 키로 연결한다)
     url: `${c.siteUrl}/browse/${encodeURIComponent(key)}`,
     reporter: str(obj(f['reporter'])['displayName']),
+    ...withAvatar('reporterAvatar', f['reporter']),
     created: str(f['created']),
     dueDate: dateOnly(f['duedate']),
     startDate: firstDate(f, dates.start),
@@ -175,7 +191,7 @@ export async function getComments(client: JiraClient, c: JiraCredential, key: st
   }
   return list.slice(0, COMMENT_COUNT).map((x) => {
     const cm = obj(x)
-    return { author: str(obj(cm['author'])['displayName']), created: str(cm['created']), bodyHtml: bodyHtml(c, cm['body'], cm['renderedBody']) }
+    return { author: str(obj(cm['author'])['displayName']), ...withAvatar('authorAvatar', cm['author']), created: str(cm['created']), bodyHtml: bodyHtml(c, cm['body'], cm['renderedBody']) }
   })
 }
 
