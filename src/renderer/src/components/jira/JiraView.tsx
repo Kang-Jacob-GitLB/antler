@@ -4,7 +4,7 @@ import { useT } from '../../i18n'
 import { api } from '../../lib/api'
 import { formatAbsolute, formatCalendarDate, isBeforeToday } from '../../lib/format'
 import { useAppStore } from '../../stores/appStore'
-import { MINE_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
+import { MINE_VIEW_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
 import { IconBoard, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
@@ -64,7 +64,7 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
   }
 
   // 다른 목록으로 바뀌면 입력칸도 그 목록의 JQL 로
-  useEffect(() => setJql(view.source === 'mine' ? MINE_JQL : (saved?.jql ?? useJiraStore.getState().list.jql)), [view.source, saved?.jql])
+  useEffect(() => setJql(view.source === 'mine' ? MINE_VIEW_JQL : (saved?.jql ?? useJiraStore.getState().list.jql)), [view.source, saved?.jql])
 
   const run = (): void => {
     if (jql.trim()) void loadList(jql.trim())
@@ -172,7 +172,7 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
         // 키 칸을 가장 긴 키에 맞춰 고정해 제목 시작 위치를 맞춘다
         <div className="gh-list" style={{ '--jira-key-ch': keyCh } as React.CSSProperties}>
           {shown.map((i) => (
-            <IssueRow key={i.key} i={i} when={rel(isoToEpoch(i.updated))} onOpen={() => openIssue(i.key)} />
+            <IssueRow key={i.key} i={i} when={<IssueWhen i={i} rel={rel} />} onOpen={() => openIssue(i.key)} />
           ))}
           {!list.error && !list.loading && shown.length === 0 && (
             <div className="gh-notice">{list.items.length === 0 ? t('gh.empty') : t('jira.filteredOut', { n: list.items.length })}</div>
@@ -241,7 +241,9 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
                     <span className="jira-card__sub">{issueSub(i, t('jira.unassigned'))}</span>
                     {i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} className="jira-card__avatar" />}
                   </div>
-                  <div className="jira-card__when">{rel(isoToEpoch(i.updated))}</div>
+                  <div className="jira-card__when">
+                    <IssueWhen i={i} rel={rel} />
+                  </div>
                 </div>
               ))}
             </section>
@@ -252,7 +254,20 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
   )
 }
 
-function IssueRow({ i, when, onOpen }: { i: JiraIssueSummary; when: string; onOpen(): void }): React.JSX.Element {
+/** 목록 행·카드의 날짜: 기한이 있으면 기한(완료 전인데 지났으면 빨강), 없으면 마지막으로 수정한 때 */
+function IssueWhen({ i, rel }: { i: JiraIssueSummary; rel(epoch: number): string }): React.JSX.Element {
+  const t = useT()
+  const locale = useAppStore((s) => s.config?.ui.locale ?? 'ko')
+  if (!i.dueDate) return <>{rel(isoToEpoch(i.updated))}</>
+  const overdue = statusCat(i.statusCategory) !== 'done' && isBeforeToday(i.dueDate)
+  return (
+    <span className={overdue ? 'jira-props__overdue' : undefined} title={t('jira.dueDate')}>
+      {t('jira.dueDate')} {formatCalendarDate(i.dueDate, locale)}
+    </span>
+  )
+}
+
+function IssueRow({ i, when, onOpen }: { i: JiraIssueSummary; when: React.ReactNode; onOpen(): void }): React.JSX.Element {
   const t = useT()
   return (
     <div className="gh-row" role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => e.key === 'Enter' && onOpen()}>

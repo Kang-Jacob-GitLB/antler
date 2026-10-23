@@ -62,6 +62,11 @@ describe('avatarOf', () => {
     expect(mapSummary({ key: 'A-1', fields: { assignee: { displayName: 'a', avatarUrls: { '48x48': 'https://x/a' } } } }).assigneeAvatar).toBe('https://x/a')
     expect('assigneeAvatar' in mapSummary({ key: 'A-1', fields: { assignee: { displayName: 'a' } } })).toBe(false)
   })
+  it('목록 항목에 기한을 달력 날짜로 싣고, 없거나 날짜가 아니면 빈 문자열', () => {
+    expect(mapSummary({ key: 'A-1', fields: { duedate: '2026-10-24' } }).dueDate).toBe('2026-10-24')
+    expect(mapSummary({ key: 'A-1', fields: { duedate: null } }).dueDate).toBe('')
+    expect(mapSummary({ key: 'A-1', fields: { duedate: 'soon' } }).dueDate).toBe('')
+  })
 })
 
 describe('JiraClient.image', () => {

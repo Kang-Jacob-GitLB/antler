@@ -53,7 +53,7 @@ describe('toEntries / jiraEntries', () => {
   })
 
   it('Jira 이슈를 epoch seconds 와 jira: 키로 바꾼다', () => {
-    const j: JiraIssueSummary = { key: 'ABC-7', summary: 'Do it', status: 'In Progress', statusCategory: 'indeterminate', issueType: 'Task', priority: 'High', assignee: 'Me', updated: '2026-01-02T03:04:05.000+0000' }
+    const j: JiraIssueSummary = { key: 'ABC-7', summary: 'Do it', status: 'In Progress', statusCategory: 'indeterminate', issueType: 'Task', priority: 'High', assignee: 'Me', updated: '2026-01-02T03:04:05.000+0000', dueDate: '' }
     const [e] = jiraEntries([j, { ...j, key: 'ABC-8', updated: 'bad' }])
     expect(e).toMatchObject({ key: 'jira:ABC-7', section: 'jira', kind: 'jira', jiraKey: 'ABC-7', updatedAt: Date.parse('2026-01-02T03:04:05.000Z') / 1000 })
     expect(jiraEntries([{ ...j, updated: 'bad' }])[0]!.updatedAt).toBe(0)
@@ -117,7 +117,7 @@ describe('visibleEntries', () => {
   })
 
   it('저장소 필터·초안 숨기기는 Jira 항목에 적용되지 않는다', () => {
-    const all = [...entries, ...jiraEntries([{ key: 'ABC-1', summary: 'Jira thing', status: 'To Do', statusCategory: 'new', issueType: '', priority: '', assignee: '', updated: '2026-01-01T00:00:00Z' }])]
+    const all = [...entries, ...jiraEntries([{ key: 'ABC-1', summary: 'Jira thing', status: 'To Do', statusCategory: 'new', issueType: '', priority: '', assignee: '', updated: '2026-01-01T00:00:00Z', dueDate: '' }])]
     const v = visibleEntries(all, 'jira', { ...emptyFilter, repoId: 'r2', hideDrafts: true }, [], {}, NOW)
     expect(v.items.map((e) => e.key)).toEqual(['jira:ABC-1'])
     expect(visibleEntries(all, 'jira', { ...emptyFilter, text: 'abc-1' }, [], {}, NOW).items).toHaveLength(1)
