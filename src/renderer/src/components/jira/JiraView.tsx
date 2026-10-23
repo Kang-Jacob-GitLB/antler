@@ -136,7 +136,7 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
 
       {/* 불러온 항목을 바로 거른다: 상태 분류(켜고 끄기, 설정에 기억) · 검색어 */}
       <div className="gh-filters jira-tools">
-        <div className="seg" role="group" aria-label={t('jira.catFilter')}>
+        <div className="seg jira-cats" role="group" aria-label={t('jira.catFilter')}>
           {CATS.map((c) => {
             const on = !hidden.includes(c)
             return (

@@ -362,6 +362,10 @@
 .jira-tools {
   flex-wrap: wrap;
 }
+/* 상태별 켜고 끄기: 여럿이 함께 켜지므로(한 개만 고르는 분절 버튼과 달리) 켜진 배경끼리 붙지 않게 띄운다 */
+.jira-cats {
+  gap: 3px;
+}
 .jira-cat {
   gap: 6px;
 }
