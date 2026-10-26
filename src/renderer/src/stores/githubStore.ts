@@ -85,6 +85,8 @@ interface GithubState {
   openAt(repoId: string, view: GhView): void
   /** 로그인·로그아웃 뒤: 보고 있던 화면은 그대로 두고 목록·상세를 다시 받는다 */
   reload(): void
+  /** fetch 가 끝났을 때: 사이드바 목록과 보고 있는 PR·이슈 목록을 화면을 비우지 않고 다시 받는다(새로 열리거나 바뀐 PR 반영) */
+  refreshLists(repoId: string): void
   refreshAuth(): Promise<void>
   loginPat(token: string): Promise<void>
   /** GitHub CLI(gh)에 로그인된 계정으로 로그인 */
@@ -119,15 +121,18 @@ function notGithub(): void {
 export const useGithubStore = create<GithubState>((set, get) => {
   const current = (g: number, repoId: string | null): boolean => g === gen && get().repoId === repoId
 
-  /** 목록 하나를 받는다. more 면 nextPage 를, 아니면 1페이지를 받는다 */
-  const fetchList = async (key: ListKey, query: GhListQuery, more: boolean): Promise<void> => {
+  /**
+   * 목록 하나를 받는다. more 면 nextPage 를, 아니면 1페이지를 받는다.
+   * quiet 면(fetch 뒤 새로 고침) 받는 동안 보던 목록을 비우거나 로딩으로 바꾸지 않고, 실패해도 보던 목록을 그대로 둔다
+   */
+  const fetchList = async (key: ListKey, query: GhListQuery, more: boolean, quiet = false): Promise<void> => {
     const { repoId, ref } = get()
     if (!repoId || !ref) return
     const g = gen
     const seq = ++listSeq[key]
     const prev = get()[key] as ListState<unknown>
     const page = more ? prev.nextPage : 1
-    set({ [key]: { ...prev, query, loading: true, error: null, ...(more ? {} : { items: [], hasMore: false }) } } as Partial<GithubState>)
+    if (!quiet) set({ [key]: { ...prev, query, loading: true, error: null, ...(more ? {} : { items: [], hasMore: false }) } } as Partial<GithubState>)
     try {
       const q = { ...query, page }
       const res: GhListResult<unknown> =
@@ -141,6 +146,7 @@ export const useGithubStore = create<GithubState>((set, get) => {
       if (key === 'sideIssues') void get().refreshAuth()
     } catch (err) {
       if (!current(g, repoId) || seq !== listSeq[key]) return
+      if (quiet) return
       // 실패해도 페이지 번호는 그대로 — 다시 '더 보기'를 누르면 같은 페이지를 다시 요청한다
       const msg = errorMessage(err)
       if (!get().auth.signedIn && msg.includes(NOT_FOUND_HINT)) anonNotFound.set(repoId, msg)
@@ -205,15 +211,15 @@ export const useGithubStore = create<GithubState>((set, get) => {
   }
 
   /** 사이드바 목록(열린 항목) 두 개를 받는다 */
-  const loadSide = (): void => {
+  const loadSide = (quiet = false): void => {
     const known = anonNotFound.get(get().repoId ?? '')
     if (known !== undefined) {
       // 다시 묻지 않고, 전에 받은 이유(로그인 필요)를 그대로 보여 준다
-      set({ sidePulls: { ...emptyList(), error: known }, sideIssues: { ...emptyList(), error: known } })
+      if (!quiet) set({ sidePulls: { ...emptyList(), error: known }, sideIssues: { ...emptyList(), error: known } })
       return
     }
-    void fetchList('sidePulls', { state: 'open' }, false)
-    void fetchList('sideIssues', { state: 'open' }, false)
+    void fetchList('sidePulls', { state: 'open' }, false, quiet)
+    void fetchList('sideIssues', { state: 'open' }, false, quiet)
   }
 
   return {
@@ -296,6 +302,17 @@ export const useGithubStore = create<GithubState>((set, get) => {
       if (get().pulls.items.length || view?.kind === 'pulls') void fetchList('pulls', get().pulls.query, false)
       if (get().issues.items.length || view?.kind === 'issues') void fetchList('issues', get().issues.query, false)
       if (view) get().show(view)
+    },
+
+    refreshLists(repoId) {
+      const { ref, view } = get()
+      if (get().repoId !== repoId || !ref) return
+      loadSide(true)
+      // 첫 페이지만 받아 둔 목록만 — '더 보기'로 늘린 목록을 1페이지로 줄이지 않는다
+      for (const kind of ['pulls', 'issues'] as const) {
+        const list = get()[kind]
+        if (view?.kind === kind && !list.loading && list.nextPage <= 2) void fetchList(kind, list.query, false, true)
+      }
     },
 
     async refreshAuth() {

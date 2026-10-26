@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { FetchStatus } from '@shared/types'
 import { api, errorMessage } from '../lib/api'
 import { useAppStore } from './appStore'
+import { useGithubStore } from './githubStore'
 import { useLogStore } from './logStore'
 
 interface FetchState {
@@ -16,7 +17,10 @@ export const useFetchStore = create<FetchState>((set) => ({
   status: {},
 
   set(status) {
+    const was = useFetchStore.getState().status[status.repoId]
     set((s) => ({ status: { ...s.status, [status.repoId]: status } }))
+    // fetch 가 막 끝났으면 GitHub PR·이슈 목록도 다시 받는다 — 새로 열리거나 바뀐 PR 이 저장소를 다시 열지 않아도 보이게
+    if (was?.fetching && !status.fetching) useGithubStore.getState().refreshLists(status.repoId)
   },
 
   async refresh() {
