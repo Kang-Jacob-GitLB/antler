@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { lstatSync, realpathSync, statSync } from 'node:fs'
-import { BrowserWindow, dialog, shell } from 'electron'
+import { BrowserWindow, clipboard, dialog, shell } from 'electron'
 import type { ExternalAction } from '@shared/types'
 import { ExternalOpener, checkChosenExe, type OpenerDeps } from '../external/opener'
 import { allowedLinkUrl } from '../external/link'
@@ -9,6 +9,9 @@ import type { ConfigStore } from '../services/ConfigStore'
 import type { IpcHandle } from './github'
 
 const ACTIONS: readonly string[] = ['fileManager', 'editor', 'terminal'] satisfies ExternalAction[]
+
+/** 클립보드에 쓸 수 있는 최대 글자 수(워크로그 표 복사에도 넉넉한 1M 글자) */
+const CLIPBOARD_MAX_CHARS = 1_000_000
 
 const realDeps = (): OpenerDeps => ({
   platform: process.platform,
@@ -39,6 +42,12 @@ export function registerExternalIpc(handle: IpcHandle, config: ConfigStore, open
           ? { kind: 'ssh', root: repo.path, host: source.sshHost ?? '' }
           : { kind: 'local', root: repo.path }
     await opener.open(target, req.action, req.path, config.get().ui)
+  })
+
+  // 클립보드 쓰기. 권한 요청을 모두 거부하므로 renderer 의 navigator.clipboard 대신 이 채널을 쓴다(읽기 채널은 두지 않는다)
+  handle('clipboard:writeText', (_e, text) => {
+    if (typeof text !== 'string' || text.length > CLIPBOARD_MAX_CHARS) throw new Error('복사할 수 없는 내용입니다')
+    clipboard.writeText(text)
   })
 
   // 저장소 문서(README 등)의 외부 링크. https 이고 자격 증명이 없는 주소만 기본 브라우저로 연다

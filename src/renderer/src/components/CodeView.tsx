@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { CodeBlobResult, CodeTreeEntry, GhRepoRef } from '@shared/types'
 import { useT, type MessageKey } from '../i18n'
+import { copyText } from '../lib/clipboard'
 import { formatBytes } from '../lib/format'
 import { githubPermalink, inRange, lineReference, normalizeRange, parseLineFragment, type LineRange } from '../lib/lineLink'
 import { githubRepoOf, isCommitOnRemote } from '../lib/lineLinkInfo'
@@ -755,7 +756,7 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
     if (!range) return
     const text = kind === 'link' && gh ? githubPermalink({ owner: gh.owner, repo: gh.repo, rev, path, range }) : lineReference({ path, rev, range })
     try {
-      await navigator.clipboard.writeText(text)
+      await copyText(text)
     } catch {
       return
     }

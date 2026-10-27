@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { Commit, CommitDetail, FileChange } from '@shared/types'
 import { useT } from '../i18n'
+import { copyText } from '../lib/clipboard'
 import { formatAbsolute } from '../lib/format'
 import { useAppStore } from '../stores/appStore'
 import { useCodeStore } from '../stores/codeStore'
@@ -167,7 +168,7 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
   // 상세가 아직 안 왔으면 목록에 있는 정보로 머리 부분을 먼저 그린다
   const d = detail?.hash === commit.hash ? detail : null
   const copy = async (): Promise<void> => {
-    await navigator.clipboard.writeText(commit.hash)
+    await copyText(commit.hash)
     setCopied(true)
   }
 

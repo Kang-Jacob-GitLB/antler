@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useT } from '../../../i18n'
+import { copyText } from '../../../lib/clipboard'
 import { useWorklogStore } from '../../../stores/jiraWorklogStore'
 import { IconChevronDown, IconChevronRight, IconCopy } from '../../icons'
 import { IssueKey, userColor, type WorklogPaneProps } from './WorklogBits'
@@ -37,8 +38,7 @@ export function WorklogReport({ days, logs, users, today, locale }: WorklogPaneP
 
   const copy = (): void => {
     const tsv = reportToTsv(report, days, { name: t('jira.worklog.col.name'), total: t('jira.worklog.total') })
-    void navigator.clipboard
-      .writeText(tsv)
+    void copyText(tsv)
       .then(() => {
         setCopied(true)
         clearTimeout(timer.current)

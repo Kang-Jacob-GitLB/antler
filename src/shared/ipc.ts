@@ -201,6 +201,8 @@ export interface IpcContract {
   'git:blob': { args: [repoId: string, req: CodeBlobRequest, requestId?: string]; result: CodeBlobResult }
   /** 코드 탐색기 줄 링크: 커밋(40/64자 해시)이 원격 추적 ref 중 하나에 들어 있는지(= push 됐는지). GitHub 원격 전용 저장소는 항상 true */
   'git:onRemote': { args: [repoId: string, rev: string]; result: boolean }
+  /** 글자를 시스템 클립보드에 쓴다(쓰기만, 읽기 채널은 없다). renderer 의 navigator.clipboard 는 권한 거부 정책에 막혀 main 을 거친다 */
+  'clipboard:writeText': { args: [text: string]; result: void }
   /** 저장소 문서(README 등)의 외부 링크를 기본 브라우저로 연다. https 주소만 */
   'code:openLink': { args: [url: string]; result: void }
   /** 저장소 부가 정보(읽기 전용): LFS 사용 여부(.gitattributes 의 filter=lfs)와 git config 의 gitflow.* 설정 */
@@ -318,6 +320,7 @@ export const IPC_CHANNELS = [
   'git:tree',
   'git:blob',
   'git:onRemote',
+  'clipboard:writeText',
   'code:openLink',
   'git:repoExtras',
   'git:lfsPaths',
