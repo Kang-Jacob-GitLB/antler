@@ -689,7 +689,8 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
       e.preventDefault() // Shift+클릭이 글자 선택을 늘리지 않게
       return
     }
-    if (e.button !== 0 || (e.target as Element).closest('.cv-lbtn')) return
+    // ⋯ 버튼에서 누르고 끌어도 줄 번호에서 끈 것과 같다(움직이지 않으면 버튼 click 이 처리한다)
+    if (e.button !== 0) return
     const box = scrollRef.current
     if (!box) return
     e.preventDefault() // 본문 글자 선택이 시작되지 않게
@@ -875,6 +876,10 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
                       tabIndex={sel?.start === n ? 0 : -1}
                       onClick={(e) => {
                         e.stopPropagation()
+                        if (suppressClick.current) return // 드래그로 범위를 고른 뒤의 click 은 무시
+                        // ⋯ 도 줄 선택을 겸한다: Shift 면 범위를 넓히고, 선택 밖의 줄이면 그 줄을 고른 뒤 메뉴를 연다
+                        if (e.shiftKey) onNumberClick(n, true)
+                        else if (!inRange(useCodeStore.getState().lineSel, n)) onNumberClick(n, false)
                         openMenu(n, e.currentTarget)
                       }}
                     >
