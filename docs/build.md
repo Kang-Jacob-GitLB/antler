@@ -79,6 +79,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 | `--search <q>` | 검색 시나리오의 검색어(기본 `Merge branch`) |
 | `--github` | GitHub PR 목록·상세·파일 탭 시나리오(첫 저장소의 origin 이 공개 GitHub 저장소일 때, 로그인 없이) |
 | `--external-commit` | diff 를 연 채 첫 저장소에 빈 커밋을 만들어 자동 반영 확인 — **임시 저장소에만** 쓸 것 |
+| `--wip` | 작업 트리(WIP) 행·변경 패널·diff 시나리오 — 첫 저장소가 더럽혀져 있어야 한다(**임시 저장소에만** 쓸 것) |
 | `--update-fake <상태>` | 업데이트 스낵바 상태(`available|downloading|downloaded|error`)를 띄워 `update-<상태>-<테마>.png` 만 남기고 종료(`--update-mode manual-dmg|manual-file`) |
 | `--idle-only <N>` | 조작 없이 N초 쉰 뒤 메모리 측정(유휴 메모리) |
 | `--electron-args "<...>"` | 실험용 Chromium·Electron 스위치 전달 |
