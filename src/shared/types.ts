@@ -932,6 +932,66 @@ export interface BlameResult {
   lines: string[]
 }
 
+/** 코드 탐색기: 트리 항목 종류. submodule 은 다른 저장소의 커밋을 가리켜 열 수 없다 */
+export type CodeEntryKind = 'dir' | 'file' | 'symlink' | 'submodule'
+
+export interface CodeTreeEntry {
+  /** 이 디렉터리 안의 이름 */
+  name: string
+  /** 저장소 최상위 기준 경로('/' 구분) */
+  path: string
+  kind: CodeEntryKind
+  /** git 파일 모드(예: 100644, 100755, 120000, 040000, 160000) */
+  mode: string
+  oid: string
+}
+
+/** 디렉터리 하나의 항목 목록. rev 는 커밋 해시만(브랜치·태그는 git:resolveRev 로 먼저 푼다), dir 은 '' 이면 최상위 */
+export interface CodeTreeRequest {
+  rev: string
+  dir: string
+}
+
+export interface CodeTreeResult {
+  rev: string
+  dir: string
+  /** 디렉터리 먼저, 그 안에서는 이름순 */
+  entries: CodeTreeEntry[]
+  /** 그 시점에 이 경로가 없거나 디렉터리가 아니다 */
+  missing: boolean
+}
+
+/** 파일 하나의 내용. rev 는 커밋 해시만 */
+export interface CodeBlobRequest {
+  rev: string
+  path: string
+}
+
+/**
+ * 파일 내용 판정
+ * - text: UTF-8 로 읽은 본문(invalidUtf8 이면 깨진 바이트가 U+FFFD 로 바뀌었다)
+ * - image: 확장자가 이미지이고 상한 이하라 data: URL 로 담았다
+ * - binary: NUL 바이트가 있어 글로 보여 주지 않는다
+ * - tooLarge: 크기 상한을 넘어 읽지 않았다
+ * - lfs: Git LFS 포인터(실제 파일은 받지 않는다)
+ * - missing: 그 시점에 경로가 없거나 파일이 아니다(디렉터리·서브모듈), 또는 객체가 로컬에 없다(partial clone)
+ */
+export type CodeBlobKind = 'text' | 'image' | 'binary' | 'tooLarge' | 'lfs' | 'missing'
+
+export interface CodeBlobResult {
+  rev: string
+  path: string
+  kind: CodeBlobKind
+  /** 바이트 크기(missing 이면 0) */
+  size: number
+  text?: string
+  invalidUtf8?: boolean
+  /** kind=image 일 때 data:<mime>;base64,… */
+  dataUrl?: string
+  /** kind=lfs 일 때 포인터 내용 */
+  lfs?: { oid: string; size: number }
+}
+
 /** diff 한 줄: ' ' 문맥 · '+' 추가 · '-' 삭제 · '\\' "No newline at end of file" */
 export interface DiffLine {
   t: ' ' | '+' | '-' | '\\'
