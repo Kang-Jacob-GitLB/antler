@@ -454,10 +454,121 @@ button.code-crumb:hover {
   position: sticky;
   left: 0;
   z-index: 1;
-  padding-left: 8px;
+  padding-left: 30px;
   padding-right: 12px;
   background: var(--list-bg);
   border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+.cv-codewrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.cv-row:hover .diff-no {
+  color: var(--text-primary);
+}
+
+/* 고른 줄: 기존 선택 토큰(--row-selected)을 줄 전체와 번호 칸에 깐다 */
+.cv-row.is-sel {
+  background: var(--row-selected);
+}
+.cv-row.is-sel .diff-no {
+  background: linear-gradient(var(--row-selected), var(--row-selected)), var(--list-bg);
+  color: var(--text-primary);
+  box-shadow: inset 2px 0 0 var(--row-selected-edge);
+}
+
+/* 줄 번호 왼쪽의 ⋯ 버튼: 줄에 올리거나 고른 범위의 첫 줄, 메뉴가 열린 줄에서 보인다 */
+.cv-lbtn {
+  position: absolute;
+  left: 8px;
+  top: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.cv-row:hover .cv-lbtn,
+.cv-row.is-sel-first .cv-lbtn,
+.cv-row.is-menu .cv-lbtn,
+.cv-lbtn:focus-visible {
+  opacity: 1;
+}
+.cv-lbtn:hover,
+.cv-lbtn[aria-expanded='true'] {
+  background: var(--row-hover);
+  color: var(--text-primary);
+}
+.cv-lbtn:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+/* 줄 메뉴(스크롤 영역 밖에 띄운다: 가상 스크롤러가 자식을 잘라낸다) */
+.cv-lmenu {
+  position: absolute;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-popover);
+  font-family: var(--font-ui);
+  font-size: var(--fs-sm);
+}
+.cv-lmenu__title {
+  padding: 6px 10px 4px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.cv-lmenu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-lmenu__item:hover,
+.cv-lmenu__item:focus-visible {
+  background: var(--row-hover);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+.cv-lmenu__icon {
+  display: inline-flex;
+  width: 16px;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.cv-lmenu__warn {
+  margin: 0 4px 4px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--diff-empty-bg);
+  color: var(--modified-text);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
 }
 .cv-row .diff-code {
   padding-left: 12px;

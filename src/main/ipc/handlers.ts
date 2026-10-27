@@ -270,6 +270,7 @@ export function registerIpc(
   handle('git:resolveRev', (_e, repoId, ref) => repos.resolveRev(repoId, ref))
   handle('git:tree', (_e, repoId, req, requestId) => repos.codeTree(repoId, req, requestId))
   handle('git:blob', (_e, repoId, req, requestId) => repos.codeBlob(repoId, req, requestId))
+  handle('git:onRemote', (_e, repoId, rev) => repos.codeOnRemote(repoId, rev))
   handle('git:repoExtras', (_e, repoId) => repos.repoExtras(repoId))
   handle('git:lfsPaths', (_e, repoId, req, requestId) => repos.lfsPaths(repoId, req, requestId))
   handle('git:wipStatus', (_e, repoId, requestId) => repos.wipStatus(repoId, requestId))

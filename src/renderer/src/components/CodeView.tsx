@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { CodeBlobResult, CodeTreeEntry } from '@shared/types'
+import type { CodeBlobResult, CodeTreeEntry, GhRepoRef } from '@shared/types'
 import { useT, type MessageKey } from '../i18n'
 import { formatBytes } from '../lib/format'
+import { githubPermalink, inRange, lineReference, normalizeRange, parseLineFragment, type LineRange } from '../lib/lineLink'
+import { githubRepoOf, isCommitOnRemote } from '../lib/lineLinkInfo'
 import { useActiveRepo, useAppStore } from '../stores/appStore'
 import { isMarkdownPath, refLabel, shortRev, useCodeStore } from '../stores/codeStore'
 import { useFileViewStore } from '../stores/fileViewStore'
 import { codeHtml, ROW_H, useHighlighter } from './DiffView'
 import { LfsBadge } from './LfsBadge'
 import { MarkdownDoc } from './MarkdownDoc'
-import { IconArrowLeft, IconBlame, IconBranch, IconCheck, IconChevronDown, IconChevronRight, IconCode, IconFile, IconFolder, IconHistory, IconRepo, IconSubmodule, IconTag } from './icons'
+import { IconArrowLeft, IconBlame, IconBranch, IconCheck, IconChevronDown, IconChevronRight, IconCode, IconCopy, IconFile, IconFolder, IconHistory, IconMore, IconRepo, IconSubmodule, IconTag } from './icons'
 import './DiffView.css'
 import './LfsBadge.css'
 import './CodeView.css'
@@ -582,7 +584,7 @@ function FilePane({ repoId, rev }: { repoId: string; rev: string }): React.JSX.E
         ) : (
           <>
             {blob.invalidUtf8 && <div className="code-note">{t('code.invalidUtf8')}</div>}
-            {lines.length === 0 ? <div className="diff-notice">{t('blame.empty')}</div> : <CodeText key={`${rev}:${path}`} lines={lines} path={path} />}
+            {lines.length === 0 ? <div className="diff-notice">{t('blame.empty')}</div> : <CodeText key={`${rev}:${path}`} repoId={repoId} rev={rev} lines={lines} path={path} />}
           </>
         )
       ) : blob.kind === 'image' ? (
@@ -628,6 +630,9 @@ function NoticeCard({ blob }: { blob: CodeBlobResult }): React.JSX.Element {
 }
 
 /** 줄의 표시 폭(문자 수, 동아시아 전각은 2, 탭은 4) — 가로 스크롤 폭 계산용 */
+/** 줄 번호 칸에서 숫자 폭 말고 더하는 픽셀(왼쪽 버튼 자리 + 여백) */
+const GUTTER_PX = 44
+const MENU_W = 232
 const LONG = 4000
 function displayWidth(line: string): number {
   let w = 0
@@ -636,29 +641,220 @@ function displayWidth(line: string): number {
   return w
 }
 
-function CodeText({ lines, path }: { lines: string[]; path: string }): React.JSX.Element {
+function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; lines: string[]; path: string }): React.JSX.Element {
+  const t = useT()
   const scrollRef = useRef<HTMLDivElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
   const hl = useHighlighter(path, lines.length)
   const v = useVirtualizer({ count: lines.length, getScrollElement: () => scrollRef.current, estimateSize: () => ROW_H, overscan: 30 })
   const numWidth = String(lines.length).length
+  const gutter = `calc(${numWidth}ch + ${GUTTER_PX}px)`
   const widest = useMemo(() => {
     let max = 0
     for (const l of lines) if (l.length * 2 > max) max = Math.max(max, displayWidth(l))
     return max
   }, [lines])
 
+  // ── 줄 선택(GitHub 식): 줄 번호 클릭 = 선택/해제, Shift+클릭 = 범위 ──
+  const sel = useCodeStore((s) => s.lineSel)
+  const pendingHash = useCodeStore((s) => s.anchor)
+  /** Shift+클릭의 기준 줄(마지막으로 일반 클릭한 줄) */
+  const baseLine = useRef<number | null>(null)
+
+  const onNumberClick = (n: number, shift: boolean): void => {
+    const st = useCodeStore.getState()
+    const cur = st.lineSel
+    const base = baseLine.current ?? cur?.start ?? null
+    if (shift && base !== null) {
+      st.setLineSel(normalizeRange(base, n))
+    } else if (cur && cur.start === n && cur.end === n) {
+      baseLine.current = null
+      st.setLineSel(null)
+    } else {
+      baseLine.current = n
+      st.setLineSel({ start: n, end: n })
+    }
+  }
+
+  // #L10 · #L10-L20 로 열렸으면 그 줄을 고르고 가운데쯤으로 스크롤한다
+  useEffect(() => {
+    const r = parseLineFragment(pendingHash)
+    if (!r) return
+    const st = useCodeStore.getState()
+    st.setAnchor(null)
+    if (r.start > lines.length) return
+    const range = { start: r.start, end: Math.min(r.end, lines.length) }
+    baseLine.current = range.start
+    st.setLineSel(range)
+    const span = range.end - range.start
+    v.scrollToIndex(span <= 20 ? range.start - 1 + Math.floor(span / 2) : range.start - 1, { align: 'center' })
+    // 가상 스크롤러 v 는 렌더마다 바뀔 수 있어 의존하지 않는다
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingHash, lines.length])
+
+  // ── 줄 메뉴(링크·참조 복사) ──
+  const [menu, setMenu] = useState<{ line: number; x: number; y: number } | null>(null)
+  const [gh, setGh] = useState<GhRepoRef | null | undefined>(undefined)
+  const [pushed, setPushed] = useState<boolean | undefined>(undefined)
+  const [copied, setCopied] = useState<'link' | 'ref' | null>(null)
+  const trigger = useRef<HTMLButtonElement | null>(null)
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    let alive = true
+    setGh(undefined)
+    void githubRepoOf(repoId).then((r) => alive && setGh(r))
+    return () => {
+      alive = false
+    }
+  }, [repoId])
+  useEffect(() => () => clearTimeout(timer.current), [])
+
+  const menuLine = menu?.line ?? null
+  const showLink = !!gh
+  useEffect(() => {
+    if (menuLine === null) return
+    ;(itemRefs.current[0] ?? itemRefs.current[1])?.focus()
+    const onDown = (e: MouseEvent): void => {
+      const el = e.target as Element
+      if (!el.closest('.cv-lmenu') && !el.closest('.cv-lbtn')) setMenu(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [menuLine])
+  // 링크 항목이 있을 때만 push 여부를 확인한다(메뉴를 열 때마다. true 만 캐시된다)
+  useEffect(() => {
+    if (menuLine === null || !showLink) return
+    let alive = true
+    setPushed(undefined)
+    void isCommitOnRemote(repoId, rev).then((ok) => alive && setPushed(ok))
+    return () => {
+      alive = false
+    }
+  }, [menuLine, showLink, repoId, rev])
+
+  const closeMenu = (refocus: boolean): void => {
+    clearTimeout(timer.current)
+    setCopied(null)
+    setMenu(null)
+    if (refocus) trigger.current?.focus()
+  }
+  const openMenu = (n: number, btn: HTMLButtonElement): void => {
+    if (menu?.line === n) return closeMenu(false)
+    clearTimeout(timer.current)
+    setCopied(null)
+    trigger.current = btn
+    const wrap = wrapRef.current?.getBoundingClientRect()
+    const b = btn.getBoundingClientRect()
+    if (!wrap) return
+    setMenu({ line: n, x: Math.max(4, Math.min(b.left - wrap.left, wrap.width - MENU_W - 8)), y: b.bottom - wrap.top + 4 })
+  }
+  const range: LineRange | null = menu ? (inRange(sel, menu.line) ? sel : { start: menu.line, end: menu.line }) : null
+  const copy = async (kind: 'link' | 'ref'): Promise<void> => {
+    if (!range) return
+    const text = kind === 'link' && gh ? githubPermalink({ owner: gh.owner, repo: gh.repo, rev, path, range }) : lineReference({ path, rev, range })
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {
+      return
+    }
+    setCopied(kind)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => closeMenu(false), 1500)
+  }
+  const onMenuKey = (e: React.KeyboardEvent): void => {
+    const items = itemRefs.current.filter((x): x is HTMLButtonElement => !!x)
+    const i = items.indexOf(document.activeElement as HTMLButtonElement)
+    const move = (n: number): void => {
+      e.preventDefault()
+      items[(n + items.length) % items.length]?.focus()
+    }
+    if (e.key === 'ArrowDown') move(i + 1)
+    else if (e.key === 'ArrowUp') move(i - 1)
+    else if (e.key === 'Home') move(0)
+    else if (e.key === 'End') move(items.length - 1)
+    else if (e.key === 'Escape' || e.key === 'Tab') {
+      // Esc 는 메뉴만 닫는다(올라가면 코드 화면까지 닫힌다)
+      e.stopPropagation()
+      closeMenu(e.key === 'Escape')
+    }
+  }
+
   return (
-    <div ref={scrollRef} className="diff-scroll cv-code">
-      <div style={{ height: v.getTotalSize(), position: 'relative', minWidth: `calc(${widest + 2}ch + ${numWidth + 3}ch)` }}>
-        {v.getVirtualItems().map((vi) => (
-          <div key={vi.key} className="diff-slot" style={{ transform: `translateY(${vi.start}px)`, height: ROW_H }}>
-            <div className="cv-row" style={{ gridTemplateColumns: `${numWidth + 3}ch 1fr` }}>
-              <span className="diff-no">{vi.index + 1}</span>
-              <span className="diff-code" dangerouslySetInnerHTML={{ __html: codeHtml(lines[vi.index]!, undefined, hl) }} />
-            </div>
-          </div>
-        ))}
+    <div ref={wrapRef} className="cv-codewrap">
+      <div ref={scrollRef} className="diff-scroll cv-code" onScroll={() => menu && closeMenu(false)}>
+        <div style={{ height: v.getTotalSize(), position: 'relative', minWidth: `calc(${widest + 2}ch + ${gutter})` }}>
+          {v.getVirtualItems().map((vi) => {
+            const n = vi.index + 1
+            const on = inRange(sel, n)
+            return (
+              <div key={vi.key} className="diff-slot" style={{ transform: `translateY(${vi.start}px)`, height: ROW_H }}>
+                <div className={`cv-row${on ? ' is-sel' : ''}${sel?.start === n ? ' is-sel-first' : ''}${menu?.line === n ? ' is-menu' : ''}`} style={{ gridTemplateColumns: `${gutter} 1fr` }}>
+                  <span
+                    className="diff-no"
+                    onMouseDown={(e) => {
+                      if (e.shiftKey) e.preventDefault() // Shift+클릭이 글자 선택을 늘리지 않게
+                    }}
+                    onClick={(e) => onNumberClick(n, e.shiftKey)}
+                  >
+                    <button
+                      type="button"
+                      className="cv-lbtn"
+                      aria-label={`${t('code.lineMenu')} (${t('code.lineN', { n })})`}
+                      aria-haspopup="menu"
+                      aria-expanded={menu?.line === n}
+                      tabIndex={sel?.start === n ? 0 : -1}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openMenu(n, e.currentTarget)
+                      }}
+                    >
+                      <IconMore size={12} />
+                    </button>
+                    {n}
+                  </span>
+                  <span className="diff-code" dangerouslySetInnerHTML={{ __html: codeHtml(lines[vi.index]!, undefined, hl) }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
+      {menu && range && (
+        <div className="cv-lmenu" role="menu" style={{ left: menu.x, top: menu.y, width: MENU_W }} aria-label={t('code.lineMenu')} onKeyDown={onMenuKey}>
+          <div className="cv-lmenu__title">{range.start === range.end ? t('code.lineN', { n: range.start }) : t('code.linesN', { a: range.start, b: range.end })}</div>
+          {showLink && (
+            <button
+              ref={(el) => {
+                itemRefs.current[0] = el
+              }}
+              role="menuitem"
+              className="cv-lmenu__item"
+              onClick={() => void copy('link')}
+            >
+              <span className="cv-lmenu__icon">{copied === 'link' ? <IconCheck size={13} /> : <IconCopy size={13} />}</span>
+              <span>{copied === 'link' ? t('code.copied') : t('code.copyLineLink')}</span>
+            </button>
+          )}
+          {showLink && pushed === false && (
+            <div className="cv-lmenu__warn" role="note">
+              {t('code.notOnRemote')}
+            </div>
+          )}
+          <button
+            ref={(el) => {
+              itemRefs.current[1] = el
+            }}
+            role="menuitem"
+            className="cv-lmenu__item"
+            onClick={() => void copy('ref')}
+          >
+            <span className="cv-lmenu__icon">{copied === 'ref' ? <IconCheck size={13} /> : <IconCopy size={13} />}</span>
+            <span>{copied === 'ref' ? t('code.copied') : t('code.copyReference')}</span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

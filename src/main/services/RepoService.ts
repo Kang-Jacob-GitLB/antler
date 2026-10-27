@@ -200,6 +200,8 @@ export class RepoService {
   private readonly pathLocks = new Map<string, Promise<void>>()
   /** 커밋 활동 집계 캐시: 저장소+ref 별로 ref 시그니처와 함께 보관한다(시그니처가 같으면 이력이 같다) */
   private readonly activityCache = new Map<string, { sig: string; value: CommitActivity }>()
+  /** git:onRemote 가 true 였던 (저장소, 커밋) — 원격 ref 가 사라질 수 있지만 경고용이라 허용 */
+  private readonly onRemoteYes = new Set<string>()
   private readonly ghRepoCache = new Map<string, { at: number; value: GhRepoRef | null }>()
   private readonly ghRemotesCache = new Map<string, { at: number; value: GhRepoRef[] }>()
   /** 활성화됐지만 첫 로그 페이지가 아직 안 나간 저장소의 문(열리면 목록에서 빠진다) */
@@ -900,6 +902,22 @@ export class RepoService {
       const result = await rt.queue.run(() => codeBrowse.readBlob(rt.exec, repo.path, req, opts), opts)
       if (key && result.kind !== 'missing') this.blobCache.set(key, result, (result.text?.length ?? 0) * 2 + (result.dataUrl?.length ?? 0) + 1024)
       return result
+    })
+  }
+
+  /** 코드 탐색기 줄 링크: 커밋이 원격에 있는지. GitHub 원격 전용 저장소는 항상 true. fetch 로 바뀔 수 있어 true 만 캐시한다 */
+  codeOnRemote(repoId: string, rev: string): Promise<boolean> {
+    const { repo, rt } = this.resolve(repoId)
+    if (this.isGithub(repoId)) return Promise.resolve(true)
+    const key = typeof rev === 'string' ? `${repoId}:${rev.toLowerCase()}` : null
+    if (key && this.onRemoteYes.has(key)) return Promise.resolve(true)
+    return rt.queue.run(async () => {
+      const ok = await codeBrowse.isOnRemote(rt.exec, repo.path, rev)
+      if (ok && key) {
+        if (this.onRemoteYes.size >= 2000) this.onRemoteYes.clear()
+        this.onRemoteYes.add(key)
+      }
+      return ok
     })
   }
 

@@ -91,6 +91,32 @@ describe('코드 탐색기 (실제 저장소)', { timeout: 60_000 }, () => {
     })
   })
 
+  describe('onRemote (줄 링크 push 여부)', () => {
+    it('원격 추적 ref 에 든 커밋만 true, 로컬 전용 커밋은 false', async () => {
+      const child = git('commit-tree', `${head}^{tree}`, '-p', head, '-m', 'local only')
+      try {
+        const { svc, repoId } = setup()
+        expect(await svc.codeOnRemote(repoId, head)).toBe(false)
+        git('update-ref', 'refs/remotes/origin/main', head)
+        expect(await svc.codeOnRemote(repoId, head)).toBe(true)
+        expect(await svc.codeOnRemote(repoId, head.toUpperCase())).toBe(true)
+        // 원격 tip 의 자식(아직 push 안 한 커밋)은 false
+        expect(await svc.codeOnRemote(repoId, child)).toBe(false)
+        // 존재하지 않는 커밋도 false(오류 아님)
+        expect(await svc.codeOnRemote(repoId, 'd'.repeat(40))).toBe(false)
+      } finally {
+        git('update-ref', '-d', 'refs/remotes/origin/main')
+      }
+    })
+
+    it('짧은 해시·옵션 모양·비문자열은 거부한다', async () => {
+      const { svc, repoId } = setup()
+      for (const bad of [head.slice(0, 12), '--all', '--contains=x', `${head}x`, '', 'HEAD', 'refs/heads/main', 5 as unknown as string]) {
+        await expect(svc.codeOnRemote(repoId, bad)).rejects.toThrow()
+      }
+    })
+  })
+
   describe('트리', () => {
     it('최상위: 디렉터리 먼저, 이름순(대소문자 무시), 종류·모드를 구분한다', async () => {
       const { svc, repoId } = setup()

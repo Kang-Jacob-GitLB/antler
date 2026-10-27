@@ -191,3 +191,13 @@ export async function readBlob(exec: GitExecutor, repoPath: string, req: CodeBlo
   }
   return { rev, path, kind: 'text', size, text, ...(invalidUtf8 ? { invalidUtf8: true } : {}) }
 }
+
+/**
+ * 커밋이 원격 추적 ref(refs/remotes/) 중 하나에 들어 있는가(= push 된 커밋인가). 줄 링크 경고용이다.
+ * rev 는 40·64자 hex 만 받으므로 `--contains` 인자가 옵션으로 해석될 수 없다. 커밋이 로컬에 없으면 false.
+ */
+export async function isOnRemote(exec: GitExecutor, repoPath: string, rev: unknown, opts?: RunOpts): Promise<boolean> {
+  assertCommitId(rev)
+  const r = await exec.run(repoPath, ['for-each-ref', '--count=1', '--contains', rev.toLowerCase(), '--format=%(refname)', 'refs/remotes/'], opts)
+  return r.code === 0 && r.stdout.toString('utf8').trim() !== ''
+}

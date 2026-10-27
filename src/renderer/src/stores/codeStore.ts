@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CodeBlobResult, CodeTreeEntry } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { parseLineFragment, type LineRange } from '../lib/lineLink'
 import { clearRepoImageCache } from '../lib/readmeImages'
 import { useDetailStore } from './detailStore'
 import { useFileViewStore } from './fileViewStore'
@@ -62,6 +63,8 @@ interface CodeState {
   mdCode: boolean
   /** 문서를 연 뒤 스크롤할 #앵커(MarkdownDoc 가 처리하고 비운다) */
   anchor: string | null
+  /** 코드 뷰어에서 고른 줄 범위(파일·리비전이 바뀌면 해제) */
+  lineSel: LineRange | null
   /** 요청한 경로가 이 시점에 없어 가까운 폴더로 물러났다는 안내 */
   missingPath: string | null
 
@@ -78,6 +81,7 @@ interface CodeState {
   collapseDir(path: string): void
   setMdCode(v: boolean): void
   setAnchor(a: string | null): void
+  setLineSel(r: LineRange | null): void
 }
 
 const README_NAMES = ['readme.md', 'readme.markdown', 'readme']
@@ -112,6 +116,7 @@ const INITIAL = {
   readme: null,
   mdCode: false,
   anchor: null,
+  lineSel: null,
   missingPath: null
 } satisfies Partial<CodeState>
 
@@ -242,6 +247,7 @@ export const useCodeStore = create<CodeState>((set, get) => {
       readme: null,
       mdCode: false,
       anchor: null,
+      lineSel: null,
       missingPath: null,
       expanded: path ? withSet(s.expanded, (n) => n.add(path)) : s.expanded
     }))
@@ -267,7 +273,7 @@ export const useCodeStore = create<CodeState>((set, get) => {
       const expanded = withSet(s.expanded, (n) => {
         for (let d = parentOf(path); d; d = parentOf(d)) n.add(d)
       })
-      return { path, kind: 'file', blob: null, blobLoading: true, blobError: null, readme: null, mdCode: false, anchor: null, missingPath: null, expanded }
+      return { path, kind: 'file', blob: null, blobLoading: true, blobError: null, readme: null, mdCode: false, anchor: null, lineSel: null, missingPath: null, expanded }
     })
     try {
       const blob = await api.invoke('git:blob', repoId, { rev, path }, id)
@@ -280,6 +286,12 @@ export const useCodeStore = create<CodeState>((set, get) => {
       pending.delete(id)
       if (blobReq === id) blobReq = null
     }
+  }
+
+  /** 파일을 연 뒤 #조각 처리: #L10 류는 마크다운도 원문(코드) 보기로 열어 그 줄을 고른다 */
+  function applyHash(path: string, hash: string | undefined): void {
+    if (hash && parseLineFragment(hash) && isMarkdownPath(path)) set({ anchor: hash, mdCode: true })
+    else set({ anchor: hash ?? null })
   }
 
   async function resolveAndShow(ref: string, path: string): Promise<void> {
@@ -355,7 +367,8 @@ export const useCodeStore = create<CodeState>((set, get) => {
         blobError: null,
         readme: null,
         missingPath: null,
-        anchor: null
+        anchor: null,
+        lineSel: null
       })
       void resolveAndShow(ref, path)
     },
@@ -376,7 +389,7 @@ export const useCodeStore = create<CodeState>((set, get) => {
       // 이미 보고 있는 파일이면 앵커만
       const cur = get()
       if (cur.kind === 'file' && cur.path === path && cur.blob) {
-        set({ anchor: hash ?? null })
+        applyHash(path, hash)
         return
       }
       const parts = path.split('/')
@@ -399,7 +412,7 @@ export const useCodeStore = create<CodeState>((set, get) => {
           else if (entry.kind === 'submodule') return fallback()
           else {
             await showFile(path, nav)
-            if (hash && !stale()) set({ anchor: hash })
+            if (hash && !stale()) applyHash(path, hash)
           }
           return
         }
@@ -437,6 +450,10 @@ export const useCodeStore = create<CodeState>((set, get) => {
 
     setAnchor(a) {
       set({ anchor: a })
+    },
+
+    setLineSel(r) {
+      set({ lineSel: r })
     }
   }
 })
