@@ -58,6 +58,25 @@
 
 ![나란히 보기 diff](docs/images/diff.png)
 
+## 코드 탐색기
+
+툴바의 `</>` 버튼(`Ctrl/Cmd+Shift+E`)으로 GitHub 의 Code 탭처럼 저장소 파일을 둘러본다. 커밋 상세나 사이드바의 브랜치·태그 우클릭에서
+그 시점의 코드를 열 수 있고, 머리줄에서 브랜치·태그를 바꾼다.
+
+- 폴더를 열면 항목 목록 아래에 그 폴더의 README 가 GitHub 처럼 렌더링된다(표·작업 목록·코드블록 강조·저장소 안 이미지·상대 링크).
+- 파일은 문법 강조와 줄 번호로 보고, `.md` 는 미리보기와 코드를 오간다. 이미지는 그림으로, LFS·바이너리는 안내 카드로 보인다.
+- **줄 링크**: 줄 번호(또는 `⋯`)를 누르고 `Shift`+클릭·드래그로 범위를 고른 뒤 GitHub permalink(`#L10-L20`)나
+  코드블록(경로·줄·커밋 머리말 포함)을 복사한다. 아직 push 하지 않은 커밋이면 알려 준다.
+
+![코드 탐색기와 README](docs/images/code.png)
+
+<details>
+<summary>줄 범위 선택과 복사 메뉴</summary>
+
+![줄 링크](docs/images/code-lines.png)
+
+</details>
+
 ## 파일 히스토리 · Blame
 
 변경 파일에 마우스를 올리면 나오는 버튼으로 그 파일의 **히스토리**와 **Blame** 을 연다.
@@ -133,6 +152,7 @@ origin 이 GitHub 저장소면 사이드바에 PR·이슈가 나타난다. PR �
 |---|---|
 | `Ctrl/Cmd+Shift+P` | 명령 팔레트 |
 | `Ctrl/Cmd+P` | 저장소 전환 |
+| `Ctrl/Cmd+Shift+E` | 코드 탐색기 열기·닫기 |
 | `Ctrl/Cmd+/` | 단축키 목록 |
 | `Ctrl/Cmd+F` | 커밋 검색 (`Enter` / `Shift+Enter` 다음·이전) |
 | `↑` `↓` `PageUp` `PageDown` `Home` `End` | 커밋 이동 |

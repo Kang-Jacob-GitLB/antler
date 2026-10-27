@@ -14,7 +14,8 @@ src/
                ssh/(config·connection·knownHosts·quote), processRunner, ProcessQueue(동시성 제한+dedupe)
     git/       commands(refs·search·logArgs), logCursor, parsers/(log, refs, worktree, stash, commit, changes, diff, nulRecords),
                fetch(설정 허용 목록 검사), wip(작업 트리 상태), activity(미니맵), fileInsight(파일 히스토리·blame·LFS),
-               repoExtras(LFS·Gitflow·서브모듈), defaultBranch, githubCache(GitHub 원격 전용 저장소)
+               repoExtras(LFS·Gitflow·서브모듈), defaultBranch, githubCache(GitHub 원격 전용 저장소),
+               codeBrowse(코드 탐색기: ls-tree·cat-file blob·rev 해석·push 여부)
     github/    api, client(ETag 캐시), deviceFlow, tokenStore, ghCli(CLI 로그인 가져오기), remoteUrl, service, validate,
                accessibleRepos, avatars, checks, launchpad, devFake(개발용 가짜 응답)
     jira/      api, client, service, validate, adf(Atlassian 문서 형식 변환)
@@ -26,7 +27,7 @@ src/
   preload/     window.antler — 허용 목록 채널만 노출
   renderer/src/
     components/   Toolbar, Sidebar, CommitList, GraphCanvas, DetailPanel(+두 커밋 비교), DiffView, FileView(히스토리·Blame),
-                  CommandPalette, ShortcutsDialog, CommitMinimap, WipGraph·WipPanel, RepoSwitcher, SearchBar, AddRepoDialog,
+                  CodeView·MarkdownDoc(코드 탐색기·GitHub 식 마크다운), CommandPalette, ShortcutsDialog, CommitMinimap, WipGraph·WipPanel, RepoSwitcher, SearchBar, AddRepoDialog,
                   SettingsDialog, ExternalMenu, LfsBadge·FlowBadge, UpdateSnackbar …
     components/github/     GitHubView, GhAuthButton, GhBits, 체크 목록
     components/jira/       JiraWorkspace, JiraView(목록·칸반), JiraConnectDialog, JiraDevPanel, worklog/(캘린더·리포트)
@@ -35,7 +36,7 @@ src/
                   compareStore, fileViewStore, githubStore, launchpadStore, jiraStore·jiraWorklogStore, wipStore, fetchStore,
                   paletteStore, searchStore …
     lib/          commands(명령 레지스트리 — 팔레트·단축키 목록·전역 단축키의 단일 출처), fuzzy·commandFilter, shortcuts,
-                  sanitize, markdown, format, laneColor, api …
+                  sanitize, markdown, readme(문서 렌더·slug·상대 경로), lineLink(줄 링크), clipboard, format, laneColor, api …
     graph/        lanes.ts(레인 계산, 순수 함수), graphEngine.ts(worker 결과 보관)
     diff/         patch.ts(파싱), diffRows.ts(unified/split 행), highlight.ts(지연 로드)
     workers/      laneWorker.ts

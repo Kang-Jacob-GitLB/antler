@@ -34,6 +34,7 @@ PR 필수 체크(`build.yml`)는 위 typecheck · test · build · check-contras
   (리뷰마다 우회돼 폐기한 방식이다). 자세한 이유는 docs/security.md.
 - 저장소 내용(코드·커밋)을 외부 서비스로 보내는 기능은 넣지 않는다(예: AI 커밋 설명).
 - 토큰은 main 프로세스에만 두고 renderer 로 넘기지 않는다.
+- 저장소 내용을 읽는 git 호출은 textconv·필터가 돌지 않는 형태만 쓴다(파일 내용은 `cat-file blob`, `git show` 금지 — `src/main/git/codeBrowse.ts`).
 
 ## 코드 규약
 
@@ -41,6 +42,7 @@ PR 필수 체크(`build.yml`)는 위 typecheck · test · build · check-contras
 - main 은 renderer 가 보낸 모든 입력(경로·해시·ref 등)을 검증한다. git 호출은 `GitExecutor` 를 거친다.
 - 명령·단축키는 `src/renderer/src/lib/commands.ts` 한 곳에서 정의한다(팔레트·단축키 목록·전역 단축키가 모두 여기서 나온다).
 - 문구는 `src/renderer/src/i18n/` 의 ko · en 둘 다 추가한다.
+- 클립보드 복사는 `lib/clipboard.ts` 의 `copyText` 를 쓴다. 앱이 권한 요청을 모두 거부해 `navigator.clipboard` 는 조용히 실패한다.
 - 스타일: 컴포넌트 CSS 에 색을 하드코딩하지 않고 semantic 토큰(`styles/tokens.css`)만 쓴다. 대화상자 입력칸은 공통 `.field__input` 을 쓴다.
   디자인은 평면(Fork/GitKraken식)이다. UI 동작이 애매하면 GitKraken 을 기준으로 한다.
 - 테스트는 `tests/setup.ts`·`tests/globalSetup.ts` 가 `GIT_CONFIG_GLOBAL` 등을 격리한다. git 을 실행하는 테스트도 이 격리를 우회하지 않는다.
