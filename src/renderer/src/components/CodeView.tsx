@@ -4,7 +4,8 @@ import type { CodeBlobResult, CodeTreeEntry, GhRepoRef } from '@shared/types'
 import { useT, type MessageKey } from '../i18n'
 import { copyText } from '../lib/clipboard'
 import { formatBytes } from '../lib/format'
-import { githubPermalink, inRange, lineReference, normalizeRange, parseLineFragment, type LineRange } from '../lib/lineLink'
+import { languageFor } from '../diff/highlight'
+import { codeSnippet, githubPermalink, inRange, normalizeRange, parseLineFragment, type LineRange } from '../lib/lineLink'
 import { githubRepoOf, isCommitOnRemote } from '../lib/lineLinkInfo'
 import { useActiveRepo, useAppStore } from '../stores/appStore'
 import { isMarkdownPath, refLabel, shortRev, useCodeStore } from '../stores/codeStore'
@@ -677,6 +678,70 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
     }
   }
 
+  // ── 줄 번호 드래그: 누른 줄이 시작, 마우스 아래의 줄이 끝. 위·아래 가장자리에서는 자동 스크롤 ──
+  const [dragging, setDragging] = useState(false)
+  const suppressClick = useRef(false)
+  const stopDrag = useRef<(() => void) | null>(null)
+  useEffect(() => () => stopDrag.current?.(), [])
+
+  const startDrag = (e: React.MouseEvent, n: number): void => {
+    if (e.shiftKey) {
+      e.preventDefault() // Shift+클릭이 글자 선택을 늘리지 않게
+      return
+    }
+    if (e.button !== 0 || (e.target as Element).closest('.cv-lbtn')) return
+    const box = scrollRef.current
+    if (!box) return
+    e.preventDefault() // 본문 글자 선택이 시작되지 않게
+    window.getSelection()?.removeAllRanges()
+    stopDrag.current?.()
+    const EDGE = 36
+    let y = e.clientY
+    let moved = false
+    let raf = 0
+    const lineAt = (): number => {
+      const r = box.getBoundingClientRect()
+      const idx = Math.floor((y - r.top + box.scrollTop) / ROW_H)
+      return Math.max(1, Math.min(lines.length, idx + 1))
+    }
+    const update = (): void => {
+      const cur = lineAt()
+      if (!moved && cur === n) return // 아직 같은 줄: 단순 클릭일 수 있다
+      moved = true
+      baseLine.current = n
+      useCodeStore.getState().setLineSel(normalizeRange(n, cur))
+    }
+    const tick = (): void => {
+      const r = box.getBoundingClientRect()
+      const dy = y < r.top + EDGE ? y - (r.top + EDGE) : y > r.bottom - EDGE ? y - (r.bottom - EDGE) : 0
+      if (dy !== 0) {
+        box.scrollTop += Math.max(-40, Math.min(40, dy / 2))
+        update()
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    const onMove = (ev: MouseEvent): void => {
+      y = ev.clientY
+      update()
+    }
+    const end = (): void => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', end)
+      cancelAnimationFrame(raf)
+      stopDrag.current = null
+      setDragging(false)
+      if (moved) {
+        suppressClick.current = true
+        setTimeout(() => (suppressClick.current = false), 0) // 뒤따르는 click 만 막는다
+      }
+    }
+    stopDrag.current = end
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', end)
+    setDragging(true)
+    raf = requestAnimationFrame(tick)
+  }
+
   // #L10 · #L10-L20 로 열렸으면 그 줄을 고르고 가운데쯤으로 스크롤한다
   useEffect(() => {
     const r = parseLineFragment(pendingHash)
@@ -697,7 +762,7 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
   const [menu, setMenu] = useState<{ line: number; x: number; y: number } | null>(null)
   const [gh, setGh] = useState<GhRepoRef | null | undefined>(undefined)
   const [pushed, setPushed] = useState<boolean | undefined>(undefined)
-  const [copied, setCopied] = useState<'link' | 'ref' | null>(null)
+  const [copied, setCopied] = useState<'link' | 'code' | null>(null)
   const trigger = useRef<HTMLButtonElement | null>(null)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -752,9 +817,9 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
     setMenu({ line: n, x: Math.max(4, Math.min(b.left - wrap.left, wrap.width - MENU_W - 8)), y: b.bottom - wrap.top + 4 })
   }
   const range: LineRange | null = menu ? (inRange(sel, menu.line) ? sel : { start: menu.line, end: menu.line }) : null
-  const copy = async (kind: 'link' | 'ref'): Promise<void> => {
+  const copy = async (kind: 'link' | 'code'): Promise<void> => {
     if (!range) return
-    const text = kind === 'link' && gh ? githubPermalink({ owner: gh.owner, repo: gh.repo, rev, path, range }) : lineReference({ path, rev, range })
+    const text = kind === 'link' && gh ? githubPermalink({ owner: gh.owner, repo: gh.repo, rev, path, range }) : codeSnippet({ path, rev, range, lines, lang: languageFor(path) })
     try {
       await copyText(text)
     } catch {
@@ -784,7 +849,7 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
 
   return (
     <div ref={wrapRef} className="cv-codewrap">
-      <div ref={scrollRef} className="diff-scroll cv-code" onScroll={() => menu && closeMenu(false)}>
+      <div ref={scrollRef} className={`diff-scroll cv-code${dragging ? ' is-dragging' : ''}`} onScroll={() => menu && closeMenu(false)}>
         <div style={{ height: v.getTotalSize(), position: 'relative', minWidth: `calc(${widest + 2}ch + ${gutter})` }}>
           {v.getVirtualItems().map((vi) => {
             const n = vi.index + 1
@@ -794,10 +859,12 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
                 <div className={`cv-row${on ? ' is-sel' : ''}${sel?.start === n ? ' is-sel-first' : ''}${menu?.line === n ? ' is-menu' : ''}`} style={{ gridTemplateColumns: `${gutter} 1fr` }}>
                   <span
                     className="diff-no"
-                    onMouseDown={(e) => {
-                      if (e.shiftKey) e.preventDefault() // Shift+클릭이 글자 선택을 늘리지 않게
+                    title={t('code.rangeHint')}
+                    onMouseDown={(e) => startDrag(e, n)}
+                    onClick={(e) => {
+                      if (suppressClick.current) return // 드래그로 범위를 고른 뒤의 click 은 무시
+                      onNumberClick(n, e.shiftKey)
                     }}
-                    onClick={(e) => onNumberClick(n, e.shiftKey)}
                   >
                     <button
                       type="button"
@@ -825,6 +892,7 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
       {menu && range && (
         <div className="cv-lmenu" role="menu" style={{ left: menu.x, top: menu.y, width: MENU_W }} aria-label={t('code.lineMenu')} onKeyDown={onMenuKey}>
           <div className="cv-lmenu__title">{range.start === range.end ? t('code.lineN', { n: range.start }) : t('code.linesN', { a: range.start, b: range.end })}</div>
+          <div className="cv-lmenu__hint">{t('code.rangeHint')}</div>
           {showLink && (
             <button
               ref={(el) => {
@@ -849,10 +917,10 @@ function CodeText({ repoId, rev, lines, path }: { repoId: string; rev: string; l
             }}
             role="menuitem"
             className="cv-lmenu__item"
-            onClick={() => void copy('ref')}
+            onClick={() => void copy('code')}
           >
-            <span className="cv-lmenu__icon">{copied === 'ref' ? <IconCheck size={13} /> : <IconCopy size={13} />}</span>
-            <span>{copied === 'ref' ? t('code.copied') : t('code.copyReference')}</span>
+            <span className="cv-lmenu__icon">{copied === 'code' ? <IconCheck size={13} /> : <IconCopy size={13} />}</span>
+            <span>{copied === 'code' ? t('code.copied') : t('code.copyCode')}</span>
           </button>
         </div>
       )}

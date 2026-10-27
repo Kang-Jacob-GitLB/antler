@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { encodePath, githubPermalink, inRange, lineFragment, lineReference, normalizeRange, parseLineFragment } from '../src/renderer/src/lib/lineLink'
+import { encodePath, githubPermalink, inRange, lineFragment, codeSnippet, normalizeRange, parseLineFragment } from '../src/renderer/src/lib/lineLink'
 
 const REV = 'a'.repeat(40)
 
@@ -28,9 +28,21 @@ describe('줄 링크 순수 함수', () => {
     expect(githubPermalink({ owner: 'o', repo: 'r', rev: REV, path: 'x.ts', range: normalizeRange(20, 10) })).toBe(`https://github.com/o/r/blob/${REV}/x.ts#L10-L20`)
   })
 
-  it('참조 문자열', () => {
-    expect(lineReference({ path: 'src/a.ts', rev: REV, range: { start: 10, end: 20 } })).toBe('src/a.ts:10-20 @ aaaaaaa')
-    expect(lineReference({ path: 'src/a.ts', rev: REV, range: { start: 7, end: 7 } })).toBe('src/a.ts:7 @ aaaaaaa')
+  it('코드 복사: 단일 줄·범위·언어', () => {
+    const lines = ['a', 'b', 'c', 'd']
+    expect(codeSnippet({ path: 'src/a.ts', rev: REV, range: { start: 2, end: 2 }, lines, lang: 'typescript' })).toBe('src/a.ts:2 @ aaaaaaa\n```typescript\nb\n```')
+    expect(codeSnippet({ path: 'src/a.ts', rev: REV, range: { start: 2, end: 3 }, lines, lang: 'typescript' })).toBe('src/a.ts:2-3 @ aaaaaaa\n```typescript\nb\nc\n```')
+  })
+
+  it('코드 복사: 언어가 없으면 펜스 이름이 비고, 범위가 파일 끝을 넘으면 자른다', () => {
+    expect(codeSnippet({ path: 'Makefile2', rev: REV, range: { start: 3, end: 99 }, lines: ['a', 'b', 'c', 'd'], lang: null })).toBe('Makefile2:3-4 @ aaaaaaa\n```\nc\nd\n```')
+    expect(codeSnippet({ path: 'x', rev: REV, range: { start: 4, end: 9 }, lines: ['a', 'b', 'c', 'd'] })).toBe('x:4 @ aaaaaaa\n```\nd\n```')
+  })
+
+  it('코드 복사: 코드에 백틱 펜스가 있으면 바깥 펜스를 늘린다', () => {
+    const lines = ['```js', 'x', '```']
+    expect(codeSnippet({ path: 'a.md', rev: REV, range: { start: 1, end: 3 }, lines, lang: 'markdown' })).toBe('a.md:1-3 @ aaaaaaa\n````markdown\n```js\nx\n```\n````')
+    expect(codeSnippet({ path: 'a.md', rev: REV, range: { start: 1, end: 1 }, lines: ['````'], lang: null })).toBe('a.md:1 @ aaaaaaa\n`````\n````\n`````')
   })
 
   it('#L 조각 해석', () => {

@@ -1,4 +1,4 @@
-// 코드 뷰어 줄 링크: GitHub permalink · 참조 문자열 · #L10-L20 조각 해석(순수 함수)
+// 코드 뷰어 줄 링크: GitHub permalink · 코드 복사 문자열 · #L10-L20 조각 해석(순수 함수)
 
 /** 1부터 세는 줄 범위(양끝 포함, start <= end) */
 export interface LineRange {
@@ -28,10 +28,19 @@ export function githubPermalink(o: { owner: string; repo: string; rev: string; p
   return `https://github.com/${encodeURIComponent(o.owner)}/${encodeURIComponent(o.repo)}/blob/${o.rev}/${encodePath(o.path)}#${lineFragment(o.range)}`
 }
 
-/** `경로:10-20 @ 짧은해시` (한 줄이면 `경로:10`) */
-export function lineReference(o: { path: string; rev: string; range: LineRange }): string {
-  const r = o.range
-  return `${o.path}:${r.start === r.end ? r.start : `${r.start}-${r.end}`} @ ${o.rev.slice(0, 7)}`
+/**
+ * 코드 복사 문자열: `경로:10-20 @ 짧은해시` 머리글 + 코드 펜스(한 줄이면 `경로:10`).
+ * lines 는 파일 전체 줄이고, 범위가 파일 끝을 넘으면 끝에서 자른다. 코드에 ``` 가 있으면 바깥 펜스를 더 길게 한다
+ */
+export function codeSnippet(o: { path: string; rev: string; range: LineRange; lines: string[]; lang?: string | null }): string {
+  const start = Math.max(1, o.range.start)
+  const end = Math.min(o.range.end, o.lines.length)
+  const code = o.lines.slice(start - 1, Math.max(start - 1, end)).join('\n')
+  const last = Math.max(start, end)
+  const head = `${o.path}:${start === last ? start : `${start}-${last}`} @ ${o.rev.slice(0, 7)}`
+  const longest = Math.max(0, ...(code.match(/`+/g) ?? []).map((r) => r.length))
+  const fence = '`'.repeat(Math.max(3, longest + 1))
+  return `${head}\n${fence}${o.lang ?? ''}\n${code}\n${fence}`
 }
 
 /** `#L10` · `#L10-L20` · `L20-L10`(뒤집힘) · GitHub 의 `L10C2-L12C5`(열은 무시)를 줄 범위로. 아니면 null */

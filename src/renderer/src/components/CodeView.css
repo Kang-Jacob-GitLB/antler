@@ -535,6 +535,18 @@ button.code-crumb:hover {
   text-transform: uppercase;
   color: var(--text-muted);
 }
+.cv-lmenu__hint {
+  padding: 0 10px 6px;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+}
+/* 줄 번호를 끌어 범위를 고르는 동안은 본문 글자가 선택되지 않게 한다 */
+.cv-code.is-dragging,
+.cv-code.is-dragging .cv-row {
+  user-select: none;
+  cursor: pointer;
+}
 .cv-lmenu__item {
   display: flex;
   align-items: center;
