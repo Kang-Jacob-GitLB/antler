@@ -3,6 +3,7 @@ import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { BrowserWindow, dialog, shell } from 'electron'
 import type { ExternalAction } from '@shared/types'
 import { ExternalOpener, checkChosenExe, type OpenerDeps } from '../external/opener'
+import { allowedLinkUrl } from '../external/link'
 import type { Target } from '../external/plan'
 import type { ConfigStore } from '../services/ConfigStore'
 import type { IpcHandle } from './github'
@@ -38,6 +39,13 @@ export function registerExternalIpc(handle: IpcHandle, config: ConfigStore, open
           ? { kind: 'ssh', root: repo.path, host: source.sshHost ?? '' }
           : { kind: 'local', root: repo.path }
     await opener.open(target, req.action, req.path, config.get().ui)
+  })
+
+  // 저장소 문서(README 등)의 외부 링크. https 이고 자격 증명이 없는 주소만 기본 브라우저로 연다
+  handle('code:openLink', async (_e, url) => {
+    const href = allowedLinkUrl(url)
+    if (!href) throw new Error('https 주소만 열 수 있습니다')
+    await shell.openExternal(href)
   })
 
   handle('external:pickEditorExe', async (e) => {

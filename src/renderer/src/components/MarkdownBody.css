@@ -1,0 +1,337 @@
+/* 저장소 문서(README·*.md)의 GitHub 마크다운 스타일. semantic 토큰만 쓴다(다크·라이트는 토큰이 바꾼다) */
+.markdown-body {
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+.markdown-body > :first-child {
+  margin-top: 0 !important;
+}
+.markdown-body > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* ── 제목 ── */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  position: relative;
+  margin: 24px 0 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.markdown-body h1 {
+  font-size: 2em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.markdown-body h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.markdown-body h3 {
+  font-size: 1.25em;
+}
+.markdown-body h4 {
+  font-size: 1em;
+}
+.markdown-body h5 {
+  font-size: 0.875em;
+}
+.markdown-body h6 {
+  font-size: 0.85em;
+  color: var(--text-secondary);
+}
+/* hover 하면 왼쪽에 나타나는 앵커 */
+.markdown-body a.anchor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -24px;
+  display: inline-flex;
+  align-items: center;
+  width: 20px;
+  justify-content: center;
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: pointer;
+}
+.markdown-body :is(h1, h2, h3, h4, h5, h6):hover > a.anchor {
+  opacity: 1;
+}
+.markdown-body a.anchor:hover {
+  color: var(--accent-text);
+}
+
+/* ── 본문 덩어리 ── */
+.markdown-body p,
+.markdown-body blockquote,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body dl,
+.markdown-body table,
+.markdown-body pre,
+.markdown-body details {
+  margin: 0 0 16px;
+}
+.markdown-body hr {
+  height: 0;
+  margin: 24px 0;
+  padding: 0;
+  border: 0;
+  border-top: 4px solid var(--border);
+}
+.markdown-body [data-href] {
+  color: var(--accent-text);
+  text-decoration: none;
+  cursor: pointer;
+}
+.markdown-body [data-href]:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body strong,
+.markdown-body th {
+  font-weight: 600;
+}
+.markdown-body del,
+.markdown-body s,
+.markdown-body strike {
+  color: var(--text-secondary);
+}
+.markdown-body mark {
+  background: var(--accent-soft);
+  color: inherit;
+}
+.markdown-body sub,
+.markdown-body sup {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+/* ── 목록 ── */
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 2em;
+}
+.markdown-body ul {
+  list-style: disc;
+}
+.markdown-body ul ul {
+  list-style: circle;
+}
+.markdown-body ul ul ul {
+  list-style: square;
+}
+.markdown-body ol {
+  list-style: decimal;
+}
+.markdown-body ol ol {
+  list-style: lower-alpha;
+}
+.markdown-body ol ol ol {
+  list-style: lower-roman;
+}
+.markdown-body li > p {
+  margin-top: 16px;
+}
+.markdown-body li + li {
+  margin-top: 0.25em;
+}
+.markdown-body li > :is(ul, ol),
+.markdown-body li > p:last-child,
+.markdown-body li > pre {
+  margin-bottom: 0;
+}
+.markdown-body li > :is(ul, ol) {
+  margin-top: 0.25em;
+}
+.markdown-body dt {
+  margin-top: 16px;
+  font-weight: 600;
+  font-style: italic;
+}
+.markdown-body dd {
+  margin: 0 0 16px;
+  padding: 0 16px;
+}
+/* 작업 목록: 불릿 없이 체크박스만 */
+.markdown-body ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+.markdown-body ul.contains-task-list ul,
+.markdown-body ul.contains-task-list ol {
+  padding-left: 2em;
+}
+.markdown-body li.task-list-item {
+  list-style: none;
+}
+.markdown-body li.task-list-item > input[type='checkbox'] {
+  margin: 0 0.5em 0.25em 0;
+  vertical-align: middle;
+  accent-color: var(--accent);
+}
+
+/* ── 인용 ── */
+.markdown-body blockquote {
+  padding: 0 1em;
+  border-left: 0.25em solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.markdown-body blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* ── 코드 ── */
+.markdown-body code,
+.markdown-body kbd,
+.markdown-body samp,
+.markdown-body tt {
+  font-family: var(--font-mono);
+  font-size: 85%;
+}
+.markdown-body :not(pre) > code,
+.markdown-body tt {
+  padding: 0.2em 0.4em;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+}
+.markdown-body pre {
+  padding: 16px;
+  overflow: auto;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  font-size: 85%;
+  line-height: 1.45;
+  tab-size: 4;
+}
+.markdown-body pre code {
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 100%;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+.markdown-body kbd {
+  display: inline-block;
+  padding: 3px 5px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  font-size: 11px;
+  line-height: 10px;
+  vertical-align: middle;
+}
+/* highlight.js 토큰 → 디자인 토큰(diff 의 .diff-code 규칙과 같은 색) */
+.markdown-body .hljs-keyword,
+.markdown-body .hljs-selector-tag,
+.markdown-body .hljs-literal,
+.markdown-body .hljs-doctag {
+  color: var(--syn-keyword);
+}
+.markdown-body .hljs-string,
+.markdown-body .hljs-regexp,
+.markdown-body .hljs-template-variable,
+.markdown-body .hljs-addition {
+  color: var(--syn-string);
+}
+.markdown-body .hljs-number,
+.markdown-body .hljs-symbol,
+.markdown-body .hljs-bullet {
+  color: var(--syn-number);
+}
+.markdown-body .hljs-comment,
+.markdown-body .hljs-quote {
+  color: var(--syn-comment);
+  font-style: italic;
+}
+.markdown-body .hljs-title,
+.markdown-body .hljs-section,
+.markdown-body .hljs-selector-id {
+  color: var(--syn-function);
+}
+.markdown-body .hljs-type,
+.markdown-body .hljs-built_in,
+.markdown-body .hljs-title.class_,
+.markdown-body .hljs-selector-class {
+  color: var(--syn-type);
+}
+.markdown-body .hljs-attr,
+.markdown-body .hljs-attribute,
+.markdown-body .hljs-property,
+.markdown-body .hljs-variable,
+.markdown-body .hljs-params,
+.markdown-body .hljs-name {
+  color: var(--syn-attr);
+}
+.markdown-body .hljs-meta,
+.markdown-body .hljs-tag,
+.markdown-body .hljs-punctuation,
+.markdown-body .hljs-operator,
+.markdown-body .hljs-subst {
+  color: var(--syn-meta);
+}
+.markdown-body .hljs-emphasis {
+  font-style: italic;
+}
+.markdown-body .hljs-strong {
+  font-weight: 700;
+}
+
+/* ── 표 ── */
+.markdown-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow: auto;
+  border-spacing: 0;
+  border-collapse: collapse;
+}
+.markdown-body th,
+.markdown-body td {
+  padding: 6px 13px;
+  border: 1px solid var(--border-strong);
+}
+.markdown-body tr {
+  border-top: 1px solid var(--border);
+}
+.markdown-body tbody tr:nth-child(2n) {
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+}
+.markdown-body :is(th, td)[align='center'] {
+  text-align: center;
+}
+.markdown-body :is(th, td)[align='right'] {
+  text-align: right;
+}
+
+/* ── 이미지 · details ── */
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+  box-sizing: content-box;
+  vertical-align: middle;
+}
+.markdown-body .md-img-missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.markdown-body details > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.markdown-body details[open] > summary {
+  margin-bottom: 16px;
+}

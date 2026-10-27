@@ -4,6 +4,7 @@ import { DetailPanel } from './components/DetailPanel'
 import { AddRepoDialog } from './components/AddRepoDialog'
 import { DiffView } from './components/DiffView'
 import { EmptyState } from './components/EmptyState'
+import { CodeView } from './components/CodeView'
 import { FileView } from './components/FileView'
 import { RepoSwitcher } from './components/RepoSwitcher'
 import { Sidebar } from './components/Sidebar'
@@ -11,6 +12,7 @@ import { Splitter, type SplitterHandlers } from './components/Splitter'
 import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
 import { useAppStore } from './stores/appStore'
+import { useCodeStore } from './stores/codeStore'
 import { useDetailStore } from './stores/detailStore'
 import { useFileViewStore } from './stores/fileViewStore'
 import { useLogStore } from './stores/logStore'
@@ -105,6 +107,7 @@ export function App(): React.JSX.Element | null {
   // 활성 저장소가 바뀌면 커밋 목록을 새로 연다
   useEffect(() => {
     useSearchStore.getState().close()
+    useCodeStore.getState().close()
     useDetailStore.getState().reset()
     void useGithubStore.getState().open(activeRepoId)
     useLogStore.getState().open(activeRepoId)
@@ -125,6 +128,7 @@ export function App(): React.JSX.Element | null {
   }, [selectedHash])
   const diffOpen = useDetailStore((s) => s.file !== null)
   const fileViewOpen = useFileViewStore((s) => s.tab !== null)
+  const codeOpen = useCodeStore((s) => s.repoId !== null)
   const sidebarShown = useAppStore((s) => s.config?.ui.sidebarHidden !== true)
   const detailShown = useAppStore((s) => s.config?.ui.detailHidden !== true)
   // 중앙 화면 우선순위: 파일 diff → GitHub 화면 → 커밋 그래프(그래프는 항상 마운트해 스크롤·페이지 유지)
@@ -199,6 +203,16 @@ export function App(): React.JSX.Element | null {
           return
         }
       }
+      // 코드 탐색기: 위에 덮인 화면(파일 히스토리·diff·GitHub)이 없을 때 Esc 로 그래프로 돌아간다(리비전 목록·입력 칸의 Esc 는 그쪽 몫)
+      const code = useCodeStore.getState()
+      if (code.repoId && !fileView.tab && !detail.file && !gh.view && e.key === 'Escape' && !useAppStore.getState().switcherOpen) {
+        const tag = (e.target as HTMLElement | null)?.tagName
+        if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
+          e.preventDefault()
+          code.close()
+          return
+        }
+      }
       // 명령 레지스트리에 단축키가 정의된 명령(Ctrl+B/Ctrl+Alt+B 패널, Ctrl+P 저장소 전환, Ctrl+F 검색,
       // Ctrl+Shift+P 팔레트, Ctrl+/ 단축키 목록)은 팔레트와 같은 함수를 실행한다. 입력 중에도 동작한다
       if (runShortcut(e)) e.preventDefault()
@@ -226,9 +240,16 @@ export function App(): React.JSX.Element | null {
         fileView.close()
         return
       }
-      if (!detail.file) return
-      e.preventDefault()
-      detail.closeFile()
+      if (detail.file) {
+        e.preventDefault()
+        detail.closeFile()
+        return
+      }
+      // 코드 탐색기(GitHub 화면이 위에 없을 때): 그래프로
+      if (useCodeStore.getState().repoId && !useGithubStore.getState().view) {
+        e.preventDefault()
+        useCodeStore.getState().close()
+      }
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('mouseup', onMouseBack)
@@ -274,9 +295,11 @@ export function App(): React.JSX.Element | null {
           {activeRepoId ? (
             <>
               {/* diff 를 여는 동안에도 그래프는 마운트해 둔다(스크롤 위치·불러온 페이지 유지) */}
-              <div className={`app__center${diffOpen || fileViewOpen || ghOpen ? ' is-hidden' : ''}`}>
+              <div className={`app__center${diffOpen || fileViewOpen || ghOpen || codeOpen ? ' is-hidden' : ''}`}>
                 <CommitList />
               </div>
+              {/* 코드 탐색기는 그래프 바로 위층: 파일 히스토리·diff·GitHub 화면이 위에 열리면 숨겨 두고(마운트 유지) 닫으면 돌아온다 */}
+              {codeOpen && <CodeView hidden={fileViewOpen || diffOpen || ghOpen} />}
               {fileViewOpen && <FileView />}
               {diffOpen ? <DiffView hidden={fileViewOpen} /> : ghOpen && !fileViewOpen ? <GitHubView /> : null}
               {detailShown && <Splitter {...splitter(1)} />}

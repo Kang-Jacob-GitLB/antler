@@ -4,6 +4,7 @@ import type { Commit, CommitDetail, FileChange } from '@shared/types'
 import { useT } from '../i18n'
 import { formatAbsolute } from '../lib/format'
 import { useAppStore } from '../stores/appStore'
+import { useCodeStore } from '../stores/codeStore'
 import { useCompareStore } from '../stores/compareStore'
 import { useDetailStore } from '../stores/detailStore'
 import { fileViewAvailability, openFileView } from '../stores/fileViewStore'
@@ -19,7 +20,7 @@ import { HtmlBody } from './github/GhBits'
 import { CommitChecksList } from './github/CommitChecksList'
 import { orderCompare } from '../lib/compare'
 import { JiraIssueChips } from './jira/JiraIssueChips'
-import { IconClose, IconCopy, IconSwap } from './icons'
+import { IconClose, IconCode, IconCopy, IconSwap } from './icons'
 import './ComparePanel.css'
 import './DetailPanel.css'
 
@@ -119,6 +120,7 @@ function FileList({ detail, title, empty }: { detail: FileListData; title?: stri
                   onOpen={(x) => void openFile(x)}
                   {...(repoId && fileViewAvailability(f, null).history ? { onHistory: (x: FileChange) => openFileView('history', repoId, x, detail.hash) } : {})}
                   {...(repoId && fileViewAvailability(f, null).blame ? { onBlame: (x: FileChange) => openFileView('blame', repoId, x, detail.hash) } : {})}
+                  {...(repoId && f.status !== 'D' ? { onCode: (x: FileChange) => useCodeStore.getState().open(repoId, { rev: detail.hash, path: x.path }) } : {})}
                 />
               </div>
             )
@@ -203,6 +205,17 @@ export function DetailPanel({ width }: { width: number }): React.JSX.Element {
           <span className="detail__sha mono selectable">{commit.hash.slice(0, 10)}</span>
           <button className="icon-btn icon-btn--sm" title={t('detail.copy')} onClick={() => void copy()}>
             <IconCopy size={13} />
+          </button>
+          <button
+            className="icon-btn icon-btn--sm"
+            title={t('code.openCommit')}
+            aria-label={t('code.openCommit')}
+            onClick={() => {
+              const repoId = useAppStore.getState().activeRepoId
+              if (repoId) useCodeStore.getState().open(repoId, { rev: commit.hash })
+            }}
+          >
+            <IconCode size={13} />
           </button>
           {copied && <span className="detail__copied">{t('detail.copied')}</span>}
           {commit.parents.length > 0 && (

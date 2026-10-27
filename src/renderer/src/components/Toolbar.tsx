@@ -3,6 +3,8 @@ import type { FetchStatus } from '@shared/types'
 import { useT } from '../i18n'
 import { fetchDetail } from '../lib/fetchText'
 import { toggleDetail, toggleSidebar, useActiveRepo, useAppStore } from '../stores/appStore'
+import { toggleCodeView } from '../stores/codeActions'
+import { useCodeStore } from '../stores/codeStore'
 import { showExternalMenuAt, useExternalMenuStore } from '../stores/externalMenuStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useJiraStore } from '../stores/jiraStore'
@@ -15,6 +17,7 @@ import { ViewChips } from './ViewChips'
 import {
   IconBranch,
   IconChevronDown,
+  IconCode,
   IconLaunchpad,
   IconClose,
   IconFunnel,
@@ -40,6 +43,7 @@ export function Toolbar(): React.JSX.Element {
   const [now, setNow] = useState(() => Date.now())
   const launchpadOpen = useLaunchpadStore((s) => s.open)
   const jiraOpen = useJiraStore((s) => s.view !== null)
+  const codeOpen = useCodeStore((s) => s.repoId !== null)
 
   const fetchTitle = (s: FetchStatus | undefined, at: number): string => {
     const base = t('toolbar.refresh')
@@ -104,6 +108,17 @@ export function Toolbar(): React.JSX.Element {
       <div className="toolbar__spacer" />
 
       <div className="toolbar__actions">
+        {repo && (
+          <button
+            className="icon-btn"
+            aria-pressed={codeOpen}
+            title={`${t('code.open')} (${mod}Shift+E)`}
+            aria-label={t('code.open')}
+            onClick={() => toggleCodeView()}
+          >
+            <IconCode />
+          </button>
+        )}
         <button
           className="icon-btn"
           aria-pressed={launchpadOpen}

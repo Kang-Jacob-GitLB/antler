@@ -5,7 +5,7 @@ import { useAppStore } from '../stores/appStore'
 import { showExternalMenuAt, useExternalMenuStore } from '../stores/externalMenuStore'
 import { FileStatusIcon } from './FileStatusIcon'
 import { LfsBadge } from './LfsBadge'
-import { IconBlame, IconHistory, IconMore } from './icons'
+import { IconBlame, IconCode, IconHistory, IconMore } from './icons'
 
 /** 경로를 (디렉터리, 파일 이름)으로 나눈다 */
 export function splitPath(path: string): [dir: string, base: string] {
@@ -21,7 +21,8 @@ export const FileRow = memo(function FileRow({
   lfs,
   onOpen,
   onHistory,
-  onBlame
+  onBlame,
+  onCode
 }: {
   file: FileChange
   active: boolean
@@ -33,6 +34,8 @@ export const FileRow = memo(function FileRow({
   /** 있으면 마우스를 올릴 때 파일 히스토리·Blame 버튼을 보여 준다 */
   onHistory?(f: FileChange): void
   onBlame?(f: FileChange): void
+  /** 있으면 "코드에서 보기"(그 커밋 시점의 파일을 코드 탐색기로) 버튼을 보여 준다 */
+  onCode?(f: FileChange): void
 }) {
   const t = useT()
   const [dir, base] = splitPath(file.path)
@@ -59,6 +62,11 @@ export const FileRow = memo(function FileRow({
       {lfs && <LfsBadge />}
       {tag && <span className="file-row__tag">{tag}</span>}
       <span className="file-row__actions" onClick={(e) => e.stopPropagation()}>
+        {onCode && (
+          <button className="icon-btn icon-btn--sm" title={t('code.openFile')} aria-label={t('code.openFile')} onClick={() => onCode(file)}>
+            <IconCode size={13} />
+          </button>
+        )}
         {onHistory && (
           <button className="icon-btn icon-btn--sm" title={t('fileView.openHistory')} onClick={() => onHistory(file)}>
             <IconHistory size={13} />

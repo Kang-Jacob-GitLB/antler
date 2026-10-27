@@ -3,6 +3,7 @@
 import type { EditorKind, ExternalAction, Locale, ThemePref } from '@shared/types'
 import type { MessageKey, useT } from '../i18n'
 import { toggleDetail, toggleSidebar, useAppStore } from '../stores/appStore'
+import { toggleCodeView } from '../stores/codeActions'
 import { useDetailStore } from '../stores/detailStore'
 import { useFetchStore } from '../stores/fetchStore'
 import { useGithubStore } from '../stores/githubStore'
@@ -214,6 +215,16 @@ export const COMMAND_DEFS: CommandDef[] = [
       useDetailStore.getState().closeFile()
       useSearchStore.getState().show()
     }
+  },
+  {
+    // 코드 탐색기(HEAD 기준). 열려 있으면 단축키·명령이 닫는다(툴바 버튼과 같은 동작)
+    id: 'code.open',
+    category: 'list',
+    title: (t) => t('code.open'),
+    keywords: 'code browse files tree source readme explorer',
+    shortcut: { code: 'KeyE', shift: true },
+    when: (c) => c.hasRepo,
+    run: () => toggleCodeView()
   },
   {
     id: 'log.refresh',

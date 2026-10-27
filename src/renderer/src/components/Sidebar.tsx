@@ -4,6 +4,7 @@ import { useT } from '../i18n'
 import { DateText } from './DateText'
 import { branchKey, laneIndexFor, laneVar } from '../lib/laneColor'
 import { useAppStore } from '../stores/appStore'
+import { useCodeStore } from '../stores/codeStore'
 import { canHide, inList, isHidden, remoteAllRef } from '../lib/refView'
 import { useLogStore } from '../stores/logStore'
 import { EnvBadge } from './EnvBadge'
@@ -586,6 +587,16 @@ export function Sidebar({ width }: { width: number }): React.JSX.Element {
         hint: !headHash ? t('compare.noHead') : hash === headHash ? t('compare.headSame') : undefined,
         onPick: () => compareWithHead(hash, v?.id)
       })
+      // 브랜치·태그: 그 시점의 코드 탐색기(ref 전체 이름을 main 이 해시로 푼다)
+      if (v && (v.kind === 'branch' || v.kind === 'remote' || v.kind === 'tag') && activeRepoId) {
+        items.push({
+          label: t('code.openRef'),
+          onPick: () => {
+            closeCtx(false)
+            useCodeStore.getState().open(activeRepoId, { ref: v.id, label: v.label })
+          }
+        })
+      }
     }
     const pick = (fn: () => void) => (): void => {
       closeCtx(false)

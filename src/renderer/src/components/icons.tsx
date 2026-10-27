@@ -193,6 +193,13 @@ export const IconFolder = (p: P) => (
     <path d="M2 4.5a1 1 0 0 1 1-1h3.2l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />
   </Svg>
 )
+/** 파일: 모서리가 접힌 문서 */
+export const IconFile = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 2h5l3.5 3.5V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" />
+    <path d="M9 2v3.5h3.5" />
+  </Svg>
+)
 export const IconStash = (p: P) => (
   <Svg {...p}>
     <path d="M2.5 6.5h11v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z" />
