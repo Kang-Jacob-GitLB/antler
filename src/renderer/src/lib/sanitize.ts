@@ -16,7 +16,13 @@ const DROP_WITH_CONTENT = new Set(['script', 'style', 'iframe', 'object', 'embed
 
 const ALLOWED_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'title']),
-  img: new Set(['src', 'alt', 'title', 'width', 'height']),
+  // align 은 README 의 가운데 정렬 로고·배지 줄(<p align="center">)을 GitHub 처럼 보이게 한다. 값은 정렬뿐이라 스타일 주입 경로가 없다
+  img: new Set(['src', 'alt', 'title', 'width', 'height', 'align']),
+  p: new Set(['align']),
+  div: new Set(['align']),
+  h1: new Set(['align']),
+  h2: new Set(['align']),
+  h3: new Set(['align']),
   td: new Set(['align', 'colspan', 'rowspan']),
   th: new Set(['align', 'colspan', 'rowspan']),
   ol: new Set(['start']),

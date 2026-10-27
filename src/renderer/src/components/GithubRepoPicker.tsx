@@ -10,6 +10,7 @@ import {
   ownerFilterValue,
   parseOwnerFilter
 } from '../lib/ghRepoList'
+import { copyText } from '../lib/clipboard'
 import { useAppStore } from '../stores/appStore'
 import { useGithubStore } from '../stores/githubStore'
 import type { GhAccessibleState } from './useGhAccessibleRepos'
@@ -300,7 +301,7 @@ function LoginPanel(): React.JSX.Element {
           <div className="gh-pick__code mono selectable">{device.userCode}</div>
           <span className="field__hint">{t('gh.auth.deviceHint', { url: device.verificationUri })}</span>
           <div className="field__row">
-            <button type="button" className="btn" onClick={() => void navigator.clipboard.writeText(device.userCode)}>
+            <button type="button" className="btn" onClick={() => void copyText(device.userCode)}>
               {t('detail.copy')}
             </button>
             <button type="button" className="btn" onClick={cancelDevice}>

@@ -44,6 +44,13 @@ describe('sanitizeHtml', () => {
     expect(out).not.toContain('type="text"')
   })
 
+  it('README 의 가운데 정렬(align)은 남기고 style 은 여전히 지운다', () => {
+    const out = sanitizeHtml('<p align="center" style="color:red"><img src="https://x.test/a.png" align="right" onerror="x"></p><h1 align="center">T</h1>')
+    expect(out).toContain('<p align="center">')
+    expect(out).toContain('align="right"')
+    expect(out).toContain('<h1 align="center">')
+    expect(out).not.toMatch(/style=|onerror/)
+  })
   it('svg 안의 스크립트 우회도 막는다', () => {
     const out = sanitizeHtml('<svg><script>alert(1)</script><a href="javascript:x">y</a></svg>ok')
     expect(out).not.toMatch(/script|javascript:|<svg/)

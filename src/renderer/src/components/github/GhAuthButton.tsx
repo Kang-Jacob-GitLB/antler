@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n'
 import { api } from '../../lib/api'
+import { copyText } from '../../lib/clipboard'
 import { useAppStore } from '../../stores/appStore'
 import { useGithubStore } from '../../stores/githubStore'
 import { Avatar } from './GhBits'
@@ -140,7 +141,7 @@ export function GhAuthButton(): React.JSX.Element {
               <div className="gh-auth__code mono selectable">{device.userCode}</div>
               <div className="gh-auth__sub">{t('gh.auth.deviceHint', { url: device.verificationUri })}</div>
               <div className="gh-auth__row">
-                <button className="btn btn--sm" onClick={() => void navigator.clipboard.writeText(device.userCode)}>
+                <button className="btn btn--sm" onClick={() => void copyText(device.userCode)}>
                   {t('detail.copy')}
                 </button>
                 <button className="btn btn--sm" onClick={cancelDevice}>

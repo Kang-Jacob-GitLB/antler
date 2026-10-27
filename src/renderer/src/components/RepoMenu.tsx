@@ -31,7 +31,9 @@ export function RepoMenu({ repo, sourceKind, groups, onClose, onGroup, onRemove 
       if (ref.current && !ref.current.contains(e.target as Node)) onClose()
     }
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key !== 'Escape') return
+      e.preventDefault() // 같은 Esc 를 App 의 화면 닫기가 또 처리하지 않게 한다
+      onClose()
     }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)

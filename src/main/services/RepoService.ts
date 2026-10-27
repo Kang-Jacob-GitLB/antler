@@ -20,6 +20,10 @@ import type {
   FileHistoryRequest,
   BlameRequest,
   BlameResult,
+  CodeBlobRequest,
+  CodeBlobResult,
+  CodeTreeRequest,
+  CodeTreeResult,
   GhRepoRef,
   LogPage,
   LogQuery,
@@ -45,6 +49,7 @@ import { uncFromWsl, wslFromUnc } from '../executors/wslPaths'
 import { commitActivity } from '../git/activity'
 import * as git from '../git/commands'
 import { hooksPathFor } from '../git/fetch'
+import * as codeBrowse from '../git/codeBrowse'
 import * as fileInsight from '../git/fileInsight'
 import { LogCursor } from '../git/logCursor'
 import * as extras from '../git/repoExtras'
@@ -82,6 +87,12 @@ const COMMIT_CACHE_BYTES = 24 * 1024 * 1024
 /** diff 캐시 총 크기(추정 바이트) */
 const DIFF_CACHE_BYTES = 32 * 1024 * 1024
 const DIFF_CACHE_ENTRIES = 500
+/** 코드 탐색기 트리 캐시(항목 하나를 200바이트로 추정) */
+const TREE_CACHE_ENTRIES = 200
+const TREE_CACHE_BYTES = 8 * 1024 * 1024
+/** 코드 탐색기 파일 내용 캐시: 항목 수를 작게 잡아 큰 파일이 메모리를 채우지 못하게 한다 */
+const BLOB_CACHE_ENTRIES = 64
+const BLOB_CACHE_BYTES = 32 * 1024 * 1024
 /** 연결 테스트 제한 시간(SSH 접속·WSL 배포판 기동 포함) */
 const ENV_TEST_TIMEOUT_MS = 25_000
 /** 커밋 활동 캐시 항목 수 */
@@ -181,11 +192,16 @@ export class RepoService {
   private readonly commitCache = new LruCache<string, CommitDetail>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
   private readonly compareCache = new LruCache<string, CompareResult>(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES)
   private readonly diffCache = new LruCache<string, FileDiff>(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES)
+  /** 커밋 해시 기준이라 불변이다. 없음(missing) 결과는 저장하지 않는다(fetch 로 객체가 생길 수 있다) */
+  private readonly treeCache = new LruCache<string, CodeTreeResult>(TREE_CACHE_ENTRIES, TREE_CACHE_BYTES)
+  private readonly blobCache = new LruCache<string, CodeBlobResult>(BLOB_CACHE_ENTRIES, BLOB_CACHE_BYTES)
   private readonly inflight = new Map<string, Inflight<unknown>>()
   /** 캐시 경로별로 직렬화하는 작업(GitHub 저장소 추가·고아 정리)의 마지막 꼬리 */
   private readonly pathLocks = new Map<string, Promise<void>>()
   /** 커밋 활동 집계 캐시: 저장소+ref 별로 ref 시그니처와 함께 보관한다(시그니처가 같으면 이력이 같다) */
   private readonly activityCache = new Map<string, { sig: string; value: CommitActivity }>()
+  /** git:onRemote 가 true 였던 (저장소, 커밋) — 원격 ref 가 사라질 수 있지만 경고용이라 허용 */
+  private readonly onRemoteYes = new Set<string>()
   private readonly ghRepoCache = new Map<string, { at: number; value: GhRepoRef | null }>()
   private readonly ghRemotesCache = new Map<string, { at: number; value: GhRepoRef[] }>()
   /** 활성화됐지만 첫 로그 페이지가 아직 안 나간 저장소의 문(열리면 목록에서 빠진다) */
@@ -855,6 +871,56 @@ export class RepoService {
     )
   }
 
+  /** 코드 탐색기: 'HEAD'·전체 ref 이름·해시를 커밋 해시로 푼다. ref 는 움직이므로 캐시하지 않는다 */
+  resolveRev(repoId: string, ref: string): Promise<string> {
+    const { repo, rt } = this.resolve(repoId)
+    return rt.queue.run(() => codeBrowse.resolveRev(rt.exec, repo.path, ref))
+  }
+
+  /** 코드 탐색기: 커밋 시점 디렉터리 하나의 항목 */
+  codeTree(repoId: string, req: CodeTreeRequest, requestId?: string): Promise<CodeTreeResult> {
+    const { repo, rt } = this.resolve(repoId)
+    const key = codeKey(repoId, req.rev, () => codeBrowse.normalizeDir(req.dir))
+    const cached = key ? this.treeCache.get(key) : undefined
+    if (cached) return Promise.resolve(cached)
+    return this.withSignal(requestId, async (signal) => {
+      const opts = signal ? { signal } : {}
+      const result = await rt.queue.run(() => codeBrowse.listTree(rt.exec, repo.path, req, opts), opts)
+      if (key && !result.missing) this.treeCache.set(key, result, 200 * (result.entries.length + 1))
+      return result
+    })
+  }
+
+  /** 코드 탐색기: 커밋 시점 파일 내용(cat-file blob) */
+  codeBlob(repoId: string, req: CodeBlobRequest, requestId?: string): Promise<CodeBlobResult> {
+    const { repo, rt } = this.resolve(repoId)
+    const key = codeKey(repoId, req.rev, () => codeBrowse.normalizeFilePath(req.path))
+    const cached = key ? this.blobCache.get(key) : undefined
+    if (cached) return Promise.resolve(cached)
+    return this.withSignal(requestId, async (signal) => {
+      const opts = signal ? { signal } : {}
+      const result = await rt.queue.run(() => codeBrowse.readBlob(rt.exec, repo.path, req, opts), opts)
+      if (key && result.kind !== 'missing') this.blobCache.set(key, result, (result.text?.length ?? 0) * 2 + (result.dataUrl?.length ?? 0) + 1024)
+      return result
+    })
+  }
+
+  /** 코드 탐색기 줄 링크: 커밋이 원격에 있는지. GitHub 원격 전용 저장소는 항상 true. fetch 로 바뀔 수 있어 true 만 캐시한다 */
+  codeOnRemote(repoId: string, rev: string): Promise<boolean> {
+    const { repo, rt } = this.resolve(repoId)
+    if (this.isGithub(repoId)) return Promise.resolve(true)
+    const key = typeof rev === 'string' ? `${repoId}:${rev.toLowerCase()}` : null
+    if (key && this.onRemoteYes.has(key)) return Promise.resolve(true)
+    return rt.queue.run(async () => {
+      const ok = await codeBrowse.isOnRemote(rt.exec, repo.path, rev)
+      if (ok && key) {
+        if (this.onRemoteYes.size >= 2000) this.onRemoteYes.clear()
+        this.onRemoteYes.add(key)
+      }
+      return ok
+    })
+  }
+
   /** LFS 사용 여부·gitflow 설정(표시 전용). 설정이 바뀔 수 있어 캐시하지 않는다 */
   repoExtras(repoId: string): Promise<RepoExtras> {
     const { repo, rt } = this.resolve(repoId)
@@ -1041,6 +1107,8 @@ export class RepoService {
     this.commitCache.clear()
     this.compareCache.clear()
     this.diffCache.clear()
+    this.treeCache.clear()
+    this.blobCache.clear()
     this.ghRepoCache.clear()
     this.ghRemotesCache.clear()
     for (const ac of this.requests.values()) ac.abort()
@@ -1094,6 +1162,16 @@ function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; tar
 }
 
 /** 파일마다 +/- 통계가 있는가(바이너리는 null 이지만 binary=true 로 구분된다). 통계 없이 읽은 목록(additions null, binary false)이면 false */
+/** 코드 탐색기 캐시 키: rev 는 소문자, 경로는 정규화한 값. 검증에 걸리는 입력은 ''(캐시 안 함 — 이어서 검증이 던진다) */
+function codeKey(repoId: string, rev: unknown, normalize: () => string): string {
+  if (typeof rev !== 'string') return ''
+  try {
+    return [repoId, rev.toLowerCase(), normalize()].join('\0')
+  } catch {
+    return ''
+  }
+}
+
 function hasLineStats(files: { additions: number | null; binary: boolean }[]): boolean {
   return files.every((f) => f.additions !== null || f.binary)
 }
