@@ -91,7 +91,7 @@ function decorate(safeHtml: string): string {
   for (const h of root.querySelectorAll('h1,h2,h3,h4,h5,h6')) {
     const id = slug(h.textContent ?? '')
     if (!id) continue
-    h.setAttribute('id', id)
+    h.setAttribute('id', `user-content-${id}`) // GitHub 처럼 접두사를 붙여 문서 id 가 앱 요소 id 와 겹치지 않게 한다
     const a = doc.createElement('a')
     a.className = 'anchor'
     a.setAttribute('data-anchor', id)
@@ -104,6 +104,13 @@ function decorate(safeHtml: string): string {
     if (!li) continue
     li.classList.add('task-list-item')
     li.parentElement?.classList.add('contains-task-list')
+  }
+  for (const a of root.querySelectorAll('a[data-href]')) {
+    // 외부 링크는 마우스를 올리면 실제 주소가 보이게 한다(표시 글자와 다른 주소로 속이는 링크 대비)
+    const href = a.getAttribute('data-href') ?? ''
+    if (parseRepoUrl(href)) continue
+    const own = a.getAttribute('title')
+    a.setAttribute('title', own ? `${own}\n${href}` : href)
   }
   for (const img of root.querySelectorAll('img')) {
     const repo = parseRepoUrl(img.getAttribute('src') ?? '')
@@ -161,7 +168,8 @@ export function findAnchor(root: ParentNode, frag: string): Element | null {
   const want = frag.replace(/^user-content-/, '')
   const lower = want.toLowerCase()
   for (const el of root.querySelectorAll('[id]')) {
-    if (el.id === want || el.id === lower) return el
+    const id = el.id.replace(/^user-content-/, '')
+    if (id === want || id === lower) return el
   }
   return null
 }

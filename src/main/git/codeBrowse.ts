@@ -12,9 +12,13 @@ export const CODE_TEXT_MAX_BYTES = 2 * 1024 * 1024
 export const CODE_IMAGE_MAX_BYTES = 10 * 1024 * 1024
 /** 읽은 내용이 상한을 조금 넘어도 실패하지 않도록 주는 여유 */
 const BUFFER_SLACK = 64 * 1024
+/** LFS 포인터는 이 크기 이하다(shared/lfs.ts 의 POINTER_MAX_CHARS 와 같은 값) */
+const LFS_POINTER_MAX_BYTES = 1024
 /** NUL 바이트로 바이너리를 판정할 앞부분 길이(git 의 휴리스틱과 같다) */
 const BINARY_SNIFF_BYTES = 8000
 const COMMIT_ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i
+/** 한 디렉터리에서 돌려줄 항목 수 상한(넘으면 정렬한 앞부분만 담고 truncated) */
+export const CODE_TREE_MAX_ENTRIES = 5000
 
 const IMAGE_MIME: Record<string, string> = {
   png: 'image/png',
@@ -34,8 +38,13 @@ function imageMime(path: string): string | undefined {
   return dot < 0 ? undefined : IMAGE_MIME[base.slice(dot + 1).toLowerCase()]
 }
 
+/** git:tree·git:blob 의 rev 는 전체 해시(40·64자)만 받는다. 짧은 해시는 모호하고 캐시 키도 갈린다 */
+function assertCommitId(rev: unknown): asserts rev is string {
+  if (typeof rev !== 'string' || !COMMIT_ID_RE.test(rev)) throw new Error('invalid commit hash')
+}
+
 /** 디렉터리 경로 정규화: '/' 앞뒤를 정리한다. '' 는 최상위. NUL·'.'·'..'·빈 구성 요소는 거부 */
-function normalizeDir(dir: unknown): string {
+export function normalizeDir(dir: unknown): string {
   if (typeof dir !== 'string' || dir.includes('\0')) throw new Error('invalid path')
   const trimmed = dir.replace(/^\/+|\/+$/g, '')
   if (trimmed === '') return ''
@@ -45,7 +54,7 @@ function normalizeDir(dir: unknown): string {
   return trimmed
 }
 
-function normalizeFilePath(path: unknown): string {
+export function normalizeFilePath(path: unknown): string {
   const p = normalizeDir(path)
   if (p === '') throw new Error('invalid path')
   return p
@@ -107,8 +116,14 @@ function parseTree(buf: Buffer, dir: string): CodeTreeEntry[] {
  * 커밋 시점 디렉터리 하나의 항목. `ls-tree -l` 은 쓰지 않는다(크기를 구하려고 blob 마다 lazy fetch 가 일어난다).
  * 경로가 없거나 트리가 아니면 missing. 객체가 로컬에 없는 경우(partial clone)도 같다.
  */
-export async function listTree(exec: GitExecutor, repoPath: string, req: CodeTreeRequest, opts?: RunOpts): Promise<CodeTreeResult> {
-  assertHex(req.rev, 'commit hash')
+export async function listTree(
+  exec: GitExecutor,
+  repoPath: string,
+  req: CodeTreeRequest,
+  opts?: RunOpts,
+  maxEntries: number = CODE_TREE_MAX_ENTRIES
+): Promise<CodeTreeResult> {
+  assertCommitId(req.rev)
   const dir = normalizeDir(req.dir)
   const rev = req.rev
   const missing: CodeTreeResult = { rev, dir, entries: [], missing: true }
@@ -125,15 +140,18 @@ export async function listTree(exec: GitExecutor, repoPath: string, req: CodeTre
     if (/not a valid object name|not a tree object|bad object|unable to read|could not (?:read|parse)|missing/i.test(r.stderr)) return missing
     throw new GitError(r.stderr.trim() || `git ls-tree failed (${r.code})`, r.code, r.stderr, args)
   }
-  return { rev, dir, entries: parseTree(r.stdout, dir), missing: false }
+  const all = parseTree(r.stdout, dir)
+  if (all.length > maxEntries) return { rev, dir, entries: all.slice(0, maxEntries), missing: false, truncated: true }
+  return { rev, dir, entries: all, missing: false }
 }
 
 /**
  * 커밋 시점 파일 내용. `cat-file -t/-s` 로 종류·크기를 먼저 보고 상한을 넘으면 내용을 읽지 않는다.
- * 판정 순서: 이미지 확장자 → NUL 이 있으면 바이너리 → LFS 포인터 → 텍스트.
+ * 판정 순서: (포인터 상한 이하면 LFS 포인터) → 이미지 확장자 → NUL 이 있으면 바이너리 → LFS 포인터 → 텍스트.
+ * LFS 로 추적되는 logo.png 는 내용이 포인터 텍스트이므로 작은 파일은 확장자보다 포인터를 먼저 본다.
  */
 export async function readBlob(exec: GitExecutor, repoPath: string, req: CodeBlobRequest, opts?: RunOpts): Promise<CodeBlobResult> {
-  assertHex(req.rev, 'commit hash')
+  assertCommitId(req.rev)
   const path = normalizeFilePath(req.path)
   const rev = req.rev
   const spec = `${rev}:${path}`
@@ -154,6 +172,10 @@ export async function readBlob(exec: GitExecutor, repoPath: string, req: CodeBlo
   if (r.code !== 0) return none
   const buf = r.stdout
 
+  if (mime && size <= LFS_POINTER_MAX_BYTES) {
+    const lfs = parseLfsPointer(new TextDecoder('utf-8', { fatal: false }).decode(buf))
+    if (lfs) return { rev, path, kind: 'lfs', size, lfs: { oid: lfs.oid, size: lfs.size } }
+  }
   if (mime) return { rev, path, kind: 'image', size, dataUrl: `data:${mime};base64,${buf.toString('base64')}` }
   if (buf.subarray(0, BINARY_SNIFF_BYTES).includes(0)) return { rev, path, kind: 'binary', size }
 

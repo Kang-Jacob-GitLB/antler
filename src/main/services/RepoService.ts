@@ -878,7 +878,7 @@ export class RepoService {
   /** 코드 탐색기: 커밋 시점 디렉터리 하나의 항목 */
   codeTree(repoId: string, req: CodeTreeRequest, requestId?: string): Promise<CodeTreeResult> {
     const { repo, rt } = this.resolve(repoId)
-    const key = typeof req.rev === 'string' && typeof req.dir === 'string' ? [repoId, req.rev.toLowerCase(), req.dir].join('\0') : ''
+    const key = codeKey(repoId, req.rev, () => codeBrowse.normalizeDir(req.dir))
     const cached = key ? this.treeCache.get(key) : undefined
     if (cached) return Promise.resolve(cached)
     return this.withSignal(requestId, async (signal) => {
@@ -892,7 +892,7 @@ export class RepoService {
   /** 코드 탐색기: 커밋 시점 파일 내용(cat-file blob) */
   codeBlob(repoId: string, req: CodeBlobRequest, requestId?: string): Promise<CodeBlobResult> {
     const { repo, rt } = this.resolve(repoId)
-    const key = typeof req.rev === 'string' && typeof req.path === 'string' ? [repoId, req.rev.toLowerCase(), req.path].join('\0') : ''
+    const key = codeKey(repoId, req.rev, () => codeBrowse.normalizeFilePath(req.path))
     const cached = key ? this.blobCache.get(key) : undefined
     if (cached) return Promise.resolve(cached)
     return this.withSignal(requestId, async (signal) => {
@@ -1144,6 +1144,16 @@ function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; tar
 }
 
 /** 파일마다 +/- 통계가 있는가(바이너리는 null 이지만 binary=true 로 구분된다). 통계 없이 읽은 목록(additions null, binary false)이면 false */
+/** 코드 탐색기 캐시 키: rev 는 소문자, 경로는 정규화한 값. 검증에 걸리는 입력은 ''(캐시 안 함 — 이어서 검증이 던진다) */
+function codeKey(repoId: string, rev: unknown, normalize: () => string): string {
+  if (typeof rev !== 'string') return ''
+  try {
+    return [repoId, rev.toLowerCase(), normalize()].join('\0')
+  } catch {
+    return ''
+  }
+}
+
 function hasLineStats(files: { additions: number | null; binary: boolean }[]): boolean {
   return files.every((f) => f.additions !== null || f.binary)
 }

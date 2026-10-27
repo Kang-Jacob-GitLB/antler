@@ -959,6 +959,8 @@ export interface CodeTreeResult {
   entries: CodeTreeEntry[]
   /** 그 시점에 이 경로가 없거나 디렉터리가 아니다 */
   missing: boolean
+  /** 항목이 상한을 넘어 앞부분만 담았다 */
+  truncated?: boolean
 }
 
 /** 파일 하나의 내용. rev 는 커밋 해시만 */

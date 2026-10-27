@@ -205,7 +205,7 @@ export function App(): React.JSX.Element | null {
       }
       // 코드 탐색기: 위에 덮인 화면(파일 히스토리·diff·GitHub)이 없을 때 Esc 로 그래프로 돌아간다(리비전 목록·입력 칸의 Esc 는 그쪽 몫)
       const code = useCodeStore.getState()
-      if (code.repoId && !fileView.tab && !detail.file && !gh.view && e.key === 'Escape' && !useAppStore.getState().switcherOpen) {
+      if (code.repoId && !fileView.tab && !detail.file && !gh.view && e.key === 'Escape' && !e.defaultPrevented && !useAppStore.getState().switcherOpen) {
         const tag = (e.target as HTMLElement | null)?.tagName
         if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') {
           e.preventDefault()

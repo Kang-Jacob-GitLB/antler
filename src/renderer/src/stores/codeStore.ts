@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { CodeBlobResult, CodeTreeEntry } from '@shared/types'
 import { api, errorMessage, isAbort, newRequestId } from '../lib/api'
+import { clearRepoImageCache } from '../lib/readmeImages'
 import { useDetailStore } from './detailStore'
 import { useFileViewStore } from './fileViewStore'
 import { useGithubStore } from './githubStore'
@@ -48,6 +49,8 @@ interface CodeState {
   tree: Map<string, CodeTreeEntry[]>
   treeLoading: Set<string>
   treeError: Map<string, string>
+  /** 항목이 상한을 넘어 앞부분만 받은 폴더 */
+  treeTruncated: Set<string>
   expanded: Set<string>
 
   blob: CodeBlobResult | null
@@ -101,6 +104,7 @@ const INITIAL = {
   tree: new Map<string, CodeTreeEntry[]>(),
   treeLoading: new Set<string>(),
   treeError: new Map<string, string>(),
+  treeTruncated: new Set<string>(),
   expanded: new Set<string>(),
   blob: null,
   blobLoading: false,
@@ -119,6 +123,8 @@ export const useCodeStore = create<CodeState>((set, get) => {
   const pending = new Set<string>()
   let blobReq: string | null = null
   let readmeReq: string | null = null
+  /** 탐색(goto·selectDir·selectFile)마다 올라가는 번호. 느린 이전 이동이 나중 클릭을 덮지 않게 한다 */
+  let navSeq = 0
   const inflight = new Map<string, Promise<TreeOutcome>>()
 
   const cancel = (id: string | null): void => {
@@ -163,7 +169,11 @@ export const useCodeStore = create<CodeState>((set, get) => {
           set((s) => ({ treeLoading: withSet(s.treeLoading, (n) => n.delete(dir)) }))
           return 'missing'
         }
-        set((s) => ({ tree: new Map(s.tree).set(dir, res.entries), treeLoading: withSet(s.treeLoading, (n) => n.delete(dir)) }))
+        set((s) => ({
+          tree: new Map(s.tree).set(dir, res.entries),
+          treeTruncated: res.truncated ? withSet(s.treeTruncated, (n) => n.add(dir)) : s.treeTruncated,
+          treeLoading: withSet(s.treeLoading, (n) => n.delete(dir))
+        }))
         return { entries: res.entries }
       } catch (err) {
         if (mine !== epoch || isAbort(err)) return null
@@ -185,7 +195,7 @@ export const useCodeStore = create<CodeState>((set, get) => {
     return n
   }
 
-  async function loadReadme(entries: CodeTreeEntry[]): Promise<void> {
+  async function loadReadme(entries: CodeTreeEntry[], dir: string): Promise<void> {
     const { repoId, rev } = get()
     cancel(readmeReq)
     readmeReq = null
@@ -198,16 +208,77 @@ export const useCodeStore = create<CodeState>((set, get) => {
     const id = track('creadme')
     readmeReq = id
     set({ readme: { path: file.path, name: file.name, result: null, loading: true, error: null } })
+    /** 결과를 넣을 때 아직 이 폴더를 보고 있는지 */
+    const here = (): boolean => {
+      const s = get()
+      return s.kind === 'dir' && s.path === dir
+    }
     try {
       const result = await api.invoke('git:blob', repoId, { rev, path: file.path }, id)
-      if (mine !== epoch || readmeReq !== id) return
+      if (mine !== epoch || readmeReq !== id || !here()) return
       set({ readme: { path: file.path, name: file.name, result, loading: false, error: null } })
     } catch (err) {
-      if (mine !== epoch || readmeReq !== id || isAbort(err)) return
+      if (mine !== epoch || readmeReq !== id || !here() || isAbort(err)) return
       set({ readme: { path: file.path, name: file.name, result: null, loading: false, error: errorMessage(err) } })
     } finally {
       pending.delete(id)
       if (readmeReq === id) readmeReq = null
+    }
+  }
+
+  /** 폴더 보기 */
+  async function showDir(path: string, nav: number): Promise<void> {
+    const mine = epoch
+    cancel(blobReq)
+    blobReq = null
+    cancel(readmeReq)
+    readmeReq = null
+    set((s) => ({
+      path,
+      kind: 'dir',
+      blob: null,
+      blobLoading: false,
+      blobError: null,
+      readme: null,
+      mdCode: false,
+      anchor: null,
+      missingPath: null,
+      expanded: path ? withSet(s.expanded, (n) => n.add(path)) : s.expanded
+    }))
+    const out = await loadTree(path)
+    if (mine !== epoch || nav !== navSeq) return
+    const cur = get()
+    if (cur.kind !== 'dir' || cur.path !== path) return
+    if (out && out !== 'missing') await loadReadme(out.entries, path)
+  }
+
+  /** 파일 보기 */
+  async function showFile(path: string, nav: number): Promise<void> {
+    const mine = epoch
+    const { repoId, rev } = get()
+    if (!repoId || !rev) return
+    cancel(blobReq)
+    cancel(readmeReq)
+    readmeReq = null
+    const id = track('cblob')
+    blobReq = id
+    set((s) => {
+      // 조상 폴더를 펼쳐 현재 위치가 트리에 보이게 한다
+      const expanded = withSet(s.expanded, (n) => {
+        for (let d = parentOf(path); d; d = parentOf(d)) n.add(d)
+      })
+      return { path, kind: 'file', blob: null, blobLoading: true, blobError: null, readme: null, mdCode: false, anchor: null, missingPath: null, expanded }
+    })
+    try {
+      const blob = await api.invoke('git:blob', repoId, { rev, path }, id)
+      if (mine !== epoch || nav !== navSeq || blobReq !== id) return
+      set({ blob, blobLoading: false })
+    } catch (err) {
+      if (mine !== epoch || nav !== navSeq || blobReq !== id || isAbort(err)) return
+      set({ blobLoading: false, blobError: errorMessage(err) })
+    } finally {
+      pending.delete(id)
+      if (blobReq === id) blobReq = null
     }
   }
 
@@ -239,6 +310,7 @@ export const useCodeStore = create<CodeState>((set, get) => {
         tree: new Map(),
         treeLoading: new Set(),
         treeError: new Map(),
+        treeTruncated: new Set(),
         expanded: new Set(),
         repoId,
         ref,
@@ -259,7 +331,8 @@ export const useCodeStore = create<CodeState>((set, get) => {
     close() {
       epoch++
       cancelAll()
-      set({ ...INITIAL, tree: new Map(), treeLoading: new Set(), treeError: new Map(), expanded: new Set() })
+      clearRepoImageCache()
+      set({ ...INITIAL, tree: new Map(), treeLoading: new Set(), treeError: new Map(), treeTruncated: new Set(), expanded: new Set() })
     },
 
     switchRev(ref, label) {
@@ -275,6 +348,7 @@ export const useCodeStore = create<CodeState>((set, get) => {
         tree: new Map(),
         treeLoading: new Set(),
         treeError: new Map(),
+        treeTruncated: new Set(),
         expanded: new Set(),
         blob: null,
         blobLoading: false,
@@ -288,12 +362,15 @@ export const useCodeStore = create<CodeState>((set, get) => {
 
     async goto(rawPath, hash) {
       const mine = epoch
+      const nav = ++navSeq
+      /** 더 새로운 이동(클릭·다른 goto)이 시작됐거나 세대가 바뀌면 이 이동의 결과는 버린다 */
+      const stale = (): boolean => mine !== epoch || nav !== navSeq
       const path = normPath(rawPath)
       const { rev } = get()
       if (!rev) return
       if (path === '') {
-        await get().selectDir('')
-        if (hash && mine === epoch) set({ anchor: hash })
+        await showDir('', nav)
+        if (hash && !stale()) set({ anchor: hash })
         return
       }
       // 이미 보고 있는 파일이면 앵커만
@@ -306,23 +383,23 @@ export const useCodeStore = create<CodeState>((set, get) => {
       let dir = ''
       /** 경로를 끝까지 따라가지 못했을 때: 따라간 데까지의 폴더를 보이고 안내를 띄운다 */
       const fallback = async (): Promise<void> => {
-        if (mine !== epoch) return
-        await get().selectDir(dir)
-        if (mine === epoch) set({ missingPath: path })
+        if (stale()) return
+        await showDir(dir, nav)
+        if (!stale()) set({ missingPath: path })
       }
       for (let i = 0; i < parts.length; i++) {
         const out = await loadTree(dir)
-        if (mine !== epoch) return
+        if (stale()) return
         if (!out || out === 'missing') return fallback()
         const entry = out.entries.find((e) => e.name === parts[i])
         if (!entry) return fallback()
         const last = i === parts.length - 1
         if (last) {
-          if (entry.kind === 'dir') await get().selectDir(path)
+          if (entry.kind === 'dir') await showDir(path, nav)
           else if (entry.kind === 'submodule') return fallback()
           else {
-            await get().selectFile(path)
-            if (hash && mine === epoch) set({ anchor: hash })
+            await showFile(path, nav)
+            if (hash && !stale()) set({ anchor: hash })
           }
           return
         }
@@ -332,56 +409,12 @@ export const useCodeStore = create<CodeState>((set, get) => {
       }
     },
 
-    async selectDir(path) {
-      const mine = epoch
-      cancel(blobReq)
-      blobReq = null
-      set((s) => ({
-        path,
-        kind: 'dir',
-        blob: null,
-        blobLoading: false,
-        blobError: null,
-        readme: null,
-        mdCode: false,
-        anchor: null,
-        missingPath: null,
-        expanded: path ? withSet(s.expanded, (n) => n.add(path)) : s.expanded
-      }))
-      const out = await loadTree(path)
-      if (mine !== epoch) return
-      const cur = get()
-      if (cur.kind !== 'dir' || cur.path !== path) return
-      if (out && out !== 'missing') await loadReadme(out.entries)
+    selectDir(path) {
+      return showDir(path, ++navSeq)
     },
 
-    async selectFile(path) {
-      const mine = epoch
-      const { repoId, rev } = get()
-      if (!repoId || !rev) return
-      cancel(blobReq)
-      cancel(readmeReq)
-      readmeReq = null
-      const id = track('cblob')
-      blobReq = id
-      set((s) => {
-        // 조상 폴더를 펼쳐 현재 위치가 트리에 보이게 한다
-        const expanded = withSet(s.expanded, (n) => {
-          for (let d = parentOf(path); d; d = parentOf(d)) n.add(d)
-        })
-        return { path, kind: 'file', blob: null, blobLoading: true, blobError: null, readme: null, mdCode: false, anchor: null, missingPath: null, expanded }
-      })
-      try {
-        const blob = await api.invoke('git:blob', repoId, { rev, path }, id)
-        if (mine !== epoch || blobReq !== id) return
-        set({ blob, blobLoading: false })
-      } catch (err) {
-        if (mine !== epoch || blobReq !== id || isAbort(err)) return
-        set({ blobLoading: false, blobError: errorMessage(err) })
-      } finally {
-        pending.delete(id)
-        if (blobReq === id) blobReq = null
-      }
+    selectFile(path) {
+      return showFile(path, ++navSeq)
     },
 
     toggleDir(path) {

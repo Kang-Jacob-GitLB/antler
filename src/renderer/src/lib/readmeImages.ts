@@ -2,9 +2,37 @@
 import type { CodeBlobResult } from '@shared/types'
 import { api, newRequestId } from './api'
 
-// 같은 그림을 다시 받지 않게 작은 캐시를 둔다
+// 같은 그림을 다시 받지 않게 작은 캐시를 둔다. 개수와 data URL 문자열 길이 합(바이트 상한)을 모두 제한한다
 const IMAGE_CACHE_MAX = 40
+const IMAGE_CACHE_MAX_BYTES = 32 * 1024 * 1024
 const imageCache = new Map<string, string | null>()
+let imageCacheBytes = 0
+
+/** 코드 탐색기를 닫을 때 캐시를 비운다 */
+export function clearRepoImageCache(): void {
+  imageCache.clear()
+  imageCacheBytes = 0
+}
+
+function evictOldest(): void {
+  const oldest = imageCache.keys().next().value
+  if (oldest === undefined) return
+  imageCacheBytes -= imageCache.get(oldest)?.length ?? 0
+  imageCache.delete(oldest)
+}
+
+function cacheImage(key: string, url: string | null): void {
+  const size = url?.length ?? 0
+  if (imageCache.has(key)) {
+    // 동시에 같은 그림을 받은 경우: 합계가 겹쳐 세어지지 않게 먼저 뺀다
+    imageCacheBytes -= imageCache.get(key)?.length ?? 0
+    imageCache.delete(key)
+  }
+  if (size > IMAGE_CACHE_MAX_BYTES) return // 상한보다 큰 단일 항목은 캐시하지 않는다
+  while (imageCache.size > 0 && (imageCache.size >= IMAGE_CACHE_MAX || imageCacheBytes + size > IMAGE_CACHE_MAX_BYTES)) evictOldest()
+  imageCache.set(key, url)
+  imageCacheBytes += size
+}
 
 async function fetchImage(repoId: string, rev: string, path: string, ids: string[]): Promise<string | null> {
   const key = `${repoId}\0${rev}\0${path}`
@@ -18,8 +46,7 @@ async function fetchImage(repoId: string, rev: string, path: string, ids: string
   } catch {
     return null // 취소·일시 오류는 캐시하지 않는다
   }
-  if (imageCache.size >= IMAGE_CACHE_MAX) imageCache.delete(imageCache.keys().next().value!)
-  imageCache.set(key, url)
+  cacheImage(key, url)
   return url
 }
 

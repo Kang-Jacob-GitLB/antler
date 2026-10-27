@@ -220,6 +220,7 @@ function TreePanel({ repoName }: { repoName: string }): React.JSX.Element {
   const expanded = useCodeStore((s) => s.expanded)
   const treeLoading = useCodeStore((s) => s.treeLoading)
   const treeError = useCodeStore((s) => s.treeError)
+  const treeTruncated = useCodeStore((s) => s.treeTruncated)
   const path = useCodeStore((s) => s.path)
   const kind = useCodeStore((s) => s.kind)
   const rev = useCodeStore((s) => s.rev)
@@ -241,10 +242,11 @@ function TreePanel({ repoName }: { repoName: string }): React.JSX.Element {
         out.push({ kind: 'entry', entry, depth })
         if (entry.kind === 'dir' && expanded.has(entry.path)) walk(entry.path, depth + 1)
       }
+      if (treeTruncated.has(dir)) out.push({ kind: 'note', depth, text: t('code.truncated', { n: entries.length }) })
     }
     walk('', 0)
     return out
-  }, [tree, expanded, treeLoading, treeError, t])
+  }, [tree, expanded, treeLoading, treeError, treeTruncated, t])
 
   // 선택 경로가 바뀌면(링크·브레드크럼으로 이동해도) 커서도 그 자리로
   useEffect(() => setCursor(path || null), [path])
@@ -416,6 +418,7 @@ function FolderPane({ repoId, rev }: { repoId: string; rev: string }): React.JSX
   const entries = useCodeStore((s) => s.tree.get(s.path))
   const loading = useCodeStore((s) => s.treeLoading.has(s.path))
   const error = useCodeStore((s) => s.treeError.get(s.path))
+  const truncated = useCodeStore((s) => s.treeTruncated.has(s.path))
   const readme = useCodeStore((s) => s.readme)
   const go = (p: string): void => void useCodeStore.getState().goto(p)
 
@@ -454,6 +457,7 @@ function FolderPane({ repoId, rev }: { repoId: string; rev: string }): React.JSX
               </button>
             ))}
             {entries.length === 0 && <div className="diff-notice">{t('code.emptyDir')}</div>}
+            {truncated && <div className="diff-notice">{t('code.truncated', { n: entries.length })}</div>}
           </div>
         )}
       </div>

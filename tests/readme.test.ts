@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /// <reference lib="dom" />
 import { describe, expect, it } from 'vitest'
-import { highlightCodeBlocks, parseRepoUrl, renderMarkdownDoc, repoBase, resolveFenceLang, slugify, slugger } from '../src/renderer/src/lib/readme'
+import { findAnchor, highlightCodeBlocks, parseRepoUrl, renderMarkdownDoc, repoBase, resolveFenceLang, slugify, slugger } from '../src/renderer/src/lib/readme'
 
 const html = (src: string, dir = ''): HTMLElement => {
   const el = document.createElement('div')
@@ -55,8 +55,26 @@ describe('renderMarkdownDoc', () => {
   it('제목에 slug id 와 앵커를 붙이고 중복은 -1, -2 를 붙인다', () => {
     const el = html('# Hello, World!\n\n## 시작하기\n\n## Hello, World!\n\n### Hello, World!\n\n## a  b')
     const ids = [...el.querySelectorAll('h1,h2,h3')].map((h) => h.id)
-    expect(ids).toEqual(['hello-world', '시작하기', 'hello-world-1', 'hello-world-2', 'a--b'])
-    expect(el.querySelector('#hello-world > a.anchor')!.getAttribute('data-anchor')).toBe('hello-world')
+    expect(ids).toEqual(['user-content-hello-world', 'user-content-시작하기', 'user-content-hello-world-1', 'user-content-hello-world-2', 'user-content-a--b'])
+    expect(el.querySelector('#user-content-hello-world > a.anchor')!.getAttribute('data-anchor')).toBe('hello-world')
+  })
+
+  it('findAnchor 는 접두사 유무·대소문자와 무관하게 제목을 찾는다', () => {
+    const el = html('# Hello, World!\n\n## 시작하기')
+    const h1 = el.querySelector('h1')
+    expect(findAnchor(el, 'hello-world')).toBe(h1)
+    expect(findAnchor(el, 'user-content-hello-world')).toBe(h1)
+    expect(findAnchor(el, 'Hello-World')).toBe(h1)
+    expect(findAnchor(el, '시작하기')).toBe(el.querySelector('h2'))
+    expect(findAnchor(el, 'nope')).toBeNull()
+  })
+
+  it('외부 링크에는 실제 주소를 title 로 달고, 작성자 title 이 있으면 앞에 둔다', () => {
+    const el = html('[a](https://example.com/p) [b](https://example.com/q "설명") [c](sub/x.md)')
+    const [a, b, c] = [...el.querySelectorAll('a[data-href]')]
+    expect(a!.getAttribute('title')).toBe('https://example.com/p')
+    expect(b!.getAttribute('title')).toBe('설명\nhttps://example.com/q')
+    expect(c!.hasAttribute('title')).toBe(false)
   })
 
   it('작업 목록에 표시 클래스를 단다', () => {

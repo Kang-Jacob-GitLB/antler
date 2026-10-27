@@ -398,5 +398,6 @@ export const EXTRA_SHORTCUTS: ExtraShortcut[] = [
   { id: 'diff.step', category: 'diff', title: 'sc.diffStep', chords: [['Alt', '↑'], ['Alt', '↓']] },
   { id: 'panel.files', category: 'panel', title: 'sc.files', chords: [['↑'], ['↓'], ['Enter']] },
   { id: 'general.gh', category: 'general', title: 'sc.ghBack', chords: [['Esc']] },
+  { id: 'general.code', category: 'general', title: 'sc.codeClose', chords: [['Esc'], ['Mouse4']] },
   { id: 'general.popup', category: 'general', title: 'sc.popup', chords: [['↑'], ['↓'], ['Enter'], ['Esc']] }
 ]

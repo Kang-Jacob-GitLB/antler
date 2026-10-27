@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { CODE_TEXT_MAX_BYTES } from '../src/main/git/codeBrowse'
+import { CODE_TEXT_MAX_BYTES, CODE_TREE_MAX_ENTRIES } from '../src/main/git/codeBrowse'
 import { allowedLinkUrl } from '../src/main/external/link'
 import { ConfigStore } from '../src/main/services/ConfigStore'
 import { RepoService } from '../src/main/services/RepoService'
@@ -42,6 +42,7 @@ describe('코드 탐색기 (실제 저장소)', { timeout: 60_000 }, () => {
     put('pic.PNG', PNG_BYTES)
     put('vec.svg', '<svg xmlns="http://www.w3.org/2000/svg"/>\n')
     put('model.bin', LFS_POINTER)
+    put('logo.png', LFS_POINTER)
     put('big.txt', Buffer.alloc(CODE_TEXT_MAX_BYTES + 1, 0x78))
     git('add', '-A')
     // 심볼릭 링크·서브모듈은 윈도우에서 체크아웃 없이 인덱스로 직접 만든다
@@ -104,6 +105,7 @@ describe('코드 탐색기 (실제 저장소)', { timeout: 60_000 }, () => {
         'file:bom.txt',
         'file:latin1.txt',
         'symlink:link',
+        'file:logo.png',
         'file:model.bin',
         'file:pic.PNG',
         'file:README.md',
@@ -143,11 +145,28 @@ describe('코드 탐색기 (실제 저장소)', { timeout: 60_000 }, () => {
       const { svc, repoId } = setup()
       await expect(svc.codeTree(repoId, { rev: 'HEAD', dir: '' })).rejects.toThrow(/invalid/)
       await expect(svc.codeTree(repoId, { rev: '--all', dir: '' })).rejects.toThrow(/invalid/)
+      await expect(svc.codeTree(repoId, { rev: head.slice(0, 8), dir: '' })).rejects.toThrow(/invalid/)
       await expect(svc.codeTree(repoId, { rev: head, dir: '../x' })).rejects.toThrow(/invalid/)
       await expect(svc.codeTree(repoId, { rev: head, dir: 'src/../..' })).rejects.toThrow(/invalid/)
       await expect(svc.codeTree(repoId, { rev: head, dir: 'src/./lib' })).rejects.toThrow(/invalid/)
       await expect(svc.codeTree(repoId, { rev: head, dir: 'src\0' })).rejects.toThrow(/invalid/)
       await expect(svc.codeTree(repoId, { rev: head, dir: 5 as unknown as string })).rejects.toThrow(/invalid/)
+    })
+
+    it('항목이 5000개를 넘으면 정렬한 앞부분만 담고 truncated 다', async () => {
+      const blob = execFileSyncStdin(['hash-object', '-w', '--stdin'], 'x\n')
+      const lines = Array.from({ length: CODE_TREE_MAX_ENTRIES + 1 }, (_, i) => `100644 ${blob}\tmany/f${String(i).padStart(5, '0')}.txt\n`).join('')
+      execFileSyncStdin(['update-index', '--add', '--index-info'], lines)
+      const tree = execFileSyncStdin(['write-tree'], '')
+      const commit = execFileSyncStdin(['commit-tree', tree, '-m', 'many'], '')
+      const { svc, repoId } = setup()
+      const t = await svc.codeTree(repoId, { rev: commit, dir: 'many' })
+      expect(t.truncated).toBe(true)
+      expect(t.entries).toHaveLength(CODE_TREE_MAX_ENTRIES)
+      expect(t.entries[0]!.name).toBe('f00000.txt')
+      expect(t.entries[CODE_TREE_MAX_ENTRIES - 1]!.name).toBe(`f${String(CODE_TREE_MAX_ENTRIES - 1).padStart(5, '0')}.txt`)
+      const small = await svc.codeTree(repoId, { rev: commit, dir: 'src' })
+      expect(small.truncated).toBeUndefined()
     })
 
     it('같은 요청은 캐시에서 돌려준다', async () => {
@@ -199,6 +218,10 @@ describe('코드 탐색기 (실제 저장소)', { timeout: 60_000 }, () => {
       expect(await read('model.bin')).toMatchObject({ kind: 'lfs', lfs: { oid: 'a'.repeat(64), size: 12345 } })
     })
 
+    it('LFS 로 추적되는 이미지 확장자 파일도 포인터면 lfs 다', async () => {
+      expect(await read('logo.png')).toMatchObject({ kind: 'lfs', lfs: { oid: 'a'.repeat(64), size: 12345 } })
+    })
+
     it('상한(2MB)을 넘으면 내용을 읽지 않고 tooLarge', async () => {
       const b = await read('big.txt')
       expect(b).toMatchObject({ kind: 'tooLarge', size: CODE_TEXT_MAX_BYTES + 1 })
@@ -223,6 +246,7 @@ describe('코드 탐색기 (실제 저장소)', { timeout: 60_000 }, () => {
       const { svc, repoId } = setup()
       await expect(svc.codeBlob(repoId, { rev: 'HEAD', path: 'README.md' })).rejects.toThrow(/invalid/)
       await expect(svc.codeBlob(repoId, { rev: '--all', path: 'README.md' })).rejects.toThrow(/invalid/)
+      await expect(svc.codeBlob(repoId, { rev: head.slice(0, 8), path: 'README.md' })).rejects.toThrow(/invalid/)
       await expect(svc.codeBlob(repoId, { rev: head, path: '' })).rejects.toThrow(/invalid/)
       await expect(svc.codeBlob(repoId, { rev: head, path: '/' })).rejects.toThrow(/invalid/)
       await expect(svc.codeBlob(repoId, { rev: head, path: '../README.md' })).rejects.toThrow(/invalid/)
