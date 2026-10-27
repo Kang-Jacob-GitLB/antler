@@ -199,6 +199,8 @@ export interface IpcContract {
   'git:tree': { args: [repoId: string, req: CodeTreeRequest, requestId?: string]; result: CodeTreeResult }
   /** 코드 탐색기: 커밋 시점 파일 내용(git cat-file blob — textconv·필터 없음). 읽기 전용 */
   'git:blob': { args: [repoId: string, req: CodeBlobRequest, requestId?: string]; result: CodeBlobResult }
+  /** 코드 탐색기 줄 링크: 커밋(40/64자 해시)이 원격 추적 ref 중 하나에 들어 있는지(= push 됐는지). GitHub 원격 전용 저장소는 항상 true */
+  'git:onRemote': { args: [repoId: string, rev: string]; result: boolean }
   /** 저장소 문서(README 등)의 외부 링크를 기본 브라우저로 연다. https 주소만 */
   'code:openLink': { args: [url: string]; result: void }
   /** 저장소 부가 정보(읽기 전용): LFS 사용 여부(.gitattributes 의 filter=lfs)와 git config 의 gitflow.* 설정 */
@@ -315,6 +317,7 @@ export const IPC_CHANNELS = [
   'git:resolveRev',
   'git:tree',
   'git:blob',
+  'git:onRemote',
   'code:openLink',
   'git:repoExtras',
   'git:lfsPaths',
