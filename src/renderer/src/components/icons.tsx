@@ -62,6 +62,13 @@ export const IconArrowLeft = (p: P) => (
     <path d="M13 8H3.5M7.5 4 3.5 8l4 4" />
   </Svg>
 )
+/** 바깥(브라우저)에서 열기: 상자 + 오른쪽 위로 빠져나가는 화살표 */
+export const IconExternal = (p: P) => (
+  <Svg {...p}>
+    <path d="M12.5 9v3.5a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1H7" />
+    <path d="M9.5 2.5h4v4M13.5 2.5 7.5 8.5" />
+  </Svg>
+)
 export const IconArrowUp = (p: P) => (
   <Svg {...p}>
     <path d="M8 13V3.5M4 7.5l4-4 4 4" />

@@ -596,8 +596,32 @@
   color: var(--text-muted);
 }
 .jira-card__when {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 20px;
   font-size: var(--fs-xs);
   color: var(--text-muted);
+}
+/* 목록 행·카드의 "Jira 에서 열기" 아이콘: 평소엔 흐리게, 행·카드에 올리거나 초점이 가면 또렷하게 */
+.jira-open {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.gh-row:hover .jira-open,
+.jira-card:hover .jira-open,
+.jira-open:focus-visible {
+  color: var(--text-secondary);
+}
+.jira-open:hover {
+  color: var(--text-primary);
+}
+/* 카드 안에서는 날짜 줄 높이를 거의 늘리지 않게 작게 */
+.jira-open.jira-card__open {
+  width: 20px;
+  height: 20px;
+  margin: -2px -4px -2px 0;
 }
 /* 칸반 아래의 불러오는 중 / 더 보기(오류 띠는 제외) */
 .jira-view > .gh-more,

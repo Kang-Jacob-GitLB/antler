@@ -6,7 +6,7 @@ import { formatAbsolute, formatCalendarDate, isBeforeToday } from '../../lib/for
 import { useAppStore } from '../../stores/appStore'
 import { MINE_VIEW_JQL, useJiraSiteData, useJiraStore, type JiraView as View } from '../../stores/jiraStore'
 import { HtmlBody, useRelative } from '../github/GhBits'
-import { IconArrowUp, IconBoard, IconChevronDown, IconChevronRight, IconRefresh, IconRows, IconSearch } from '../icons'
+import { IconArrowUp, IconBoard, IconChevronDown, IconChevronRight, IconExternal, IconRefresh, IconRows, IconSearch } from '../icons'
 import { JiraDevPanel } from './JiraDevPanel'
 import { JiraTransitionMenu } from './JiraTransitionMenu'
 import { WorklogView } from './worklog/WorklogView'
@@ -18,6 +18,33 @@ const NO_FILTERS: JiraSavedFilter[] = []
 const NO_CATS: JiraStatusCategory[] = []
 const CATS: JiraStatusCategory[] = ['new', 'indeterminate', 'done']
 const openOnJira = (url: string): void => void api.invoke('jira:openExternal', url).catch(() => {})
+
+/**
+ * 목록 행·칸반 카드의 "Jira 에서 열기" 아이콘. 목록 응답에는 주소가 없어 연결한 사이트 주소로 /browse/키 를 만든다
+ * (main 의 이슈 상세 주소와 같은 꼴이고, main 이 연결한 사이트 origin 인지 다시 검증한다).
+ * 행·카드를 누르면 앱 안 상세가 열리므로 클릭·키 입력이 거기까지 올라가지 않게 막는다
+ */
+function OpenOnJira({ issueKey, className = '' }: { issueKey: string; className?: string }): React.JSX.Element | null {
+  const t = useT()
+  const siteUrl = useJiraStore((s) => s.auth.siteUrl)
+  if (!siteUrl) return null
+  const label = t('jira.openInBrowser')
+  return (
+    <button
+      type="button"
+      className={`icon-btn icon-btn--sm jira-open ${className}`}
+      title={label}
+      aria-label={`${issueKey} ${label}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        openOnJira(`${siteUrl}/browse/${encodeURIComponent(issueKey)}`)
+      }}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      <IconExternal size={13} />
+    </button>
+  )
+}
 
 /** Jira 작업 공간(JiraWorkspace)의 본문: 이슈 목록 / 이슈 상세. GitHub 화면과 같은 레이아웃·클래스를 쓴다 */
 export function JiraView(): React.JSX.Element | null {
@@ -261,6 +288,7 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
                           </div>
                           <div className="jira-card__when">
                             <IssueWhen i={i} rel={rel} />
+                            <OpenOnJira issueKey={i.key} className="jira-card__open" />
                           </div>
                         </div>
                       ))}
@@ -324,6 +352,7 @@ function IssueRow({ i, when, onOpen }: { i: JiraIssueSummary; when: React.ReactN
       <div className="gh-row__people">{i.assignee && <JiraAvatar name={i.assignee} url={i.assigneeAvatar} />}</div>
       <JiraStatus name={i.status} category={i.statusCategory} />
       <span className="gh-row__when">{when}</span>
+      <OpenOnJira issueKey={i.key} />
     </div>
   )
 }
