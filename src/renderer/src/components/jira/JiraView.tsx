@@ -214,7 +214,7 @@ function ListView({ view }: { view: Extract<View, { kind: 'list' }> }): React.JS
 type BoardLane = 'epic' | 'work'
 
 /**
- * 칸반: 상태 이름별 열. 열 순서는 할 일 → 진행 중 → 완료, 같은 분류 안에서는 목록에 처음 나온 순서.
+ * 칸반: 상태 이름별 열. 열 순서는 보관 → 할 일 → 진행 중 → 완료, 같은 분류 안에서는 목록에 처음 나온 순서.
  * 에픽과 그 밖의 작업 항목은 같은 칸에 섞지 않고 영역을 나눈다 — 두 영역이 높이를 반씩 쓰고 각자 세로로 스크롤하며,
  * 영역 머리를 눌러 접으면 남은 영역이 높이를 다 쓴다. 열 머리는 두 영역이 함께 쓴다
  */
@@ -238,7 +238,9 @@ function Board({ items, rel, onOpen }: { items: JiraIssueSummary[]; rel(epoch: n
       for (const cell of lane.values()) cell.sort((a, b) => (!a.dueDate || !b.dueDate ? Number(!a.dueDate) - Number(!b.dueDate) : b.dueDate.localeCompare(a.dueDate)))
     }
     const lanes = (['epic', 'work'] as const).filter((l) => count[l] > 0).map((l) => ({ id: l, n: count[l], cells: cells[l] }))
-    return { columns: [...byStatus.values()].sort((a, b) => CATS.indexOf(a.cat) - CATS.indexOf(b.cat)), lanes }
+    // '보관' 열은 분류와 상관없이 맨 왼쪽(Request To Do 등 할 일 열보다 앞)
+    const rank = (c: { name: string; cat: JiraStatusCategory }): number => (c.name.trim() === '보관' ? -1 : CATS.indexOf(c.cat))
+    return { columns: [...byStatus.values()].sort((a, b) => rank(a) - rank(b)), lanes }
   }, [items])
   // 한 종류뿐이면 줄 머리(접기)는 군더더기라 빼고 그 줄이 높이를 다 쓴다
   const laneHeads = lanes.length > 1
