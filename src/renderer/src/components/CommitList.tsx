@@ -189,9 +189,15 @@ const Row = memo(function Row({
   const pr = subjectPr ?? (showPr && openPr ? openPr.number : null)
   const draft = subjectPr === null && !!openPr?.draft
   const firstChip = chips[0]
-  // ref 가 여럿이면 refs 칸에 마우스를 댈 때 행 위에 전부 펼친 오버레이를 띄운다(행 높이·배치는 그대로 두고 덮기만 한다)
+  // ref 가 여럿이거나 하나뿐이어도 이름이 잘렸으면, refs 칸에 마우스를 댈 때 행 위에 전부 펼친 오버레이를 띄운다
+  // (행 높이·배치는 그대로 두고 덮기만 한다)
   const [refsOpen, setRefsOpen] = useState(false)
   const overlay = useRef<HTMLDivElement>(null)
+  const openRefs = (cell: HTMLElement): void => {
+    if (chips.length > 1) return setRefsOpen(true)
+    const label = cell.querySelector<HTMLElement>('.ref-chip__label')
+    if (label && label.scrollWidth > label.clientWidth) setRefsOpen(true)
+  }
   return (
     <div
       className={`commit-row${selected ? ' is-selected' : ''}${compared ? ' is-compared' : ''}${mark === 'none' ? '' : ` is-${mark}`}`}
@@ -201,7 +207,7 @@ const Row = memo(function Row({
     >
       <div
         className="cell cell--refs"
-        onMouseEnter={chips.length > 1 ? () => setRefsOpen(true) : undefined}
+        onMouseEnter={firstChip ? (e) => openRefs(e.currentTarget) : undefined}
         // 오버레이가 이 칸을 덮으면 포인터가 오버레이로 넘어가므로, 그때는 닫지 않는다
         onMouseLeave={(e) => {
           if (!(e.relatedTarget instanceof Node && overlay.current?.contains(e.relatedTarget))) setRefsOpen(false)
@@ -214,7 +220,7 @@ const Row = memo(function Row({
           </span>
         )}
       </div>
-      {refsOpen && chips.length > 1 && (
+      {refsOpen && firstChip && (
         <div ref={overlay} className="ref-overlay" onMouseLeave={() => setRefsOpen(false)}>
           {chips.map((c) => (
             <RefChip key={c.key} chip={c} filterTitle={t('list.chipFilter')} />
