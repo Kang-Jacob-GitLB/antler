@@ -126,7 +126,7 @@ function onLine(line: string): void {
     watcher.setFocused(msg.focused)
     if (msg.focused) fetcher.onFocus()
   } else if (msg.t === 'hostres') {
-    resolveHost(msg.id, msg.ok)
+    resolveHost(msg.id, msg.ok, msg.value)
   }
 }
 

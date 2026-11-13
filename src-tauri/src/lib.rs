@@ -1,4 +1,5 @@
 mod commands;
+mod dialogs;
 mod sidecar;
 mod snap;
 
@@ -6,6 +7,7 @@ use std::path::PathBuf;
 
 use tauri::window::Color;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_window_state::StateFlags;
 
 /// 첫 페인트 전 흰 화면을 막는다. 토큰 --bg-base(Dark)와 같은 값
 const BG: Color = Color(0x14, 0x11, 0x0F, 0xFF);
@@ -47,8 +49,20 @@ fn is_github_link(url: &tauri::Url) -> bool {
 
 pub fn run() {
     commands::mark_start();
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
+        // 확인 창·폴더 선택은 Rust(dialogs.rs)에서만 띄운다. capability 에 dialog 권한이 없어 renderer 는 부를 수 없다
+        .plugin(tauri_plugin_dialog::init());
+    // 창 위치·크기·최대화만 기억한다(visible·decorations·fullscreen 은 제외). ANTLER_USER_DATA 로 도는 측정·자동화 실행은
+    // 실사용 창 상태를 덮어쓰지 않게 등록하지 않는다. 플러그인의 JS command 도 capability 에 주지 않는다
+    if std::env::var_os("ANTLER_USER_DATA").is_none() {
+        builder = builder.plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+                .build(),
+        );
+    }
+    builder
         .invoke_handler(tauri::generate_handler![
             snap::show_snap_overlay,
             commands::antler_invoke,

@@ -17,9 +17,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 사이드카 응답 대기표(id → oneshot)
 tokio = { version = "1", features = ["sync"] }
-# host 요청(openExternal·clipboard)을 Rust API 로 처리한다. JS 쪽 권한은 capabilities 에 주지 않는다
+# host 요청(openExternal·clipboard·대화상자)을 Rust API 로 처리한다. JS 쪽 권한은 capabilities 에 주지 않는다
 tauri-plugin-opener = "2.7.3"
 tauri-plugin-clipboard-manager = "2.5.0"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-window-state = "2.5.0"
 
 [target.'cfg(windows)'.dependencies]
 # 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판

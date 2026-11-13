@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::oneshot;
 
+use crate::dialogs;
+
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
 
 pub struct Sidecar {
@@ -132,12 +134,15 @@ fn handle_message(app: &AppHandle, stdin: &Arc<Mutex<ChildStdin>>, pending: &Pen
         Some("host") => {
             let id = msg["id"].clone();
             let op = msg["op"].as_str().unwrap_or("").to_string();
-            let arg = msg["arg"].as_str().unwrap_or("").to_string();
+            let arg = msg["arg"].clone();
             let (app, stdin) = (app.clone(), stdin.clone());
-            // 외부 프로그램 기동은 읽기 스레드를 막지 않게 따로 돌린다
+            // 외부 프로그램 기동·대화상자(사용자가 닫을 때까지 블로킹)는 읽기 스레드를 막지 않게 따로 돌린다
             std::thread::spawn(move || {
-                let ok = run_host(&app, &op, &arg);
-                let _ = write_line(&stdin, &json!({ "t": "hostres", "id": id, "ok": ok }));
+                let res = match run_host(&app, &op, &arg) {
+                    Some(value) => json!({ "t": "hostres", "id": id, "ok": true, "value": value }),
+                    None => json!({ "t": "hostres", "id": id, "ok": false }),
+                };
+                let _ = write_line(&stdin, &res);
             });
         }
         Some("ready") => {}
@@ -145,13 +150,17 @@ fn handle_message(app: &AppHandle, stdin: &Arc<Mutex<ChildStdin>>, pending: &Pen
     }
 }
 
-/// 사이드카가 요청한 OS 동작. 기존 핸들러가 이미 검증하지만 Rust 도 https 만 통과시킨다
-fn run_host(app: &AppHandle, op: &str, arg: &str) -> bool {
+/// 사이드카가 요청한 OS 동작. 성공이면 응답 값(없으면 null), 실패면 None.
+/// openExternal 은 기존 핸들러가 이미 검증하지만 Rust 도 https 만 통과시킨다
+fn run_host(app: &AppHandle, op: &str, arg: &Value) -> Option<Value> {
     match op {
         "openExternal" => {
-            arg.starts_with("https://") && tauri_plugin_opener::open_url(arg, None::<&str>).is_ok()
+            let url = arg.as_str().filter(|u| u.starts_with("https://"))?;
+            tauri_plugin_opener::open_url(url, None::<&str>).ok().map(|_| Value::Null)
         }
-        "clipboard" => app.clipboard().write_text(arg.to_string()).is_ok(),
-        _ => false,
+        "clipboard" => app.clipboard().write_text(arg.as_str()?.to_string()).ok().map(|_| Value::Null),
+        "messageBox" => dialogs::message_box(app, arg),
+        "pickPath" => dialogs::pick_path(app, arg),
+        _ => None,
     }
 }
