@@ -1,0 +1,168 @@
+[
+  {
+    "parser": "log",
+    "fixture": "log.bin",
+    "golden": "log__log.bin.json"
+  },
+  {
+    "parser": "log",
+    "fixture": "edge/log-edge.bin",
+    "golden": "log__edge_log-edge.bin.json"
+  },
+  {
+    "parser": "refs",
+    "fixture": "for-each-ref.bin",
+    "args": {
+      "remotes": "remotes.txt"
+    },
+    "golden": "refs__for-each-ref.bin.json"
+  },
+  {
+    "parser": "refs",
+    "fixture": "edge/refs-edge.bin",
+    "args": {
+      "remotes": "edge/remotes-edge.txt"
+    },
+    "golden": "refs__edge_refs-edge.bin.json"
+  },
+  {
+    "parser": "refs",
+    "fixture": "edge/refs-edge.bin",
+    "golden": "refs__edge_refs-edge.bin@no-remotes.json"
+  },
+  {
+    "parser": "refs",
+    "fixture": "edge/refs-no-trailing-newline.bin",
+    "golden": "refs__edge_refs-no-trailing-newline.bin.json"
+  },
+  {
+    "parser": "stash",
+    "fixture": "stash.bin",
+    "golden": "stash__stash.bin.json"
+  },
+  {
+    "parser": "stash",
+    "fixture": "edge/stash-edge.bin",
+    "golden": "stash__edge_stash-edge.bin.json"
+  },
+  {
+    "parser": "worktree",
+    "fixture": "worktree.bin",
+    "golden": "worktree__worktree.bin.json"
+  },
+  {
+    "parser": "worktree",
+    "fixture": "edge/worktree-edge.bin",
+    "golden": "worktree__edge_worktree-edge.bin.json"
+  },
+  {
+    "parser": "log",
+    "fixture": "edge/empty.bin",
+    "golden": "log__edge_empty.bin.json"
+  },
+  {
+    "parser": "refs",
+    "fixture": "edge/empty.bin",
+    "golden": "refs__edge_empty.bin.json"
+  },
+  {
+    "parser": "stash",
+    "fixture": "edge/empty.bin",
+    "golden": "stash__edge_empty.bin.json"
+  },
+  {
+    "parser": "worktree",
+    "fixture": "edge/empty.bin",
+    "golden": "worktree__edge_empty.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "dt-name-status-korean.bin",
+    "golden": "nulRecords__dt-name-status-korean.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "dt-name-status-root.bin",
+    "golden": "nulRecords__dt-name-status-root.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "dt-numstat-korean.bin",
+    "golden": "nulRecords__dt-numstat-korean.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "for-each-ref.bin",
+    "golden": "nulRecords__for-each-ref.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "log.bin",
+    "golden": "nulRecords__log.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "name-status-delete.bin",
+    "golden": "nulRecords__name-status-delete.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "name-status-merge.bin",
+    "golden": "nulRecords__name-status-merge.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "name-status-rename.bin",
+    "golden": "nulRecords__name-status-rename.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "numstat-binary.bin",
+    "golden": "nulRecords__numstat-binary.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "numstat-rename.bin",
+    "golden": "nulRecords__numstat-rename.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "stash.bin",
+    "golden": "nulRecords__stash.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "worktree.bin",
+    "golden": "nulRecords__worktree.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "edge/empty.bin",
+    "golden": "nulRecords__edge_empty.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "edge/log-edge.bin",
+    "golden": "nulRecords__edge_log-edge.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "edge/refs-edge.bin",
+    "golden": "nulRecords__edge_refs-edge.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "edge/refs-no-trailing-newline.bin",
+    "golden": "nulRecords__edge_refs-no-trailing-newline.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "edge/stash-edge.bin",
+    "golden": "nulRecords__edge_stash-edge.bin.json"
+  },
+  {
+    "parser": "nulRecords",
+    "fixture": "edge/worktree-edge.bin",
+    "golden": "nulRecords__edge_worktree-edge.bin.json"
+  }
+]

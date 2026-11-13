@@ -1,0 +1,21 @@
+{
+  "local": [
+    {
+      "fullName": "refs/heads/main",
+      "hash": "1111111111111111111111111111111111111111",
+      "isHead": true,
+      "name": "main"
+    }
+  ],
+  "remotes": [],
+  "tags": [
+    {
+      "annotated": false,
+      "date": 1700000000,
+      "fullName": "refs/tags/v1",
+      "hash": "1111111111111111111111111111111111111111",
+      "name": "v1",
+      "targetsCommit": true
+    }
+  ]
+}

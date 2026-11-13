@@ -1,0 +1,5 @@
+origin
+team
+
+team/upstream
+solo

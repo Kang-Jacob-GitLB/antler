@@ -1,0 +1,43 @@
+name: tauri
+
+# Tauri 이관(docs/tauri.md)의 Rust 쪽 검사: 이식한 파서가 TS 골든과 같은 결과를 내는지(cargo test) + clippy.
+# 필수 상태 체크가 아니다(main 룰셋은 build.yml 의 잡만 요구한다). 배포 빌드는 하지 않는다.
+on:
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - "tests/golden/**"
+      - "tests/fixtures/**"
+      - "src/main/git/parsers/**"
+      - ".github/workflows/tauri.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: tauri-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust · 골든 · clippy
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # 러너에 기본 설치된 rustup 을 쓴다(서드파티 액션을 늘리지 않는다)
+      - name: Rust stable
+        run: |
+          rustup default stable
+          rustup component add clippy
+          rustc --version
+
+      # 컴파일은 frontendDist(out-tauri/renderer)가 없어도 된다 — 필요해지면 여기서 빈 폴더를 만든다
+      - name: 테스트 (단위 + TS 골든 패리티)
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden
+
+      - name: clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings

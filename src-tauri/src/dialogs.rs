@@ -91,31 +91,6 @@ fn show(parent: &tauri::WebviewWindow, buttons: &[&str], cancel_id: usize, title
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::button_order;
-
-    #[test]
-    fn 플러그인_경로에서는_취소_버튼이_마지막이다() {
-        // 플러그인은 Esc·닫기를 마지막 자리 버튼으로 바꿔 돌려준다 — 그 자리가 cancelId 가 아니면 Esc 가 허용이 된다
-        assert_eq!(button_order(1, 0, false), vec![0]);
-        assert_eq!(button_order(2, 1, false), vec![0, 1]); // SSH: [연결][취소]
-        assert_eq!(button_order(2, 0, false), vec![1, 0]);
-        assert_eq!(button_order(3, 2, false), vec![0, 1, 2]); // fetch: [이번만][항상][취소]
-        assert_eq!(button_order(3, 0, false), vec![1, 2, 0]);
-        assert_eq!(button_order(3, 1, false), vec![0, 2, 1]);
-    }
-
-    #[test]
-    fn 윈도우_경로에서는_취소_버튼이_맨_앞_기본_버튼이다() {
-        // rfd 직접 호출은 Esc 를 Cancel 로 따로 돌려주므로 취소를 기본 버튼(첫 자리)에 둔다
-        assert_eq!(button_order(1, 0, true), vec![0]);
-        assert_eq!(button_order(2, 1, true), vec![1, 0]); // SSH: [취소][연결]
-        assert_eq!(button_order(3, 2, true), vec![2, 0, 1]); // fetch: [취소][이번만][항상]
-        assert_eq!(button_order(3, 1, true), vec![1, 0, 2]);
-    }
-}
-
 /// 폴더·파일 선택. 값은 `{ "filePaths": [경로] }`(취소면 빈 배열). 대화상자를 못 띄우면 `None`
 pub fn pick_path(app: &AppHandle, arg: &Value) -> Option<Value> {
     let parent = app.get_webview_window("main")?;
@@ -146,4 +121,29 @@ pub fn pick_path(app: &AppHandle, arg: &Value) -> Option<Value> {
         .into_iter()
         .collect();
     Some(json!({ "filePaths": paths }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::button_order;
+
+    #[test]
+    fn 플러그인_경로에서는_취소_버튼이_마지막이다() {
+        // 플러그인은 Esc·닫기를 마지막 자리 버튼으로 바꿔 돌려준다 — 그 자리가 cancelId 가 아니면 Esc 가 허용이 된다
+        assert_eq!(button_order(1, 0, false), vec![0]);
+        assert_eq!(button_order(2, 1, false), vec![0, 1]); // SSH: [연결][취소]
+        assert_eq!(button_order(2, 0, false), vec![1, 0]);
+        assert_eq!(button_order(3, 2, false), vec![0, 1, 2]); // fetch: [이번만][항상][취소]
+        assert_eq!(button_order(3, 0, false), vec![1, 2, 0]);
+        assert_eq!(button_order(3, 1, false), vec![0, 2, 1]);
+    }
+
+    #[test]
+    fn 윈도우_경로에서는_취소_버튼이_맨_앞_기본_버튼이다() {
+        // rfd 직접 호출은 Esc 를 Cancel 로 따로 돌려주므로 취소를 기본 버튼(첫 자리)에 둔다
+        assert_eq!(button_order(1, 0, true), vec![0]);
+        assert_eq!(button_order(2, 1, true), vec![1, 0]); // SSH: [취소][연결]
+        assert_eq!(button_order(3, 2, true), vec![2, 0, 1]); // fetch: [취소][이번만][항상]
+        assert_eq!(button_order(3, 1, true), vec![1, 0, 2]);
+    }
 }

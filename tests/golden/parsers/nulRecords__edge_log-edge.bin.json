@@ -1,0 +1,12 @@
+[
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u001fbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb cccccccccccccccccccccccccccccccccccccccc\u001f홍길동\u001fdev@example.com\u001f1700000000\u001f1700000060\u001fHEAD -> refs/heads/main, tag: refs/tags/v1.0, refs/remotes/origin/main, refs/remotes/origin/HEAD\u001ffeat: 한글 제목",
+  "",
+  "\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u001f\u001fa b\u001f\u001f 12 \u001f\u001fHEAD\u001f 앞뒤 공백 제목 ",
+  "cccccccccccccccccccccccccccccccccccccccc\u001fdddddddddddddddddddddddddddddddddddddddd\u001fx\u001fx@x\u001fabc\u001f\u001frefs/stash, refs/heads/a/b, , tag: refs/tags/t, refs/foo/bar\u001fx",
+  "too\u001ffew\u001ffields",
+  "dddddddddddddddddddddddddddddddddddddddd\u001f\u001fn\u001fe\u001f1\u001f2\u001f\u001f제목\u001f속\u001f구분자",
+  "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\u001f\u001fn\u001fe\u001f0x10\u001f1e3\u001fHEAD -> refs/heads/feature/한글\u001f",
+  "ffffffffffffffffffffffffffffffffffffffff\u001f\u001fn\u001fe\u001f\u001f-5\u001f  HEAD  ,  refs/remotes/up/stream/x  \u001ftrim",
+  "9999999999999999999999999999999999999999\u001f\u001fn\u001fe\u001f3\u001f4\u001f\u001fbad-���",
+  "8888888888888888888888888888888888888888\u001f7777777777777777777777777777777777777777\u001flast\u001fe\u001f5\u001f6\u001fHEAD\u001f끝"
+]

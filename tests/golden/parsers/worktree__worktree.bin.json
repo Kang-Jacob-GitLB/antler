@@ -1,0 +1,32 @@
+[
+  {
+    "bare": false,
+    "branch": "main",
+    "detached": false,
+    "head": "b748c8d536fdf022c493256580ceb25ebe29de57",
+    "isMain": true,
+    "locked": false,
+    "path": "C:/Users/user/AppData/Local/Temp/antler-fixture-jSzvDy",
+    "prunable": false
+  },
+  {
+    "bare": false,
+    "branch": null,
+    "detached": true,
+    "head": "2b2539b54fee540d22c77d7c87fa7516934ac05a",
+    "isMain": false,
+    "locked": false,
+    "path": "C:/Users/user/AppData/Local/Temp/antler-fixture-wt-sjBlPH/detached-wt",
+    "prunable": false
+  },
+  {
+    "bare": false,
+    "branch": "wt-branch",
+    "detached": false,
+    "head": "b748c8d536fdf022c493256580ceb25ebe29de57",
+    "isMain": false,
+    "locked": false,
+    "path": "C:/Users/user/AppData/Local/Temp/antler-fixture-wt-sjBlPH/작업 트리",
+    "prunable": false
+  }
+]
