@@ -84,6 +84,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 | `--idle-only <N>` | 조작 없이 N초 쉰 뒤 메모리 측정(유휴 메모리) |
 | `--electron-args "<...>"` | 실험용 Chromium·Electron 스위치 전달 |
 | `--exe <경로>` | 패키지된 실행 파일(예: `dist/win-unpacked/Antler.exe`)을 띄움 |
+| `--tauri <exe>` | Electron 대신 Tauri 판(`pnpm tauri:build:cdp` 산출물 `src-tauri/target/release/antler.exe`)을 같은 시나리오로 측정. `--gpu` 로 하드웨어 가속을 켠다(기본 끔). 끝에 OS 프로세스 트리 메모리(`process tree`)를 두 판 같은 방식으로 출력 — [docs/tauri.md](tauri.md#phase-0-측정) |
 | `--inject-css <css>` | 실험용 CSS 주입 |
 | `ANTLER_DRIVE_DEBUG=1` (환경 변수) | main 프로세스 출력 표시 |
 

@@ -2,13 +2,14 @@
 // 빌드된 앱(out/)을 Playwright 로 띄워 시나리오를 돌리고 스크린샷·측정치를 남긴다.
 // 실사용 설정을 건드리지 않도록 임시 userData 를 쓴다.
 //
-// 사용: node scripts/drive.mjs <저장소 경로...> [--out <스크린샷 디렉터리>] [--theme dark|light] [--locale ko|en]
+// 사용: node scripts/drive.mjs <저장소 경로...> [--out <스크린샷 디렉터리>] [--theme dark|light] [--locale ko|en] [--tauri <exe>]
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
-import { _electron as electron } from 'playwright-core'
-import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
+import { launchElectron } from './lib/electronHost.mjs'
+import { launchTauri } from './lib/tauriHost.mjs'
+import { formatTree, measureTree } from './lib/procTree.mjs'
 
 const APP_DIR = resolve(import.meta.dirname, '..')
 const args = process.argv.slice(2)
@@ -41,6 +42,10 @@ const updateFake = opt('update-fake', '')
 const updateMode = opt('update-mode', '')
 // --exe <경로>: 패키지된 실행 파일(dist/win-unpacked/Antler.exe 등)을 띄운다
 const exePath = opt('exe', '') || undefined
+// --tauri <exe>: Electron 대신 Tauri 판(pnpm tauri:build:cdp 로 만든 src-tauri/target/release/antler.exe)을 같은 시나리오로 측정한다
+const tauriExe = opt('tauri', '') || undefined
+// --gpu: 하드웨어 가속을 켠다(Tauri 는 ANTLER_GPU=1). 기본은 끔
+const gpu = args.includes('--gpu') && args.splice(args.indexOf('--gpu'), 1) && true
 // 저장소 지정: 로컬 경로 또는 'wsl:<배포판>:<리눅스 경로>' / 'ssh:<호스트>:<경로>'
 const repos = args.map((p) => {
   const m = /^(wsl|ssh):([^:]+):(.+)$/.exec(p)
@@ -66,25 +71,19 @@ writeFileSync(
   })
 )
 
-const t0 = Date.now()
-const app = await electron.launch({
-  // require('electron') 는 실행 파일 경로를 돌려주며, 바이너리가 없으면 그때 내려받는다(Electron 44+)
-  executablePath: exePath ?? createRequire(import.meta.url)('electron'),
-  // 패키지된 앱(--exe)은 앱 경로 인자 없이 실행한다(app.asar 를 스스로 읽는다)
-  args: exePath ? electronArgs : [...electronArgs, APP_DIR],
-  env: {
-    ...process.env,
-    ANTLER_USER_DATA: userData,
-    ...(updateFake ? { ANTLER_UPDATE_FAKE: updateFake, ...(updateMode ? { ANTLER_UPDATE_FAKE_MODE: updateMode } : {}) } : {})
-  },
-  timeout: 30_000
-})
-// ANTLER_DRIVE_DEBUG=1 이면 main 프로세스 출력을 함께 보여 준다
-if (process.env['ANTLER_DRIVE_DEBUG']) {
-  app.process().stdout?.on('data', (d) => process.stdout.write(`[main] ${d}`))
-  app.process().stderr?.on('data', (d) => process.stdout.write(`[main!] ${d}`))
-}
-const page = await app.firstWindow()
+// 호스트(Electron | Tauri) 뒤에 숨긴 것: 실행·종료, 앱 기준 시각, 메모리, CPU. 시나리오는 page 만 쓴다
+const host = tauriExe
+  ? await launchTauri({ exePath: resolve(tauriExe), userData, gpu })
+  : await launchElectron({
+      appDir: APP_DIR,
+      exePath,
+      electronArgs,
+      userData,
+      extraEnv: updateFake ? { ANTLER_UPDATE_FAKE: updateFake, ...(updateMode ? { ANTLER_UPDATE_FAKE_MODE: updateMode } : {}) } : {}
+    })
+// 프로세스 시작(spawn) 시각 — 두 호스트 모두 "spawn → 첫 커밋 행" 을 같은 정의로 잰다
+const t0 = host.startedAt
+const page = host.page
 const shot = async (name) => {
   const f = join(outDir, `${name}.png`)
   await page.screenshot({ path: f })
@@ -100,10 +99,11 @@ try {
     await shot(`empty-${theme}`)
   } else {
     // 프레임마다 확인해 첫 커밋 행이 처음 그려진 시각을 잡는다(기본 폴링 100ms 는 오차가 크다)
-    await page.waitForFunction(() => !!document.querySelector('.commit-subject'), null, { polling: 'raf', timeout: 15_000 })
+    await page.waitForFunction(() => !!document.querySelector('.commit-subject'), null, { polling: 'raf', timeout: 30_000 })
     const firstRowAt = Date.now()
     // 앱 기준 콜드 스타트: main 프로세스가 시작된 뒤 첫 커밋 행이 보일 때까지(Playwright 가 붙는 시간 제외)
-    const appUptime = Math.round((await app.evaluate(() => process.uptime())) * 1000)
+    // (Tauri 는 process.uptime 이 없어 bridge 가 기록한 첫 행 DOM 등장 시각을 spawn 기준으로 환산한다 — 같은 줄의 괄호 값)
+    const appUptime = await host.uptimeMs()
     // 목록 안정 시각: 행 수·전체 높이·첫 행 제목·그래프 레인 계산 버전이 500ms 동안 바뀌지 않게 된 시점
     // (목록이 비워졌다 다시 채워지거나 레인이 다시 계산되면 그만큼 늦어진다). 15초 안에 안정되지 않으면 'unstable' 로 보고한다
     const lastChangeAt = await page.evaluate(
@@ -131,7 +131,7 @@ try {
         })
     )
     const stable = lastChangeAt === null ? 'unstable (15 s+)' : `${Math.max(lastChangeAt, firstRowAt) - t0} ms`
-    console.log(`cold start → first commit row: ${firstRowAt - t0} ms (app uptime ${appUptime} ms) · list stable ${stable}`)
+    console.log(`cold start → first commit row: ${firstRowAt - t0} ms (app uptime ${appUptime ?? 'n/a'} ms) · list stable ${stable}`)
     await page.waitForTimeout(300)
     await shot(`list-${theme}`)
     if (updateFake) {
@@ -154,10 +154,13 @@ try {
         console.log(`wip panel: ${(await page.$$eval('.wip-head', (e) => e.map((x) => x.textContent?.trim()))).join(' | ')}; file rows: ${await page.$$eval('.detail .file-row', (e) => e.length)}; tags: ${await page.$$eval('.detail .file-row__tag', (e) => e.length)}`)
         await shot(`wip-${theme}`)
         // 변경 패널을 연 채로 가만히 둘 때 렌더러가 CPU 를 쓰지 않는지(렌더 루프 회귀 감지) — 첫 호출은 기준점
-        const cpu = () => app.evaluate(({ app }) => app.getAppMetrics().filter((m) => m.type === 'Tab').map((m) => m.cpu.percentCPUUsage))
-        await cpu()
-        await page.waitForTimeout(2000)
-        console.log(`wip panel idle renderer CPU %: ${(await cpu()).map((x) => x.toFixed(1)).join(', ')}`)
+        if (host.cpu) {
+          await host.cpu()
+          await page.waitForTimeout(2000)
+          console.log(`wip panel idle renderer CPU %: ${(await host.cpu()).map((x) => x.toFixed(1)).join(', ')}`)
+        } else {
+          console.log('wip panel idle renderer CPU %: n/a')
+        }
         await page.click('.detail .file-row >> nth=0')
         await page.waitForSelector('.diff-row', { timeout: 10_000 }).catch(() => {})
         await page.waitForTimeout(400)
@@ -237,11 +240,15 @@ try {
       // 더블클릭 → 해당 ref 만 보기
       await page.dblclick(`.side-section:nth-of-type(2) .side-item:not(.side-item--folder) >> nth=-1`)
       await page.waitForSelector('.filter-chip', { timeout: 5_000 })
-      await page.waitForTimeout(500)
+      // 고정 대기만 하면 첫 페이지가 늦을 때 "커밋 0개+"(불러오는 중)를 읽는다 — 첫 행이 그려질 때까지 기다린다
+      await page.waitForSelector('.commit-subject', { timeout: 15_000 }).catch(() => {})
+      await page.waitForTimeout(300)
       console.log(`filter chip: "${await page.textContent('.filter-chip')}", rows: ${await page.textContent('.statusbar__count')}`)
       await shot(`filter-${theme}`)
-      await page.click('.filter-chip')
-      await page.waitForSelector('.filter-chip', { state: 'detached' })
+      // 칩은 팝오버를 여는 버튼이다 — 열고 'Solo 해제' 를 눌러야 사라진다
+      await page.click('.filter-chip--solo')
+      await page.click('.view-chip__clear')
+      await page.waitForSelector('.filter-chip--solo', { state: 'detached' })
       await page.waitForSelector('.commit-subject')
     }
 
@@ -259,7 +266,14 @@ try {
         els.sort((a, b) => score(b) - score(a))[0].click()
       })
       const tDiff = Date.now()
-      await page.waitForSelector('.diff-row, .diff-notice', { timeout: 10_000 })
+      // .diff-notice 는 "불러오는 중…" 안내일 수도 있다 — 행이 그려지거나 로딩이 아닌 안내(바이너리 등)가 나올 때까지 기다린다
+      await page.waitForFunction(
+        () =>
+          document.querySelector('.diff-row') !== null ||
+          [...document.querySelectorAll('.diff-notice')].some((n) => !/불러오는 중|Loading/i.test(n.textContent ?? '')),
+        null,
+        { timeout: 15_000 }
+      )
       await page.waitForTimeout(500)
       const rows = await page.$$eval('.diff-row', (els) => els.length)
       const hl = await page.$$eval('.diff-code [class^="hljs-"]', (els) => els.length)
@@ -337,6 +351,10 @@ try {
     await page.waitForSelector('.search-bar__input')
     await page.fill('.search-bar__input', searchQuery)
     await page.waitForTimeout(1200)
+    // 고정 대기만으로는 "검색 중…"을 읽을 수 있다 — 상태가 끝날 때까지 더 기다린다
+    await page
+      .waitForFunction(() => !/검색 중|Searching/i.test(document.querySelector('.search-bar__status')?.textContent ?? ''), null, { timeout: 15_000 })
+      .catch(() => {})
     console.log(`search "${searchQuery}": ${await page.textContent('.search-bar__status')}`)
     await page.keyboard.press('Enter')
     await page.waitForTimeout(300)
@@ -425,15 +443,15 @@ try {
   }
   // 유휴 상태 메모리: 잠시 쉰 뒤 프로세스별 working set / private bytes(KB → MB)
   await page.waitForTimeout(1500)
-  const mem = await app.evaluate(async ({ app }) =>
-    app.getAppMetrics().map((m) => ({ type: m.type, ws: m.memory.workingSetSize, priv: m.memory.privateBytes ?? 0 }))
-  )
+  const mem = await host.memory()
   const mb = (kb) => Math.round(kb / 1024)
   console.log(
     `memory: working set ${mb(mem.reduce((s, m) => s + m.ws, 0))} MB, private ${mb(mem.reduce((s, m) => s + m.priv, 0))} MB — ` +
       mem.map((m) => `${m.type} ${mb(m.ws)}/${mb(m.priv)}`).join(', ')
   )
+  // 두 호스트를 같은 방식(OS 프로세스 트리, WorkingSet/PrivatePageCount)으로 잰 값 — 판 사이 비교는 이 줄을 쓴다
+  console.log(`process tree [${host.kind}]: ${formatTree(measureTree({ rootPid: host.pid, userData }))}`)
 } finally {
-  await app.close()
-  rmSync(userData, { recursive: true, force: true })
+  await host.close()
+  rmSync(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 }
