@@ -1,0 +1,34 @@
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 2
+author 홍길동
+author-mail <hong@example.com>
+author-time 1700000000
+author-tz +0900
+committer 홍길동
+committer-mail <hong@example.com>
+committer-time 1700000000
+committer-tz +0900
+summary feat: 한글 요약
+filename src/a.ts
+	line one
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 2 2
+	line two
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 1 3 1
+author Bob Lee
+author-mail <bob@example.com>
+author-time 1700000100
+author-tz +0900
+committer Bob Lee
+committer-mail <bob@example.com>
+committer-time 1700000100
+committer-tz +0900
+summary second
+previous aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa src/a.ts
+boundary
+filename src/a.ts
+		indented	with tab
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 3 4 1
+	line four
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 7 5 1
+	
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 8 6 1
+	crlf

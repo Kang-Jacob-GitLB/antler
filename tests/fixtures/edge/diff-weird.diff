@@ -1,0 +1,25 @@
++++ stray plus before hunk
+random header line
+Binary files notice differ
+@@ -1 +1 @@
+-a
++b
+@@ malformed header @@
+ after malformed
+@@@ -1,2 -1,2 +1,2 @@@ combined
++x
+@@ -5,1 +6,1 @@ withCR inside
+ y
+@@ -100000000000000000000,3 +1 @@ huge
+ z
+@@ -0,0 +0,0 @@ empty
+@@ -3,2 +3,2 @@ line separator
+ q
+@@ -7 +7 @@
+@@ -8 +8 @@x
+@@ -9 +9 @@  two spaces
+@@ -010,02 +0x1,3 @@ bad
+@@ -11,1 +11,1 @@ tail 한글
+ w
+@@ -12 +12 @@ nl
+ last line without newline

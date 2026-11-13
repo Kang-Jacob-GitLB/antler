@@ -1,0 +1,9 @@
+diff --git a/w.txt b/w.txt
+new file mode 100755
+@@ -1,4 +1,4 @@ fn()
+ a
+-b
++c
++
+
+\ No newline at end of file

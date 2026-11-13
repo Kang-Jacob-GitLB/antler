@@ -1,0 +1,18 @@
+[
+  {
+    "additions": null,
+    "binary": true,
+    "deletions": null,
+    "path": "bin/logo.bin",
+    "status": "A"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "src/app.ts",
+    "path": "src/main app.ts",
+    "similarity": 50,
+    "status": "R"
+  }
+]

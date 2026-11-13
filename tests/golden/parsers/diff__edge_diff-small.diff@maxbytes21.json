@@ -1,0 +1,28 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "header": "",
+      "lines": [
+        {
+          "n": 1,
+          "t": "+",
+          "text": "a"
+        },
+        {
+          "n": 2,
+          "t": "+",
+          "text": "b"
+        }
+      ],
+      "newLines": 2,
+      "newStart": 1,
+      "oldLines": 0,
+      "oldStart": 0
+    }
+  ],
+  "meta": [],
+  "path": "x",
+  "totalLines": 2,
+  "truncated": false
+}

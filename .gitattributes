@@ -1,0 +1,2 @@
+# 골든 fixture 는 바이트 그대로 읽는다(autocrlf 로 줄바꿈이 바뀌면 CRLF 를 담은 diff·blame fixture 의 골든이 달라진다)
+tests/fixtures/** -text

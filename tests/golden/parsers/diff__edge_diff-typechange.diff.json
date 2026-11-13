@@ -1,0 +1,49 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "header": "",
+      "lines": [
+        {
+          "o": 1,
+          "t": "-",
+          "text": "line 1"
+        },
+        {
+          "o": 2,
+          "t": "-",
+          "text": "line 2"
+        }
+      ],
+      "newLines": 0,
+      "newStart": 0,
+      "oldLines": 2,
+      "oldStart": 1
+    },
+    {
+      "header": "",
+      "lines": [
+        {
+          "n": 1,
+          "t": "+",
+          "text": "target/path"
+        },
+        {
+          "t": "\\",
+          "text": "No newline at end of file"
+        }
+      ],
+      "newLines": 1,
+      "newStart": 1,
+      "oldLines": 0,
+      "oldStart": 0
+    }
+  ],
+  "meta": [
+    "deleted file mode 100644",
+    "new file mode 120000"
+  ],
+  "path": "x",
+  "totalLines": 4,
+  "truncated": false
+}

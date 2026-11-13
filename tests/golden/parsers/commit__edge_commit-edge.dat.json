@@ -1,0 +1,14 @@
+{
+  "authorDate": null,
+  "authorEmail": "",
+  "authorName": "",
+  "body": "공백 둘러싼",
+  "commitDate": 12,
+  "committerEmail": "",
+  "committerName": "",
+  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "parents": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "subject": "제목\u001f속"
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "branch": "develop",
+    "name": "libs/foo.bar",
+    "path": "libs/foo.bar",
+    "url": "https://example.com/a.git"
+  },
+  {
+    "name": "한글 이름",
+    "path": "libs/한글 모듈",
+    "url": "../rel/x.git"
+  }
+]

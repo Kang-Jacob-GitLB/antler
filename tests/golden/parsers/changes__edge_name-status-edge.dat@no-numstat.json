@@ -1,0 +1,140 @@
+[
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "a.txt",
+    "status": "M"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "한글 경로.txt",
+    "status": "A"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "bin.png",
+    "status": "M"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "half",
+    "status": "M"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "old 1",
+    "path": "new 1",
+    "similarity": 100,
+    "status": "R"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "t",
+    "status": "T"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "u",
+    "status": "U"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "x",
+    "status": "M"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "b",
+    "status": "M"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "from",
+    "path": "to",
+    "similarity": 75,
+    "status": "C"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "o",
+    "path": "n",
+    "status": "R"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "o2",
+    "path": "n2",
+    "status": "R"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "o3",
+    "path": "n3",
+    "similarity": 50,
+    "status": "R"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "o4",
+    "path": "n4",
+    "similarity": 16,
+    "status": "R"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "oldPath": "o5",
+    "path": "n5",
+    "similarity": 10,
+    "status": "R"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "second char",
+    "status": "M"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "empty-code",
+    "status": "M"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "",
+    "status": "M"
+  }
+]

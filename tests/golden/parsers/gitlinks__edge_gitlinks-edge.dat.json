@@ -1,0 +1,18 @@
+[
+  {
+    "path": "conflict",
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "path": "no stage",
+    "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  {
+    "path": "a\tb with tab",
+    "sha": "ffffffffffffffffffffffffffffffffffffffff"
+  },
+  {
+    "path": "last without nul",
+    "sha": "1111111111111111111111111111111111111111"
+  }
+]

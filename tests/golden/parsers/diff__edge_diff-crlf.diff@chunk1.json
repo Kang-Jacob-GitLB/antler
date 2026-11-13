@@ -1,0 +1,51 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "header": "fn()",
+      "lines": [
+        {
+          "n": 1,
+          "o": 1,
+          "t": " ",
+          "text": "a"
+        },
+        {
+          "o": 2,
+          "t": "-",
+          "text": "b"
+        },
+        {
+          "n": 2,
+          "t": "+",
+          "text": "c"
+        },
+        {
+          "n": 3,
+          "t": "+",
+          "text": ""
+        },
+        {
+          "n": 4,
+          "o": 3,
+          "t": " ",
+          "text": ""
+        },
+        {
+          "t": "\\",
+          "text": "No newline at end of file"
+        }
+      ],
+      "newLines": 4,
+      "newStart": 1,
+      "oldLines": 4,
+      "oldStart": 1
+    }
+  ],
+  "meta": [
+    "new file mode 100755"
+  ],
+  "path": "x",
+  "totalLines": 6,
+  "truncated": false
+}

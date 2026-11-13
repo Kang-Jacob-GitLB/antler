@@ -3,10 +3,17 @@
 
 use serde::{Serialize, Serializer};
 
+pub mod blame;
+pub mod changes;
+pub mod commit;
+pub mod diff;
+pub mod file_history;
 pub mod log;
 pub mod nul_records;
 pub mod refs;
 pub mod stash;
+pub mod submodule;
+pub mod wip_status;
 pub mod worktree;
 
 /// JS `Number(str)` 의 결과. JSON 으로는 `JSON.stringify` 처럼 NaN·Infinity 가 null, 정수는 소수점 없이 나간다.
@@ -34,6 +41,16 @@ fn is_js_space(c: char) -> bool {
 /// JS `String.prototype.trim` 과 같은 공백 기준으로 앞뒤를 자른다
 pub fn js_trim(s: &str) -> &str {
     s.trim_matches(is_js_space)
+}
+
+/// JS `Number(s) || 0`: NaN(과 0)은 0 이 된다. Infinity 는 그대로라 JSON 으로는 null
+pub fn js_number_or_zero(s: &str) -> JsNumber {
+    let n = js_number(s);
+    if n.0.is_nan() || n.0 == 0.0 {
+        JsNumber(0.0)
+    } else {
+        n
+    }
 }
 
 /// 0x·0o·0b 접두 정수. 접두가 없으면 None, 접두 뒤가 비었거나 자릿수가 틀리면 NaN

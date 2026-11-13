@@ -1,0 +1,46 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "header": "",
+      "lines": [
+        {
+          "o": 1,
+          "t": "-",
+          "text": "1"
+        },
+        {
+          "n": 1,
+          "t": "+",
+          "text": "2"
+        },
+        {
+          "n": 2,
+          "o": 2,
+          "t": " ",
+          "text": "ew file mode 100000"
+        }
+      ],
+      "newLines": 1,
+      "newStart": 1,
+      "oldLines": 1,
+      "oldStart": 1
+    }
+  ],
+  "meta": [
+    "old mode 100644",
+    "new mode 100755",
+    "similarity index 90%",
+    "dissimilarity index 10%",
+    "rename from old name.ts",
+    "rename to 새 이름.ts",
+    "copy from c1",
+    "copy to c2",
+    "new file mode 100755",
+    "deleted file mode 100644"
+  ],
+  "oldPath": "old name.ts",
+  "path": "새 이름.ts",
+  "totalLines": 3,
+  "truncated": false
+}

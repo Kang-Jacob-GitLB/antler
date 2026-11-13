@@ -1,0 +1,15 @@
+{
+  "binary": false,
+  "commits": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "authorDate": 1,
+      "authorEmail": "e",
+      "authorName": "n",
+      "boundary": false,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": "s"
+    }
+  },
+  "groups": [],
+  "lines": []
+}

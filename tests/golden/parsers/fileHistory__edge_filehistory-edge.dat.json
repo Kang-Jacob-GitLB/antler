@@ -1,0 +1,97 @@
+[
+  {
+    "authorDate": 0,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "parents": [],
+    "path": "src/fallback.ts",
+    "status": "M",
+    "subject": "empty path"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "oldPath": "old",
+    "parents": [],
+    "path": "src/fallback.ts",
+    "status": "R",
+    "subject": "rename w/o new path"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "cccccccccccccccccccccccccccccccccccccccc",
+    "parents": [],
+    "path": "src/fallback.ts",
+    "status": "R",
+    "subject": "rename missing parts"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "dddddddddddddddddddddddddddddddddddddddd",
+    "parents": [],
+    "path": "t.ts",
+    "status": "T",
+    "subject": "status T"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "parents": [],
+    "path": "x.ts",
+    "status": "X",
+    "subject": "status X unknown"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "ffffffffffffffffffffffffffffffffffffffff",
+    "parents": [],
+    "path": "gone.ts",
+    "status": "D",
+    "subject": "many newlines"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "2222222222222222222222222222222222222222222222222222222222222222",
+    "parents": [],
+    "path": "sha256.ts",
+    "status": "M",
+    "subject": "sha256 hash"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "5555555555555555555555555555555555555555",
+    "oldPath": "copy-from.ts",
+    "parents": [
+      "6666666666666666666666666666666666666666",
+      "7777777777777777777777777777777777777777"
+    ],
+    "path": "copy-to.ts",
+    "status": "C",
+    "subject": "제목\u001f속\u001f구분자 \u0001notahash"
+  },
+  {
+    "authorDate": 2,
+    "authorEmail": "e",
+    "authorName": "n",
+    "hash": "8888888888888888888888888888888888888888",
+    "parents": [],
+    "path": "src/fallback.ts",
+    "status": "M",
+    "subject": "no nul in this chunk"
+  }
+]

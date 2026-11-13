@@ -1,0 +1,82 @@
+{
+  "conflicted": 0,
+  "counts": {
+    "added": 5,
+    "modified": 5,
+    "staged": 4,
+    "unstaged": 5,
+    "untracked": 4
+  },
+  "staged": [
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "oldPath": "orig-eaten.ts",
+      "path": "new-eats-next.ts",
+      "status": "R"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "dup.ts",
+      "status": "A"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "mm.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "last-rename-no-orig",
+      "status": "R"
+    }
+  ],
+  "unstaged": [
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "unknown-letter.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "dup.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "same.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "same.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "mm.ts",
+      "status": "M"
+    }
+  ],
+  "untracked": [
+    ""
+  ],
+  "untrackedMore": 3
+}
