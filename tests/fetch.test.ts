@@ -1183,7 +1183,13 @@ describe('UNC·네트워크 경로 remote URL 은 어느 플랫폼에서든 거�
     'file://localhost/share/x.git',
     'file:////host/share/x.git',
     'FILE://host/share/x.git',
-    'file:\\\\host\\share\\x.git'
+    'file:\\\\host\\share\\x.git',
+    // NT 네임스페이스 접두어 — 앞이 역슬래시 하나라 // 검사를 빠져나간다(git -C '\??\C:\…' 이 실제로 열린다)
+    '\\??\\UNC\\host\\share\\x.git',
+    '  \\??\\UNC\\host\\share\\x.git',
+    '/??/UNC/host/share/x.git',
+    'file:///??/UNC/host/share/x.git',
+    'file:/??/UNC/host/share/x.git'
   ])('거부: %s', (url) => expect(unsafeRemoteUrl(url)).not.toBeNull())
 
   it.each(['file:///C:/repos/x.git', 'file:///tmp/r.git', '/tmp/r.git', 'C:\\repos\\x.git', 'C:/repos/x.git', '../r.git', 'https://example.com/x.git', 'git@github.com:a/b.git'])(
@@ -1198,6 +1204,15 @@ describe('UNC·네트워크 경로 remote URL 은 어느 플랫폼에서든 거�
     const st = await fetcher.fetch(repoId, { manual: true, confirm: async () => true })
     expect(st.blocked?.confirmable).toBe(false)
     expect(st.blocked?.keys[0]).toMatch(/UNC/)
+  })
+
+  it('설정의 NT 네임스페이스(\\??\\UNC\\…) remote 도 확인 없이 거부하고 접속하지 않는다', async () => {
+    const { repo } = makeRepos()
+    git(repo, 'config', 'remote.origin.url', '\\??\\UNC\\127.0.0.1\\share\\x.git')
+    const { fetcher, repoId } = setup(repo)
+    const st = await fetcher.fetch(repoId, { manual: true, confirm: async () => true })
+    expect(st.blocked?.confirmable).toBe(false)
+    expect(st.blocked?.keys[0]).toMatch(/NT 네임스페이스/)
   })
 
   it('submodule URL 도 같은 검사를 받는다', async () => {
