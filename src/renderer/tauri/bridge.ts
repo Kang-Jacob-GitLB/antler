@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { IPC_CHANNELS, IPC_EVENTS, type AntlerApi, type IpcEnvelope } from '@shared/ipc'
+import { UNDEFINED_ARG } from '../../sidecar/protocol'
 import './titlebar.css'
 
 const channels = new Set<string>(IPC_CHANNELS)
@@ -15,6 +16,17 @@ const listeners = new Map<string, Set<Listener>>()
 void listen<{ name: string; payload: unknown }>('antler:evt', (e) => {
   for (const l of listeners.get(e.payload.name) ?? []) (l as (p: unknown) => void)(e.payload.payload)
 })
+
+/**
+ * JSON 은 배열 속 undefined 를 null 로 바꾼다. Electron IPC(structured clone)는 undefined 를 그대로 넘기고 main 의 검증은
+ * "생략(undefined)" 과 "잘못된 값(null)" 을 구분한다(예: git:search 의 scope 가 null 이면 invalid scope).
+ * 그래서 빈 자리는 표식으로 보내고 사이드카가 undefined 로 되돌린다. 끝의 undefined 는 그냥 뗀다(인자 생략과 같다).
+ */
+function encodeArgs(args: unknown[]): unknown[] {
+  let end = args.length
+  while (end > 0 && args[end - 1] === undefined) end--
+  return args.slice(0, end).map((a) => (a === undefined ? { [UNDEFINED_ARG]: true } : a))
+}
 
 const root = document.documentElement
 root.dataset['shell'] = 'tauri'
@@ -29,7 +41,7 @@ const api: AntlerApi = {
       root.toggleAttribute('data-titlebar-dim', theme?.dim === true)
       return undefined as never
     }
-    const res = (await invoke<IpcEnvelope<never>>('antler_invoke', { channel, args })) as IpcEnvelope<never>
+    const res = (await invoke<IpcEnvelope<never>>('antler_invoke', { channel, args: encodeArgs(args) })) as IpcEnvelope<never>
     if (res.ok) return res.data
     throw new Error(`[${res.code ?? 'ERROR'}] ${res.error}`)
   },

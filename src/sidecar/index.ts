@@ -15,7 +15,7 @@ import { RepoService } from '../main/services/RepoService'
 import { RepoWatcher } from '../main/services/RepoWatcher'
 import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
-import type { FromSidecar, ToSidecar } from './protocol'
+import { UNDEFINED_ARG, type FromSidecar, type ToSidecar } from './protocol'
 import { IPC_CHANNELS } from '@shared/ipc'
 
 // stdout 은 프로토콜 전용이다 — 서비스가 console.log/info 를 써도 프로토콜 줄이 깨지지 않게 stderr 로 돌린다
@@ -93,7 +93,17 @@ repos.cleanupGithubCache().catch((err) => console.error('원격 저장소 캐시
 // preload 의 허용 목록과 같은 검사. renderer 의 bridge 검사는 __TAURI__ 로 우회할 수 있으므로 여기서 다시 막는다
 const allowedChannels = new Set<string>(IPC_CHANNELS)
 
-async function onRequest(id: number, ch: string, args: unknown[]): Promise<void> {
+/** bridge 의 encodeArgs 를 되돌린다 — 표식 객체(키가 정확히 그것 하나)만 undefined 로 바꾼다 */
+function decodeArgs(args: unknown[]): unknown[] {
+  return args.map((a) =>
+    a !== null && typeof a === 'object' && !Array.isArray(a) && Object.keys(a).length === 1 && (a as Record<string, unknown>)[UNDEFINED_ARG] === true
+      ? undefined
+      : a
+  )
+}
+
+async function onRequest(id: number, ch: string, rawArgs: unknown[]): Promise<void> {
+  const args = decodeArgs(rawArgs)
   const pending = allowedChannels.has(ch) ? invokeHandler(ch, args) : undefined
   const env = pending ? await pending : { ok: false, error: `알 수 없는 채널: ${ch}`, code: 'ERROR' }
   out({ t: 'res', id, env: env as Extract<FromSidecar, { t: 'res' }>['env'] })

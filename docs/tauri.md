@@ -65,10 +65,55 @@ pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 �
 - CDP 로 확인(OS 입력 합성 없이 DOM `click()`): 창 버튼 최대화·복원·최소화, 밖에서 커밋하면 `repo:changed` 가 도착해 목록이 갱신됨,
   `location.href` 로 앱 밖 이동 시도는 같은 문서에 머무르고 `window.open` 은 null.
 
+## Phase 0 측정
+
+`node scripts/drive.mjs <저장소> --tauri src-tauri/target/release/antler.exe` 가 Electron 판과 **같은 시나리오**로 Tauri 판을 잰다(호스트 차이는
+`scripts/lib/electronHost.mjs`·`tauriHost.mjs` 뒤에 숨겼다). 이 기록은 2026-11-13, Electron 은 `pnpm build` 산출물을 개발 모드로 실행한
+것이고(패키지본이 아니다), Tauri 는 `tauri:build:cdp` 릴리스 빌드(사이드카는 Node 개발용)다. GPU 끔, 판·저장소 조합마다 3회씩
+(전체 시나리오 3회 + `--idle-only 30` 3회, 번갈아 실행). 저장소: `small` = 이 워크트리(85커밋), `big` = `make-big-repo.mjs` 10만 커밋.
+
+| 항목 | 저장소 | Electron 중앙값 (범위) | Tauri 중앙값 (범위) |
+|---|---|---|---|
+| 콜드 스타트 — spawn → 첫 커밋 행 감지(ms, n=6) | small | 15218 (13140–18869) | 11547 (3894–20903) |
+| 〃 | big | 8215 (3776–11816) | 9227 (3883–15971) |
+| 스크롤 p95(ms, n=3) | small | 13.4 (13.4–13.4) | 13.4 (13.4–13.4) |
+| 〃 | big | 26.7 (26.6–26.7) | 13.5 (13.4–26.7) |
+| 유휴 메모리 30초, 프로세스 트리 합 WorkingSet / Private (MB, n=3) | small | 449 / 232 | A 전체 538 / 269 · B node 제외 475 / 189 |
+| 〃 | big | 415 / 209 | A 전체 507 / 246 · B node 제외 447 / 168 |
+
+범위: 유휴 메모리는 Electron 446–457 / 229–234(small), 413–415 / 208–211(big), Tauri A 535–539 / 265–273(small), 507–511 / 246–247(big),
+B 469–477 / 185–195(small), 446–448 / 167–168(big).
+
+- **콜드 스타트는 결론을 낼 수 없다.** 같은 판·같은 저장소에서도 3.9초~21초로 흔들린다(측정 중 다른 프로세스 부하·디스크 캐시 영향으로 보이며 원인은 확인하지 않았다).
+  Electron small 이 big 보다 느린 것도 순서·부하 탓이지 저장소 차이가 아니다. 정의는 두 판 모두 "프로세스 spawn → 드라이버가 첫 `.commit-subject` 를 본 시각"이고,
+  Playwright 붙는 시간이 들어간다. 출력 괄호의 `app uptime` 은 Electron 은 `process.uptime`(감지 시점), Tauri 는 bridge 가 기록한 첫 행 DOM 등장 시각을 spawn 기준으로 환산한 값이라
+  **두 값은 정의가 달라 서로 비교하지 않는다**(비교 표에는 앞의 감지 값을 쓴다). 안정적인 비교를 하려면 부하 없는 상태에서 더 많이 반복해야 한다.
+- **스크롤 p95 는 화면 주사율(13.3ms 프레임)에 걸려 변별력이 없다.** 85커밋은 항상 한 프레임이고, 10만 커밋에서도 Tauri 는 3회 중 2회가 한 프레임, Electron 은 3회 모두 두 프레임(26.7ms)이었다.
+  3회로 "Tauri 가 낫다"고 말할 수는 없고, 적어도 나빠지지 않았다는 정도만 본다.
+- **유휴 메모리는 Tauri 가 더 크다.** Node 사이드카(약 60MB WS)를 빼도(B) Electron 과 비슷하거나 약간 큰 수준(small +26MB WS, big +32MB WS 이나 Private 은 오히려 작음: 189 vs 232, 168 vs 209).
+  Tauri 의 WebView2 프로세스는 앱 exe 의 자손으로 잡혔다(트리 안). WorkingSet 은 공유 페이지가 중복 합산되어 실제보다 크게 나오므로 Private 쪽이 더 믿을 만하다.
+  Electron 의 `app` 항목 14MB 안에는 playwright 가 돌려주는 `cmd.exe` 래퍼 1개가 `other` 로 따로 잡힌다. Tauri 의 `other`(12MB, 1개)는 정체를 확인하지 않았다.
+- 같은 줄에 출력되는 기존 `memory:`(Electron `getAppMetrics`)는 트리 합과 약간 다르다(small 474/244 vs 트리 449/234 등). 판 사이 비교는 `process tree` 줄만 쓴다.
+
+측정 조건과 한계:
+
+- 머신: Windows 11 Pro. 측정 시작 시 여유 메모리 약 4.3GB, 실행 중 3.6~5.2GB(Win32_OperatingSystem 기준). **vmmemWSL 이 약 3GB 를 쓰며 계속 떠 있었고**,
+  브라우저·여러 Claude 세션·작업 관리자 등 다른 앱도 함께 돌았다(CPU 사용률 20%대). 측정 전용 머신이 아니고, 수치를 보정하지 않았다.
+- 시나리오의 WSL 연결 테스트가 전체 시나리오 3회마다 실행된다(기존 동작).
+- 창이 전면으로 나오는지·다른 창이 가려지는지는 제어하지 않았다(Electron 도 같다).
+- Tauri 판에서는 창 최대화 버튼의 Win+Z 가 실제 입력으로 나가므로 `tauriHost` 가 측정 중 `.tb-controls` 에 `pointer-events: none` 을 주고, `page.mouse` 좌표가 그 상자와 겹치면 throw 한다.
+  (`page.click(selector)` 는 위 CSS 로만 막는다.) 프로세스는 PID 로만 종료한다.
+- 위 표를 잰 뒤 Tauri 판에서만 다르게 나오던 화면(Solo 후 `0개+`, diff 줄 0, 검색 `invalid scope`)을 고쳤다. 원인은 둘이었다.
+  (1) JSON 은 인자 배열의 `undefined` 를 `null` 로 바꾸는데 main 의 검증은 둘을 구분한다(`git:search` 의 scope 가 null 이면 `invalid scope`) —
+  bridge 가 빈 자리를 표식으로 보내고 사이드카가 되돌린다(`UNDEFINED_ARG`, `src/sidecar/protocol.ts`).
+  (2) `drive.mjs` 가 Solo·diff·검색 결과를 고정 시간만 기다리고 읽어, 응답이 조금 늦으면 "불러오는 중"·"검색 중"을 읽었다 — 끝날 때까지 기다리게 했다(Electron 측정도 더 정확해진다).
+  고친 뒤 같은 저장소(small)에서 두 판의 시나리오 결과가 모두 같다(Solo 84개, diff 64줄, 검색, 스크롤 p95 13.4ms). 미니맵 툴팁 `커밋 0개` 는 Electron 판도 같아 Tauri 문제가 아니다.
+  위 표의 스크롤 p95·메모리는 이 수정과 무관한 단계에서 잰 값이다.
+
 ## 남은 일·알려진 제약
 
 - 직접 확인 필요: 스냅 레이아웃 플라이아웃 위치·지연, 툴바 드래그·더블클릭 최대화(입력 합성을 하지 않아 자동 확인 못 함).
-- Electron 대비 성능(콜드 스타트·유휴 메모리·10만 커밋 스크롤 p95) — `drive.mjs` 의 Tauri 경로가 아직 없다.
+- Electron 대비 성능은 위 "Phase 0 측정" — 콜드 스타트는 부하 없는 환경에서 다시 재야 한다.
 - 새 창으로 여는 링크는 github.com 만 기본 브라우저로 보낸다(Electron 판 `setWindowOpenHandler` 와 같은 규칙).
 - 미지원: 폴더 선택 대화상자, `theme:system` 이벤트, 창 위치·크기 기억, `openPath`·`showItemInFolder`.
 - 배포 전 필수: 사이드카 경로가 빌드 머신 절대 경로로 박혀 있다(`src-tauri/src/sidecar.rs`) — Node 를 걷어 내면 사라지지만,

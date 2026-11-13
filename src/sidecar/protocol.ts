@@ -2,6 +2,12 @@
 // Rust 는 채널을 해석하지 않고 req 를 그대로 중계한다.
 import type { IpcEnvelope } from '@shared/ipc'
 
+/**
+ * 인자 배열의 빈 자리(undefined) 표식. JSON 은 배열 속 undefined 를 null 로 바꾸므로 bridge 가 이 키 하나짜리 객체로 보내고
+ * 사이드카가 undefined 로 되돌린다(src/renderer/tauri/bridge.ts 의 encodeArgs, src/sidecar/index.ts 의 decodeArgs).
+ */
+export const UNDEFINED_ARG = '__antlerUndefinedArg'
+
 /** Rust → Node */
 export type ToSidecar =
   | { t: 'req'; id: number; ch: string; args: unknown[] }
