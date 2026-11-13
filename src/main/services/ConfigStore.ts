@@ -149,6 +149,11 @@ export class ConfigStore {
   private config: AppConfig
   /** 설정 파일이 있는데 읽거나 해석하지 못했다(저장소 목록이 비어 시작했다). 목록이 빈 것을 근거로 캐시를 지우면 안 된다 */
   loadFailed = false
+  /**
+   * 설정이 디스크에 쓰인 직후(메모리 상태를 바꾼 뒤) 새 설정으로 불린다. 기본은 아무 일도 하지 않으며 Electron 판은 쓰지 않는다.
+   * Tauri 사이드카가 저장소 목록을 Rust 라우터에 미러로 알리는 데 쓴다(src/sidecar/index.ts).
+   */
+  onChange: (config: AppConfig) => void = () => {}
 
   constructor(
     private readonly file: string,
@@ -286,6 +291,12 @@ export class ConfigStore {
   private update(next: AppConfig): AppConfig {
     this.save(next)
     this.config = next
+    // 알림이 던져도 이미 저장된 설정 변경을 실패로 만들지 않는다
+    try {
+      this.onChange(next)
+    } catch (err) {
+      console.error('설정 변경 알림 실패:', err)
+    }
     return next
   }
 

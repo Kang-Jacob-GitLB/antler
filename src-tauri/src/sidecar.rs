@@ -14,6 +14,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::oneshot;
 
 use crate::dialogs;
+use crate::mirror::RepoMirror;
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
 
@@ -29,7 +30,8 @@ fn error_env(msg: &str) -> Value {
 }
 
 impl Sidecar {
-    pub fn spawn(app: &AppHandle, user_data: &Path) -> Result<Self, String> {
+    /// `mirror` 는 사이드카가 보내는 `repos` 메시지로 채워진다(라우터가 같은 것을 읽는다)
+    pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror) -> Result<Self, String> {
         let node = std::env::var("ANTLER_NODE").unwrap_or_else(|_| "node".into());
         let script = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../out-tauri/sidecar/index.cjs"));
         // git 이 아니라 개발 전용 Node 사이드카를 띄운다 — git 실행기(src/git/exec)의 대상이 아니다
@@ -70,7 +72,7 @@ impl Sidecar {
                     eprintln!("[sidecar] JSON 아닌 줄: {}", line.chars().take(200).collect::<String>());
                     continue;
                 };
-                handle_message(&app, &stdin_r, &pending_r, msg);
+                handle_message(&app, &stdin_r, &pending_r, &mirror, msg);
             }
             // 사이드카가 끝났다 — 기다리던 호출은 모두 실패로 돌려준다
             for (_, tx) in pending_r.lock().unwrap().drain() {
@@ -121,8 +123,14 @@ fn write_line(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {
     w.write_all(line.as_bytes()).and_then(|_| w.flush()).map_err(|e| format!("사이드카 쓰기 실패: {e}"))
 }
 
-fn handle_message(app: &AppHandle, stdin: &Arc<Mutex<ChildStdin>>, pending: &Pending, msg: Value) {
+fn handle_message(app: &AppHandle, stdin: &Arc<Mutex<ChildStdin>>, pending: &Pending, mirror: &RepoMirror, msg: Value) {
     match msg.get("t").and_then(Value::as_str) {
+        // 저장소 미러. 같은 stdout 에서 순서대로 읽으므로 저장소를 바꾼 호출의 res 보다 먼저 반영된다
+        Some("repos") => {
+            if !mirror.apply_message(&msg) {
+                eprintln!("[sidecar] repos 메시지를 적용하지 않았다(모양이 틀렸거나 오래된 gen)");
+            }
+        }
         Some("res") => {
             let id = msg.get("id").and_then(Value::as_u64);
             let tx = id.and_then(|id| pending.lock().unwrap().remove(&id));

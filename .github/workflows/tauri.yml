@@ -1,19 +1,13 @@
 name: tauri
 
-# Tauri 이관(docs/tauri.md)의 Rust 쪽 검사: 이식한 파서·실행기가 TS 골든과 같은 결과를 내는지(cargo test) + clippy.
-# 필수 상태 체크가 아니다(main 룰셋은 build.yml 의 잡만 요구한다). 배포 빌드는 하지 않는다.
+# Tauri 이관(docs/tauri.md)의 Rust 쪽 검사: 이식한 파서·실행기·라우터가 TS 골든과 같은 결과를 내는지(cargo test) + clippy.
+# 배포 빌드는 하지 않는다.
+#
+# 필수 상태 체크로 쓸 수 있게 **모든 PR 에서 돌고 항상 결과를 보고한다**. 워크플로 수준의 paths 필터를 쓰면 관련 없는 PR 에서는
+# 체크가 아예 보고되지 않아, 필수로 지정했을 때 그 PR 이 영원히 대기한다. 대신 첫 단계가 바뀐 파일을 보고 관련이 없으면
+# 무거운 단계를 건너뛰고 성공으로 끝낸다(목록은 아래 RELEVANT).
 on:
   pull_request:
-    paths:
-      - "src-tauri/**"
-      - "tests/golden/**"
-      - "tests/fixtures/**"
-      - "src/main/git/**"
-      - "src/main/executors/**"
-      - "src/main/services/RepoService.ts"
-      - "src/shared/**"
-      - "src/sidecar/**"
-      - ".github/workflows/tauri.yml"
   workflow_dispatch:
 
 concurrency:
@@ -33,9 +27,39 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # PR 의 기준 커밋과 비교하려면 이력이 필요하다(저장소가 작아 전체를 받는다)
+          fetch-depth: 0
+
+      # 바뀐 파일 중 Rust 검사와 관련 있는 것이 있는지. workflow_dispatch 는 항상 돈다
+      - name: 관련 변경 확인
+        id: changes
+        shell: pwsh
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          # Rust 이식의 원본(TS)·골든·fixture 와 Rust 코드
+          $RELEVANT = @(
+            '^src-tauri/', '^tests/golden/', '^tests/fixtures/', '^src/main/git/', '^src/main/executors/',
+            '^src/main/services/RepoService\.ts$', '^src/main/services/ConfigStore\.ts$', '^src/main/ipc/handlers\.ts$',
+            '^scripts/make-repo-fixtures\.mjs$', '^scripts/make-edge-fixtures\.mjs$', '^src/shared/', '^src/sidecar/',
+            '^src/renderer/tauri/', '^tests/golden.*\.test\.ts$', '^\.github/workflows/tauri\.yml$'
+          )
+          if ($env:EVENT -ne 'pull_request') { "run=true" >> $env:GITHUB_OUTPUT; exit 0 }
+          $files = git diff --name-only "$env:BASE_SHA" HEAD
+          if ($LASTEXITCODE -ne 0) { Write-Host '비교 실패 — 안전하게 전부 돈다'; "run=true" >> $env:GITHUB_OUTPUT; exit 0 }
+          $hit = $files | Where-Object { $f = $_; $RELEVANT | Where-Object { $f -match $_ } }
+          if ($hit) {
+            Write-Host "관련 변경:"; $hit | ForEach-Object { Write-Host "  $_" }
+            "run=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host '관련 변경 없음 — Rust 검사를 건너뛰고 성공으로 보고한다'
+            "run=false" >> $env:GITHUB_OUTPUT
+          }
 
       # 러너에 기본 설치된 rustup 을 쓴다(서드파티 액션을 늘리지 않는다)
       - name: Rust stable
+        if: steps.changes.outputs.run == 'true'
         run: |
           rustup default stable
           rustup component add clippy
@@ -44,8 +68,11 @@ jobs:
       # 컴파일은 frontendDist(out-tauri/renderer)가 없어도 된다 — 필요해지면 여기서 빈 폴더를 만든다
       # exec: 실제 git 을 띄우는 실행기 테스트(러너의 Git for Windows 를 쓴다). 러너에는 WSL 배포판이 없어 WSL 통합 케이스는 건너뛴다
       # (`[wsl] 건너뜀` 이 출력된다). git 격리는 tests/exec.rs 의 isolate(ctor)가 한다
-      - name: 테스트 (단위 + TS 골든 패리티 + 실행기)
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec
+      # channels: 라우터의 Rust 경로(git:commit)가 TS 골든과 같은 결과를 내는지(fixture 는 git fast-import 로 만든다)
+      - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
+        if: steps.changes.outputs.run == 'true'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels
 
       - name: clippy
+        if: steps.changes.outputs.run == 'true'
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
