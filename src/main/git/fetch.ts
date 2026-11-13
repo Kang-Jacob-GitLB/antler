@@ -98,6 +98,9 @@ export function isAllowedConfig(key: string, value: string | null): boolean {
   return ALLOWED_KEYS.some((re) => re.test(key))
 }
 
+/** Windows NT 네임스페이스 접두어(`\??\`, `/??/`) — 경로 어디에 있어도 거부한다(정상 경로에 `??` 디렉터리가 올 일은 없다) */
+export const NT_NAMESPACE = /[\\/]\?\?[\\/]/
+
 /**
  * 거부할 remote URL 인지 판정한다(사유를 돌려주고, 괜찮으면 null).
  * GIT_ALLOW_PROTOCOL 이 ext/fd/원격 도우미를 이미 막지만 의도를 명시하고 한 겹 더 둔다.
@@ -108,6 +111,9 @@ export function unsafeRemoteUrl(url: string): string | null {
   // UNC·네트워크 경로(\\host\share, //host@port/DavWWWRoot, \\?\UNC\…, \\.\…)와 호스트가 있는 file URL: Windows 는 접속하며 NTLM 을 보낸다.
   // 모든 플랫폼에서 거부한다(로컬 경로와 file:///C:/… 는 그대로 둔다)
   if (/^[\\/]{2}/.test(u)) return 'UNC·네트워크 경로'
+  // NT 네임스페이스 접두어(\??\UNC\host\share 등): 앞이 역슬래시 하나라 위 검사를 빠져나가지만 Windows 는 그대로 열어 SMB 로 접속한다
+  // (git -C '\??\C:\…' 이 실제로 그 위치로 간다 — 실측). URL 어디에 있든(file:///??/UNC/… 포함) 거부한다
+  if (NT_NAMESPACE.test(u)) return 'NT 네임스페이스 경로(\\??\\)'
   const file = /^file:(.*)$/is.exec(u)
   if (file && (/^[\\/]{2}[^\\/]/.test(file[1]!) || /^[\\/]{4}/.test(file[1]!))) return '호스트가 있는 file URL(네트워크 경로)'
   const helper = /^([A-Za-z0-9+.-]+)::/.exec(u)

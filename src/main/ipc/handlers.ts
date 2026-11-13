@@ -3,6 +3,7 @@ import type { IpcArgs, IpcChannel, IpcEnvelope, IpcResult } from '@shared/ipc'
 import type { AddGithubReposInput, AddRepoInput, AddReposInput } from '@shared/types'
 import { isWslUnc, wslFromUnc } from '../executors/wslPaths'
 import { MAX_ADD_GITHUB } from '../git/githubCache'
+import { NT_NAMESPACE } from '../git/fetch'
 import { AbortError, GitError } from '../executors/GitExecutor'
 import { listSshHosts } from '../executors/SshExecutor'
 import { listWslDistros } from '../executors/WslExecutor'
@@ -63,6 +64,8 @@ function checkPath(kind: AddRepoInput['kind'], path: unknown): asserts path is s
   }
   // 서비스는 앞뒤 공백을 지운 경로를 쓴다 — 같은 값으로 검사해야 ' \\host\share' 가 빠져나가지 못한다
   const p = path.trim()
+  // NT 네임스페이스 접두어(\??\UNC\host\share): 앞이 역슬래시 하나라 아래 UNC 검사를 빠져나가지만 Windows 는 SMB 로 연다
+  if (NT_NAMESPACE.test(p)) throw new Error('네트워크 공유 경로는 지원하지 않습니다(WSL 경로는 \\\\wsl.localhost\\… 로 고르세요)')
   if ((kind === 'local' || kind === 'wsl') && isUncPath(p) && !isWslUnc(p)) {
     throw new Error('네트워크 공유 경로는 지원하지 않습니다(WSL 경로는 \\\\wsl.localhost\\… 로 고르세요)')
   }
@@ -179,7 +182,8 @@ export function registerIpc(
   handle('dialog:pickFolder', async (e, defaultPath) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     // 시작 위치로 네트워크 경로(\\host\share)를 주면 대화상자가 SMB 인증을 시도한다 — WSL 공유만 허용
-    const safeDefault = typeof defaultPath === 'string' && defaultPath && (!isUncPath(defaultPath) || isWslUnc(defaultPath))
+    const safeDefault =
+      typeof defaultPath === 'string' && defaultPath && !NT_NAMESPACE.test(defaultPath) && (!isUncPath(defaultPath) || isWslUnc(defaultPath))
     const opts: Electron.OpenDialogOptions = {
       properties: ['openDirectory'],
       title: 'Git 저장소 선택',
