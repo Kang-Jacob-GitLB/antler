@@ -32,6 +32,8 @@ impl Sidecar {
     pub fn spawn(app: &AppHandle, user_data: &Path) -> Result<Self, String> {
         let node = std::env::var("ANTLER_NODE").unwrap_or_else(|_| "node".into());
         let script = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../out-tauri/sidecar/index.cjs"));
+        // git 이 아니라 개발 전용 Node 사이드카를 띄운다 — git 실행기(src/git/exec)의 대상이 아니다
+        #[allow(clippy::disallowed_methods)]
         let mut cmd = Command::new(node);
         cmd.arg(script)
             .env("ANTLER_USER_DATA", user_data)
