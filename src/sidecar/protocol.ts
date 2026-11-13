@@ -24,9 +24,23 @@ export type ToSidecar =
  */
 export type HostOp = 'openExternal' | 'clipboard' | 'messageBox' | 'pickPath'
 
+/**
+ * Rust 라우터가 저장소 경로·환경을 읽는 유일한 출처(미러). 설정을 쓰는 쪽은 사이드카(main 의 ConfigStore)뿐이고,
+ * Rust 는 renderer 가 보낸 경로를 쓰지 않는다. 토큰 등 비밀은 담지 않는다.
+ * kind 는 저장소가 속한 소스의 종류, distro 는 wsl 소스의 배포판 이름이다.
+ */
+export interface MirrorRepo {
+  id: string
+  kind: 'local' | 'wsl' | 'ssh' | 'github'
+  path: string
+  distro?: string
+}
+
 /** Node → Rust */
 export type FromSidecar =
   | { t: 'res'; id: number; env: IpcEnvelope<unknown> }
+  /** 저장소 미러 전체. gen 은 1 부터 1씩 늘고, Rust 는 이전 것보다 작거나 같은 gen 을 버린다. 시작 때 ready 전에, 이후 목록이 바뀔 때마다 보낸다 */
+  | { t: 'repos'; gen: number; repos: MirrorRepo[] }
   | { t: 'evt'; name: string; payload: unknown }
   | { t: 'host'; id: number; op: HostOp; arg: unknown }
   | { t: 'ready' }

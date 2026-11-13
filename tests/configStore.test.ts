@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ConfigStore, checkEditor, checkVisibleGroups } from '../src/main/services/ConfigStore'
 
 const tmp = (): string => join(mkdtempSync(join(tmpdir(), 'antler-cfg-')), 'antler.config.json')
@@ -59,5 +59,45 @@ describe('ConfigStore.load', () => {
     expect(saved.profiles).toBeUndefined()
     expect(saved.ui.activeProfileId).toBeUndefined()
     expect(saved.ui.diffMode).toBe('split')
+  })
+})
+
+describe('ConfigStore.onChange', () => {
+  it('기본은 아무 일도 하지 않아 설정을 쓰는 동작이 그대로다', () => {
+    const file = tmp()
+    const c = new ConfigStore(file)
+    c.setUi({ diffMode: 'split' })
+    expect(JSON.parse(readFileSync(file, 'utf8')).ui.diffMode).toBe('split')
+    expect(c.get().ui.diffMode).toBe('split')
+  })
+
+  it('쓰기가 끝난 뒤 새 설정으로 불린다(저장소 추가·삭제·UI 설정 모두)', () => {
+    const file = tmp()
+    const c = new ConfigStore(file)
+    const seen: { repos: number; mem: number }[] = []
+    c.onChange = (cfg) => {
+      // 불린 시점에 디스크와 메모리가 이미 새 상태다
+      expect(JSON.parse(readFileSync(file, 'utf8')).repos).toHaveLength(cfg.repos.length)
+      seen.push({ repos: cfg.repos.length, mem: c.get().repos.length })
+    }
+    const r = c.addRepo({ sourceId: 'local', path: '/tmp/x', name: 'x' })
+    c.setUi({ diffMode: 'split' })
+    c.removeRepo(r.id)
+    expect(seen).toEqual([
+      { repos: 1, mem: 1 },
+      { repos: 1, mem: 1 },
+      { repos: 0, mem: 0 }
+    ])
+  })
+
+  it('알림이 던져도 저장된 변경은 실패하지 않는다', () => {
+    const c = new ConfigStore(tmp())
+    c.onChange = () => {
+      throw new Error('boom')
+    }
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(c.setUi({ diffMode: 'split' }).ui.diffMode).toBe('split')
+    expect(c.get().ui.diffMode).toBe('split')
+    err.mockRestore()
   })
 })

@@ -21,7 +21,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 |---|---|---|
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
-| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(앱에는 아직 연결 안 함, 아래 "실행기") — 라우터·LogCursor 스트리밍·RepoWatcher 는 남음 |
+| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터") — 나머지 채널·LogCursor 스트리밍·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
@@ -73,6 +73,9 @@ pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 �
 UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts   # TS 파서 출력으로 골든(tests/golden/parsers) 다시 쓰기
 npx vitest run tests/golden.test.ts                   # TS 파서가 골든과 같은지
 cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 같은 골든과 같은지(건너뛴 수 출력)
+cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels   # CI 와 같은 전체(라우터·채널 패리티 포함)
+UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts   # 채널 골든(tests/golden/channels, exec/channels.json) 다시 쓰기
+ANTLER_RUST_GIT=0 <exe>                               # 라우터를 끄고 모든 채널을 사이드카로(되돌리기 스위치)
 ```
 
 요구 사항: Rust(stable, MSVC), WebView2 런타임, PATH 의 node(또는 `ANTLER_NODE`). 환경 변수 `ANTLER_USER_DATA` 로 userData 를,
@@ -114,7 +117,7 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 
 ## 실행기(Phase 2, `src-tauri/src/git/exec/`)
 
-`src/main/executors` 의 Local·WSL 실행기·`ProcessQueue`·`wslPaths` 를 옮겼다(SSH 는 Phase 5). **아직 앱에서 부르지 않는다** — 라우터(다음 PR)가 붙기 전까지 사이드카가 그대로 처리한다.
+`src/main/executors` 의 Local·WSL 실행기·`ProcessQueue`·`wslPaths` 를 옮겼다(SSH 는 Phase 5). 앱에서는 라우터(아래 "라우터")가 등록된 채널에서만 부른다.
 
 - `common.rs` 의 `GIT_GLOBAL_ARGS`·`GIT_ENV` 가 유일한 정의이고 `RunOpts` 에는 env 필드가 없다(호출자가 방어 환경변수를 덮어쓸 수 없다. TS 의 `RunOpts.env`·`envFor`·WSL `extraEnv` 는 GitHub 원격 전용 저장소용이라 옮기지 않았다).
 - `run`(stdout 64MB 상한, stderr 는 앞 4MB 만 담고 파이프는 끝까지 비움) / `stream`(`GitStream`: `AsyncRead`. **읽을 때만** 파이프에서 가져가므로 소비자가 안 읽으면 git 이 멈춘다.
@@ -124,7 +127,8 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
   검증 뒤 정해진 위치·`--` 뒤에만 넣고, (2) 저장소 경로·배포판은 renderer 가 아니라 사이드카가 보낸 미러(main 이 저장한 값)에서만 가져오며
   `src/main/ipc/handlers.ts` 의 `checkPath`(UNC·NUL·길이)·배포판 목록 대조를 이식하고, (3) LogCursor 를 버릴 때 `GitStream` 을 drop 한다
   (스트림의 취소 토큰은 다음 읽기 때만 확인된다 — 토큰만 취소하고 구조체를 남기면 git 이 파이프에서 멈춘 채 남는다).
-  Rust CI(`tauri.yml`)는 아직 필수 체크가 아니다 — clippy 의 `disallowed-methods` 가 실패해도 머지될 수 있으니 앱 연결 PR 전에 필수 체크로 올린다(저장소 룰셋 설정).
+  (1)·(2)는 라우터 PR 에서 채웠고(아래 "라우터"), (3)은 LogCursor 를 옮기는 PR 의 몫이다.
+  Rust CI(`tauri.yml`)는 아직 필수 체크가 아니다 — clippy 의 `disallowed-methods` 가 실패해도 머지될 수 있으니 **필수 체크로 올려야 한다(저장소 룰셋 설정, 사용자 확인 필요 — 이 PR 에서 하지 않았다)**.
 - Windows: `CREATE_NO_WINDOW`, 취소·Drop 때 `taskkill /pid N /T /F` 를 **한 번만**, **별도 스레드에서** 띄우고 기다린다. 이미 끝나 수거된 자식에는 보내지 않는다.
   루트 프로세스 핸들 복제본을 taskkill 이 끝날 때까지 쥐고 있어 그 사이 PID 가 재사용되지 않고, taskkill 이 실패하면 그 핸들로 루트를 `TerminateProcess` 한다.
   처음 이식은 런타임 스레드에서 taskkill 을 2~3번(명시적 kill + Drop) 띄워, 병렬 테스트 부하에서 취소→반환이 8~22초까지 늘었다(현재 1ms 미만).
@@ -139,6 +143,48 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
   git 을 띄우는 Rust 테스트를 새 파일에 만들면 같은 격리를 넣어야 한다(`격리` 테스트가 본보기).
 - 실행: `cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec`. WSL 통합 케이스는 배포판(과 그 안의 git)이 없으면 건너뛴다(`[wsl] 건너뜀`, `--nocapture`).
   수동(트리 kill): `ANTLER_BIG_REPO=<큰 저장소> cargo test --manifest-path src-tauri/Cargo.toml --test exec -- --ignored --nocapture --test-threads=1` — powershell 로 프로세스 트리를 읽는다.
+
+## 라우터(Phase 2, `src-tauri/src/router.rs`)
+
+`antler_invoke` 는 이제 라우터를 거친다. 채널이 Rust 에서 처리할 수 있는 것이면 Rust 가 envelope 를 만들고, 아니면 사이드카에 인자를 **그대로** 넘긴다.
+
+```
+renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit 하나)
+                                         └ Sidecar → Node 사이드카 → envelope → renderer (그 밖의 모든 것)
+```
+
+- **Rust 경로 조건**(전부): 채널이 `RUST_CHANNELS` 에 있다 · 인자의 저장소 id 가 미러에 있다 · 그 kind 가 local 또는 wsl 이다(ssh·github 소스는 사이드카) ·
+  환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아니다. 미러에 없는 id 는 사이드카로 가서 오류 문구를 사이드카가 만든다.
+- **되돌리기 스위치**: `ANTLER_RUST_GIT=0` 으로 실행하면 모든 채널이 사이드카로 간다(Electron 판과 같은 경로). 확인용으로 `ANTLER_ROUTE_LOG=1` 이면
+  `RUST_CHANNELS` 채널이 어디로 갔는지 stderr 에 `[route] git:commit -> rust|sidecar` 로 남긴다(기본은 조용하다. drive 는 `ANTLER_DRIVE_DEBUG=1` 로 stderr 를 본다).
+- **미러**(`src-tauri/src/mirror.rs`, 프로토콜 `{t:"repos", gen, repos:[{id, kind, path, distro?}]}`): 설정을 쓰는 쪽은 사이드카의 `ConfigStore` 뿐이다.
+  `ConfigStore.onChange`(기본 아무 일도 안 함 — Electron 판은 쓰지 않는다)가 `update` 안에서 동기로 불려 사이드카가 미러를 보낸다 — 시작 때 ready 전에 한 번,
+  저장소 목록이 바뀔 때마다(창 위치·UI 설정처럼 저장소와 무관한 쓰기는 같은 내용이라 보내지 않는다). 같은 stdout 에서 순서대로 읽으므로 저장소를 바꾼 호출의 응답보다 미러가 먼저 반영된다.
+  `gen` 이 이미 받은 것 이하이면 버린다. 토큰 등 비밀은 담지 않는다. **Rust 는 renderer 가 보낸 경로·kind·배포판을 쓰지 않는다** — 저장소 id 와 검증된 해시만 받는다.
+- **미러 값 검사**: `check_path` 는 `handlers.ts` 의 `checkPath` 와 같다(NUL·빈 값·4096 UTF-16 단위 초과 거부, 로컬·WSL 의 `\\host\share` 거부, `\\wsl.localhost\…` 허용, UNC 는 trim 한 값으로 본다).
+  WSL 배포판은 TS 가 **추가할 때만** 설치 목록(`wsl.exe -l -q`)과 대조하고 쓸 때는 다시 확인하지 않는다 — Rust 는 목록을 읽지 않고(`Command::new` 가 `process.rs` 에만 있어야 한다)
+  형식만 본다(비었음·255 초과·제어 문자·`-` 로 시작 거부). 검사에 걸린 미러 값은 사이드카로 넘기지 않고 `ERROR` envelope 로 돌려준다(TS 는 이 값으로 git 을 돌렸을 것이다).
+- **인자 구성**: `git:commit` 의 renderer 인자는 `repoId, hash, requestId?` 다. 해시는 `HexHash`(16진수 4~64자, TS `assertHex` 와 같음 — 정규식 대신 손으로 검사해 JS `$`·`\s` 차이를 피했다)만 통과하고,
+  `git/commit.rs` 의 `meta_args`·`diff_tree_args` 가 서브커맨드·옵션 상수 + `HexHash` 를 정해진 자리에만 넣는다(TS 와 같게 `--end-of-options` 없이 뒤에 `--`).
+  `HexHash` 가 아닌 문자열은 argv 를 만들 방법이 없다. `-c alias…`·`--output=…`·`-x`·개행 붙은 해시 등의 거부는 단위·통합 테스트가 증명한다.
+  git 이 돌려준 `%H`·부모 해시도 `HexHash` 로 다시 검사한 뒤 diff-tree 범위에 쓴다.
+- **채널 처리**(TS `RepoService.commit` 과 같은 순서): 해시 기준 불변 LRU(300개·24MB, 키 `repoId\0소문자 해시`, 크기 추정은 UTF-16 길이) → 같은 키 요청 합치기(`ProcessQueue` 의 `Shared`) →
+  큐 슬롯 한 개 안에서 `log -1`, 이어 `diff-tree --name-status` 와 `--numstat` 동시. 큐는 **소스별**(TS 와 같게 local 하나, wsl 은 배포판마다 하나; 6/4 동시성)이고 큐의 결과 타입이 JSON 값이라 이후 채널이 같은 큐를 나눠 쓴다.
+- **envelope**: `{ok:true,data}` / `{ok:false,error,code}`. code 는 `handlers.ts` 의 판정 순서(ABORTED → STALE → GitHub·Jira → GIT → ERROR)와 같게 `ExecError` 에서 정한다
+  (Aborted→ABORTED, Git→GIT, 그 밖(검증 실패·파서 거부·spawn 실패)→ERROR). **오류 문구는 code 만 패리티**다 — 문구는 Rust 가 비슷하게 만들지만 같다고 보장하지 않는다.
+- **취소**: `requestId → CancellationToken`(`CancelRegistry`). 핸들러는 첫 await 전에 등록한다. `req:cancel` 은 Rust 레지스트리를 취소한 뒤 **항상** 사이드카에도 전달한다.
+  cancel 과 요청은 별개 invoke 라 도착 순서가 보장되지 않으므로, 등록 전에 온 cancel 은 tombstone(10초·256개)에 남겨 두었다가 등록 때 이미 취소된 토큰을 준다.
+  합쳐진 요청에서는 한 호출자의 취소가 다른 호출자의 프로세스를 죽이지 않는다 — 호출자 토큰은 실행기가 아니라 대기(`select!`)에만 걸리고, 기다리는 쪽이 모두 사라지면 큐가 프로세스를 정리한다.
+- `UNDEFINED_ARG` 표식은 Rust 경로에서만 디코드한다(`decode_args` — 사이드카 `decodeArgs` 와 같은 규칙). 사이드카로 보낼 때는 원본 인자를 그대로 넘긴다.
+
+### 채널 골든
+
+- `tests/golden/exec/channels.json`: TS `IPC_CHANNELS` 덤프. `src-tauri/tests/channels.rs` 가 `RUST_CHANNELS ⊆ IPC_CHANNELS` 를 강제한다(채널 이름을 오타 내면 Rust 테스트가 실패한다).
+- `tests/fixtures/repos/*.fi`(`node scripts/make-repo-fixtures.mjs` 로 만든 `git fast-import` 스트림 — 날짜·작성자·내용이 고정이라 해시가 결정적이다. 루트·병합·가지·빈 커밋·이름 변경·바이너리·한글 경로·5001개 파일 포함)와
+  `commit.scenarios.json`(시나리오: 해시 풀이, 대문자·약식 해시, 없는 해시, 잘못된 해시 여러 가지)을 TS(`tests/goldenChannels.test.ts` → `RepoService.commit`)와 Rust(`channels.rs` → `Router::route`)가 임시 디렉터리에 import 해 돈다.
+  TS 결과가 `tests/golden/channels/commit.json`(오류는 code 만, 파일이 20개를 넘으면 개수·처음·마지막만)이고 Rust 가 같은지 본다.
+- 골든 갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts`. 채널을 `RUST_CHANNELS` 에 추가할 때는 시나리오·골든도 함께 넣는다.
+- Rust 테스트의 git 격리는 `tests/channels.rs` 의 `isolate`(ctor)가 한다(`exec.rs` 와 같다). 단위 테스트(`--lib`)는 git 을 띄우지 않는다.
 
 ## Phase 0 에서 확인한 것
 
