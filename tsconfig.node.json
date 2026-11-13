@@ -16,5 +16,5 @@
     "outDir": "./node_modules/.tsc/node",
     "paths": { "@shared/*": ["./src/shared/*"] }
   },
-  "include": ["electron.vite.config.mts", "vitest.config.mts", "src/main/**/*", "src/preload/**/*", "src/shared/**/*", "tests/**/*", "scripts/**/*.ts"]
+  "include": ["electron.vite.config.mts", "vitest.config.mts", "vite.*.config.mts", "src/main/**/*", "src/sidecar/**/*","src/preload/**/*", "src/shared/**/*", "tests/**/*", "scripts/**/*.ts"]
 }

@@ -1,0 +1,29 @@
+[package]
+name = "antler"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "antler_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 사이드카 응답 대기표(id → oneshot)
+tokio = { version = "1", features = ["sync"] }
+# host 요청(openExternal·clipboard)을 Rust API 로 처리한다. JS 쪽 권한은 capabilities 에 주지 않는다
+tauri-plugin-opener = "2.7.3"
+tauri-plugin-clipboard-manager = "2.5.0"
+
+[target.'cfg(windows)'.dependencies]
+# 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판
+windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+
+[features]
+cdp = []

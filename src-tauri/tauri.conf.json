@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Antler",
+  "version": "0.0.0",
+  "identifier": "com.antler.app",
+  "build": {
+    "devUrl": "http://localhost:5174",
+    "frontendDist": "../out-tauri/renderer",
+    "beforeDevCommand": "pnpm tauri:sidecar && pnpm tauri:web",
+    "beforeBuildCommand": "pnpm tauri:sidecar && vite build --config vite.tauri.config.mts"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com https://camo.githubusercontent.com https://user-images.githubusercontent.com https://private-user-images.githubusercontent.com https://github.com https://github.githubassets.com; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "bundle": { "active": false, "icon": ["../resources/icon.ico", "../resources/icon.png"] }
+}

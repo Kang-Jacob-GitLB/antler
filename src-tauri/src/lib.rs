@@ -1,0 +1,94 @@
+mod commands;
+mod sidecar;
+mod snap;
+
+use std::path::PathBuf;
+
+use tauri::window::Color;
+use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+
+/// 첫 페인트 전 흰 화면을 막는다. 토큰 --bg-base(Dark)와 같은 값
+const BG: Color = Color(0x14, 0x11, 0x0F, 0xFF);
+
+/// WebView2 실행 인자. 하드웨어 가속은 기본으로 끈다(Electron 판과 같은 이유 — ANTLER_GPU=1 로 켠다)
+fn browser_args() -> String {
+    let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+    if std::env::var("ANTLER_GPU").as_deref() != Ok("1") {
+        args.push_str(" --disable-gpu");
+    }
+    #[cfg(any(debug_assertions, feature = "cdp"))]
+    if let Ok(port) = std::env::var("ANTLER_CDP_PORT") {
+        if port.chars().all(|c| c.is_ascii_digit()) && !port.is_empty() {
+            args.push_str(&format!(" --remote-debugging-port={port}"));
+        }
+    }
+    args
+}
+
+/// 앱 자신의 화면 주소인가. 배포 빌드는 tauri.localhost 만, 개발 빌드는 vite dev 서버(devUrl)도 허용한다
+fn is_app_url(url: &tauri::Url) -> bool {
+    let host = url.host_str().unwrap_or("");
+    let scheme_ok = matches!(url.scheme(), "http" | "https" | "tauri");
+    if scheme_ok && (host == "tauri.localhost" || url.scheme() == "tauri" && host == "localhost") {
+        return true;
+    }
+    cfg!(debug_assertions) && url.scheme() == "http" && host == "localhost" && url.port() == Some(5174)
+}
+
+pub fn run() {
+    commands::mark_start();
+    tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .invoke_handler(tauri::generate_handler![
+            snap::show_snap_overlay,
+            commands::antler_invoke,
+            commands::antler_uptime_ms
+        ])
+        .setup(|app| {
+            // Electron 판의 %APPDATA%\Antler 와 설정이 섞이지 않게 기본값은 Tauri 의 app_data_dir 다
+            let user_data: PathBuf = match std::env::var_os("ANTLER_USER_DATA") {
+                Some(p) => p.into(),
+                None => app.path().app_data_dir()?,
+            };
+            std::fs::create_dir_all(&user_data)?;
+            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data)?);
+
+            let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                .title("Antler")
+                .inner_size(1440.0, 900.0)
+                .min_inner_size(960.0, 600.0)
+                .decorations(false)
+                // 앱이 HTML5 드래그 앤 드롭을 쓴다 — Tauri 의 파일 드롭 처리가 이를 가로채지 않게 끈다
+                .disable_drag_drop_handler()
+                .background_color(BG)
+                .data_directory(user_data.join("webview2"))
+                .additional_browser_args(&browser_args())
+                // src/main/index.ts 의 will-navigate·setWindowOpenHandler·권한 거부와 같다.
+                // 드롭한 파일·링크로 창이 앱 밖 주소로 바뀌어 앱처럼 보이는 가짜 화면을 띄우지 못하게 한다
+                .on_navigation(is_app_url)
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny);
+            if std::env::var("ANTLER_MEASURE").as_deref() == Ok("1") {
+                win = win.initialization_script("window.__ANTLER_MEASURE__=true");
+            }
+            win.build()?;
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // 창이 뒤에 있을 때는 원격 폴링을 늦춘다(src/main/index.ts 의 focus·blur 처리와 같다)
+            if let WindowEvent::Focused(focused) = event {
+                if let Some(s) = window.app_handle().try_state::<sidecar::Sidecar>() {
+                    s.set_focus(*focused);
+                }
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("Tauri 앱 빌드 실패")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                if let Some(s) = app.try_state::<sidecar::Sidecar>() {
+                    s.kill();
+                }
+            }
+        });
+}

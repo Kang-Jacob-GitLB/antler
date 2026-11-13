@@ -10,6 +10,7 @@ Antler 는 Windows · WSL · SSH 의 git 저장소를 한 창에서 보는 **읽
 | [docs/build.md](docs/build.md) | 설치·실행·패키징·릴리스(CI), 개발 도구 스크립트 |
 | [docs/connections.md](docs/connections.md) | GitHub·Jira 로그인, WSL·SSH |
 | [docs/updates.md](docs/updates.md) | 앱 안 업데이트 동작과 검증 |
+| [docs/tauri.md](docs/tauri.md) | Tauri 2 전환 계획·결정·진행 상태(src-tauri, src/sidecar, src/renderer/tauri) |
 
 ## 명령
 

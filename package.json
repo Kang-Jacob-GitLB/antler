@@ -20,7 +20,13 @@
     "dist:win": "electron-builder --win",
     "dist:mac": "electron-builder --mac",
     "dist:linux": "electron-builder --linux",
-    "notices": "node scripts/gen-notices.mjs"
+    "notices": "node scripts/gen-notices.mjs",
+    "tauri": "tauri",
+    "tauri:web": "vite --config vite.tauri.config.mts",
+    "tauri:sidecar": "vite build --config vite.sidecar.config.mts",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build --no-bundle",
+    "tauri:build:cdp": "tauri build --no-bundle --features cdp"
   },
   "dependencies": {
     "electron-updater": "^6.8.9",
@@ -30,6 +36,8 @@
     "@fontsource/nanum-gothic-coding": "^5.3.0",
     "@resvg/resvg-js": "^2.6.2",
     "@tanstack/react-virtual": "^3.14.19",
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/cli": "2.12.4",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
