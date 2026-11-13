@@ -1,0 +1,132 @@
+{
+  "local": [
+    {
+      "behind": 1,
+      "fullName": "refs/heads/behind-br",
+      "hash": "6c7389681dd636b8c87f4b1129c41a437804a999",
+      "isHead": false,
+      "name": "behind-br",
+      "upstream": "origin/main"
+    },
+    {
+      "ahead": 1,
+      "behind": 3,
+      "fullName": "refs/heads/diverged",
+      "hash": "f7c4735f2df2146e427371b1e2fac6b9ebcd0f5b",
+      "isHead": false,
+      "name": "diverged",
+      "upstream": "origin/diverged"
+    },
+    {
+      "fullName": "refs/heads/feature/이름-변경",
+      "hash": "aca5e172360e5b73e9191e02029e12daf730218e",
+      "isHead": false,
+      "name": "feature/이름-변경"
+    },
+    {
+      "fullName": "refs/heads/gone-br",
+      "hash": "2b2539b54fee540d22c77d7c87fa7516934ac05a",
+      "isHead": false,
+      "name": "gone-br",
+      "upstream": "origin/gone-br",
+      "upstreamGone": true
+    },
+    {
+      "ahead": 4,
+      "fullName": "refs/heads/main",
+      "hash": "b748c8d536fdf022c493256580ceb25ebe29de57",
+      "isHead": true,
+      "name": "main",
+      "upstream": "origin/main"
+    },
+    {
+      "fullName": "refs/heads/wt-branch",
+      "hash": "b748c8d536fdf022c493256580ceb25ebe29de57",
+      "isHead": false,
+      "name": "wt-branch"
+    }
+  ],
+  "remotes": [
+    {
+      "branches": [
+        {
+          "fullName": "refs/remotes/origin/diverged",
+          "hash": "2b2539b54fee540d22c77d7c87fa7516934ac05a",
+          "isHead": false,
+          "name": "origin/diverged"
+        },
+        {
+          "fullName": "refs/remotes/origin/main",
+          "hash": "750dd9e22d22543f51658f06d35025c27b519d77",
+          "isHead": false,
+          "name": "origin/main"
+        },
+        {
+          "fullName": "refs/remotes/origin/team/HEAD",
+          "hash": "b748c8d536fdf022c493256580ceb25ebe29de57",
+          "isHead": false,
+          "name": "origin/team/HEAD"
+        }
+      ],
+      "name": "origin"
+    },
+    {
+      "branches": [
+        {
+          "fullName": "refs/remotes/team/upstream/feature/x",
+          "hash": "750dd9e22d22543f51658f06d35025c27b519d77",
+          "isHead": false,
+          "name": "team/upstream/feature/x"
+        },
+        {
+          "fullName": "refs/remotes/team/upstream/main",
+          "hash": "b748c8d536fdf022c493256580ceb25ebe29de57",
+          "isHead": false,
+          "name": "team/upstream/main"
+        }
+      ],
+      "name": "team/upstream"
+    }
+  ],
+  "tags": [
+    {
+      "annotated": true,
+      "date": 1700001680,
+      "fullName": "refs/tags/v0.9.0",
+      "hash": "b748c8d536fdf022c493256580ceb25ebe29de57",
+      "name": "v0.9.0",
+      "targetsCommit": true
+    },
+    {
+      "annotated": false,
+      "date": 1700001200,
+      "fullName": "refs/tags/v0.10.0",
+      "hash": "b748c8d536fdf022c493256580ceb25ebe29de57",
+      "name": "v0.10.0",
+      "targetsCommit": true
+    },
+    {
+      "annotated": true,
+      "date": 1700000960,
+      "fullName": "refs/tags/v0.2.0",
+      "hash": "2b2539b54fee540d22c77d7c87fa7516934ac05a",
+      "name": "v0.2.0",
+      "targetsCommit": true
+    },
+    {
+      "annotated": false,
+      "date": 1700000180,
+      "fullName": "refs/tags/v0.1.0",
+      "hash": "9da3a23f3932e127c3c08fa30a5d901570a10000",
+      "name": "v0.1.0",
+      "targetsCommit": true
+    },
+    {
+      "annotated": false,
+      "fullName": "refs/tags/tree-tag",
+      "hash": "c92a9ffbefa4082499cae70f868bb75227a6c85f",
+      "name": "tree-tag",
+      "targetsCommit": false
+    }
+  ]
+}

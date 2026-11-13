@@ -1,0 +1,14 @@
+[
+  "worktree C:/Users/user/AppData/Local/Temp/antler-fixture-jSzvDy",
+  "HEAD b748c8d536fdf022c493256580ceb25ebe29de57",
+  "branch refs/heads/main",
+  "",
+  "worktree C:/Users/user/AppData/Local/Temp/antler-fixture-wt-sjBlPH/detached-wt",
+  "HEAD 2b2539b54fee540d22c77d7c87fa7516934ac05a",
+  "detached",
+  "",
+  "worktree C:/Users/user/AppData/Local/Temp/antler-fixture-wt-sjBlPH/작업 트리",
+  "HEAD b748c8d536fdf022c493256580ceb25ebe29de57",
+  "branch refs/heads/wt-branch",
+  ""
+]

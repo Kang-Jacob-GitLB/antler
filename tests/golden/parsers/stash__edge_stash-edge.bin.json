@@ -1,0 +1,30 @@
+[
+  {
+    "date": 1700000000,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "index": 0,
+    "message": "On main: 임시 저장",
+    "ref": "stash@{0}"
+  },
+  {
+    "date": 1700000001,
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "index": 12,
+    "message": "WIP on x: abc 메시지",
+    "ref": "stash@{12}"
+  },
+  {
+    "date": null,
+    "hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "index": 4,
+    "message": "a\u001fb\u001fc",
+    "ref": "stash@{4}"
+  },
+  {
+    "date": 0,
+    "hash": "ffffffffffffffffffffffffffffffffffffffff",
+    "index": 5,
+    "message": "no trailing nul",
+    "ref": "stash@{5}"
+  }
+]

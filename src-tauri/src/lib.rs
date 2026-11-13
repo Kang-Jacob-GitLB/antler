@@ -1,5 +1,6 @@
 mod commands;
 mod dialogs;
+pub mod git;
 mod sidecar;
 mod snap;
 

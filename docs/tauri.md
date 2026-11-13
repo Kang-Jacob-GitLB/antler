@@ -20,8 +20,8 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 단계 | 내용 | 상태 |
 |---|---|---|
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
-| 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | |
-| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | |
+| 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
+| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 5개(log·refs·stash·worktree·nulRecords) 이식·골든 일치 — 나머지 파서(diff·wipStatus 등)·실행기는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
@@ -69,10 +69,32 @@ renderer(src/renderer/src, 그대로)
 pnpm tauri:build        # 사이드카·renderer 빌드 후 src-tauri/target/release/antler.exe (설치본 없음)
 pnpm tauri:build:cdp    # 위 + ANTLER_CDP_PORT 로 원격 디버깅 포트를 열 수 있는 빌드(측정·자동화용, 배포 금지)
 pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 실행해 확인하지 않았다
+
+UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts   # TS 파서 출력으로 골든(tests/golden/parsers) 다시 쓰기
+npx vitest run tests/golden.test.ts                   # TS 파서가 골든과 같은지
+cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 같은 골든과 같은지(건너뛴 수 출력)
 ```
 
 요구 사항: Rust(stable, MSVC), WebView2 런타임, PATH 의 node(또는 `ANTLER_NODE`). 환경 변수 `ANTLER_USER_DATA` 로 userData 를,
 `ANTLER_GPU=1` 로 하드웨어 가속을, `ANTLER_MEASURE=1` 로 첫 커밋 행 시각 기록(`window.__ANTLER_FIRST_ROW__`)을 켠다.
+
+## 골든 테스트(Phase 1)
+
+TS 파서가 기준이다. `tests/fixtures`(git 원시 출력, `make-fixtures.mjs`)와 `tests/fixtures/edge`(손으로 짠 경계 입력, `make-edge-fixtures.mjs` —
+빈 입력·마지막 NUL 없음·잘못된 레코드·숫자 아닌 날짜·깨진 UTF-8·정렬 경계)에 TS 파서를 돌린 결과를 `tests/golden/parsers/<파서>__<fixture>.json`
+(키 정렬·2칸·LF)로 저장하고, `manifest.json`(`[{parser, fixture, args?, golden}]`)이 목록이다.
+`tests/golden.test.ts` 가 TS 출력 = 골든을 검사하고(git 을 실행하지 않는다), `src-tauri/tests/golden.rs` 가 같은 manifest 로 Rust 구현의 출력 JSON 을 골든과 비교한다
+(불일치는 JSON 경로로 보이고, 아직 안 옮긴 파서 항목은 건너뛰며 수를 출력한다). 파서를 하나 옮길 때는 TS 입력 케이스를 manifest 에 먼저 넣고 골든을 만든 뒤
+Rust 를 맞춘다. CI 는 `tauri.yml`(필수 체크 아님, windows-latest).
+
+이식 때 TS 와 맞춘 것:
+
+- 디코드는 전부 UTF-8(깨진 바이트는 U+FFFD — Node `toString('utf8')` = Rust `from_utf8_lossy`). `-z` 레코드는 바이트 단위로 자르고, 마지막 NUL 이 없는 조각은 비어 있지 않을 때만 레코드다.
+- `Number(문자열)` 은 `js_number` 가 흉내 낸다(빈 문자열 0, 앞뒤 공백 허용, `0x`, 문자열이 숫자가 아니면 NaN → JSON null).
+- TS 에서 키가 없는 optional 필드(`upstream`·`ahead`·`behind`·`upstreamGone`·`date`)는 `skip_serializing_if`, `null` 인 필드(`Worktree.head`·`branch`)는 `Option` 그대로.
+- **알려진 차이**: 브랜치·태그·리모트 정렬은 TS 가 `localeCompare(undefined, {numeric: true})`(ICU, **실행 환경 로케일에 따라 다르다** — ko-KR 에서는 한글이 라틴 문자보다 앞)이고,
+  Rust `natural_compare` 는 숫자 덩어리 수치 비교 + 대소문자 무시(같으면 소문자 먼저) + ASCII 기호는 CLDR root 순서 + ASCII 밖은 코드 포인트 순인 근사다.
+  그래서 골든 fixture 에는 서로 다른 문자 체계(한글↔라틴)가 첫 차이가 되는 정렬 쌍을 넣지 않았다(로케일이 다르면 골든이 달라진다). 실제 정렬을 Rust 로 완전히 옮기려면 `icu_collator` 가 필요하다 — Phase 2 의 결정 사항.
 
 ## Phase 0 에서 확인한 것
 

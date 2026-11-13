@@ -1,0 +1,143 @@
+[
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "commitDate": 1700000060,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "parents": [
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "cccccccccccccccccccccccccccccccccccccccc"
+    ],
+    "refs": [
+      {
+        "kind": "head",
+        "name": "main"
+      },
+      {
+        "kind": "local",
+        "name": "main"
+      },
+      {
+        "kind": "tag",
+        "name": "v1.0"
+      },
+      {
+        "kind": "remote",
+        "name": "origin/main"
+      }
+    ],
+    "subject": "feat: 한글 제목"
+  },
+  {
+    "authorDate": 12,
+    "authorEmail": "",
+    "authorName": "a b",
+    "commitDate": 0,
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "parents": [],
+    "refs": [
+      {
+        "kind": "head",
+        "name": "HEAD"
+      }
+    ],
+    "subject": " 앞뒤 공백 제목 "
+  },
+  {
+    "authorDate": null,
+    "authorEmail": "x@x",
+    "authorName": "x",
+    "commitDate": 0,
+    "hash": "cccccccccccccccccccccccccccccccccccccccc",
+    "parents": [
+      "dddddddddddddddddddddddddddddddddddddddd"
+    ],
+    "refs": [
+      {
+        "kind": "local",
+        "name": "a/b"
+      },
+      {
+        "kind": "tag",
+        "name": "t"
+      }
+    ],
+    "subject": "x"
+  },
+  {
+    "authorDate": 1,
+    "authorEmail": "e",
+    "authorName": "n",
+    "commitDate": 2,
+    "hash": "dddddddddddddddddddddddddddddddddddddddd",
+    "parents": [],
+    "refs": [],
+    "subject": "제목\u001f속\u001f구분자"
+  },
+  {
+    "authorDate": 16,
+    "authorEmail": "e",
+    "authorName": "n",
+    "commitDate": 1000,
+    "hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "parents": [],
+    "refs": [
+      {
+        "kind": "head",
+        "name": "feature/한글"
+      },
+      {
+        "kind": "local",
+        "name": "feature/한글"
+      }
+    ],
+    "subject": ""
+  },
+  {
+    "authorDate": 0,
+    "authorEmail": "e",
+    "authorName": "n",
+    "commitDate": -5,
+    "hash": "ffffffffffffffffffffffffffffffffffffffff",
+    "parents": [],
+    "refs": [
+      {
+        "kind": "head",
+        "name": "HEAD"
+      },
+      {
+        "kind": "remote",
+        "name": "up/stream/x"
+      }
+    ],
+    "subject": "trim"
+  },
+  {
+    "authorDate": 3,
+    "authorEmail": "e",
+    "authorName": "n",
+    "commitDate": 4,
+    "hash": "9999999999999999999999999999999999999999",
+    "parents": [],
+    "refs": [],
+    "subject": "bad-���"
+  },
+  {
+    "authorDate": 5,
+    "authorEmail": "e",
+    "authorName": "last",
+    "commitDate": 6,
+    "hash": "8888888888888888888888888888888888888888",
+    "parents": [
+      "7777777777777777777777777777777777777777"
+    ],
+    "refs": [
+      {
+        "kind": "head",
+        "name": "HEAD"
+      }
+    ],
+    "subject": "끝"
+  }
+]

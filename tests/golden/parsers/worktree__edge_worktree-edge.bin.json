@@ -1,0 +1,52 @@
+[
+  {
+    "bare": false,
+    "branch": "main",
+    "detached": false,
+    "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "isMain": true,
+    "locked": false,
+    "path": "C:/repo/주 저장소",
+    "prunable": false
+  },
+  {
+    "bare": false,
+    "branch": null,
+    "detached": false,
+    "head": null,
+    "isMain": false,
+    "locked": true,
+    "path": "C:/wt/작업 트리",
+    "prunable": true
+  },
+  {
+    "bare": true,
+    "branch": null,
+    "detached": true,
+    "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "isMain": false,
+    "locked": true,
+    "path": "C:/wt/detached",
+    "prunable": false
+  },
+  {
+    "bare": false,
+    "branch": "feature/x",
+    "detached": false,
+    "head": "",
+    "isMain": false,
+    "locked": false,
+    "path": "C:/wt/no-values",
+    "prunable": false
+  },
+  {
+    "bare": false,
+    "branch": null,
+    "detached": false,
+    "head": null,
+    "isMain": false,
+    "locked": false,
+    "path": "C:/wt/last",
+    "prunable": false
+  }
+]

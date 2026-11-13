@@ -1,0 +1,9 @@
+[
+  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u001fstash@{0}\u001f1700000000\u001fOn main: 임시 저장",
+  "\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\u001fstash@{12}\u001f1700000001\u001fWIP on x: abc 메시지",
+  "cccccccccccccccccccccccccccccccccccccccc\u001fstash@{x}\u001f1\u001fbad ref",
+  "dddddddddddddddddddddddddddddddddddddddd\u001fstash@{3}\u001f2",
+  "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\u001fstash@{4}\u001fnan\u001fa\u001fb\u001fc",
+  "",
+  "ffffffffffffffffffffffffffffffffffffffff\u001fstash@{5}\u001f\u001fno trailing nul"
+]

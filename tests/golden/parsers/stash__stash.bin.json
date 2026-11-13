@@ -1,0 +1,16 @@
+[
+  {
+    "date": 1700002880,
+    "hash": "0f3374e1bc29d78a8c04a59ff864942f55229b2e",
+    "index": 0,
+    "message": "On main: second stash",
+    "ref": "stash@{0}"
+  },
+  {
+    "date": 1700002820,
+    "hash": "55eaf2e95e2e437946ddc178d251e789401eef0a",
+    "index": 1,
+    "message": "On main: 임시 저장: 한글 메시지",
+    "ref": "stash@{1}"
+  }
+]

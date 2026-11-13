@@ -63,6 +63,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 | 스크립트 | 용도 |
 |---|---|
 | `node scripts/make-fixtures.mjs` | 파서 테스트용 git 출력 fixture 재생성(한글 경로·공백·rename·merge·바이너리) |
+| `node scripts/make-edge-fixtures.mjs` | 골든 테스트용 경계 입력(`tests/fixtures/edge`) 재생성. 골든 갱신은 `UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts`([tauri.md](tauri.md)) |
 | `node scripts/make-big-repo.mjs <dir> [n]` | 성능 검증용 대형 저장소(기본 10만 커밋, feature 브랜치·merge 포함) 생성 |
 | `node scripts/drive.mjs <repo...> [옵션]` | 빌드된 앱을 Playwright 로 띄워 콜드 스타트·사이드바·찾아가기·필터·검색·스크롤 프레임·메모리 측정 + 스크린샷 |
 | `node scripts/bench-log.mjs <repo>` | git log 옵션 조합별 소요 시간 |
