@@ -1,0 +1,11 @@
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1
+author n
+author-mail <e>
+author-time 1
+author-tz +0900
+committer n
+committer-mail <e>
+committer-time 1
+committer-tz +0900
+summary s
+filename src/a.ts

@@ -1,0 +1,19 @@
+diff --git a/src/a.ts b/src/a.ts
+index 1111111..2222222 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,6 +1,7 @@ function 한글(x) {
+ keep
+
+-old 안녕
++new 🙂 emoji
+--- dash dash
++++ plus plus
+\ No newline at end of file
+한글 첫 글자는 접두로 먹힌다
+@@ -20 +21,0 @@
+@@ -30,2 +30,3 @@
+ ctx
++added
+ ctx2
+\   No newline  

@@ -1,0 +1,10 @@
+[
+  {
+    "path": "a",
+    "status": "M"
+  },
+  {
+    "path": "b",
+    "status": "A"
+  }
+]

@@ -1,0 +1,129 @@
+{
+  "binary": true,
+  "hunks": [
+    {
+      "header": "",
+      "lines": [
+        {
+          "o": 1,
+          "t": "-",
+          "text": "a"
+        },
+        {
+          "n": 1,
+          "t": "+",
+          "text": "b"
+        },
+        {
+          "n": 2,
+          "o": 2,
+          "t": " ",
+          "text": "after malformed"
+        },
+        {
+          "n": 3,
+          "t": "+",
+          "text": "x"
+        },
+        {
+          "n": 4,
+          "o": 3,
+          "t": " ",
+          "text": "y"
+        }
+      ],
+      "newLines": 1,
+      "newStart": 1,
+      "oldLines": 1,
+      "oldStart": 1
+    },
+    {
+      "header": "huge",
+      "lines": [
+        {
+          "n": 1,
+          "o": 100000000000000000000,
+          "t": " ",
+          "text": "z"
+        }
+      ],
+      "newLines": 1,
+      "newStart": 1,
+      "oldLines": 3,
+      "oldStart": 100000000000000000000
+    },
+    {
+      "header": "empty",
+      "lines": [
+        {
+          "n": 0,
+          "o": 0,
+          "t": " ",
+          "text": "q"
+        }
+      ],
+      "newLines": 0,
+      "newStart": 0,
+      "oldLines": 0,
+      "oldStart": 0
+    },
+    {
+      "header": "",
+      "lines": [],
+      "newLines": 1,
+      "newStart": 7,
+      "oldLines": 1,
+      "oldStart": 7
+    },
+    {
+      "header": "x",
+      "lines": [],
+      "newLines": 1,
+      "newStart": 8,
+      "oldLines": 1,
+      "oldStart": 8
+    },
+    {
+      "header": " two spaces",
+      "lines": [],
+      "newLines": 1,
+      "newStart": 9,
+      "oldLines": 1,
+      "oldStart": 9
+    },
+    {
+      "header": "tail 한글",
+      "lines": [
+        {
+          "n": 11,
+          "o": 11,
+          "t": " ",
+          "text": "w"
+        }
+      ],
+      "newLines": 1,
+      "newStart": 11,
+      "oldLines": 1,
+      "oldStart": 11
+    },
+    {
+      "header": "nl",
+      "lines": [
+        {
+          "n": 12,
+          "o": 12,
+          "t": " ",
+          "text": "last line without newline"
+        }
+      ],
+      "newLines": 1,
+      "newStart": 12,
+      "oldLines": 1,
+      "oldStart": 12
+    }
+  ],
+  "meta": [],
+  "path": "x",
+  "totalLines": 9,
+  "truncated": false
+}

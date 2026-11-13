@@ -21,7 +21,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 |---|---|---|
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
-| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 5개(log·refs·stash·worktree·nulRecords) 이식·골든 일치 — 나머지 파서(diff·wipStatus 등)·실행기는 남음 |
+| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0) — 실행기·LogCursor 스트리밍·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
@@ -84,8 +84,24 @@ TS 파서가 기준이다. `tests/fixtures`(git 원시 출력, `make-fixtures.mj
 빈 입력·마지막 NUL 없음·잘못된 레코드·숫자 아닌 날짜·깨진 UTF-8·정렬 경계)에 TS 파서를 돌린 결과를 `tests/golden/parsers/<파서>__<fixture>.json`
 (키 정렬·2칸·LF)로 저장하고, `manifest.json`(`[{parser, fixture, args?, golden}]`)이 목록이다.
 `tests/golden.test.ts` 가 TS 출력 = 골든을 검사하고(git 을 실행하지 않는다), `src-tauri/tests/golden.rs` 가 같은 manifest 로 Rust 구현의 출력 JSON 을 골든과 비교한다
-(불일치는 JSON 경로로 보이고, 아직 안 옮긴 파서 항목은 건너뛰며 수를 출력한다). 파서를 하나 옮길 때는 TS 입력 케이스를 manifest 에 먼저 넣고 골든을 만든 뒤
+(불일치는 JSON 경로로 보이고, 아직 안 옮긴 파서 항목은 건너뛰며 수를 출력한다 — 지금은 0). 파서를 하나 옮길 때는 TS 입력 케이스를 manifest 에 먼저 넣고 골든을 만든 뒤
 Rust 를 맞춘다. CI 는 `tauri.yml`(필수 체크 아님, windows-latest).
+
+2차 이식(diff·wipStatus·changes·commit·blame·fileHistory·submodule)의 fixture 는 전부 `make-edge-fixtures.mjs` 가 만든다(확장자 `.diff`·`.dat`·`.txt` — `.bin` 은 nulRecords 골든이
+전부 돌리므로 피했다). `tests/fixtures/** -text`(`.gitattributes`)로 autocrlf 가 CRLF 를 담은 fixture 를 바꾸지 못하게 했다. 파서별 골든 수:
+diff 30(청크 1·3·7·4096 바이트 분할, 줄·바이트·세기 한계, 3,000줄 기본 상한 — 큰 diff 는 `summary` 인자로 hunk 줄 목록 대신 줄 수·처음·마지막 줄만 고정) ·
+wipStatus 9 · nameStatus 9 · numstat 5 · changes 6 · commit 10 · blame 4 · fileHistory 4 · gitlinks 3 · gitmodules 3 · probe 8.
+TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞춘다(`chunk`·`maxLines`·`numstat`·`fallback` 등). `parseCommitMeta` 가 던지는 입력은 골든에 `{"error": 메시지}` 로 남는다.
+
+이식 때 정한 모양(2차):
+
+- `DiffParser`·`WipStatusParser` 는 TS 처럼 `push`/`finish` 스트리밍 구조 그대로다(줄·바이트·세기 한계 상수 3000 / 200,000 / 64MB 와 "상한 직후 끝나면 잘린 것이 아님" 판정 포함).
+- TS 가 `Map` 으로 돌려주는 `parseGitmodules` 는 Rust 에서 삽입 순서를 지킨 `Vec<ModuleEntry>`(항목에 `path` 포함)이고, 같은 경로가 둘이면 뒤가 덮어쓰되 자리는 처음 그대로다.
+- `parseGitlinks`·`parseGitmodules` 는 TS 가 `Buffer | string` 을 받지만 Rust 는 바이트만 받는다. `submoduleStatus`·`FileStatus` 는 골든 없이 단위 테스트로 본다.
+- **알려진 차이(보고만, 고치지 않음)**: TS 는 줄·문자열을 UTF-16 코드 단위로 자른다. diff 내용 줄의 접두 한 글자, `fileHistory` 의 상태 한 글자, wip `? ` 접두 두 글자가
+  비-BMP 문자(이모지 등)일 때만 Rust(코드 포인트 단위)와 다르다. git 출력에서 그 자리는 ASCII 접두라 실제로는 일어나지 않아 fixture 에 넣지 않았다.
+  2^53 이상 정수(예: hunk 시작 줄 1e20)는 TS·Rust 모두 부동소수점이라 값은 같지만, 골든 비교기는 값(`f64`)으로 비교한다.
+- 로케일·플랫폼 의존으로 빼 둔 것은 없다 — 2차 파서 7개는 정렬·`Intl`·날짜 파싱을 쓰지 않는다(`Number()`·`trim()` 은 `js_number`·`js_trim` 이 흉내 낸다).
 
 이식 때 TS 와 맞춘 것:
 

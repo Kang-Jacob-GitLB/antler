@@ -1,0 +1,86 @@
+[
+  {
+    "path": "a.txt",
+    "status": "M"
+  },
+  {
+    "path": "한글 경로.txt",
+    "status": "A"
+  },
+  {
+    "path": "bin.png",
+    "status": "M"
+  },
+  {
+    "path": "half",
+    "status": "M"
+  },
+  {
+    "oldPath": "old 1",
+    "path": "new 1",
+    "similarity": 100,
+    "status": "R"
+  },
+  {
+    "path": "t",
+    "status": "T"
+  },
+  {
+    "path": "u",
+    "status": "U"
+  },
+  {
+    "path": "x",
+    "status": "M"
+  },
+  {
+    "path": "b",
+    "status": "M"
+  },
+  {
+    "oldPath": "from",
+    "path": "to",
+    "similarity": 75,
+    "status": "C"
+  },
+  {
+    "oldPath": "o",
+    "path": "n",
+    "status": "R"
+  },
+  {
+    "oldPath": "o2",
+    "path": "n2",
+    "status": "R"
+  },
+  {
+    "oldPath": "o3",
+    "path": "n3",
+    "similarity": 50,
+    "status": "R"
+  },
+  {
+    "oldPath": "o4",
+    "path": "n4",
+    "similarity": 16,
+    "status": "R"
+  },
+  {
+    "oldPath": "o5",
+    "path": "n5",
+    "similarity": 10,
+    "status": "R"
+  },
+  {
+    "path": "second char",
+    "status": "M"
+  },
+  {
+    "path": "empty-code",
+    "status": "M"
+  },
+  {
+    "path": "",
+    "status": "M"
+  }
+]

@@ -1,0 +1,51 @@
+{
+  "binary": false,
+  "commits": {
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+      "authorDate": 1700000000,
+      "authorEmail": "hong@example.com",
+      "authorName": "홍길동",
+      "boundary": false,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": "feat: 한글 요약"
+    },
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": {
+      "authorDate": 1700000100,
+      "authorEmail": "bob@example.com",
+      "authorName": "Bob Lee",
+      "boundary": true,
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "summary": "second"
+    }
+  },
+  "groups": [
+    {
+      "count": 2,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "start": 0
+    },
+    {
+      "count": 1,
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "start": 2
+    },
+    {
+      "count": 1,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "start": 3
+    },
+    {
+      "count": 2,
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "start": 4
+    }
+  ],
+  "lines": [
+    "line one",
+    "line two",
+    "\tindented\twith tab",
+    "line four",
+    "",
+    "crlf\r"
+  ]
+}

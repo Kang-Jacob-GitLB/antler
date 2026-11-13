@@ -1,0 +1,19 @@
+[
+  {
+    "branch": "main",
+    "name": "second",
+    "path": "dup/path"
+  },
+  {
+    "name": "third",
+    "path": "third"
+  },
+  {
+    "name": "nl",
+    "path": "multi\nline value"
+  },
+  {
+    "name": "dotted.name.v2",
+    "path": "dotted"
+  }
+]

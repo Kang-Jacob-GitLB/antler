@@ -1,0 +1,50 @@
+[
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "parents": [
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "path": "src/a.ts",
+    "status": "M",
+    "subject": "feat: 수정"
+  },
+  {
+    "authorDate": 1700000000,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "oldPath": "old/한글 경로.ts",
+    "parents": [
+      "cccccccccccccccccccccccccccccccccccccccc"
+    ],
+    "path": "src/a.ts",
+    "status": "R",
+    "subject": "rename"
+  },
+  {
+    "authorDate": 1700000300,
+    "authorEmail": "m@x",
+    "authorName": "m",
+    "hash": "cccccccccccccccccccccccccccccccccccccccc",
+    "parents": [
+      "dddddddddddddddddddddddddddddddddddddddd",
+      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    ],
+    "path": "src/fallback.ts",
+    "status": "M",
+    "subject": "Merge branch"
+  },
+  {
+    "authorDate": 1700000400,
+    "authorEmail": "dev@example.com",
+    "authorName": "홍길동",
+    "hash": "dddddddddddddddddddddddddddddddddddddddd",
+    "parents": [],
+    "path": "old/한글 경로.ts",
+    "status": "A",
+    "subject": "root add"
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "first": {
+        "n": 1,
+        "o": 1,
+        "t": " ",
+        "text": "ctx 0"
+      },
+      "header": "big",
+      "last": {
+        "n": 2000,
+        "t": "+",
+        "text": "new 2999 한글"
+      },
+      "lineCount": 3000,
+      "newLines": 3100,
+      "newStart": 1,
+      "oldLines": 3100,
+      "oldStart": 1
+    }
+  ],
+  "meta": [],
+  "path": "x",
+  "totalIsLowerBound": true,
+  "totalLines": 3071,
+  "truncated": true
+}

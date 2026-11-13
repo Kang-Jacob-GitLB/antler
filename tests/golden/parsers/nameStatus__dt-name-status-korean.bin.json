@@ -1,0 +1,10 @@
+[
+  {
+    "path": "src/app.ts",
+    "status": "A"
+  },
+  {
+    "path": "문서/설계 노트.md",
+    "status": "A"
+  }
+]

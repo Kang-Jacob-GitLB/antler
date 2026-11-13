@@ -1,0 +1,16 @@
+diff --git a/a b/a
+deleted file mode 100644
+index 1111111..0000000
+--- a/a
++++ /dev/null
+@@ -1,2 +0,0 @@
+-line 1
+-line 2
+diff --git a/a b/a
+new file mode 120000
+index 0000000..2222222
+--- /dev/null
++++ b/a
+@@ -0,0 +1 @@
++target/path
+\ No newline at end of file

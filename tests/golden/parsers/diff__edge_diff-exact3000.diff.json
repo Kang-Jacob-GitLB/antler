@@ -1,0 +1,27 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "first": {
+        "n": 1,
+        "t": "+",
+        "text": "l0"
+      },
+      "header": "",
+      "last": {
+        "n": 3000,
+        "t": "+",
+        "text": "l2999"
+      },
+      "lineCount": 3000,
+      "newLines": 3000,
+      "newStart": 1,
+      "oldLines": 0,
+      "oldStart": 0
+    }
+  ],
+  "meta": [],
+  "path": "x",
+  "totalLines": 3000,
+  "truncated": false
+}

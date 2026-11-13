@@ -1,0 +1,94 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "header": "function 한글(x) {",
+      "lines": [
+        {
+          "n": 1,
+          "o": 1,
+          "t": " ",
+          "text": "keep"
+        },
+        {
+          "n": 2,
+          "o": 2,
+          "t": " ",
+          "text": ""
+        },
+        {
+          "o": 3,
+          "t": "-",
+          "text": "old 안녕"
+        },
+        {
+          "n": 3,
+          "t": "+",
+          "text": "new 🙂 emoji"
+        },
+        {
+          "o": 4,
+          "t": "-",
+          "text": "-- dash dash"
+        },
+        {
+          "n": 4,
+          "t": "+",
+          "text": "++ plus plus"
+        },
+        {
+          "t": "\\",
+          "text": "No newline at end of file"
+        },
+        {
+          "n": 5,
+          "o": 5,
+          "t": " ",
+          "text": "글 첫 글자는 접두로 먹힌다"
+        }
+      ],
+      "newLines": 7,
+      "newStart": 1,
+      "oldLines": 6,
+      "oldStart": 1
+    },
+    {
+      "header": "",
+      "lines": [],
+      "newLines": 0,
+      "newStart": 21,
+      "oldLines": 1,
+      "oldStart": 20
+    },
+    {
+      "header": "",
+      "lines": [
+        {
+          "n": 30,
+          "o": 30,
+          "t": " ",
+          "text": "ctx"
+        },
+        {
+          "n": 31,
+          "t": "+",
+          "text": "added"
+        },
+        {
+          "n": 32,
+          "o": 31,
+          "t": " ",
+          "text": "ctx2"
+        }
+      ],
+      "newLines": 3,
+      "newStart": 30,
+      "oldLines": 2,
+      "oldStart": 30
+    }
+  ],
+  "meta": [],
+  "path": "x",
+  "totalLines": 12,
+  "truncated": true
+}

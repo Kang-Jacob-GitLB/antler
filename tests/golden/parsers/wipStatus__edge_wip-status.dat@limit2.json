@@ -1,0 +1,128 @@
+{
+  "conflicted": 1,
+  "counts": {
+    "added": 5,
+    "modified": 10,
+    "staged": 9,
+    "unstaged": 6,
+    "untracked": 3
+  },
+  "staged": [
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "src/staged.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "src/both 공백 한글.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "new.ts",
+      "status": "A"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "added-then-edited.ts",
+      "status": "A"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "deleted-staged.ts",
+      "status": "D"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "typechanged.ts",
+      "status": "T"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "oldPath": "renamed old.ts",
+      "path": "renamed new.ts",
+      "status": "R"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "oldPath": "한글 옛.ts",
+      "path": "한글 새.ts",
+      "status": "R"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "oldPath": "copy-from.ts",
+      "path": "copy-to.ts",
+      "status": "C"
+    }
+  ],
+  "unstaged": [
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "src/modified.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "src/both 공백 한글.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "added-then-edited.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "deleted-in-tree.ts",
+      "status": "D"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "oldPath": "한글 옛.ts",
+      "path": "한글 새.ts",
+      "status": "M"
+    },
+    {
+      "additions": null,
+      "binary": false,
+      "deletions": null,
+      "path": "conflict file.ts",
+      "status": "U"
+    }
+  ],
+  "untracked": [
+    "untracked.txt",
+    "dir/한글 파일.txt"
+  ],
+  "untrackedMore": 1
+}

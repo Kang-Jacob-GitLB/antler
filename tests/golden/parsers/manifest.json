@@ -76,6 +76,627 @@
     "golden": "worktree__edge_empty.bin.json"
   },
   {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "src/a.ts"
+    },
+    "golden": "diff__edge_diff-basic.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "chunk": "1"
+    },
+    "golden": "diff__edge_diff-basic.diff@chunk1.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "chunk": "7"
+    },
+    "golden": "diff__edge_diff-basic.diff@chunk7.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "12"
+    },
+    "golden": "diff__edge_diff-basic.diff@max12.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "11"
+    },
+    "golden": "diff__edge_diff-basic.diff@max11.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "8"
+    },
+    "golden": "diff__edge_diff-basic.diff@max8.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "3"
+    },
+    "golden": "diff__edge_diff-basic.diff@max3.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "0"
+    },
+    "golden": "diff__edge_diff-basic.diff@max0.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "3",
+      "chunk": "7"
+    },
+    "golden": "diff__edge_diff-basic.diff@max3-chunk7.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "3",
+      "countLimit": "4"
+    },
+    "golden": "diff__edge_diff-basic.diff@max3-count4.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-basic.diff",
+    "args": {
+      "path": "x",
+      "maxLines": "3",
+      "countBytes": "20"
+    },
+    "golden": "diff__edge_diff-basic.diff@max3-bytes20.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-small.diff",
+    "args": {
+      "path": "x",
+      "maxBytes": "21"
+    },
+    "golden": "diff__edge_diff-small.diff@maxbytes21.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-small.diff",
+    "args": {
+      "path": "x",
+      "maxBytes": "10",
+      "chunk": "5"
+    },
+    "golden": "diff__edge_diff-small.diff@maxbytes10-chunk5.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-longline.diff",
+    "args": {
+      "path": "x",
+      "maxBytes": "100"
+    },
+    "golden": "diff__edge_diff-longline.diff@maxbytes100.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-longline.diff",
+    "args": {
+      "path": "x",
+      "maxBytes": "100",
+      "chunk": "50"
+    },
+    "golden": "diff__edge_diff-longline.diff@maxbytes100-chunk50.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-meta.diff",
+    "args": {
+      "path": "새 이름.ts",
+      "oldPath": "old name.ts"
+    },
+    "golden": "diff__edge_diff-meta.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-meta-only.diff",
+    "args": {
+      "path": "x"
+    },
+    "golden": "diff__edge_diff-meta-only.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-binary.diff",
+    "args": {
+      "path": "x"
+    },
+    "golden": "diff__edge_diff-binary.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-gitbinary.diff",
+    "args": {
+      "path": "x"
+    },
+    "golden": "diff__edge_diff-gitbinary.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-typechange.diff",
+    "args": {
+      "path": "x"
+    },
+    "golden": "diff__edge_diff-typechange.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-crlf.diff",
+    "args": {
+      "path": "x"
+    },
+    "golden": "diff__edge_diff-crlf.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-crlf.diff",
+    "args": {
+      "path": "x",
+      "chunk": "1"
+    },
+    "golden": "diff__edge_diff-crlf.diff@chunk1.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-weird.diff",
+    "args": {
+      "path": "x"
+    },
+    "golden": "diff__edge_diff-weird.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-weird.diff",
+    "args": {
+      "path": "x",
+      "chunk": "3"
+    },
+    "golden": "diff__edge_diff-weird.diff@chunk3.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-big.diff",
+    "args": {
+      "path": "x",
+      "summary": "1"
+    },
+    "golden": "diff__edge_diff-big.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-big.diff",
+    "args": {
+      "path": "x",
+      "summary": "1",
+      "chunk": "4096"
+    },
+    "golden": "diff__edge_diff-big.diff@chunk4096.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-big.diff",
+    "args": {
+      "path": "x",
+      "summary": "1",
+      "countLimit": "50"
+    },
+    "golden": "diff__edge_diff-big.diff@count50.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-big.diff",
+    "args": {
+      "path": "x",
+      "summary": "1",
+      "chunk": "4096",
+      "countBytes": "1000"
+    },
+    "golden": "diff__edge_diff-big.diff@chunk4096-bytes1000.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/diff-exact3000.diff",
+    "args": {
+      "path": "x",
+      "summary": "1"
+    },
+    "golden": "diff__edge_diff-exact3000.diff.json"
+  },
+  {
+    "parser": "diff",
+    "fixture": "edge/empty.bin",
+    "args": {
+      "path": "x"
+    },
+    "golden": "diff__edge_empty.bin.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-status.dat",
+    "golden": "wipStatus__edge_wip-status.dat.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-status.dat",
+    "args": {
+      "chunk": "1"
+    },
+    "golden": "wipStatus__edge_wip-status.dat@chunk1.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-status.dat",
+    "args": {
+      "chunk": "5"
+    },
+    "golden": "wipStatus__edge_wip-status.dat@chunk5.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-status.dat",
+    "args": {
+      "untrackedLimit": "2"
+    },
+    "golden": "wipStatus__edge_wip-status.dat@limit2.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-status.dat",
+    "args": {
+      "untrackedLimit": "0"
+    },
+    "golden": "wipStatus__edge_wip-status.dat@limit0.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-edge.dat",
+    "golden": "wipStatus__edge_wip-edge.dat.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-edge.dat",
+    "args": {
+      "chunk": "3"
+    },
+    "golden": "wipStatus__edge_wip-edge.dat@chunk3.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/wip-edge.dat",
+    "args": {
+      "untrackedLimit": "1"
+    },
+    "golden": "wipStatus__edge_wip-edge.dat@limit1.json"
+  },
+  {
+    "parser": "wipStatus",
+    "fixture": "edge/empty.bin",
+    "golden": "wipStatus__edge_empty.bin.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "dt-name-status-korean.bin",
+    "golden": "nameStatus__dt-name-status-korean.bin.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "dt-name-status-root.bin",
+    "golden": "nameStatus__dt-name-status-root.bin.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "name-status-delete.bin",
+    "golden": "nameStatus__name-status-delete.bin.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "name-status-merge.bin",
+    "golden": "nameStatus__name-status-merge.bin.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "name-status-rename.bin",
+    "golden": "nameStatus__name-status-rename.bin.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "edge/name-status-edge.dat",
+    "golden": "nameStatus__edge_name-status-edge.dat.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "edge/name-status-no-trailing-nul.dat",
+    "golden": "nameStatus__edge_name-status-no-trailing-nul.dat.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "edge/name-status-dangling.dat",
+    "golden": "nameStatus__edge_name-status-dangling.dat.json"
+  },
+  {
+    "parser": "nameStatus",
+    "fixture": "edge/empty.bin",
+    "golden": "nameStatus__edge_empty.bin.json"
+  },
+  {
+    "parser": "numstat",
+    "fixture": "dt-numstat-korean.bin",
+    "golden": "numstat__dt-numstat-korean.bin.json"
+  },
+  {
+    "parser": "numstat",
+    "fixture": "numstat-binary.bin",
+    "golden": "numstat__numstat-binary.bin.json"
+  },
+  {
+    "parser": "numstat",
+    "fixture": "numstat-rename.bin",
+    "golden": "numstat__numstat-rename.bin.json"
+  },
+  {
+    "parser": "numstat",
+    "fixture": "edge/numstat-edge.dat",
+    "golden": "numstat__edge_numstat-edge.dat.json"
+  },
+  {
+    "parser": "numstat",
+    "fixture": "edge/empty.bin",
+    "golden": "numstat__edge_empty.bin.json"
+  },
+  {
+    "parser": "changes",
+    "fixture": "dt-name-status-korean.bin",
+    "args": {
+      "numstat": "dt-numstat-korean.bin"
+    },
+    "golden": "changes__dt-name-status-korean.bin.json"
+  },
+  {
+    "parser": "changes",
+    "fixture": "name-status-rename.bin",
+    "args": {
+      "numstat": "numstat-rename.bin"
+    },
+    "golden": "changes__name-status-rename.bin.json"
+  },
+  {
+    "parser": "changes",
+    "fixture": "name-status-merge.bin",
+    "args": {
+      "numstat": "numstat-binary.bin"
+    },
+    "golden": "changes__name-status-merge.bin.json"
+  },
+  {
+    "parser": "changes",
+    "fixture": "edge/name-status-edge.dat",
+    "args": {
+      "numstat": "edge/numstat-edge.dat"
+    },
+    "golden": "changes__edge_name-status-edge.dat.json"
+  },
+  {
+    "parser": "changes",
+    "fixture": "edge/name-status-edge.dat",
+    "args": {
+      "numstat": "edge/empty.bin"
+    },
+    "golden": "changes__edge_name-status-edge.dat@no-numstat.json"
+  },
+  {
+    "parser": "changes",
+    "fixture": "edge/empty.bin",
+    "args": {
+      "numstat": "edge/numstat-edge.dat"
+    },
+    "golden": "changes__edge_empty.bin.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-meta.dat",
+    "golden": "commit__edge_commit-meta.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-merge.dat",
+    "golden": "commit__edge_commit-merge.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-root.dat",
+    "golden": "commit__edge_commit-root.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-edge.dat",
+    "golden": "commit__edge_commit-edge.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-hex-date.dat",
+    "golden": "commit__edge_commit-hex-date.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-short.dat",
+    "golden": "commit__edge_commit-short.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-nine.dat",
+    "golden": "commit__edge_commit-nine.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-no-terminator.dat",
+    "golden": "commit__edge_commit-no-terminator.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/commit-extra.dat",
+    "golden": "commit__edge_commit-extra.dat.json"
+  },
+  {
+    "parser": "commit",
+    "fixture": "edge/empty.bin",
+    "golden": "commit__edge_empty.bin.json"
+  },
+  {
+    "parser": "blame",
+    "fixture": "edge/blame.txt",
+    "golden": "blame__edge_blame.txt.json"
+  },
+  {
+    "parser": "blame",
+    "fixture": "edge/blame-edge.txt",
+    "golden": "blame__edge_blame-edge.txt.json"
+  },
+  {
+    "parser": "blame",
+    "fixture": "edge/blame-dangling.txt",
+    "golden": "blame__edge_blame-dangling.txt.json"
+  },
+  {
+    "parser": "blame",
+    "fixture": "edge/empty.bin",
+    "golden": "blame__edge_empty.bin.json"
+  },
+  {
+    "parser": "fileHistory",
+    "fixture": "edge/filehistory.dat",
+    "args": {
+      "fallback": "src/fallback.ts"
+    },
+    "golden": "fileHistory__edge_filehistory.dat.json"
+  },
+  {
+    "parser": "fileHistory",
+    "fixture": "edge/filehistory.dat",
+    "golden": "fileHistory__edge_filehistory.dat@no-fallback.json"
+  },
+  {
+    "parser": "fileHistory",
+    "fixture": "edge/filehistory-edge.dat",
+    "args": {
+      "fallback": "src/fallback.ts"
+    },
+    "golden": "fileHistory__edge_filehistory-edge.dat.json"
+  },
+  {
+    "parser": "fileHistory",
+    "fixture": "edge/empty.bin",
+    "args": {
+      "fallback": "src/fallback.ts"
+    },
+    "golden": "fileHistory__edge_empty.bin.json"
+  },
+  {
+    "parser": "gitlinks",
+    "fixture": "edge/gitlinks.dat",
+    "golden": "gitlinks__edge_gitlinks.dat.json"
+  },
+  {
+    "parser": "gitlinks",
+    "fixture": "edge/gitlinks-edge.dat",
+    "golden": "gitlinks__edge_gitlinks-edge.dat.json"
+  },
+  {
+    "parser": "gitlinks",
+    "fixture": "edge/empty.bin",
+    "golden": "gitlinks__edge_empty.bin.json"
+  },
+  {
+    "parser": "gitmodules",
+    "fixture": "edge/gitmodules.dat",
+    "golden": "gitmodules__edge_gitmodules.dat.json"
+  },
+  {
+    "parser": "gitmodules",
+    "fixture": "edge/gitmodules-edge.dat",
+    "golden": "gitmodules__edge_gitmodules-edge.dat.json"
+  },
+  {
+    "parser": "gitmodules",
+    "fixture": "edge/empty.bin",
+    "golden": "gitmodules__edge_empty.bin.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/probe-ok.txt",
+    "golden": "probe__edge_probe-ok.txt.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/probe-nohead.txt",
+    "golden": "probe__edge_probe-nohead.txt.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/probe-crlf-upper.txt",
+    "golden": "probe__edge_probe-crlf-upper.txt.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/probe-sha256.txt",
+    "golden": "probe__edge_probe-sha256.txt.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/probe-bad-length.txt",
+    "golden": "probe__edge_probe-bad-length.txt.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/probe-dir-only.txt",
+    "golden": "probe__edge_probe-dir-only.txt.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/probe-empty-dir.txt",
+    "golden": "probe__edge_probe-empty-dir.txt.json"
+  },
+  {
+    "parser": "probe",
+    "fixture": "edge/empty.bin",
+    "golden": "probe__edge_empty.bin.json"
+  },
+  {
     "parser": "nulRecords",
     "fixture": "dt-name-status-korean.bin",
     "golden": "nulRecords__dt-name-status-korean.bin.json"

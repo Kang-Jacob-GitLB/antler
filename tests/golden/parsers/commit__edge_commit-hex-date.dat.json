@@ -1,0 +1,14 @@
+{
+  "authorDate": 16,
+  "authorEmail": "dev@example.com",
+  "authorName": "홍길동",
+  "body": "x",
+  "commitDate": 1000,
+  "committerEmail": "c@example.com",
+  "committerName": "Committer",
+  "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "parents": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  ],
+  "subject": "feat: 제목 한글"
+}

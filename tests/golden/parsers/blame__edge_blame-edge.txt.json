@@ -1,0 +1,107 @@
+{
+  "binary": true,
+  "commits": {
+    "1111111111111111111111111111111111111111": {
+      "authorDate": 0,
+      "authorEmail": "",
+      "authorName": "",
+      "boundary": false,
+      "hash": "1111111111111111111111111111111111111111",
+      "summary": ""
+    },
+    "1111111111111111111111111111111111111111111111111111111111111111": {
+      "authorDate": null,
+      "authorEmail": "",
+      "authorName": "",
+      "boundary": false,
+      "hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "summary": ""
+    },
+    "9999999999999999999999999999999999999999": {
+      "authorDate": 12,
+      "authorEmail": "",
+      "authorName": "",
+      "boundary": false,
+      "hash": "9999999999999999999999999999999999999999",
+      "summary": ""
+    },
+    "cccccccccccccccccccccccccccccccccccccccc": {
+      "authorDate": 0,
+      "authorEmail": "",
+      "authorName": "",
+      "boundary": true,
+      "hash": "cccccccccccccccccccccccccccccccccccccccc",
+      "summary": ""
+    },
+    "dddddddddddddddddddddddddddddddddddddddd": {
+      "authorDate": 16,
+      "authorEmail": "only-open",
+      "authorName": "",
+      "boundary": false,
+      "hash": "dddddddddddddddddddddddddddddddddddddddd",
+      "summary": ""
+    },
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee": {
+      "authorDate": -5,
+      "authorEmail": "bare@close",
+      "authorName": "",
+      "boundary": false,
+      "hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "summary": ""
+    },
+    "ffffffffffffffffffffffffffffffffffffffff": {
+      "authorDate": 1000,
+      "authorEmail": "<double>",
+      "authorName": "",
+      "boundary": false,
+      "hash": "ffffffffffffffffffffffffffffffffffffffff",
+      "summary": ""
+    }
+  },
+  "groups": [
+    {
+      "count": 1,
+      "hash": "cccccccccccccccccccccccccccccccccccccccc",
+      "start": 0
+    },
+    {
+      "count": 1,
+      "hash": "dddddddddddddddddddddddddddddddddddddddd",
+      "start": 1
+    },
+    {
+      "count": 1,
+      "hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "start": 2
+    },
+    {
+      "count": 1,
+      "hash": "ffffffffffffffffffffffffffffffffffffffff",
+      "start": 3
+    },
+    {
+      "count": 1,
+      "hash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "start": 4
+    },
+    {
+      "count": 1,
+      "hash": "1111111111111111111111111111111111111111",
+      "start": 5
+    },
+    {
+      "count": 1,
+      "hash": "9999999999999999999999999999999999999999",
+      "start": 6
+    }
+  ],
+  "lines": [
+    "first\tcontent",
+    "second",
+    "third",
+    "fourth",
+    "bin\u0000ary",
+    "x",
+    "last without newline"
+  ]
+}

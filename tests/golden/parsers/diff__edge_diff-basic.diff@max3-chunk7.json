@@ -1,0 +1,35 @@
+{
+  "binary": false,
+  "hunks": [
+    {
+      "header": "function 한글(x) {",
+      "lines": [
+        {
+          "n": 1,
+          "o": 1,
+          "t": " ",
+          "text": "keep"
+        },
+        {
+          "n": 2,
+          "o": 2,
+          "t": " ",
+          "text": ""
+        },
+        {
+          "o": 3,
+          "t": "-",
+          "text": "old 안녕"
+        }
+      ],
+      "newLines": 7,
+      "newStart": 1,
+      "oldLines": 6,
+      "oldStart": 1
+    }
+  ],
+  "meta": [],
+  "path": "x",
+  "totalLines": 12,
+  "truncated": true
+}

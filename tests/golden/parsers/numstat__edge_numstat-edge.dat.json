@@ -1,0 +1,68 @@
+[
+  {
+    "additions": 1,
+    "binary": false,
+    "deletions": 2,
+    "path": "a.txt"
+  },
+  {
+    "additions": null,
+    "binary": true,
+    "deletions": null,
+    "path": "bin.png"
+  },
+  {
+    "additions": 3,
+    "binary": false,
+    "deletions": null,
+    "path": "half"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": 4,
+    "path": "half2"
+  },
+  {
+    "additions": null,
+    "binary": false,
+    "deletions": null,
+    "path": "bad num"
+  },
+  {
+    "additions": 5,
+    "binary": false,
+    "deletions": 6,
+    "path": "spaces"
+  },
+  {
+    "additions": 16,
+    "binary": false,
+    "deletions": 10,
+    "path": "hex"
+  },
+  {
+    "additions": 0,
+    "binary": false,
+    "deletions": 0,
+    "path": "empty nums"
+  },
+  {
+    "additions": 5,
+    "binary": false,
+    "deletions": 6,
+    "path": "new 1"
+  },
+  {
+    "additions": 9,
+    "binary": false,
+    "deletions": 9,
+    "path": "한글 경로.txt"
+  },
+  {
+    "additions": 1,
+    "binary": false,
+    "deletions": 1,
+    "path": "a.txt"
+  }
+]
