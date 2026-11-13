@@ -88,7 +88,8 @@ TS 파서가 기준이다. `tests/fixtures`(git 원시 출력, `make-fixtures.mj
 (키 정렬·2칸·LF)로 저장하고, `manifest.json`(`[{parser, fixture, args?, golden}]`)이 목록이다.
 `tests/golden.test.ts` 가 TS 출력 = 골든을 검사하고(git 을 실행하지 않는다), `src-tauri/tests/golden.rs` 가 같은 manifest 로 Rust 구현의 출력 JSON 을 골든과 비교한다
 (불일치는 JSON 경로로 보이고, 아직 안 옮긴 파서 항목은 건너뛰며 수를 출력한다 — 지금은 0). 파서를 하나 옮길 때는 TS 입력 케이스를 manifest 에 먼저 넣고 골든을 만든 뒤
-Rust 를 맞춘다. CI 는 `tauri.yml`(필수 체크 아님, windows-latest).
+Rust 를 맞춘다. CI 는 `tauri.yml`(windows-latest). 모든 PR 에서 돌고 항상 결과를 보고한다 — 관련 파일이 바뀌지 않았으면
+첫 단계에서 무거운 검사를 건너뛰고 성공으로 끝나므로 필수 체크로 지정해도 관련 없는 PR 이 대기하지 않는다.
 
 2차 이식(diff·wipStatus·changes·commit·blame·fileHistory·submodule)의 fixture 는 전부 `make-edge-fixtures.mjs` 가 만든다(확장자 `.diff`·`.dat`·`.txt` — `.bin` 은 nulRecords 골든이
 전부 돌리므로 피했다). `tests/fixtures/** -text`(`.gitattributes`)로 autocrlf 가 CRLF 를 담은 fixture 를 바꾸지 못하게 했다. 파서별 골든 수:
@@ -128,7 +129,8 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
   `src/main/ipc/handlers.ts` 의 `checkPath`(UNC·NUL·길이)·배포판 목록 대조를 이식하고, (3) LogCursor 를 버릴 때 `GitStream` 을 drop 한다
   (스트림의 취소 토큰은 다음 읽기 때만 확인된다 — 토큰만 취소하고 구조체를 남기면 git 이 파이프에서 멈춘 채 남는다).
   (1)·(2)는 라우터 PR 에서 채웠고(아래 "라우터"), (3)은 LogCursor 를 옮기는 PR 의 몫이다.
-  Rust CI(`tauri.yml`)는 아직 필수 체크가 아니다 — clippy 의 `disallowed-methods` 가 실패해도 머지될 수 있으니 **필수 체크로 올려야 한다(저장소 룰셋 설정, 사용자 확인 필요 — 이 PR 에서 하지 않았다)**.
+  Rust CI(`tauri.yml`)를 main 룰셋의 필수 체크(`Rust · 골든 · clippy`)로 올려야 clippy 의 `disallowed-methods`·주입 거부 테스트가 실패한 PR 이
+  머지되지 않는다. 워크플로는 필수 지정에 맞게 항상 결과를 보고하도록 바꿨다(관련 없는 PR 은 건너뛰고 성공). **룰셋 변경은 저장소 설정이라 사용자 확인 후 한다.**
 - Windows: `CREATE_NO_WINDOW`, 취소·Drop 때 `taskkill /pid N /T /F` 를 **한 번만**, **별도 스레드에서** 띄우고 기다린다. 이미 끝나 수거된 자식에는 보내지 않는다.
   루트 프로세스 핸들 복제본을 taskkill 이 끝날 때까지 쥐고 있어 그 사이 PID 가 재사용되지 않고, taskkill 이 실패하면 그 핸들로 루트를 `TerminateProcess` 한다.
   처음 이식은 런타임 스레드에서 taskkill 을 2~3번(명시적 kill + Drop) 띄워, 병렬 테스트 부하에서 취소→반환이 8~22초까지 늘었다(현재 1ms 미만).
