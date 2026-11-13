@@ -35,6 +35,16 @@ fn is_app_url(url: &tauri::Url) -> bool {
     cfg!(debug_assertions) && url.scheme() == "http" && host == "localhost" && url.port() == Some(5174)
 }
 
+/// https://github.com 의 링크인가(사용자 정보 없음, 2048자 이하)
+fn is_github_link(url: &tauri::Url) -> bool {
+    url.as_str().len() <= 2048
+        && url.scheme() == "https"
+        && url.host_str() == Some("github.com")
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
 pub fn run() {
     commands::mark_start();
     tauri::Builder::default()
@@ -66,7 +76,13 @@ pub fn run() {
                 // src/main/index.ts 의 will-navigate·setWindowOpenHandler·권한 거부와 같다.
                 // 드롭한 파일·링크로 창이 앱 밖 주소로 바뀌어 앱처럼 보이는 가짜 화면을 띄우지 못하게 한다
                 .on_navigation(is_app_url)
-                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                .on_new_window(|url, _| {
+                    // 새 창은 열지 않고, github.com 링크만 기본 브라우저로 보낸다(src/main/github/validate.ts 의 allowedExternalUrl 과 같은 규칙)
+                    if is_github_link(&url) {
+                        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                    }
+                    tauri::webview::NewWindowResponse::Deny
+                })
                 .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny);
             if std::env::var("ANTLER_MEASURE").as_deref() == Ok("1") {
                 win = win.initialization_script("window.__ANTLER_MEASURE__=true");
