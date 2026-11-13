@@ -15,17 +15,25 @@ tauri-build = { version = "2.7.4", features = [] }
 tauri = { version = "2.12.5", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 사이드카 응답 대기표(id → oneshot)
-tokio = { version = "1", features = ["sync"] }
+# 사이드카 응답 대기표(id → oneshot) + git 실행기(process·io-util: 자식 파이프, time: 테스트·유휴 정리, macros: select!/test)
+tokio = { version = "1", features = ["sync", "process", "io-util", "time", "macros", "rt", "rt-multi-thread"] }
+# 취소 신호(CancellationToken) — 실행기·큐가 요청 취소를 받는다. tauri 가 이미 끌어오는 판(0.7)
+tokio-util = "0.7"
+# ProcessQueue 의 같은 키 요청 합치기(Shared)·Boxed future. tauri 가 이미 쓰는 판(0.3)
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # host 요청(openExternal·clipboard·대화상자)을 Rust API 로 처리한다. JS 쪽 권한은 capabilities 에 주지 않는다
 tauri-plugin-opener = "2.7.3"
 tauri-plugin-clipboard-manager = "2.5.0"
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-window-state = "2.5.0"
 
+[dev-dependencies]
+# 실행기 통합 테스트(tests/exec.rs)가 어떤 테스트보다 먼저 git 설정 격리 환경을 넣는다. tauri 가 이미 끌어오는 판
+ctor = "1.0.13"
+
 [target.'cfg(windows)'.dependencies]
 # 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판
-windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading"] }
 # 확인 창을 플러그인 없이 직접 띄운다 — 플러그인은 Esc 를 "cancel 자리 버튼"으로 바꿔 돌려줘 취소를 기본 버튼으로 둘 수 없다
 # (src-tauri/src/dialogs.rs). tauri-plugin-dialog 2.8 이 쓰는 것과 같은 판·기능이라 따로 빌드되지 않는다
 rfd = { version = "0.17", default-features = false, features = ["common-controls-v6"] }

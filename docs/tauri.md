@@ -21,7 +21,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 |---|---|---|
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
-| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0) — 실행기·LogCursor 스트리밍·RepoWatcher 는 남음 |
+| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(앱에는 아직 연결 안 함, 아래 "실행기") — 라우터·LogCursor 스트리밍·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
@@ -111,6 +111,34 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 - **알려진 차이**: 브랜치·태그·리모트 정렬은 TS 가 `localeCompare(undefined, {numeric: true})`(ICU, **실행 환경 로케일에 따라 다르다** — ko-KR 에서는 한글이 라틴 문자보다 앞)이고,
   Rust `natural_compare` 는 숫자 덩어리 수치 비교 + 대소문자 무시(같으면 소문자 먼저) + ASCII 기호는 CLDR root 순서 + ASCII 밖은 코드 포인트 순인 근사다.
   그래서 골든 fixture 에는 서로 다른 문자 체계(한글↔라틴)가 첫 차이가 되는 정렬 쌍을 넣지 않았다(로케일이 다르면 골든이 달라진다). 실제 정렬을 Rust 로 완전히 옮기려면 `icu_collator` 가 필요하다 — Phase 2 의 결정 사항.
+
+## 실행기(Phase 2, `src-tauri/src/git/exec/`)
+
+`src/main/executors` 의 Local·WSL 실행기·`ProcessQueue`·`wslPaths` 를 옮겼다(SSH 는 Phase 5). **아직 앱에서 부르지 않는다** — 라우터(다음 PR)가 붙기 전까지 사이드카가 그대로 처리한다.
+
+- `common.rs` 의 `GIT_GLOBAL_ARGS`·`GIT_ENV` 가 유일한 정의이고 `RunOpts` 에는 env 필드가 없다(호출자가 방어 환경변수를 덮어쓸 수 없다. TS 의 `RunOpts.env`·`envFor`·WSL `extraEnv` 는 GitHub 원격 전용 저장소용이라 옮기지 않았다).
+- `run`(stdout 64MB 상한, stderr 는 앞 4MB 만 담고 파이프는 끝까지 비움) / `stream`(`GitStream`: `AsyncRead`. **읽을 때만** 파이프에서 가져가므로 소비자가 안 읽으면 git 이 멈춘다.
+  EOF 뒤 `finish()` 로 종료 코드를 확인하고, 버리면 트리를 죽인다). 취소는 `CancellationToken`.
+- **앱에 연결하기 전 필수(보안 리뷰)**: 실행기는 호출자 `args` 를 전역 옵션 바로 뒤에 붙인다 — renderer 값이 그 자리에 오면
+  `-c alias.x=!cmd`·`--output=<경로>` 로 명령 실행·파일 쓰기가 된다. 라우터는 (1) 서브커맨드·옵션을 상수로 정하고 renderer 값(ref·해시·경로)은
+  검증 뒤 정해진 위치·`--` 뒤에만 넣고, (2) 저장소 경로·배포판은 renderer 가 아니라 사이드카가 보낸 미러(main 이 저장한 값)에서만 가져오며
+  `src/main/ipc/handlers.ts` 의 `checkPath`(UNC·NUL·길이)·배포판 목록 대조를 이식하고, (3) LogCursor 를 버릴 때 `GitStream` 을 drop 한다
+  (스트림의 취소 토큰은 다음 읽기 때만 확인된다 — 토큰만 취소하고 구조체를 남기면 git 이 파이프에서 멈춘 채 남는다).
+  Rust CI(`tauri.yml`)는 아직 필수 체크가 아니다 — clippy 의 `disallowed-methods` 가 실패해도 머지될 수 있으니 앱 연결 PR 전에 필수 체크로 올린다(저장소 룰셋 설정).
+- Windows: `CREATE_NO_WINDOW`, 취소·Drop 때 `taskkill /pid N /T /F` 를 **한 번만**, **별도 스레드에서** 띄우고 기다린다. 이미 끝나 수거된 자식에는 보내지 않는다.
+  루트 프로세스 핸들 복제본을 taskkill 이 끝날 때까지 쥐고 있어 그 사이 PID 가 재사용되지 않고, taskkill 이 실패하면 그 핸들로 루트를 `TerminateProcess` 한다.
+  처음 이식은 런타임 스레드에서 taskkill 을 2~3번(명시적 kill + Drop) 띄워, 병렬 테스트 부하에서 취소→반환이 8~22초까지 늘었다(현재 1ms 미만).
+- 오류는 `ExecError`(`Git`·`Aborted`·`SpawnFailed`) → envelope code `GIT`·`ABORTED`·`ERROR`. WSL 은 wsl.exe 자신의 실패(종료 코드 -1, stderr 빔)를 stdout 의 WSL 메시지로 바꾼다.
+- `ProcessQueue`: local 6 / wsl 4 동시성(저장소마다 하나), 같은 키 요청은 `Shared` 로 합치고(키가 있는 요청에는 취소 신호를 걸지 않는다), 기다리는 쪽이 모두 사라지면 프로세스도 정리된다.
+- **git 을 띄우는 `Command::new` 는 `process.rs` 한 곳뿐이다.** `src-tauri/clippy.toml` 의 `disallowed-methods` 가 `std::process::Command::new`·`tokio::process::Command::new` 를 막고,
+  예외(`sidecar.rs` 의 Node 사이드카, `process.rs` 의 git·taskkill, 테스트 헬퍼)는 `#[allow(clippy::disallowed_methods)]` 와 이유 주석을 단다.
+- 골든 `tests/golden/exec/env.json`(`UPDATE_GOLDEN=1 npx vitest run tests/goldenExec.test.ts`): TS 의 전역 인자·`GIT_ENV`(순서 포함)·로컬 spawn 인자와 환경·`wsl.exe` 인자와 `WSL_UTF8`·`wslArgv` 샘플. `src-tauri/tests/exec.rs` 가 Rust 상수와 비교한다.
+- 테스트 격리: `src-tauri/tests/exec.rs` 의 `isolate`(ctor — 어떤 테스트보다 먼저 한 번)가 `GIT_CONFIG_GLOBAL`(커밋된 `src-tauri/tests/gitconfig`)·
+  `GIT_CONFIG_NOSYSTEM`·`GCM_INTERACTIVE` 를 테스트 프로세스 환경에 넣는다. `.cargo/config.toml` 의 `[env]` 는 쓰지 않는다 —
+  `cargo run`·`tauri dev` 에도 걸려 개발 중인 앱의 git 이 사용자 전역 설정(WSL 경로의 safe.directory, 자격 증명 도우미)을 못 보게 된다.
+  git 을 띄우는 Rust 테스트를 새 파일에 만들면 같은 격리를 넣어야 한다(`격리` 테스트가 본보기).
+- 실행: `cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec`. WSL 통합 케이스는 배포판(과 그 안의 git)이 없으면 건너뛴다(`[wsl] 건너뜀`, `--nocapture`).
+  수동(트리 kill): `ANTLER_BIG_REPO=<큰 저장소> cargo test --manifest-path src-tauri/Cargo.toml --test exec -- --ignored --nocapture --test-threads=1` — powershell 로 프로세스 트리를 읽는다.
 
 ## Phase 0 에서 확인한 것
 
