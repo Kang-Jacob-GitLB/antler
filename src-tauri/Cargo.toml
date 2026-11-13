@@ -26,6 +26,9 @@ tauri-plugin-window-state = "2.5.0"
 [target.'cfg(windows)'.dependencies]
 # 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판
 windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse"] }
+# 확인 창을 플러그인 없이 직접 띄운다 — 플러그인은 Esc 를 "cancel 자리 버튼"으로 바꿔 돌려줘 취소를 기본 버튼으로 둘 수 없다
+# (src-tauri/src/dialogs.rs). tauri-plugin-dialog 2.8 이 쓰는 것과 같은 판·기능이라 따로 빌드되지 않는다
+rfd = { version = "0.17", default-features = false, features = ["common-controls-v6"] }
 
 [features]
 cdp = []

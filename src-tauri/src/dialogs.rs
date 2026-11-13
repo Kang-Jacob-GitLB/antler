@@ -7,15 +7,17 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
+use tauri_plugin_dialog::DialogExt;
+#[cfg(not(windows))]
+use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogKind, MessageDialogResult};
 
-/// 확인 창. 값은 `{ "response": <arg.buttons 의 원래 인덱스> }`
+/// 확인 창. 값은 `{ "response": <arg.buttons 의 원래 인덱스> }`. 눌린 버튼은 문구로 구분하므로 문구가 겹치면 거부한다.
 ///
-/// **취소 버튼(`cancelId`)은 반드시 마지막(플러그인의 "cancel" 자리)에 둔다.** tauri-plugin-dialog 2.8 은 Esc·창 닫기로 생긴
-/// `Cancel` 결과를 모든 플랫폼에서 `Custom(cancel 자리의 문구)` 로 바꿔 돌려준다(desktop.rs 의 show_message_dialog).
-/// 그 자리에 다른 버튼이 있으면 Esc 가 "연결"·"항상 허용"으로 뒤집힌다. 마지막에 두면 Esc·닫기·취소 버튼이 모두 cancelId 다.
-/// 대가: OS 기본 버튼(Enter)이 첫 버튼(허용 쪽)이 된다 — Electron 판은 defaultId(취소)가 기본이었다(docs/tauri.md 남은 일).
-/// 눌린 버튼은 문구로 구분하므로 문구가 겹치면 거부한다.
+/// - **Windows**: rfd 를 직접 쓴다. rfd 는 사용자 지정 버튼마다 고유 ID 를 붙여 누른 버튼은 `Custom(문구)`, Esc·창 닫기는 `Cancel` 로
+///   구분해 돌려준다. 그래서 취소 버튼을 **맨 앞(= 기본 버튼, Enter)** 에 둘 수 있다 — Electron 판의 defaultId(취소)와 같다.
+/// - **그 밖**: tauri-plugin-dialog 2.8 은 Esc·닫기로 생긴 `Cancel` 을 `Custom(cancel 자리 문구)` 로 바꿔 돌려준다(desktop.rs 의
+///   show_message_dialog). 그 자리에 다른 버튼이 있으면 Esc 가 "연결"·"항상 허용"으로 뒤집히므로 취소를 **마지막**(cancel 자리)에 둔다.
+///   대가로 Enter 가 첫 버튼(허용 쪽)을 누른다.
 pub fn message_box(app: &AppHandle, arg: &Value) -> Option<Value> {
     let buttons: Vec<&str> = arg.get("buttons")?.as_array()?.iter().map(Value::as_str).collect::<Option<_>>()?;
     if buttons.is_empty() || buttons.len() > 3 || buttons.iter().any(|b| b.is_empty()) {
@@ -25,9 +27,54 @@ pub fn message_box(app: &AppHandle, arg: &Value) -> Option<Value> {
         return None;
     }
     let cancel_id = usize::try_from(arg.get("cancelId")?.as_u64()?).ok().filter(|&c| c < buttons.len())?;
-    let order = button_order(buttons.len(), cancel_id);
+    let message = arg.get("message")?.as_str()?;
+    let title = arg.get("title")?.as_str()?;
+    let kind = arg.get("kind").and_then(Value::as_str);
+    let parent = app.get_webview_window("main")?;
+    let pressed = show(&parent, &buttons, cancel_id, title, message, kind)?;
+    let response = buttons.iter().position(|b| *b == pressed)?;
+    Some(json!({ "response": response }))
+}
+
+/// 화면 순서(원래 인덱스 목록)
+fn button_order(len: usize, cancel_id: usize, cancel_first: bool) -> Vec<usize> {
+    let rest = (0..len).filter(move |&i| i != cancel_id);
+    if cancel_first {
+        std::iter::once(cancel_id).chain(rest).collect()
+    } else {
+        rest.chain(std::iter::once(cancel_id)).collect()
+    }
+}
+
+/// 누른 버튼의 문구. Esc·닫기·실패는 None
+#[cfg(windows)]
+fn show(parent: &tauri::WebviewWindow, buttons: &[&str], cancel_id: usize, title: &str, message: &str, kind: Option<&str>) -> Option<String> {
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+    let order = button_order(buttons.len(), cancel_id, true);
     let label = |n: usize| buttons[order[n]].to_string();
-    let kind = match arg.get("kind").and_then(Value::as_str) {
+    let level = match kind {
+        Some("warning") => MessageLevel::Warning,
+        Some("error") => MessageLevel::Error,
+        _ => MessageLevel::Info,
+    };
+    let shown = match buttons.len() {
+        1 => MessageButtons::OkCustom(label(0)),
+        2 => MessageButtons::OkCancelCustom(label(0), label(1)),
+        _ => MessageButtons::YesNoCancelCustom(label(0), label(1), label(2)),
+    };
+    // 이 함수는 사이드카 host 처리 스레드(std::thread)에서 불린다. TaskDialog 는 부르는 스레드에서 돌고 부모 창을 비활성화한다(모달)
+    let result = MessageDialog::new().set_level(level).set_title(title).set_description(message).set_buttons(shown).set_parent(parent).show();
+    match result {
+        MessageDialogResult::Custom(pressed) => Some(pressed),
+        _ => None, // Cancel(Esc·닫기) 등
+    }
+}
+
+#[cfg(not(windows))]
+fn show(parent: &tauri::WebviewWindow, buttons: &[&str], cancel_id: usize, title: &str, message: &str, kind: Option<&str>) -> Option<String> {
+    let order = button_order(buttons.len(), cancel_id, false);
+    let label = |n: usize| buttons[order[n]].to_string();
+    let kind = match kind {
         Some("warning") => MessageDialogKind::Warning,
         Some("error") => MessageDialogKind::Error,
         _ => MessageDialogKind::Info,
@@ -37,24 +84,11 @@ pub fn message_box(app: &AppHandle, arg: &Value) -> Option<Value> {
         2 => MessageDialogButtons::OkCancelCustom(label(0), label(1)),
         _ => MessageDialogButtons::YesNoCancelCustom(label(0), label(1), label(2)),
     };
-    let parent = app.get_webview_window("main")?;
-    let result = app
-        .dialog()
-        .message(arg.get("message")?.as_str()?)
-        .title(arg.get("title")?.as_str()?)
-        .kind(kind)
-        .buttons(shown)
-        .parent(&parent)
-        .blocking_show_with_result();
-    // 사용자 지정 문구 버튼만 인정한다. 매핑되지 않은 Cancel 과 알 수 없는 값은 None → 취소
-    let MessageDialogResult::Custom(pressed) = result else { return None };
-    let response = order.iter().copied().find(|&i| buttons[i] == pressed)?;
-    Some(json!({ "response": response }))
-}
-
-/// 화면 순서(원래 인덱스 목록): 취소가 아닌 버튼(원래 순서) → 취소 버튼(마지막 = 플러그인의 cancel 자리)
-fn button_order(len: usize, cancel_id: usize) -> Vec<usize> {
-    (0..len).filter(|&i| i != cancel_id).chain(std::iter::once(cancel_id)).collect()
+    let result = parent.dialog().message(message).title(title).kind(kind).buttons(shown).parent(parent).blocking_show_with_result();
+    match result {
+        MessageDialogResult::Custom(pressed) => Some(pressed),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -62,14 +96,23 @@ mod tests {
     use super::button_order;
 
     #[test]
-    fn 취소_버튼은_항상_마지막이다() {
-        // Esc·닫기는 마지막 자리 버튼으로 바뀌어 돌아온다 — 그 자리가 cancelId 가 아니면 Esc 가 허용이 된다
-        assert_eq!(button_order(1, 0), vec![0]);
-        assert_eq!(button_order(2, 1), vec![0, 1]); // SSH: [연결][취소]
-        assert_eq!(button_order(2, 0), vec![1, 0]);
-        assert_eq!(button_order(3, 2), vec![0, 1, 2]); // fetch: [이번만][항상][취소]
-        assert_eq!(button_order(3, 0), vec![1, 2, 0]);
-        assert_eq!(button_order(3, 1), vec![0, 2, 1]);
+    fn 플러그인_경로에서는_취소_버튼이_마지막이다() {
+        // 플러그인은 Esc·닫기를 마지막 자리 버튼으로 바꿔 돌려준다 — 그 자리가 cancelId 가 아니면 Esc 가 허용이 된다
+        assert_eq!(button_order(1, 0, false), vec![0]);
+        assert_eq!(button_order(2, 1, false), vec![0, 1]); // SSH: [연결][취소]
+        assert_eq!(button_order(2, 0, false), vec![1, 0]);
+        assert_eq!(button_order(3, 2, false), vec![0, 1, 2]); // fetch: [이번만][항상][취소]
+        assert_eq!(button_order(3, 0, false), vec![1, 2, 0]);
+        assert_eq!(button_order(3, 1, false), vec![0, 2, 1]);
+    }
+
+    #[test]
+    fn 윈도우_경로에서는_취소_버튼이_맨_앞_기본_버튼이다() {
+        // rfd 직접 호출은 Esc 를 Cancel 로 따로 돌려주므로 취소를 기본 버튼(첫 자리)에 둔다
+        assert_eq!(button_order(1, 0, true), vec![0]);
+        assert_eq!(button_order(2, 1, true), vec![1, 0]); // SSH: [취소][연결]
+        assert_eq!(button_order(3, 2, true), vec![2, 0, 1]); // fetch: [취소][이번만][항상]
+        assert_eq!(button_order(3, 1, true), vec![1, 0, 2]);
     }
 }
 

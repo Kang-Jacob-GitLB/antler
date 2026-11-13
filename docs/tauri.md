@@ -42,12 +42,14 @@ renderer(src/renderer/src, 그대로)
   `src-tauri/src/dialogs.rs` 가 `tauri-plugin-dialog` 의 Rust API 로 **네이티브 대화상자**(부모 = 메인 창, 모달)를 띄운다. webview 안 HTML 이 아니라서 침해된
   renderer 가 스스로 누를 수 없고, 플러그인의 JS command 는 capability 에 주지 않았다. 확인 창은 **어떤 실패(창 없음·잘못된 응답·범위 밖 값·닫기·Esc)에서도 cancelId** 로
   답한다. 확인 창 규칙:
-  - 버튼은 1~3개(문구가 서로 달라야 한다 — 눌린 버튼을 문구로 구분한다). **취소 버튼(`cancelId`)은 항상 마지막**에 둔다:
-    tauri-plugin-dialog 2.8 은 Esc·창 닫기로 생긴 `Cancel` 을 모든 플랫폼에서 "마지막(cancel 자리) 버튼을 누른 것"으로 바꿔 돌려주므로,
-    그 자리에 다른 버튼이 있으면 Esc 가 "연결"·"항상 허용"으로 뒤집힌다(처음 구현에서 실제로 그렇게 배치했다가 리뷰에서 잡았다).
-    그래서 fetch 확인은 `[이번만 fetch][이 저장소에서 항상 허용][취소]`, SSH 확인은 `[연결][취소]` 로 보이고, Esc·닫기·취소는 모두 거부다.
-  - **알려진 차이**: 네이티브 대화상자는 기본 버튼을 정할 수 없어 Enter 가 첫 버튼(허용 쪽)을 누른다. Electron 판은 `defaultId`(취소)가 기본이었다.
-    rfd 를 플러그인 없이 직접 써서 결과(`Custom`/`Cancel`)를 구분하면 취소를 첫 자리·기본으로 둘 수 있다 — Phase 1 남은 일.
+  - 버튼은 1~3개(문구가 서로 달라야 한다 — 눌린 버튼을 문구로 구분한다). Esc·창 닫기·취소 버튼은 모두 거부다.
+  - **Windows**: tauri-plugin-dialog 를 거치지 않고 rfd 를 직접 쓴다. rfd 는 누른 사용자 지정 버튼(`Custom(문구)`)과 Esc·닫기(`Cancel`)를
+    구분해 돌려주므로 **취소 버튼을 맨 앞(= 기본 버튼, Enter)** 에 둔다 — Electron 판의 `defaultId`(취소)와 같다.
+    fetch 확인은 `[취소][이번만 fetch][이 저장소에서 항상 허용]`, SSH 확인은 `[취소][연결]`.
+  - **그 밖의 OS**(플러그인 경로): 플러그인 2.8 은 Esc·닫기로 생긴 `Cancel` 을 "마지막(cancel 자리) 버튼을 누른 것"으로 바꿔 돌려주므로,
+    그 자리에 다른 버튼이 있으면 Esc 가 "연결"·"항상 허용"으로 뒤집힌다(#84 의 첫 구현이 그렇게 배치했다가 리뷰에서 잡았다).
+    그래서 취소를 **마지막**에 두고, 대가로 Enter 가 첫 버튼(허용 쪽)을 누른다. macOS·Linux 빌드는 아직 컴파일조차 확인하지 않았다.
+  - 버튼 배치 규칙은 `src-tauri/src/dialogs.rs` 의 단위 테스트(`cargo test --lib`)로 고정했다.
     응답 인덱스는 원래 `buttons` 기준으로 되돌려 준다.
   - **체크박스는 지원하지 않는다**(`checkboxChecked` 는 항상 `false`). 지금 호출부는 쓰지 않으며, 앞으로 체크가 권한을 넓히는 용도로 쓰이면 false 가 안전한 쪽이다.
   - `message` 와 `detail` 은 빈 줄로 이어 한 본문으로 보인다.
@@ -129,7 +131,7 @@ B 469–477 / 185–195(small), 446–448 / 167–168(big).
 - 직접 확인 필요: 스냅 레이아웃 플라이아웃 위치·지연, 툴바 드래그·더블클릭 최대화(입력 합성을 하지 않아 자동 확인 못 함).
 - Electron 대비 성능은 위 "Phase 0 측정" — 콜드 스타트는 부하 없는 환경에서 다시 재야 한다.
 - 새 창으로 여는 링크는 github.com 만 기본 브라우저로 보낸다(Electron 판 `setWindowOpenHandler` 와 같은 규칙).
-- 미지원: `theme:system` 이벤트(renderer 가 `matchMedia` 로 시스템 테마를 직접 따라 필요 없다), `openPath`·`showItemInFolder`, 확인 창의 체크박스·기본 버튼 지정(Enter = 허용 쪽 첫 버튼, 위 참고).
+- 미지원: `theme:system` 이벤트(renderer 가 `matchMedia` 로 시스템 테마를 직접 따라 필요 없다), `openPath`·`showItemInFolder`, 확인 창의 체크박스, Windows 밖에서의 기본 버튼 지정(위 참고).
 - 직접 확인 필요: 확인 창(fetch·SSH)과 폴더·에디터 선택 대화상자가 실제로 뜨고 버튼 응답이 맞는지, 창 위치·크기·최대화가 재시작 뒤 복원되는지(자동 확인은 대화상자를 띄우지 않고 요청·응답 형식만 봤다).
 - 배포 전 필수: 사이드카 경로가 빌드 머신 절대 경로로 박혀 있다(`src-tauri/src/sidecar.rs`) — Node 를 걷어 내면 사라지지만,
   그 전에 배포해야 한다면 resource 경로로 바꾼다. `cdp` 기능은 배포 빌드에서 켜지지 않게 CI 에서 막는다.
