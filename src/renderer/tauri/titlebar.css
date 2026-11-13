@@ -1,0 +1,39 @@
+/* Tauri 창 버튼. Electron 의 titleBarOverlay 자리(우상단 138×43)에 직접 그린다 */
+.tb-controls {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 43px;
+  width: 138px;
+  z-index: 70;
+  display: flex;
+  -webkit-app-region: no-drag;
+}
+/* 모달 배경막이 뜨면 버튼도 같이 어둡게. 버튼은 계속 눌려야 하므로 클릭은 통과시킨다 */
+[data-titlebar-dim] .tb-controls::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--backdrop);
+  pointer-events: none;
+}
+.tb-btn {
+  width: 46px;
+  height: 43px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets', sans-serif;
+  font-size: 10px;
+  line-height: 43px;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+.tb-btn:hover {
+  background: var(--row-hover);
+}
+.tb-btn--close:hover {
+  background: var(--removed);
+  color: var(--accent-contrast);
+}
