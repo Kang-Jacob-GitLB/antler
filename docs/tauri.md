@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트) 완료, 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소) 완료, 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -435,7 +435,7 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 - **HTTP**: reqwest 0.13(`default-features=false`, `native-tls`), 클라이언트 생성은 한 곳(`net/http.rs`)에 모으고 `Client::new` 등은 clippy 로 막는다. `https_only`·`no_proxy`·15초·UA `Antler`,
   Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
   `reqwest::Error` 의 Display 는 쓰지 않는다. 비밀은 `SecretString`(Display·Serialize 없음, Debug `***`)이고 오류 문구는 마지막에 `redact_secrets` 를 거친다.
-- **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버, 완료) → 4 SecretStore(키링·메모리) → 5 Jira 서비스 →
+- **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버, 완료) → 4 SecretStore(키링·메모리, 완료) → 5 Jira 서비스 →
   6 Jira 연결(채널·`openExternal`) → 7 GitHub 서비스 → 8 gh CLI → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
 
 ### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
@@ -571,6 +571,31 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
 
 **알려진 한계**: 공개 사진 호스트의 실제 TLS 연결(gravatar·wp.com)은 시험하지 못했다(외부 접속 금지 — 주소 치환으로 홉 규칙만 확인). 서버 본문 메시지는 비밀을 **가린 뒤** 200 단위로 자른다(`github_body_message`·`jira_body_message`·`*_http_error` 가 `secrets` 를 받는다. TS 는 자른 뒤 가리는 순서였으나 Rust 는 경계에 걸린 토큰이 남지 않게 바꿨다 — 골든 비교는 `secrets` 가 비면 TS 와 같다).
 `sealed` 는 마지막 방어로 남아 있다. 소스 검사는 `git/fetch` 의 기존 `*_for_test` 함수(운영 코드가 부르는 순수 함수)를 대상으로 삼지 않는다.
+
+### PR 4 — 토큰 보관(`src-tauri/src/secret`, 앱에 연결하지 않는다)
+
+| 파일 | 내용 |
+|---|---|
+| `secret/mod.rs` | `SecretStore` 트레이트(`get`·`set`·`delete` 는 바이트, `get_secret_string`·`set_secret_string` 은 `SecretString`), `Vault`(GitHub·Jira 저장·복원), 저장소 선택 `open_store`·`open_default_store`, `service_name` |
+| `secret/keyring.rs` | `KeyringStore`(Windows 자격 증명 관리자, `cfg(windows)`). **키링 항목을 만드는 유일한 곳**. keyring 오류는 값이 들 수 있어(`BadEncoding` 의 바이트) 싣지 않고 `SecretError` 로만 바꾼다 |
+| `secret/memory.rs` | `MemoryStore`. Windows 가 아니거나 `ANTLER_USER_DATA` 가 있으면 이것이며 `storage_unavailable` 이다 |
+
+- **저장 형식**: 비밀과 메타데이터를 **한 덩어리 UTF-8 JSON** 으로 둔다(메타 파일 없음). GitHub `{method, token}`(계정 `github-token`), Jira `{kind, siteUrl, email, token, displayName}`(계정 `jira-token`).
+  서비스 이름은 운영 `com.antler.app`, 디버그 빌드 `com.antler.app.dev` 다. 값은 `set_secret` 으로 **바이트 그대로** 두므로 UTF-16 으로 바꾸지 않는다.
+- **읽기**: JSON 실패·검증 실패(GitHub: 방식 `pat|device|gh-cli`·`usable_token`, Jira: `parse_connect_input` 재검증)면 그 항목을 지우고 `None`. 저장소 접근 실패는 "없음"으로 보되 지우지 않는다.
+- **쓰기**: 실패하거나 저장소가 남지 않는 종류면 메모리에만 두고 `storage_unavailable`(tokenStore.ts 와 같다). 다음 쓰기가 성공하면 풀린다.
+- **크기 예산**: 한 덩어리 2560바이트(`MAX_BLOB`). Jira `displayName` 을 200자로 먼저 자르고 그래도 넘으면 `SecretError::TooLarge`(연결하지 않는다 — 기존 값은 그대로). 메모리 저장소도 같은 한도다.
+- **실측**(`keyring.rs` 의 `#[ignore]` 시험, `cargo test --lib -- --ignored secret::keyring`, 고유 서비스 이름 `com.antler.test.<pid>-<시각>` 을 쓰고 끝나면 지운다): blob 2560바이트 저장 성공·2561바이트 실패(실패해도 기존 값 유지),
+  `set_secret` 은 바이트를 **그대로** 저장(UTF-8 "가나" 6바이트 → 6바이트), `set_password` 는 UTF-16LE 로 바꿔 한도가 1280자다.
+- **보존 방식(Windows 자격 증명 지속성)**: `persistence=Local` 로 만든다(`windows-native-keyring-store 1.1` 의 항목 수정자, 대소문자 무시 `Session|Local|Enterprise` — 크레이트 소스 `lib.rs`·`store.rs` 로 확인).
+  크레이트 기본값은 Enterprise 이며 Electron 판은 로밍 경로였다. 토큰은 이 PC 에서만 쓰면 되고 도메인 로밍으로 다른 PC 에 복제되지 않는 편이 안전해 Local 을 골랐다.
+  수정자는 값을 쓸 때만 적용되고 읽기에는 영향이 없다. 실제 자격 증명 관리자에서의 동작(이미 Enterprise 인 항목을 덮어쓸 때 바뀌는지 포함)은 수동 시험으로 확인하지 않았다.
+- **비밀 다루기**: `SecretString` 은 `Debug` `***`·`Display`/`Serialize` 없음을 유지하고 버릴 때 0 으로 덮는다(`Drop`). 저장 JSON 버퍼와 읽은 바이트는 `Zeroizing`, 해석한 `Value` 의 문자열은 `scrub` 이 덮는다
+  (serde 가 이스케이프를 풀어 만든 중간 복사까지는 보장하지 못한다 — "가능하면").
+- **소스 검사**(`tests/net.rs` 의 `mod secret_store`): `keyring_core`·`windows_native_keyring_store` 는 `secret/` 밖에서 쓰지 않고(Cargo.toml 에서도 windows 대상 의존성뿐), `secret/` 에는 `println`·`eprintln`·`dbg`·`log` 가 없다
+  (파일 끝의 `#[cfg(test)]` 모듈은 제외 — 수동 시험이 `eprintln!` 으로 실측값을 낸다). 테스트는 메모리 구현만 쓴다. 대응표 `N/A: PR 4` 5개 중 4개를 Rust 테스트에 연결했고, 하나(Linux `basic_text`)는 해당 분기가 없어 N/A 사유로 바꿨다.
+- 의존성: `keyring-core 1`·`windows-native-keyring-store 1.1`(windows 대상), `zeroize 1`(전이 의존이던 판). `windows-sys 0.61.2` 를 기존 트리와 공유해 중복 판이 없다(`cargo tree -d`).
+- **미연결**: 앱·IPC 에서 부르지 않는다. 연결(`ANTLER_RUST_API`·키체인 읽기)은 PR 9 이며 Electron 판 토큰은 옮기지 않는다(다시 로그인).
 
 ## Phase 0 에서 확인한 것
 

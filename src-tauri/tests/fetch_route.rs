@@ -24,11 +24,23 @@ fn read_src(rel: &str) -> String {
     fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
 }
 
-/// 주석 줄과 `#[cfg(test)]` 이후를 뺀 운영 코드
+/// 운영 코드의 끝(바이트 위치) — 들여쓰기 없는 `#[cfg(test)]` 바로 다음 줄이 `mod ` 인 곳이다(메서드 앞의 시험 전용 항목에서는 멈추지 않는다)
+fn prod_end(text: &str) -> usize {
+    let mut off = 0;
+    let mut lines = text.split_inclusive('\n').peekable();
+    while let Some(l) = lines.next() {
+        if l.trim_end_matches(['\r', '\n']) == "#[cfg(test)]" && lines.peek().is_some_and(|n| n.starts_with("mod ")) {
+            return off;
+        }
+        off += l.len();
+    }
+    text.len()
+}
+
+/// 주석 줄과 파일 끝의 시험 모듈을 뺀 운영 코드
 fn prod_code(rel: &str) -> String {
     let src = read_src(rel);
-    let end = src.find("#[cfg(test)]").unwrap_or(src.len());
-    src[..end].lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n")
+    src[..prod_end(&src)].lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n")
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {

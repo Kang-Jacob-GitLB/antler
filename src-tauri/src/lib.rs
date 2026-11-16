@@ -8,6 +8,8 @@ pub mod jira;
 pub mod mirror;
 pub mod net;
 pub mod router;
+// 토큰 보관(Phase 4 PR 4) — 앱에는 아직 연결하지 않는다
+pub mod secret;
 mod sidecar;
 mod snap;
 

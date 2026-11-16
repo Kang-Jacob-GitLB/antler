@@ -950,12 +950,40 @@ macro_rules! assert_not_impl_any {
 assert_not_impl_any!(SecretString: std::fmt::Display, serde::Serialize, serde::de::DeserializeOwned);
 assert_not_impl_any!(&'static SecretString: std::fmt::Display, serde::Serialize);
 
+/// 운영 코드의 끝(바이트 위치) — 들여쓰기 없는 `#[cfg(test)]` 바로 다음 줄이 `mod ` 인 곳(파일 끝의 시험 모듈)이다.
+/// 메서드 앞의 `#[cfg(test)] fn ...` 같은 시험 전용 항목에서는 멈추지 않는다(그 뒤의 운영 코드가 검사에서 빠진다)
+fn prod_end(text: &str) -> usize {
+    let mut off = 0;
+    let mut lines = text.split_inclusive('\n').peekable();
+    while let Some(l) = lines.next() {
+        if l.trim_end_matches(['\r', '\n']) == "#[cfg(test)]" && lines.peek().is_some_and(|n| n.starts_with("mod ")) {
+            return off;
+        }
+        off += l.len();
+    }
+    text.len()
+}
+
+#[test]
+fn 운영_코드_끝_검출기는_시험_전용_항목에서_멈추지_않는다() {
+    // 들여쓰기 있는 `#[cfg(test)] fn` 뒤의 운영 코드도 운영 구간이다
+    let src = "impl A {\n    #[cfg(test)]\n    fn count(&self) {}\n    fn prod(&self) { PROD }\n}\n#[cfg(test)]\nmod tests { TEST }\n";
+    let body = &src[..prod_end(src)];
+    assert!(body.contains("PROD") && !body.contains("TEST"));
+    // 들여쓰기 없는 `#[cfg(test)]` 라도 다음 줄이 `mod ` 가 아니면 멈추지 않는다
+    let src = "#[cfg(test)]\nfn only_test() {}\nfn prod() { PROD }\n#[cfg(test)]\r\nmod tests { TEST }\n";
+    let body = &src[..prod_end(src)];
+    assert!(body.contains("PROD") && !body.contains("TEST"));
+    // 시험 모듈이 없으면 전부다
+    assert_eq!(prod_end("fn a() {}\n"), 10);
+}
+
 /// `SecretString` 은 `Display`·`Serialize` 를 구현하지 않는다 — 위 타입 단언이 컴파일 시점에 보장하고, 아래는 소스 문자열 검사(보조)와 `Debug` 가 `***` 인지 본다
 #[test]
 fn secret_string_은_display_와_serialize_가_없다() {
     let src = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("net").join("redact.rs")).unwrap();
     // 비교 대상은 테스트 모듈 앞까지(테스트 안의 설명 문자열은 제외)
-    let body = src.split("#[cfg(test)]").next().unwrap();
+    let body = &src[..prod_end(&src)];
     for banned in ["Display for SecretString", "Serialize for SecretString", "Deserialize for SecretString", "derive(Serialize", "derive(Deserialize", "derive(Debug"] {
         assert!(!body.contains(banned), "SecretString 에 {banned} 를 더하면 안 된다");
     }
@@ -3318,5 +3346,394 @@ mod live {
         // Rewrite·Profile::Test·HttpClient/GitHubClient/JiraClient 의 new_for_test·insecure_loopback_for_test — 정의를 못 찾았다면 검사기가 눈먼 것이다
         assert!(defs >= 6, "훅 정의를 {defs}개만 찾았다");
         assert!(bad.is_empty(), "test-hooks feature 뒤에 있지 않은 테스트 훅:\n{}", bad.join("\n"));
+    }
+}
+
+// ── 토큰 보관(PR 4): 메모리 구현만으로 돈다(실제 자격 증명 관리자는 src/secret/keyring.rs 의 #[ignore] 수동 시험) ─────────────────
+
+mod secret_store {
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use antler_lib::jira::validate::{parse_connect_input, ConnectInput, SiteOptions};
+    use antler_lib::jira::JiraKind;
+    use antler_lib::net::redact::SecretString;
+    use antler_lib::secret::memory::MemoryStore;
+    use antler_lib::secret::{open_store, service_name, GithubMethod, SecretError, SecretStore, Vault, GITHUB_ACCOUNT, JIRA_ACCOUNT, MAX_BLOB};
+    use serde_json::{json, Value};
+    use zeroize::Zeroizing;
+
+    /// 키체인처럼 남는 척하는 메모리 저장소와, 그 위의 보관소
+    fn vault() -> (Arc<MemoryStore>, Vault) {
+        let store = Arc::new(MemoryStore::standing_in_for_keychain());
+        (store.clone(), Vault::new(store))
+    }
+
+    fn jira_input(token: &str) -> ConnectInput {
+        parse_connect_input(&json!({"kind": "cloud", "siteUrl": "https://acme.atlassian.net", "email": "dev@acme.io", "token": token}), SiteOptions::default()).unwrap()
+    }
+
+    fn raw(store: &MemoryStore, account: &str) -> Option<String> {
+        store.get(account).unwrap().map(|v| String::from_utf8(v.to_vec()).unwrap())
+    }
+
+    fn has(store: &MemoryStore, account: &str) -> bool {
+        store.get(account).unwrap().is_some()
+    }
+
+    /// 쓰기·삭제가 항상 실패하는 저장소(읽기는 비어 있다)
+    struct Failing;
+    impl SecretStore for Failing {
+        fn get(&self, _: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &[u8]) -> Result<(), SecretError> {
+            Err(SecretError::Backend)
+        }
+        fn delete(&self, _: &str) -> Result<(), SecretError> {
+            Err(SecretError::Backend)
+        }
+        fn persistent(&self) -> bool {
+            true
+        }
+    }
+
+    /// 읽기만 항상 실패하는 저장소(쓰기·삭제는 안쪽 저장소로 간다)
+    struct ReadFails(Arc<MemoryStore>);
+    impl SecretStore for ReadFails {
+        fn get(&self, _: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+            Err(SecretError::Backend)
+        }
+        fn set(&self, a: &str, v: &[u8]) -> Result<(), SecretError> {
+            self.0.set(a, v)
+        }
+        fn delete(&self, a: &str) -> Result<(), SecretError> {
+            self.0.delete(a)
+        }
+        fn persistent(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn github_는_저장하고_다시_읽는다_메타_파일_없이_한_덩어리다() {
+        let (store, v) = vault();
+        assert!(v.load_github().is_none());
+        assert_eq!(v.save_github(&SecretString::new("ghp_abc"), GithubMethod::Device), Ok(true));
+        assert!(!v.github_storage_unavailable());
+        assert_eq!(raw(&store, GITHUB_ACCOUNT).unwrap(), r#"{"method":"device","token":"ghp_abc"}"#);
+        let got = v.load_github().unwrap();
+        assert_eq!((got.token.expose(), got.method), ("ghp_abc", GithubMethod::Device));
+        for m in [GithubMethod::Pat, GithubMethod::GhCli] {
+            v.save_github(&SecretString::new("t"), m).unwrap();
+            assert_eq!(v.load_github().unwrap().method, m);
+        }
+        v.clear_github().unwrap();
+        assert!(v.load_github().is_none() && !has(&store, GITHUB_ACCOUNT));
+    }
+
+    #[test]
+    fn jira_는_다섯_필드를_한_덩어리로_저장하고_다시_검증해_읽는다() {
+        let (store, v) = vault();
+        assert_eq!(v.save_jira(&jira_input("jtok"), "홍길동"), Ok(true));
+        let stored: Value = serde_json::from_str(&raw(&store, JIRA_ACCOUNT).unwrap()).unwrap();
+        assert_eq!(stored, json!({"kind": "cloud", "siteUrl": "https://acme.atlassian.net", "email": "dev@acme.io", "token": "jtok", "displayName": "홍길동"}));
+        let got = v.load_jira().unwrap();
+        assert_eq!(
+            (got.input.kind, got.input.site_url.as_str(), got.input.email.as_str(), got.input.token.expose(), got.display_name.as_str()),
+            (JiraKind::Cloud, "https://acme.atlassian.net", "dev@acme.io", "jtok", "홍길동")
+        );
+        // Data Center 는 이메일이 없다
+        let dc = parse_connect_input(&json!({"kind": "server", "siteUrl": "https://jira.acme.io/jira/", "token": "pat"}), SiteOptions::default()).unwrap();
+        v.save_jira(&dc, "").unwrap();
+        let got = v.load_jira().unwrap();
+        assert_eq!((got.input.kind, got.input.site_url.as_str(), got.input.email.as_str(), got.display_name.as_str()), (JiraKind::Server, "https://jira.acme.io/jira", "", ""));
+        v.clear_jira().unwrap();
+        assert!(v.load_jira().is_none() && !has(&store, JIRA_ACCOUNT));
+    }
+
+    #[test]
+    fn 깨진_값은_지우고_none_을_돌려준다() {
+        let (store, v) = vault();
+        let bad_github = [
+            "not json",
+            "{}",
+            r#"{"method":"pat"}"#,
+            r#"{"method":"oauth","token":"t"}"#,
+            r#"{"method":"pat","token":"a b"}"#,
+            r#"{"method":"pat","token":""}"#,
+            r#"{"method":"pat","token":5}"#,
+            "[]",
+            "null",
+        ];
+        for b in bad_github {
+            store.set(GITHUB_ACCOUNT, b.as_bytes()).unwrap();
+            assert!(v.load_github().is_none(), "{b}");
+            assert!(!has(&store, GITHUB_ACCOUNT), "깨진 항목을 지웠어야 한다: {b}");
+        }
+        store.set(GITHUB_ACCOUNT, &[0xff, 0xfe, 0x00]).unwrap();
+        assert!(v.load_github().is_none() && !has(&store, GITHUB_ACCOUNT));
+
+        let bad_jira = [
+            "not json",
+            r#"{"kind":"cloud"}"#,
+            r#"{"kind":"other","siteUrl":"https://a.atlassian.net","token":"t"}"#,
+            // 검증 실패: http, 자격 증명이 든 주소, 이메일 없는 cloud, 공백이 든 토큰
+            r#"{"kind":"server","siteUrl":"http://jira.acme.io","token":"t"}"#,
+            r#"{"kind":"server","siteUrl":"https://u:p@jira.acme.io","token":"t"}"#,
+            r#"{"kind":"cloud","siteUrl":"https://a.atlassian.net","token":"t"}"#,
+            r#"{"kind":"server","siteUrl":"https://jira.acme.io","token":"a b"}"#,
+        ];
+        for b in bad_jira {
+            store.set(JIRA_ACCOUNT, b.as_bytes()).unwrap();
+            assert!(v.load_jira().is_none(), "{b}");
+            assert!(!has(&store, JIRA_ACCOUNT), "깨진 항목을 지웠어야 한다: {b}");
+        }
+        // 한쪽이 깨져도 다른 쪽은 그대로다
+        v.save_github(&SecretString::new("ghp"), GithubMethod::Pat).unwrap();
+        store.set(JIRA_ACCOUNT, b"x").unwrap();
+        assert!(v.load_jira().is_none() && v.load_github().is_some());
+    }
+
+    #[test]
+    fn 남지_않는_저장소는_메모리에만_두고_storage_unavailable_이다() {
+        let store = Arc::new(MemoryStore::new());
+        let v = Vault::new(store.clone());
+        assert!(v.github_storage_unavailable() && v.jira_storage_unavailable());
+        assert_eq!(v.save_github(&SecretString::new("ghp_mem"), GithubMethod::Pat), Ok(false));
+        assert_eq!(v.save_jira(&jira_input("j"), "n"), Ok(false));
+        assert!(!has(&store, GITHUB_ACCOUNT) && !has(&store, JIRA_ACCOUNT), "저장소에는 쓰지 않는다");
+        assert_eq!(v.load_github().unwrap().token.expose(), "ghp_mem");
+        assert_eq!(v.load_jira().unwrap().display_name, "n");
+        v.clear_github().unwrap();
+        v.clear_jira().unwrap();
+        assert!(v.load_github().is_none() && v.load_jira().is_none());
+    }
+
+    #[test]
+    fn 쓰기에_실패하면_메모리에_두고_성공할_때까지_storage_unavailable_이다() {
+        let v = Vault::new(Arc::new(Failing));
+        assert!(!v.github_storage_unavailable() && !v.jira_storage_unavailable());
+        assert_eq!(v.save_github(&SecretString::new("ghp_x"), GithubMethod::Device), Ok(false));
+        // 실패는 그 계정만 표시한다
+        assert!(v.github_storage_unavailable() && !v.jira_storage_unavailable());
+        assert_eq!(v.load_github().unwrap().token.expose(), "ghp_x");
+        assert_eq!(v.save_jira(&jira_input("jt"), "이름"), Ok(false));
+        assert!(v.jira_storage_unavailable());
+        assert_eq!(v.load_jira().unwrap().input.token.expose(), "jt");
+        // 지우기가 저장소에서 실패해도 메모리 사본은 비운다
+        assert_eq!(v.clear_github(), Err(SecretError::Backend));
+        assert!(v.load_github().is_none());
+
+        // 성공하는 저장소에서는 키체인으로 가고 메모리 사본은 없다
+        let (store, v) = vault();
+        v.save_github(&SecretString::new("a"), GithubMethod::Pat).unwrap();
+        assert!(has(&store, GITHUB_ACCOUNT) && !v.github_storage_unavailable());
+    }
+
+    /// 한쪽 계정의 쓰기 실패가 다른 쪽의 상태를 바꾸지 않고, 그 계정이 다시 성공하면 풀린다
+    #[test]
+    fn 저장_실패_표시는_계정별이다() {
+        struct FailOnly(Arc<MemoryStore>, &'static str);
+        impl SecretStore for FailOnly {
+            fn get(&self, a: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+                self.0.get(a)
+            }
+            fn set(&self, a: &str, v: &[u8]) -> Result<(), SecretError> {
+                if a == self.1 {
+                    Err(SecretError::Backend)
+                } else {
+                    self.0.set(a, v)
+                }
+            }
+            fn delete(&self, a: &str) -> Result<(), SecretError> {
+                self.0.delete(a)
+            }
+            fn persistent(&self) -> bool {
+                true
+            }
+        }
+        let v = Vault::new(Arc::new(FailOnly(Arc::new(MemoryStore::standing_in_for_keychain()), JIRA_ACCOUNT)));
+        assert_eq!(v.save_github(&SecretString::new("ghp_ok"), GithubMethod::Pat), Ok(true));
+        assert_eq!(v.save_jira(&jira_input("jt"), "n"), Ok(false));
+        assert!(v.jira_storage_unavailable() && !v.github_storage_unavailable());
+        // GitHub 쓰기가 성공해도 Jira 표시는 풀리지 않는다
+        assert_eq!(v.save_github(&SecretString::new("ghp_ok2"), GithubMethod::Pat), Ok(true));
+        assert!(v.jira_storage_unavailable());
+    }
+
+    #[test]
+    fn 쓸_수_없는_github_토큰은_저장하지_않고_오류다() {
+        let (store, v) = vault();
+        v.save_github(&SecretString::new("ghp_keep"), GithubMethod::Pat).unwrap();
+        for bad in ["", "a b", "a\tb", " ", "a\0b", &"a".repeat(4097)] {
+            assert_eq!(v.save_github(&SecretString::new(bad), GithubMethod::Pat), Err(SecretError::InvalidToken), "{bad:?}");
+        }
+        // 기존 값은 그대로다
+        assert_eq!(v.load_github().unwrap().token.expose(), "ghp_keep");
+        assert!(raw(&store, GITHUB_ACCOUNT).unwrap().contains("ghp_keep"));
+        assert!(!SecretError::InvalidToken.to_string().contains("ghp"));
+    }
+
+    #[test]
+    fn 읽기_실패는_없음으로_보고_항목을_지우지_않는다() {
+        let inner = Arc::new(MemoryStore::standing_in_for_keychain());
+        inner.set(GITHUB_ACCOUNT, br#"{"method":"pat","token":"t"}"#).unwrap();
+        let v = Vault::new(Arc::new(ReadFails(inner.clone())));
+        assert!(v.load_github().is_none());
+        assert!(has(&inner, GITHUB_ACCOUNT), "접근 실패는 깨진 값이 아니다");
+    }
+
+    #[test]
+    fn 한도를_넘는_덩어리는_저장하지_않는다_표시_이름은_200자로_자른다() {
+        let (store, v) = vault();
+        // 표시 이름: 200자(한글 3바이트 → 600바이트)로 잘리고 저장된다
+        let long: String = "가".repeat(500);
+        assert_eq!(v.save_jira(&jira_input("jt"), &long), Ok(true));
+        assert_eq!(v.load_jira().unwrap().display_name.chars().count(), 200);
+        let bytes = raw(&store, JIRA_ACCOUNT).unwrap().len();
+        assert!(bytes <= MAX_BLOB, "{bytes}");
+
+        // 그래도 넘으면(사이트 주소가 길다) 명확한 오류이고 기존 값은 건드리지 않는다
+        let big = ConnectInput { site_url: format!("https://acme.atlassian.net/{}", "a".repeat(1900)), ..jira_input(&"t".repeat(1000)) };
+        let before = raw(&store, JIRA_ACCOUNT);
+        assert_eq!(v.save_jira(&big, &long), Err(SecretError::TooLarge));
+        assert_eq!(raw(&store, JIRA_ACCOUNT), before);
+        assert!(SecretError::TooLarge.to_string().contains("너무"));
+        // 경계: 정확히 MAX_BLOB 바이트는 저장되고 1바이트 넘으면 거부한다
+        let overhead = r#"{"method":"pat","token":""}"#.len();
+        assert_eq!(v.save_github(&SecretString::new("a".repeat(MAX_BLOB - overhead)), GithubMethod::Pat), Ok(true));
+        assert_eq!(raw(&store, GITHUB_ACCOUNT).unwrap().len(), MAX_BLOB);
+        assert_eq!(v.save_github(&SecretString::new("a".repeat(MAX_BLOB - overhead + 1)), GithubMethod::Pat), Err(SecretError::TooLarge));
+        // 메모리 저장소에서도 같은 한도다(플랫폼에 따라 동작이 갈리지 않는다)
+        assert_eq!(Vault::new(Arc::new(MemoryStore::new())).save_github(&SecretString::new("a".repeat(MAX_BLOB)), GithubMethod::Pat), Err(SecretError::TooLarge));
+    }
+
+    #[test]
+    fn 바이트와_secret_string_을_다루고_비밀은_포맷에_나오지_않는다() {
+        let s = MemoryStore::standing_in_for_keychain();
+        s.set_secret_string("k", &SecretString::new("ghp_secret")).unwrap();
+        assert_eq!(s.get("k").unwrap().unwrap().as_slice(), b"ghp_secret");
+        assert_eq!(s.get_secret_string("k").unwrap().unwrap().expose(), "ghp_secret");
+        assert!(s.get_secret_string("none").unwrap().is_none());
+        s.set("bin", &[0xff, 0xfe]).unwrap();
+        assert!(s.get_secret_string("bin").unwrap().is_none(), "UTF-8 이 아니면 깨진 값");
+        s.delete("k").unwrap();
+        s.delete("k").unwrap();
+        assert!(s.get("k").unwrap().is_none());
+
+        let (_, v) = vault();
+        v.save_github(&SecretString::new("ghp_secret"), GithubMethod::Pat).unwrap();
+        v.save_jira(&jira_input("jira_secret"), "n").unwrap();
+        let (g, j) = (v.load_github().unwrap(), v.load_jira().unwrap());
+        for text in [format!("{g:?}"), format!("{j:?}"), format!("{:?}", g.token), SecretError::Backend.to_string(), format!("{:?}", SecretError::TooLarge)] {
+            assert!(!text.contains("ghp_secret") && !text.contains("jira_secret"), "{text}");
+        }
+        assert_eq!(format!("{:?}", g.token), "***");
+    }
+
+    #[test]
+    fn 저장소_선택과_서비스_이름() {
+        // ANTLER_USER_DATA 가 있으면(비어 있어도 — lib.rs 와 같다) 메모리다. 키체인을 여는 경로(None)는 여기서 부르지 않는다 — 실제 항목을 건드릴 수 있다
+        assert!(!open_store(Some(std::ffi::OsStr::new("C:/tmp/ud"))).persistent());
+        assert!(!open_store(Some(std::ffi::OsStr::new(""))).persistent());
+        // 이 시험 빌드는 디버그라 개발용 이름이다. 운영 이름(com.antler.app)과 겹치지 않는다
+        assert_eq!(service_name(), if cfg!(debug_assertions) { "com.antler.app.dev" } else { "com.antler.app" });
+        #[cfg(not(windows))]
+        assert!(!open_store(None).persistent());
+    }
+
+    // ── 소스 검사 ────────────────────────────────────────────────────────
+
+    fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                rs_files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// 주석 줄과 파일 끝의 시험 모듈(`#[cfg(test)]` + `mod `)을 뺀 코드 줄
+    fn code_lines(text: &str) -> Vec<(usize, &str)> {
+        let mut out = Vec::new();
+        for (i, line) in text[..super::prod_end(text)].lines().enumerate() {
+            let t = line.trim_start();
+            if !t.starts_with("//") {
+                out.push((i + 1, t));
+            }
+        }
+        out
+    }
+
+    fn words(t: &str) -> Vec<&str> {
+        t.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).collect()
+    }
+
+    /// `rel`(src/ 기준) 파일의 위반: secret 밖에서 키링 크레이트를 쓰거나, secret 안에서 출력·로그를 쓴다
+    fn violations(rel: &str, text: &str) -> Vec<String> {
+        let in_secret = rel.starts_with("secret/");
+        let mut out = Vec::new();
+        for (n, t) in code_lines(text) {
+            let w = words(t);
+            let uses_keyring = w.iter().any(|x| *x == "keyring_core" || *x == "windows_native_keyring_store") || t.contains("keyring-core") || t.contains("windows-native-keyring-store");
+            let prints = in_secret
+                && (["println", "eprintln", "print", "eprint", "dbg"].iter().any(|m| w.contains(m) && t.contains(&format!("{m}!")))
+                    || w.iter().any(|x| matches!(*x, "log" | "tracing" | "slog" | "env_logger")));
+            if (uses_keyring && !in_secret) || prints {
+                out.push(format!("{rel}:{n}: {t}"));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn 소스_검사기가_위반을_알아본다() {
+        assert_eq!(violations("net/x.rs", "use keyring_core::Entry;").len(), 1);
+        assert_eq!(violations("net/x.rs", "let s = windows_native_keyring_store::Store::new();").len(), 1);
+        assert!(violations("secret/keyring.rs", "use keyring_core::Entry;").is_empty());
+        assert!(violations("net/x.rs", "// keyring_core 는 secret 에서만").is_empty());
+        assert_eq!(violations("secret/mod.rs", "println!(\"{}\", x);").len(), 1);
+        assert_eq!(violations("secret/mod.rs", "    eprintln!(\"x\");").len(), 1);
+        assert_eq!(violations("secret/mod.rs", "dbg!(x);").len(), 1);
+        assert_eq!(violations("secret/mod.rs", "log::info!(\"x\");").len(), 1);
+        assert_eq!(violations("secret/mod.rs", "use tracing::debug;").len(), 1);
+        assert!(violations("net/x.rs", "println!(\"ok\");").is_empty());
+        assert!(violations("secret/mod.rs", "let login = 1; let blog = 2;").is_empty());
+        // 파일 끝의 시험 모듈은 보지 않는다
+        assert!(violations("secret/keyring.rs", "fn a() {}\n#[cfg(test)]\nmod t { fn b() { eprintln!(\"x\"); } }").is_empty());
+        // 메서드 앞의 `#[cfg(test)]`(시험 전용 항목) 뒤의 운영 코드는 본다
+        assert_eq!(violations("secret/mod.rs", "impl A {\n    #[cfg(test)]\n    fn c(&self) {}\n    fn p(&self) { eprintln!(\"x\"); }\n}\n").len(), 1);
+    }
+
+    #[test]
+    fn 키링은_secret_모듈에서만_쓰고_secret_모듈에는_출력과_로그가_없다() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&src, &mut files);
+        let (mut secret_files, mut bad) = (0, Vec::new());
+        for f in &files {
+            let rel = f.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+            secret_files += usize::from(rel.starts_with("secret/"));
+            bad.extend(violations(&rel, &std::fs::read_to_string(f).unwrap()));
+        }
+        assert!(secret_files >= 3, "secret 모듈 파일을 {secret_files}개만 찾았다");
+        assert!(bad.is_empty(), "위반:\n{}", bad.join("\n"));
+        // Cargo.toml: 두 크레이트는 windows 대상 의존성으로만 있다
+        let toml = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+        let (before, after) = toml.split_once("[target.'cfg(windows)'.dependencies]").expect("windows 의존성 절");
+        let windows_part = after.split("\n[").next().unwrap();
+        assert!(windows_part.contains("keyring-core") && windows_part.contains("windows-native-keyring-store"));
+        assert!(!before.contains("keyring-core") && !before.contains("windows-native-keyring-store"));
+    }
+
+    #[test]
+    fn secret_string_은_display_와_serialize_가_없고_버릴_때_덮는다() {
+        let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/net/redact.rs")).unwrap();
+        let code: String = code_lines(&text).iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
+        assert!(!code.contains("Display for SecretString") && !code.contains("Serialize for SecretString") && !code.contains("derive(Serialize"));
+        assert!(code.contains("impl Drop for SecretString"));
     }
 }

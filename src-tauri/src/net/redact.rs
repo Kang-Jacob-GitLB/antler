@@ -27,6 +27,13 @@ impl SecretString {
     }
 }
 
+impl Drop for SecretString {
+    /// 버릴 때 값을 0 으로 덮는다(복제본은 각자 덮는다)
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
 impl std::fmt::Debug for SecretString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("***")
