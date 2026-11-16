@@ -21,7 +21,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 |---|---|---|
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
-| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log") — 나머지 채널·RepoWatcher 는 남음 |
+| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
@@ -159,7 +159,7 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 `antler_invoke` 는 이제 라우터를 거친다. 채널이 Rust 에서 처리할 수 있는 것이면 Rust 가 envelope 를 만들고, 아니면 사이드카에 인자를 **그대로** 넘긴다.
 
 ```
-renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit·git:log)
+renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit·git:log·git:compare·git:fileDiff·git:fileHistory·git:blame)
                                          └ Sidecar → Node 사이드카 → envelope → renderer (그 밖의 모든 것)
 ```
 
@@ -170,7 +170,8 @@ renderer → antler_invoke → Router::route ─ Done(envelope) ─────�
 - **미러**(`src-tauri/src/mirror.rs`, 프로토콜 `{t:"repos", gen, repos:[{id, kind, path, distro?}]}`): 설정을 쓰는 쪽은 사이드카의 `ConfigStore` 뿐이다.
   `ConfigStore.onChange`(기본 아무 일도 안 함 — Electron 판은 쓰지 않는다)가 `update` 안에서 동기로 불려 사이드카가 미러를 보낸다 — 시작 때 ready 전에 한 번,
   저장소 목록이 바뀔 때마다(창 위치·UI 설정처럼 저장소와 무관한 쓰기는 같은 내용이라 보내지 않는다). 같은 stdout 에서 순서대로 읽으므로 저장소를 바꾼 호출의 응답보다 미러가 먼저 반영된다.
-  `gen` 이 이미 받은 것 이하이면 버린다. 토큰 등 비밀은 담지 않는다. **Rust 는 renderer 가 보낸 경로·kind·배포판을 쓰지 않는다** — 저장소 id 와 검증된 해시만 받는다.
+  `gen` 이 이미 받은 것 이하이면 버린다. 토큰 등 비밀은 담지 않는다. **Rust 는 renderer 가 보낸 경로·kind·배포판을 쓰지 않는다** — 저장소 id 와, 채널별로 검증을 통과한 값(해시·ref 범위·파일 경로·숫자)만 받는다.
+  저장소 경로와 파일 경로는 다르다: 저장소 경로는 미러에서만, 파일 경로(`git:fileDiff` 등의 `path`)는 renderer 값이라 아래 "파일 단위 채널"의 규칙으로 검증한다.
 - **미러 값 검사**: `check_path` 는 `handlers.ts` 의 `checkPath` 와 같다(NUL·빈 값·4096 UTF-16 단위 초과 거부, 로컬·WSL 의 `\\host\share` 거부, `\\wsl.localhost\…` 허용, UNC 는 trim 한 값으로 본다).
   WSL 배포판은 TS 가 **추가할 때만** 설치 목록(`wsl.exe -l -q`)과 대조하고 쓸 때는 다시 확인하지 않는다 — Rust 는 목록을 읽지 않고(`Command::new` 가 `process.rs` 에만 있어야 한다)
   형식만 본다(비었음·255 초과·제어 문자·`-` 로 시작 거부). 검사에 걸린 미러 값은 사이드카로 넘기지 않고 `ERROR` envelope 로 돌려준다(TS 는 이 값으로 git 을 돌렸을 것이다).
@@ -241,6 +242,53 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
 - 앱 확인(`drive.mjs`, `ANTLER_ROUTE_LOG=1` 로 `git:log -> rust` 확인, 10만 커밋 저장소 1회씩이라 **추세만** 본다): Solo `커밋 1,000개+`·diff `f32.txt` 3줄·검색 `1 / 2250` 이 Rust 경로·`ANTLER_RUST_GIT=0`·Electron 에서 모두 같다.
   콜드 스타트(첫 커밋 행) 7.6초(Rust) / 13.0초(`ANTLER_RUST_GIT=0`) / 16.3초(Electron), 스크롤 p95 26.6 / 26.6 / 26.7ms(스크롤 중 읽은 행 7,000+ / 1,000+ / 6,000+) — 부하가 있는 머신에서 1회씩이라 콜드 스타트 차이는 결론을 내지 않는다.
 - 알려진 차이: 확인 읽기+본 읽기를 한 요청으로 묶는다(위). 앵커는 TS 처럼 키마다 하나씩이지만 Rust 쪽은 **활성 저장소의 것만 남기고 32개를 넘으면 오래된 것부터 버린다**(TS 는 상한이 없다).
+
+## 파일 단위 채널(Phase 2, `src-tauri/src/git/file_channels.rs`)
+
+`git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame` 를 옮겼다(TS: `commands.ts` 의 `compareCommits`·`fileDiff`, `fileInsight.ts`, `RepoService` 의 같은 이름 메서드).
+라우팅·미러·취소·envelope 은 `git:commit` 과 같다. 여기서 처음으로 **renderer 의 자유 문자열(파일 경로)** 이 git argv 에 들어간다.
+
+| 채널 | 인자 | git | 캐시 · 합치기 | 취소 |
+|---|---|---|---|---|
+| `git:compare` | `repoId, from, to, requestId?` | `diff-tree -r -z -M --no-commit-id --no-ext-diff --name-status\|--numstat <from> <to> --` 둘을 동시에(커밋 상세와 같은 `changed_files`·파서·5000개 상한) | 키 `compare\0repoId\0from소문자\0to소문자`, 300개·24MB, 같은 키 합치기 | 기다림만 그만둔다(합쳐진 호출자 보호) |
+| `git:fileDiff` | `repoId, {hash, path, oldPath?, parent?, full?}, requestId?` | `rev-list --parents -n1 <hash> --`(parent 생략 때만) → `diff-tree -p -M --no-color --no-ext-diff --no-textconv --no-commit-id -U3 <부모\|--root> <hash> -- [oldPath] path` 를 **스트림**으로 읽어 `DiffParser` 에 먹인다 | 키 `repoId\0hash\0parent\0oldPath\0path\0full\|part`(소문자·빈 값은 `''`), 500개·32MB, part/full 이 서로 다른 항목, 합치기 | 기다림만 그만둔다 |
+| `git:fileHistory` | `repoId, {path, rev?, skip, count}, requestId?` | `rev-parse --verify --quiet HEAD`(rev 생략 때) → `log --follow --no-color --no-ext-diff -z --name-status -M --format=… --max-count=skip+count+1 --end-of-options <rev> -- path` | 없음(HEAD 가 움직인다) | 프로세스에 바로 닿는다(`queue.run(None, Some(token))`) |
+| `git:blame` | `repoId, {path, rev?}, requestId?` | `rev-parse HEAD`(rev 생략 때) → `cat-file -s <rev>:<path>` → `blame --no-textconv --porcelain <rev> -- path`(128MB 버퍼, `blame.ignoreRevsFile` 이 깨졌으면 `--no-ignore-revs-file` 로 한 번 더) | 없음 | 프로세스에 바로 닿는다 |
+
+- **잘림·전체 불러오기**: diff 는 기본 8MB·3,000줄에서 줄 객체 만들기를 멈추고 이후 줄 수만 센다(`truncated`, 20만 줄·64MB 를 넘으면 `totalIsLowerBound`). `full` 이면 64MB·**20만 줄**까지 읽는다.
+  - **알려진 차이**: TS 의 `full` 은 줄 수 상한이 없다. Rust 는 줄 객체를 `serde_json::Value`(줄당 수백 바이트)로 만들므로 한 줄 1바이트짜리 64MB 파일이면
+    수십 GB 가 되어 앱이 죽는다(보안 리뷰) — 그래서 20만 줄에서 자르고(`truncated`) 줄 수는 끝까지 센다. 캐시에 들어가지 않은 큰 결과는 응답할 때 복사하지 않는다.
+  - **blame 목록 파일**: `blame.ignoreRevsFile` 이 OID 가 아닌 줄을 담은 파일을 가리키면 git 은 `invalid object name: <그 줄>` 로 파일 내용을 stderr 에 낸다.
+    악성 저장소가 이 설정을 사용자 파일(자격 증명 등)로 가리키면 그 첫 줄이 오류 문구로 renderer 에 갔다(TS 도 같다 — 별도 수정). 이런 실패도 `--no-ignore-revs-file`
+    로 다시 돌리고, 그래도 실패하면 원문 대신 `git blame failed` 를 돌려준다(테스트 `blame_ignore_revs_file_의_내용이_응답으로_새지_않는다`).
+  상한을 넘기고 세기도 끝났으면 스트림을 버려 git 을 끊고, EOF 까지 읽었으면 `finish()` 로 종료 코드를 확인한다(없는 해시는 `GIT`). `full` 은 JS 참 거짓으로 읽는다(`1`·`"no"` 는 참, `0`·`""`·`null` 은 거짓).
+  blame 은 512KiB 가 넘는 파일이면 blame 하지 않고 `tooLarge`, 그 시점에 경로가 없거나 파일이 아니면(`cat-file -s` 실패) `missing`, 출력에 NUL 이 있으면 `binary`, HEAD 를 풀 수 없으면 `no commits yet`(ERROR).
+  fileHistory 는 `skip` 이 10만 이상이면 git 을 부르지 않고 `{entries:[], hasMore:false}`, 커밋 없는 저장소도 같다(`rev` 키 없음).
+- **LFS·lenient·캐시 비우기**: 이 네 채널의 TS 코드(`commands.ts`·`fileInsight.ts`)에는 LFS 처리가 없어 그대로 옮겼다(LFS 판정은 `git:blob`·`git:lfsPaths` 쪽이고 둘 다 사이드카에 남는다).
+  TS 의 `lenient`(blob 을 못 받아도 목록만 돌려주기)는 GitHub 원격 전용 저장소용이라 옮기지 않았다 — 그 저장소는 사이드카로 간다.
+  TS 는 `RepoService.dispose` 에서만 compare·diff 캐시를 비우고(해시 기준 불변) Rust 도 `git:commit` 캐시와 마찬가지로 앱 수명 동안 둔다.
+- **검증(보안 경계)** — renderer 값이 argv 에 들어가는 길은 둘뿐이고 둘 다 검증된 newtype 이다:
+  - 해시(`hash`·`parent`·`rev`·`from`·`to`): `HexHash`(16진수 4~64자). 틀리면 `invalid commit hash|parent hash|from hash|to hash`(ERROR). `null`·숫자도 거부한다(키가 아예 없어야 생략이다).
+  - 파일 경로(`path`·`oldPath`): `FilePath` — **문자열이고 비어 있지 않고 NUL 이 없다**. TS(`assertPath`·`fileDiff`)의 규칙 그대로이며 **길이·절대 경로·`..` 는 TS 에도 없어** 거르지 않는다
+    (`../a.txt`·`/a.txt` 는 diff·history 에서 git 이 `GIT` 오류로 거부하고 blame 은 `missing` 이다 — 골든이 TS 와 같음을 고정한다). 틀리면 `invalid path`.
+  - git 이 돌려준 해시(`rev-parse HEAD`·`rev-list --parents`)도 `HexHash` 로 다시 검사한 뒤 argv 에 넣는다.
+  - 요청 객체가 아니면(`null`·문자열·숫자) ERROR 다 — 사이드카로 넘기지 않는다.
+  - `fileHistory` 의 `skip`·`count` 는 오류 없이 맞춘다(TS `Number.isInteger`): skip 은 양의 정수만 쓰고 아니면 0, count 는 정수면 1~500, 아니면 100.
+- **argv 위치**: 서브커맨드·옵션은 상수다. 파일 경로는 **항상 `--` 뒤**(fileHistory 의 rev 는 `--end-of-options` 뒤)이고, 유일한 예외는 blame 의 크기 조회 `cat-file -s <16진수>:<경로>` 로 경로가 해시 접두가 붙은 **한 인자** 안에 있어 옵션이 될 수 없다.
+  `GIT_LITERAL_PATHSPECS=1`(실행기 `GIT_ENV`)이라 `:(glob)`·`:(top)`·`:!`·`*`·`[ab]`·`?` 는 리터럴이다. `--no-textconv`(diff·blame)·`--no-ext-diff`(diff·log) 는 TS 가 붙이는 곳에 그대로 붙었다
+  (`log --follow` 에 `--no-textconv` 가 없는 것도 TS 와 같다 — name-status 만 읽어 내용 변환이 돌지 않는다).
+  `-c alias…`·`--output=…`·`--`·`-` 로 시작하는 경로가 옵션 자리에 오지 않음은 `file_channels.rs` 의 argv 단위 테스트와 `tests/channels.rs` 가 증명한다
+  (적대적 해시·경로·요청 모양은 git 을 띄우기 전에 거부되고, 실제 저장소에서는 옵션 모양 경로가 리터럴 경로로만 쓰이며 마커 파일이 생기지 않는다).
+- **골든**: `tests/fixtures/repos/files.fi`(이름 변경 이력·삭제·바이너리·한글/공백 경로·병합·작성자 둘·4000줄 파일(diff 3,000줄 초과)·512KiB 넘는 파일·glob 문자 이름 `[ab].txt`·옵션 모양 이름 `--output=pwned.txt`)와
+  `files.scenarios.json`(채널별 시나리오 — 루트·병합(첫 부모)·잘림과 full·없는 경로·잘못된 해시·주입 입력 등 compare 17·fileDiff 51·fileHistory 50·blame 35)을 TS(`goldenChannels.test.ts`)와 Rust(`channels.rs`)가 돈다.
+  결과는 `tests/golden/channels/{compare,fileDiff,fileHistory,blame}.json` — 오류는 code 만(시나리오에 `msg:true` 면 검증 문구도), diff 는 hunk 줄이 40개를 넘으면 개수·처음·마지막만 남긴다.
+  `$upper`·`$cat` 식이 시나리오 값에 더해졌다. Windows 의 git 은 `:`·`*` 가 든 경로를 `fast-import` 에서 거부(`invalid path`)하므로 fixture 에는 `[ab].txt` 를 쓰고, 매직 경로(`:(glob)*.txt` 등)는 요청 쪽에서만 보낸다.
+  20만 줄 한계를 넘어 git 을 끊는 경로(`totalIsLowerBound`)는 골든 fixture 가 너무 커져 `channels.rs` 가 테스트 시점에 210,000줄 파일을 만들어 따로 본다.
+- **WSL**: 이 채널들은 자유 형식 문자열(공백·따옴표·백슬래시·한글)을 처음으로 `wsl.exe` argv 에 싣는다. `tests/exec.rs` 의 `wsl_통합` 이 그런 경로가 한 인자로 그대로 도착하는지 본다(배포판이 없으면 건너뜀).
+- 앱 확인(`drive.mjs`, `ANTLER_ROUTE_LOG=1 ANTLER_DRIVE_DEBUG=1` 로 네 채널이 `-> rust` 임을 확인, `ANTLER_RUST_GIT=0` 이면 `-> sidecar(…)`): 저장소 하나를 고정 클론해
+  Rust 경로·`ANTLER_RUST_GIT=0`·Electron 에서 같은 시나리오를 돌렸다. `drive.mjs` 에 파일 히스토리·blame(diff 머리의 버튼)과 두 커밋 비교(Shift+클릭) 단계가 새로 들어갔다.
+  세 모드의 출력이 같다 — diff `log_service.rs` 67줄, 파일 히스토리 `mod.rs` 4개 항목(같은 제목들), blame 8행(같은 해시·작성자), 비교 13개 파일 `+599−60`(`715edde → 29bf645`).
+  (상대 시간 문구만 실행 시각에 따라 다르다.) 1회씩이라 시간(ms)은 비교하지 않았다.
 
 ## Phase 0 에서 확인한 것
 

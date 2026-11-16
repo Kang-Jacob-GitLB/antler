@@ -1,0 +1,470 @@
+{
+  "scenarios": [
+    {
+      "args": [
+        "df275b04de5429eac2d974b6f278a2876945d81e",
+        "65c3255a2946625134cb709c7be012786dc824fb"
+      ],
+      "name": "루트 → HEAD",
+      "repo": "files",
+      "result": {
+        "data": {
+          "additions": 15005,
+          "deletions": 2,
+          "files": [
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "--output=pwned.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "[ab].txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": 4000,
+              "binary": false,
+              "deletions": 0,
+              "path": "big.txt",
+              "status": "A"
+            },
+            {
+              "additions": null,
+              "binary": true,
+              "deletions": null,
+              "path": "bin.dat",
+              "status": "D"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "dir/old.txt",
+              "path": "dir/new.txt",
+              "similarity": 95,
+              "status": "R"
+            },
+            {
+              "additions": 11000,
+              "binary": false,
+              "deletions": 0,
+              "path": "large.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "side.txt",
+              "status": "A"
+            }
+          ],
+          "from": "df275b04de5429eac2d974b6f278a2876945d81e",
+          "to": "65c3255a2946625134cb709c7be012786dc824fb",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "fe58a5ff59da77b397cacd04d188827e13407f14",
+        "b12d65799ed5c9498d26058279355393d9372b78"
+      ],
+      "name": "병합 직전 → 병합(첫 부모 쪽 변경)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "additions": 6,
+          "deletions": 3,
+          "files": [
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "--output=pwned.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "[ab].txt",
+              "status": "A"
+            },
+            {
+              "additions": 3,
+              "binary": false,
+              "deletions": 3,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "side.txt",
+              "status": "A"
+            }
+          ],
+          "from": "fe58a5ff59da77b397cacd04d188827e13407f14",
+          "to": "b12d65799ed5c9498d26058279355393d9372b78",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "d626a5f234b9727437ae698b367bc01f9c77a774",
+        "fe58a5ff59da77b397cacd04d188827e13407f14"
+      ],
+      "name": "가지 사이(side → 병합 직전)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "additions": 4001,
+          "deletions": 2,
+          "files": [
+            {
+              "additions": 4000,
+              "binary": false,
+              "deletions": 0,
+              "path": "big.txt",
+              "status": "A"
+            },
+            {
+              "additions": null,
+              "binary": true,
+              "deletions": null,
+              "path": "bin.dat",
+              "status": "D"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "dir/old.txt",
+              "path": "dir/new.txt",
+              "similarity": 95,
+              "status": "R"
+            },
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 1,
+              "path": "side.txt",
+              "status": "D"
+            }
+          ],
+          "from": "d626a5f234b9727437ae698b367bc01f9c77a774",
+          "to": "fe58a5ff59da77b397cacd04d188827e13407f14",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "65c3255a2946625134cb709c7be012786dc824fb",
+        "df275b04de5429eac2d974b6f278a2876945d81e"
+      ],
+      "name": "방향을 뒤집으면 추가가 삭제로",
+      "repo": "files",
+      "result": {
+        "data": {
+          "additions": 2,
+          "deletions": 15005,
+          "files": [
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 1,
+              "path": "--output=pwned.txt",
+              "status": "D"
+            },
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 1,
+              "path": "[ab].txt",
+              "status": "D"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 4000,
+              "path": "big.txt",
+              "status": "D"
+            },
+            {
+              "additions": null,
+              "binary": true,
+              "deletions": null,
+              "path": "bin.dat",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "dir/new.txt",
+              "path": "dir/old.txt",
+              "similarity": 95,
+              "status": "R"
+            },
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 11000,
+              "path": "large.txt",
+              "status": "D"
+            },
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 1,
+              "path": "side.txt",
+              "status": "D"
+            }
+          ],
+          "from": "65c3255a2946625134cb709c7be012786dc824fb",
+          "to": "df275b04de5429eac2d974b6f278a2876945d81e",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "65c3255a2946625134cb709c7be012786dc824fb",
+        "65c3255a2946625134cb709c7be012786dc824fb"
+      ],
+      "name": "같은 커밋끼리는 빈 목록",
+      "repo": "files",
+      "result": {
+        "data": {
+          "additions": 0,
+          "deletions": 0,
+          "files": [],
+          "from": "65c3255a2946625134cb709c7be012786dc824fb",
+          "to": "65c3255a2946625134cb709c7be012786dc824fb",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "DF275B04DE5429EAC2D974B6F278A2876945D81E",
+        "003074736548EE495215B8D9B58444269F114596"
+      ],
+      "name": "대문자 해시는 보낸 그대로 돌려준다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "additions": 3,
+          "deletions": 3,
+          "files": [
+            {
+              "additions": 2,
+              "binary": false,
+              "deletions": 2,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "dir/old.txt",
+              "path": "dir/new.txt",
+              "similarity": 95,
+              "status": "R"
+            }
+          ],
+          "from": "DF275B04DE5429EAC2D974B6F278A2876945D81E",
+          "to": "003074736548EE495215B8D9B58444269F114596",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "62a9e11b8e10507012236832d279f9be3bb6f279",
+        "003074736548ee495215b8d9b58444269f114596"
+      ],
+      "name": "이름 변경이 R 로 잡힌다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "additions": 1,
+          "deletions": 1,
+          "files": [
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "dir/old.txt",
+              "path": "dir/new.txt",
+              "similarity": 95,
+              "status": "R"
+            }
+          ],
+          "from": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "to": "003074736548ee495215b8d9b58444269f114596",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "0000000000000000000000000000000000000000",
+        "65c3255a2946625134cb709c7be012786dc824fb"
+      ],
+      "name": "없는 해시",
+      "repo": "files",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "zzzz",
+        "65c3255a2946625134cb709c7be012786dc824fb"
+      ],
+      "name": "from 이 해시가 아니다",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid from hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "65c3255a2946625134cb709c7be012786dc824fb",
+        "-x"
+      ],
+      "name": "to 가 옵션 -x",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid to hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "--output=pwned.txt",
+        "65c3255a2946625134cb709c7be012786dc824fb"
+      ],
+      "name": "from 이 --output",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid from hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "65c3255a2946625134cb709c7be012786dc824fb",
+        "-calias.x=!echo"
+      ],
+      "name": "to 가 -c alias",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid to hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "65c3255a2946625134cb709c7be012786dc824fb",
+        "HEAD"
+      ],
+      "name": "to 가 HEAD",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid to hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "65c3255a2946625134cb709c7be012786dc824fb"
+      ],
+      "name": "to 없음",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid to hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        123,
+        456
+      ],
+      "name": "숫자",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid from hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        null,
+        null
+      ],
+      "name": "null",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid from hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "df275b04de5429eac2d974b6f278a2876945d81e\n",
+        "65c3255a2946625134cb709c7be012786dc824fb"
+      ],
+      "name": "해시 뒤 개행",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid from hash",
+        "ok": false
+      }
+    }
+  ]
+}

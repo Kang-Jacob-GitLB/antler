@@ -5,8 +5,9 @@
 //! (미러에 없는 id 의 오류 문구도 사이드카가 만든다). `ANTLER_RUST_GIT=0` 은 즉시 되돌리는 스위치다.
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
-//! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 해시뿐이다.
-//! - git 인자는 `git::commit`·`git::scope`(log) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다. 이 파일은 인자를 만들지 않는다.
+//! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
+//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
+//!   파일 경로는 항상 `--` 뒤(blame 의 크기 조회만 `<해시>:<경로>` 한 인자)다. 이 파일은 인자를 만들지 않는다.
 //! - 취소: `requestId → CancellationToken` 레지스트리. cancel 이 등록보다 먼저 도착해도(별개 호출이라 순서가 보장되지 않는다)
 //!   tombstone 이 기억했다가 등록 때 이미 취소된 토큰을 준다.
 //!
@@ -23,13 +24,16 @@ use tokio_util::sync::CancellationToken;
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
 use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, WSL_LIMIT};
 use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, WslExecutor};
+use crate::git::file_channels::{
+    compare, estimate_compare_bytes, estimate_diff_bytes, file_blame, file_diff, file_history, parse_compare, BlameRequest, DiffRequest, HistoryRequest,
+};
 use crate::git::log_service::{parse_query, LogService, NoteSink};
 use crate::git::lru::LruCache;
 use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
 /// (`tests/channels.rs` 가 `tests/golden/exec/channels.json` 으로 강제한다)
-pub const RUST_CHANNELS: &[&str] = &["git:commit", "git:log"];
+pub const RUST_CHANNELS: &[&str] = &["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame"];
 
 /// bridge 의 `encodeArgs` 가 인자 배열의 빈 자리(undefined)에 넣는 표식(`src/sidecar/protocol.ts` 의 `UNDEFINED_ARG`)
 pub const UNDEFINED_ARG: &str = "__antlerUndefinedArg";
@@ -37,10 +41,25 @@ pub const UNDEFINED_ARG: &str = "__antlerUndefinedArg";
 /// 커밋 상세 캐시(`RepoService.ts` 의 COMMIT_CACHE_ENTRIES·COMMIT_CACHE_BYTES)
 const COMMIT_CACHE_ENTRIES: usize = 300;
 const COMMIT_CACHE_BYTES: u64 = 24 * 1024 * 1024;
+/// 파일 diff 캐시(`DIFF_CACHE_ENTRIES`·`DIFF_CACHE_BYTES`). 비교 결과 캐시는 커밋 상세와 같은 크기다
+const DIFF_CACHE_ENTRIES: usize = 500;
+const DIFF_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// 등록보다 먼저 도착한 cancel 을 기억하는 시간·개수
 const TOMBSTONE_TTL: Duration = Duration::from_secs(10);
 const TOMBSTONE_MAX: usize = 256;
+
+/// 검증을 마친 파일 단위 채널 요청
+enum FileJob {
+    Compare(HexHash, HexHash),
+    Diff(DiffRequest),
+    History(HistoryRequest),
+    Blame(BlameRequest),
+}
+
+fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ExecError> {
+    serde_json::to_value(v).map_err(|e| ExecError::Other { message: e.to_string() })
+}
 
 pub enum Routed {
     /// Rust 가 처리했다 — IpcEnvelope(`{ok:true,data}` / `{ok:false,error,code}`)
@@ -184,6 +203,8 @@ pub struct Router {
     cancels: Arc<CancelRegistry>,
     sources: Mutex<HashMap<String, Arc<SourceRuntime>>>,
     commit_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
+    compare_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
+    diff_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
     logs: LogService,
     rust_handled: AtomicU64,
 }
@@ -197,6 +218,8 @@ impl Router {
             cancels: Arc::default(),
             sources: Mutex::default(),
             commit_cache: Arc::new(Mutex::new(LruCache::new(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES))),
+            compare_cache: Arc::new(Mutex::new(LruCache::new(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES))),
+            diff_cache: Arc::new(Mutex::new(LruCache::new(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES))),
             logs: LogService::new(mirror),
             rust_handled: AtomicU64::new(0),
         }
@@ -278,6 +301,7 @@ impl Router {
         match channel {
             "git:commit" => self.git_commit(&args).await,
             "git:log" => self.git_log(&args).await,
+            "git:compare" | "git:fileDiff" | "git:fileHistory" | "git:blame" => self.git_file_channel(channel, &args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -350,6 +374,113 @@ impl Router {
             Ok(page) => ok_env(page),
             Err(e) => err_env(&e.to_string(), e.envelope_code()),
         })
+    }
+
+    /// 파일 단위 채널. 인자는 `git:compare(repoId, from, to, requestId?)`, `git:fileDiff|fileHistory|blame(repoId, req, requestId?)`.
+    /// 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다) 통과한 값만 `git::file_channels` 의 argv 빌더로 간다
+    async fn git_file_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note(channel, "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        let arg = |i: usize| args.get(i).copied().flatten();
+        let job = match channel {
+            "git:compare" => parse_compare(arg(1), arg(2)).map(|(from, to)| FileJob::Compare(from, to)),
+            "git:fileDiff" => DiffRequest::parse(arg(1)).map(FileJob::Diff),
+            "git:fileHistory" => HistoryRequest::parse(arg(1)).map(FileJob::History),
+            _ => BlameRequest::parse(arg(1)).map(FileJob::Blame),
+        };
+        let job = match job {
+            Ok(j) => j,
+            Err(e) => return Routed::Done(err_env(&e.to_string(), e.envelope_code())),
+        };
+        let request_id = if channel == "git:compare" { 3 } else { 2 };
+        let reg = match args.get(request_id) {
+            Some(Some(Value::String(id))) if is_request_id(id) => Some(self.cancels.register(id)),
+            _ => None,
+        };
+        let token = reg.as_ref().map_or_else(CancellationToken::new, |r| r.token.clone());
+        self.note(channel, "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let result = self.file_job(repo_id, &target, job, &token).await;
+        drop(reg);
+        Routed::Done(match result {
+            // 캐시에 들어가지 않은(상한 초과) 큰 결과는 참조가 하나뿐이다 — 복사하지 않고 꺼낸다
+            Ok(data) => ok_env(Arc::try_unwrap(data).unwrap_or_else(|a| (*a).clone())),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    async fn file_job(&self, repo_id: &str, target: &Target, job: FileJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+        let rt = self.runtime(target);
+        let (exec, path) = (rt.exec.clone(), target.path().to_string());
+        match job {
+            // 해시 쌍 기준이라 불변: 캐시 + 같은 키 요청 합치기
+            FileJob::Compare(from, to) => {
+                let key = format!("compare\0{repo_id}\0{}\0{}", from.lower(), to.lower());
+                self.cached_shared(&rt, &self.compare_cache, key, token, move || async move {
+                    let result = compare(&exec, &path, &from, &to).await?;
+                    let cost = estimate_compare_bytes(&result);
+                    Ok((to_value(&result)?, cost))
+                })
+                .await
+            }
+            // part/full 이 서로 다른 항목이다. 잘렸는지와 상관없이 캐시한다(TS 와 같다)
+            FileJob::Diff(req) => {
+                let key = req.key(repo_id);
+                self.cached_shared(&rt, &self.diff_cache, key, token, move || async move {
+                    let diff = file_diff(&exec, &path, &req).await?;
+                    let cost = estimate_diff_bytes(&diff);
+                    Ok((to_value(&diff)?, cost))
+                })
+                .await
+            }
+            // HEAD 가 움직일 수 있어 캐시하지 않고 합치지도 않는다. 취소는 이 요청의 프로세스에 바로 닿는다
+            FileJob::History(req) => {
+                let t = token.clone();
+                rt.queue.run(None, Some(token.clone()), move || async move { file_history(&exec, &path, &req, &t).await.map(Arc::new) }).await
+            }
+            FileJob::Blame(req) => {
+                let t = token.clone();
+                rt.queue.run(None, Some(token.clone()), move || async move { file_blame(&exec, &path, &req, &t).await.map(Arc::new) }).await
+            }
+        }
+    }
+
+    /// 불변 결과의 캐시 → 같은 키 요청 합치기 → 큐 슬롯 안에서 `task`. `commit` 과 같은 방식이다:
+    /// 요청 토큰은 실행기에 넘기지 않고(합쳐진 다른 호출자의 프로세스까지 죽이게 된다) 이 호출자는 기다리기만 그만둔다
+    async fn cached_shared<F, Fut>(
+        &self,
+        rt: &SourceRuntime,
+        cache: &Arc<Mutex<LruCache<Arc<Value>>>>,
+        key: String,
+        token: &CancellationToken,
+        task: F,
+    ) -> Result<Arc<Value>, ExecError>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<(Value, u64), ExecError>> + Send + 'static,
+    {
+        if let Some(hit) = cache.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+            return Ok(hit);
+        }
+        let (cache, cache_key) = (cache.clone(), key.clone());
+        let run = rt.queue.run(Some(&key), None, move || async move {
+            let (value, cost) = task().await?;
+            let value = Arc::new(value);
+            cache.lock().unwrap_or_else(PoisonError::into_inner).set(&cache_key, value.clone(), cost);
+            Ok(value)
+        });
+        tokio::select! {
+            biased;
+            () = token.cancelled() => Err(ExecError::Aborted),
+            r = run => r,
+        }
     }
 
     fn runtime(&self, target: &Target) -> Arc<SourceRuntime> {

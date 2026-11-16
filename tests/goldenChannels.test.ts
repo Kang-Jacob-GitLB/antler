@@ -13,6 +13,7 @@ import { IPC_CHANNELS } from '../src/shared/ipc'
 // 채널 패리티 골든. TS(RepoService)가 기준이고, Rust 라우터(src-tauri/tests/channels.rs)가 같은 fixture·시나리오로 같은 결과를 내는지 본다.
 //  - tests/golden/exec/channels.json: IPC_CHANNELS 목록. Rust 의 RUST_CHANNELS 가 이것의 부분집합인지 Rust 테스트가 강제한다
 //  - tests/golden/channels/log.json: git:log 시나리오(tests/fixtures/repos/log.scenarios.json — 다단계: 페이지·범위·저장소 조작). logArgs.json: logArgs 의 argv(logArgs.cases.json)
+//  - tests/golden/channels/{compare,fileDiff,fileHistory,blame}.json: 파일 단위 채널 시나리오(tests/fixtures/repos/files.scenarios.json)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 // 골든 갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts`
@@ -156,6 +157,8 @@ function expand(v: unknown, rev: (expr: string) => string): unknown {
       const [prefix, ch, n] = o['$str'] as [string, string, number]
       return prefix + ch.repeat(n)
     }
+    if (keys.length === 1 && keys[0] === '$cat') return (expand(o['$cat'], rev) as string[]).join('')
+    if (keys.length === 1 && keys[0] === '$upper') return String(expand(o['$upper'], rev)).toUpperCase()
     return Object.fromEntries(keys.map((k) => [k, expand(o[k], rev)]))
   }
   return v
@@ -240,4 +243,65 @@ describe('git:log 채널 골든(channels/log.json)', () => {
     })
     check(join(GOLDEN_DIR, 'channels', 'logArgs.json'), stable({ cases: results }))
   })
+})
+
+// ── 파일 단위 채널: git:compare · git:fileDiff · git:fileHistory · git:blame ────────────────
+
+interface FileScenario {
+  name: string
+  repo?: string
+  args: unknown[]
+  /** true 면 ERROR 의 문구도 비교한다(검증이 만든 문구만 — TypeError 문구는 TS·Rust 가 다르다) */
+  msg?: boolean
+}
+
+/** diff 는 줄이 많아 hunk 의 줄 목록을 개수·처음·마지막으로 줄인다. Rust 테스트(channels.rs 의 `summarize_diff`)도 같은 규칙이다 */
+function summarizeDiff(data: Record<string, unknown>): Record<string, unknown> {
+  const hunks = (data['hunks'] as { lines: unknown[] }[]).map((h) => (h.lines.length > 40 ? { ...h, lines: { count: h.lines.length, first: h.lines[0], last: h.lines[h.lines.length - 1] } } : h))
+  return { ...data, hunks }
+}
+
+describe('파일 단위 채널 골든(channels/{compare,fileDiff,fileHistory,blame}.json)', () => {
+  const all = JSON.parse(readFileSync(join(FIXTURES, 'files.scenarios.json'), 'utf8')) as Record<'compare' | 'fileDiff' | 'fileHistory' | 'blame', FileScenario[]>
+  let root: string
+  const dirs: Record<string, string> = {}
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chanfile-'))
+    for (const r of ['files', 'empty']) {
+      const dir = join(root, r)
+      mkdirSync(dir)
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${r}.fi`)))
+      dirs[r] = dir
+    }
+  }, 60_000)
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const config = new ConfigStore(join(root, 'config.json'))
+    const svc = new RepoService(config)
+    const ids: Record<string, string> = {}
+    for (const r of Object.keys(dirs)) ids[r] = config.addRepo({ sourceId: 'local', path: dirs[r]!, name: r }).id
+    for (const channel of ['compare', 'fileDiff', 'fileHistory', 'blame'] as const) {
+      const results: unknown[] = []
+      for (const [i, s] of all[channel].entries()) {
+        const repo = s.repo ?? 'files'
+        const args = expand(s.args, (expr) => git(dirs[repo]!, ['rev-parse', expr])) as unknown[]
+        let result: Record<string, unknown>
+        try {
+          const call = svc as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>
+          const data = JSON.parse(JSON.stringify(await call[channel]!.call(svc, ids[repo], ...args, `req-${i}`))) as Record<string, unknown>
+          result = { ok: true, data: channel === 'compare' ? summarize(data) : channel === 'fileDiff' ? summarizeDiff(data) : data }
+        } catch (err) {
+          result = { ok: false, code: codeOf(err), ...(s.msg ? { error: (err as Error).message } : {}) }
+        }
+        results.push({ name: s.name, repo, args, result })
+      }
+      check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: results }))
+    }
+    await svc.dispose()
+  }, 120_000)
 })
