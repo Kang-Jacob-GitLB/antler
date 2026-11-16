@@ -3451,13 +3451,41 @@ mod live {
             r.expect_err("오류여야 한다")
         }
 
-        /// 조건이 참이 될 때까지 기다린다(최대 5초)
+        /// 조건이 참이 될 때까지 기다린다(최대 `WAIT_LIMIT`)
         async fn wait_for(f: impl Fn() -> bool) {
             let t = Instant::now();
             while !f() {
-                assert!(t.elapsed() < Duration::from_secs(5), "조건이 되지 않았다");
+                assert!(t.elapsed() < WAIT_LIMIT, "조건이 되지 않았다");
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
+        }
+
+        /// 목 응답을 테스트가 직접 푸는 문. 처리기가 `wait` 로 응답을 붙들고, 테스트가 `open` 으로 놓아 준다.
+        /// 시간이 아니라 순서로 "응답이 오기 전/후"를 만든다. 열리지 않아도 처리기 스레드가 영원히 남지 않게 `GATE_LIMIT` 뒤에는 풀린다
+        #[derive(Clone, Default)]
+        struct Gate(Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+        const GATE_LIMIT: Duration = Duration::from_secs(30);
+        /// 테스트가 기다리는 최대 시간(조건이 되지 않아 걸리는 경우에만 쓰인다. 정상이면 곧바로 끝난다)
+        const WAIT_LIMIT: Duration = Duration::from_secs(10);
+
+        impl Gate {
+            fn wait(&self) {
+                let (lock, cv) = &*self.0;
+                let g = lock.lock().unwrap();
+                let _ = cv.wait_timeout_while(g, GATE_LIMIT, |open| !*open).unwrap();
+            }
+
+            fn open(&self) {
+                let (lock, cv) = &*self.0;
+                *lock.lock().unwrap() = true;
+                cv.notify_all();
+            }
+        }
+
+        /// 문이 닫힌 채로 끝나야 하는 비동기 작업을 기다린다(상한 안에 안 끝나면 실패)
+        async fn within<T>(f: impl std::future::Future<Output = T>) -> T {
+            tokio::time::timeout(WAIT_LIMIT, f).await.expect("상한 안에 끝나지 않았다")
         }
 
         fn count(m: &Mock, f: impl Fn(&Req) -> bool) -> usize {
@@ -3532,7 +3560,7 @@ mod live {
             assert_eq!((a.connected, a.kind, a.site_url.as_deref()), (true, Some("server"), Some(m.base().as_str())));
             again.issue(&key("ABC-1"), None).await.unwrap();
             assert_eq!(m.requests().last().unwrap().header("authorization"), Some(format!("Bearer {SECRET}").as_str()));
-            assert!(!again.disconnect().unwrap().connected);
+            assert!(!again.disconnect().await.unwrap().connected);
             assert!(vault.load_jira_with(SiteOptions::insecure_loopback_for_test()).is_none());
             assert!(!service_on(vault, Arc::new(SystemClock), 4000).auth().connected);
         }
@@ -3618,7 +3646,7 @@ mod live {
             let m = Mock::start(jira_handler);
             let svc = service_on(Arc::new(Vault::new(Arc::new(NoDelete(Arc::new(MemoryStore::standing_in_for_keychain()))))), Arc::new(SystemClock), 4000);
             connect_server(&svc, &m).await;
-            let e = failure(svc.disconnect());
+            let e = failure(svc.disconnect().await);
             assert_eq!(e.code, "ERROR");
             assert!(e.message.contains("토큰을 지우지 못했습니다") && !e.message.contains(SECRET), "{e}");
             assert!(!svc.auth().connected, "연결은 끊겨 있어야 한다");
@@ -3759,18 +3787,23 @@ mod live {
         #[tokio::test]
         async fn 서비스는_요청_id_로_진행_중인_조회를_취소할_수_있다() {
             let _g = Guard;
-            let m = Mock::start(|_, r| if path_of(r).ends_with("/myself") { ok(json!({"displayName": "x"})) } else { ok(json!({})).delay(Duration::from_secs(2)) });
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let m = Mock::start(move |_, r| if path_of(r).ends_with("/myself") { ok(json!({"displayName": "x"})) } else {
+                g2.wait();
+                ok(json!({}))
+            });
             let svc = service();
             connect_server(&svc, &m).await;
             let s2 = svc.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-                s2.cancel("req-1");
-            });
-            let t = Instant::now();
-            let e = failure(svc.issue(&key("ABC-1"), Some("req-1")).await);
+            let task = tokio::spawn(async move { s2.issue(&key("ABC-1"), Some("req-1")).await });
+            // 응답이 문에 막힌 요청이 서버에 도착한 뒤 취소한다
+            wait_for(|| count(&m, |r| !path_of(r).ends_with("/myself")) >= 1).await;
+            svc.cancel("req-1");
+            // 문이 닫힌 채로 끝난다 — 응답을 기다리지 않고 취소로 돌아온다
+            let e = failure(within(task).await.unwrap());
             assert_eq!((e.code, e.message.as_str()), ("ABORTED", "aborted"));
-            assert!(t.elapsed() < Duration::from_secs(1));
+            gate.open();
             // 없는 id 는 무시한다
             svc.cancel("nope");
         }
@@ -3788,6 +3821,70 @@ mod live {
             });
             let e = failure(svc.issue(&key("ABC-1"), None).await);
             assert_eq!(e.code, "ABORTED");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn 서비스_날짜_필드는_조회가_세대를_잡은_뒤_연결이_바뀌면_옛_자격_증명으로_작업을_시작하거나_캐시하지_않는다() {
+            let _g = Guard;
+            let old = Mock::start(date_handler(Dates { fields: standard_fields(), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
+            let new_fields = json!([{"id": "customfield_20001", "name": "Start date", "schema": {"type": "date"}}]);
+            let new = Mock::start(date_handler(Dates { fields: new_fields, issue_fields: json!({"customfield_20001": "2026-11-01"}), ..Default::default() }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &old).await;
+            // data() 가 세대를 잡은 뒤 날짜 필드 공유 작업을 잠그기 전에 연결을 바꾼다(두 잠금 사이의 경합)
+            let fired = Arc::new(AtomicBool::new(false));
+            let (hook_svc, new_base, rt) = (svc.clone(), new.base(), tokio::runtime::Handle::current());
+            svc.set_before_date_fields_for_test(move || {
+                if !fired.swap(true, Ordering::SeqCst) {
+                    tokio::task::block_in_place(|| rt.block_on(hook_svc.connect(&cloud_in(&new_base)))).unwrap();
+                }
+            });
+            let s2 = svc.clone();
+            let stale = tokio::spawn(async move { s2.issue(&key("ABC-1"), None).await }).await.unwrap();
+            assert_eq!(failure(stale).code, "ABORTED");
+            // 새 연결의 조회는 새 사이트의 날짜 필드를 쓴다 — 옛 사이트로 시작한 작업이 새 세대에 캐시돼 있으면 날짜가 비거나 옛 id 를 쓴다
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!("2026-11-01"));
+            assert_eq!((field_calls(&old), field_calls(&new)), (0, 1));
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn 서비스_겹친_connect_와_disconnect_뒤에도_키체인과_메모리의_연결이_같다() {
+            let _g = Guard;
+            let site = SiteOptions::insecure_loopback_for_test();
+            let (a, b) = (Mock::start(|_, _| ok(json!({"displayName": "a"}))), Mock::start(|_, _| ok(json!({"displayName": "b"}))));
+            for second_is_disconnect in [false, true] {
+                let vault = new_vault();
+                let svc = service_on(vault.clone(), Arc::new(SystemClock), 4000);
+                // 첫 connect 가 저장한 직후(연결 교체 전)에 멈추고, 두 번째 호출이 교체 잠금 앞까지 온 것을 확인하고서야 놓아 준다.
+                // 직렬화되어 있지 않으면 두 번째가 그 사이에 끝까지 실행되어 키체인과 메모리가 어긋난다
+                let (arrived, paused) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+                let (arrived2, paused2) = (arrived.clone(), paused.clone());
+                svc.set_connect_stage_for_test(move |stage| match stage {
+                    "before_lock" => {
+                        arrived2.fetch_add(1, Ordering::SeqCst);
+                    }
+                    "after_save" if !paused2.swap(true, Ordering::SeqCst) => {
+                        let t = Instant::now();
+                        while arrived2.load(Ordering::SeqCst) < 2 && t.elapsed() < WAIT_LIMIT {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    _ => {}
+                });
+                let (s1, s2, ca, cb) = (svc.clone(), svc.clone(), server_in(&a.base()), server_in(&b.base()));
+                let first = tokio::spawn(async move { s1.connect(&ca).await });
+                wait_for(|| paused.load(Ordering::SeqCst)).await;
+                let second = tokio::spawn(async move {
+                    if second_is_disconnect { s2.disconnect().await } else { s2.connect(&cb).await }
+                });
+                first.await.unwrap().unwrap();
+                second.await.unwrap().unwrap();
+                let mem = svc.auth();
+                let disk = vault.load_jira_with(site).map(|st| st.input.site_url);
+                assert_eq!(mem.site_url, disk, "disconnect={second_is_disconnect}: 메모리와 키체인의 연결이 다르다");
+                // 나중에 시작한 호출이 이긴다
+                assert_eq!(mem.site_url, (!second_is_disconnect).then(|| b.base()));
+            }
         }
 
         #[tokio::test]
@@ -3862,7 +3959,8 @@ mod live {
         struct Dates {
             fields: Value,
             field_status: u16,
-            field_delay_ms: u64,
+            /// 있으면 /field 응답을 이 문이 열릴 때까지 붙든다
+            field_gate: Option<Gate>,
             field_huge: bool,
             issue_fields: Value,
             by_key: Value,
@@ -3875,12 +3973,13 @@ mod live {
                     return ok(json!({"displayName": "x"}));
                 }
                 if path.ends_with("/field") {
-                    let delay = Duration::from_millis(o.field_delay_ms);
-                    if o.field_huge {
-                        return ok(json!([{"id": "customfield_1", "name": "Start date", "pad": "x".repeat(6 * 1024 * 1024)}])).delay(delay);
+                    if let Some(g) = &o.field_gate {
+                        g.wait();
                     }
-                    let reply = if o.field_status != 0 && o.field_status != 200 { status(o.field_status, json!({"errorMessages": ["x"]})) } else { ok(if o.fields.is_null() { json!([]) } else { o.fields.clone() }) };
-                    return reply.delay(delay);
+                    if o.field_huge {
+                        return ok(json!([{"id": "customfield_1", "name": "Start date", "pad": "x".repeat(6 * 1024 * 1024)}]));
+                    }
+                    return if o.field_status != 0 && o.field_status != 200 { status(o.field_status, json!({"errorMessages": ["x"]})) } else { ok(if o.fields.is_null() { json!([]) } else { o.fields.clone() }) };
                 }
                 if let Some(k) = path.rsplit('/').next().filter(|k| path.contains("/issue/") && k.starts_with("ABC-")) {
                     let mut f = json!({"summary": "s"});
@@ -3914,16 +4013,31 @@ mod live {
         #[tokio::test]
         async fn 서비스_날짜_필드가_대기_상한을_넘긴_채로_재연결해도_새_연결에서_다시_부른다() {
             let _g = Guard;
-            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_delay_ms: 300, ..Default::default() }));
+            let gate = Gate::default();
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_gate: Some(gate.clone()), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
             let svc = service_wait(10);
             connect_cloud(&svc, &m).await;
-            svc.issue(&key("ABC-1"), None).await.unwrap(); // 10ms 상한으로 날짜 없이 돌아온다
+            // /field 응답을 붙들어 둔 채라 10ms 상한을 넘겨 날짜 없이 돌아온다
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!(""));
             wait_for(|| field_calls(&m) == 1).await;
-            // 서버의 300ms 지연 응답이 끝난 뒤 재연결한다
-            tokio::time::sleep(Duration::from_millis(350)).await;
+            // 응답을 놓아 첫 연결의 공유 작업이 끝나 캐시될 때까지 기다린 뒤 재연결한다
+            gate.open();
+            start_date_eventually(&svc, "2026-10-01").await;
             connect_cloud(&svc, &m).await;
-            svc.issue(&key("ABC-1"), None).await.unwrap();
-            wait_for(|| field_calls(&m) == 2).await;
+            start_date_eventually(&svc, "2026-10-01").await;
+            assert_eq!(field_calls(&m), 2);
+        }
+
+        /// 공유 /field 작업이 끝나 캐시될 때까지(날짜가 나올 때까지) 이슈 조회를 되풀이한다
+        async fn start_date_eventually(svc: &JiraService, want: &str) {
+            let t = Instant::now();
+            loop {
+                if j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"] == json!(want) {
+                    return;
+                }
+                assert!(t.elapsed() < WAIT_LIMIT, "날짜가 나오지 않았다");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
         }
 
         #[tokio::test]
@@ -4124,32 +4238,33 @@ mod live {
         #[tokio::test]
         async fn 서비스_날짜_필드가_늦으면_이슈는_날짜_없이_상한_안에_돌아오고_끝난_뒤_조회에는_날짜가_나온다() {
             let _g = Guard;
-            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_delay_ms: 400, issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
+            let gate = Gate::default();
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_gate: Some(gate.clone()), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
             let svc = service_wait(50);
             connect_cloud(&svc, &m).await;
-            let t = Instant::now();
-            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!(""));
-            assert!(t.elapsed() < Duration::from_millis(300), "{:?}", t.elapsed());
-            tokio::time::sleep(Duration::from_millis(600)).await; // 공유 /field 요청이 끝나 캐시될 때까지
-            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!("2026-10-01"));
+            // /field 응답이 아직 오지 않은 채(문이 닫혀 있다) 대기 상한(50ms)에서 날짜 없이 돌아온다
+            assert_eq!(j(&within(svc.issue(&key("ABC-1"), None)).await.unwrap())["startDate"], json!(""));
+            gate.open();
+            start_date_eventually(&svc, "2026-10-01").await; // 공유 /field 요청이 끝나 캐시될 때까지
             assert_eq!(field_calls(&m), 1);
         }
 
         #[tokio::test]
         async fn 서비스_날짜_필드_대기_중_개별_취소는_즉시_거절되고_다른_조회는_날짜를_받는다() {
             let _g = Guard;
-            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_delay_ms: 300, issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
-            let svc = service_wait(5000);
+            let gate = Gate::default();
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_gate: Some(gate.clone()), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
+            let svc = service_wait(60_000);
             connect_cloud(&svc, &m).await;
             let (sa, sb) = (svc.clone(), svc.clone());
             let a = tokio::spawn(async move { sa.issue(&key("ABC-1"), Some("req-a")).await });
+            wait_for(|| field_calls(&m) == 1).await; // a 가 공유 /field 를 시작했고 응답은 문에 막혀 있다
             let b = tokio::spawn(async move { sb.issue(&key("ABC-1"), Some("req-b")).await });
-            tokio::time::sleep(Duration::from_millis(60)).await;
-            let t = Instant::now();
             svc.cancel("req-a");
-            assert_eq!(failure(a.await.unwrap()).code, "ABORTED");
-            assert!(t.elapsed() < Duration::from_millis(200));
-            assert_eq!(j(&b.await.unwrap().unwrap())["startDate"], json!("2026-10-01"));
+            // 문이 닫힌 채로 a 가 곧바로 거절된다(응답을 기다리지 않는다)
+            assert_eq!(failure(within(a).await.unwrap()).code, "ABORTED");
+            gate.open();
+            assert_eq!(j(&within(b).await.unwrap().unwrap())["startDate"], json!("2026-10-01"));
             assert_eq!(field_calls(&m), 1);
         }
 
@@ -4278,11 +4393,12 @@ mod live {
             embed: Option<usize>,
             status: Option<u16>,
             huge: bool,
-            delay_ms: u64,
+            /// 있으면 이 이슈의 worklog 응답을 문이 열릴 때까지 붙든다
+            gate: Option<Gate>,
         }
 
         fn fi(key: &str, worklogs: Vec<Wl>) -> Fi {
-            Fi { key: key.into(), worklogs, embed: None, status: None, huge: false, delay_ms: 0 }
+            Fi { key: key.into(), worklogs, embed: None, status: None, huge: false, gate: None }
         }
 
         #[derive(Clone)]
@@ -4317,21 +4433,23 @@ mod live {
                 }
                 if let Some(rest) = path.split("/issue/").nth(1).and_then(|p| p.strip_suffix("/worklog")) {
                     let Some(issue) = site.issues.iter().find(|i| i.key == rest) else { return status(404, json!({})) };
-                    let delay = Duration::from_millis(issue.delay_ms);
+                    if let Some(g) = &issue.gate {
+                        g.wait();
+                    }
                     if let Some(st) = issue.status {
-                        return status(st, json!({"errorMessages": ["x"]})).delay(delay);
+                        return status(st, json!({"errorMessages": ["x"]}));
                     }
                     if issue.huge {
-                        return ok(json!({"worklogs": [], "pad": "x".repeat(21 * 1024 * 1024)})).delay(delay);
+                        return ok(json!({"worklogs": [], "pad": "x".repeat(21 * 1024 * 1024)}));
                     }
                     if cloud {
                         let num = |k: &str, d: f64| qp(r, k).and_then(|v| v.parse::<f64>().ok()).unwrap_or(d);
                         let (after, before) = (num("startedAfter", f64::NEG_INFINITY), num("startedBefore", f64::INFINITY));
                         let list: Vec<&Wl> = issue.worklogs.iter().filter(|w| parse_date_ms(&w.started).is_some_and(|t| t >= after && t < before)).collect();
                         let (start, max) = (num("startAt", 0.0) as usize, num("maxResults", 5000.0) as usize);
-                        return ok(json!({"startAt": start, "maxResults": max, "total": list.len(), "worklogs": list.iter().skip(start).take(max).map(|w| to_worklog(true, w)).collect::<Vec<_>>()})).delay(delay);
+                        return ok(json!({"startAt": start, "maxResults": max, "total": list.len(), "worklogs": list.iter().skip(start).take(max).map(|w| to_worklog(true, w)).collect::<Vec<_>>()}));
                     }
-                    return ok(json!({"worklogs": issue.worklogs.iter().map(|w| to_worklog(false, w)).collect::<Vec<_>>()})).delay(delay);
+                    return ok(json!({"worklogs": issue.worklogs.iter().map(|w| to_worklog(false, w)).collect::<Vec<_>>()}));
                 }
                 if path.ends_with("/search/jql") || path.ends_with("/search") {
                     let jql = qp(r, "jql").unwrap_or_default();
@@ -4575,16 +4693,38 @@ mod live {
         #[tokio::test]
         async fn 서비스_워크로그는_이슈_worklog_가_인증_오류면_전체_실패하고_남은_이슈는_요청하지_않는다() {
             let _g = Guard;
+            let gate = Gate::default();
             let mut issues = slow(10);
             for i in &mut issues {
-                i.delay_ms = 150;
+                i.gate = Some(gate.clone());
             }
             issues[0].status = Some(401);
-            issues[0].delay_ms = 0;
+            issues[0].gate = None;
             let (svc, m) = connected(site(true, issues)).await;
-            assert_eq!(failure(svc.worklogs(&q(), None).await).code, "JIRA_AUTH");
-            tokio::time::sleep(Duration::from_millis(400)).await;
+            // 나머지 이슈의 응답은 문에 막혀 있다 — 401 이 확정되면 그것을 기다리지 않고 바로 실패한다
+            assert_eq!(failure(within(svc.worklogs(&q(), None)).await).code, "JIRA_AUTH");
+            // 돌아온 시점에 요청 스트림은 이미 버려졌다 — 동시 3개를 넘는 요청은 시작되지 않았다
             assert!(worklog_reqs(&m).len() <= 3, "{}", worklog_reqs(&m).len());
+            gate.open();
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_받는_도중_2만건_상한에서_멈추고_넘는_것은_담지_않고_truncated() {
+            let _g = Guard;
+            // 이슈 둘이 각각 10,005건(내장은 비워 이슈별로 다시 받게 한다) — 맞는 항목이 2만 10건이다
+            let issues: Vec<Fi> = (0..2)
+                .map(|n| {
+                    let mut f = fi(&format!("ABC-{}", n + 1), (0..10_005).map(|i| wl(&format!("w{n}-{i}"), "acc-me", T)).collect());
+                    f.embed = Some(0);
+                    f
+                })
+                .collect();
+            let (svc, m) = connected(site(true, issues)).await;
+            let r = svc.worklogs(&q(), None).await.unwrap();
+            let v = j(&r);
+            assert_eq!((v["worklogs"].as_array().unwrap().len(), v["truncated"].clone()), (20_000, json!(true)));
+            // 받는 것은 끝까지 받는다(TS 와 같다) — 페이지는 이슈마다 1000건씩 11번
+            assert_eq!(worklog_reqs(&m).len(), 22);
         }
 
         #[tokio::test]
@@ -4684,7 +4824,7 @@ mod live {
             assert_eq!(svc.avatar(&url).await.as_deref(), Some(want.as_str()));
             let hits = || count(&m, |r| r.target.starts_with("/secure/useravatar"));
             assert_eq!(hits(), 1);
-            assert!(!svc.disconnect().unwrap().connected);
+            assert!(!svc.disconnect().await.unwrap().connected);
             assert_eq!(svc.avatar(&url).await, None);
             connect_server(&svc, &m).await;
             assert_eq!(svc.avatar(&url).await.as_deref(), Some(want.as_str()));

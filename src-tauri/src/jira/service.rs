@@ -5,6 +5,8 @@
 //! - 토큰은 `SecretString` 이다. 반환값에는 토큰이 없다([`JiraAuthState`] 와 `Json` 결과뿐). 오류 문구는 마지막에 `redact_secrets` 를 거친다.
 //! - 세대: 연결·해제로 `new_epoch` 가 불리면 진행 중인 요청이 모두 취소되고(`CancellationToken` 의 자식), 내 id·날짜 필드·사진 캐시가 비워진다.
 //!   느린 작업이 끝났을 때 세대가 바뀌었으면 결과를 캐시에 넣지 않는다.
+//! - 워크로그는 받는 대로 한 항목씩 작성자·범위로 거르고 변환해 원본을 쌓지 않는다(TS 와 같다). 20,000건 상한도 받는 도중에 공유 카운터로 세어,
+//!   넘으면 truncated 로 하고 더 쌓지 않는다(상한 근처의 도착 순서는 동시 3개 요청 때문에 TS 와 마찬가지로 정해져 있지 않다).
 //! - `jira:transition` 은 `requestId` 로 취소하지 않는다(적용 여부를 알 수 없게 되므로). POST 는 재시도하지 않는다(클라이언트가 보장한다).
 //! - 시계([`Clock`])·대기([`Sleeper`])는 트레이트로 주입한다. 시계는 날짜 필드 쿨다운·사진 캐시 유효 기간, 대기는 `/field` 대기 상한에 쓴다.
 //!
@@ -13,7 +15,8 @@
 //! - 결과는 키 순서를 지키는 [`Json`] 이다. 상태([`JiraAuthState`])만 `serde` 로 직렬화한다.
 //! - `connect` 는 저장에 실패하면(너무 긴 값) 세대를 바꾸기 전에 오류를 돌려줘 기존 연결을 그대로 둔다(TS 는 세대를 먼저 바꾼다).
 //! - `disconnect` 는 키체인 삭제가 실패하면 연결은 끊은 채로 그 오류를 돌려준다(TS 의 `clear` 는 실패하지 않는다).
-//! - 워크로그는 이슈마다 받은 즉시 거르고 변환해 원본을 쌓지 않는다(TS 와 같은 의도). 20,000건 상한은 이슈 순서로 자른다(TS 는 응답 도착 순서).
+//! - `connect`·`disconnect` 는 tokio `Mutex` 하나로 직렬화한다(/myself 확인 뒤 저장·세대 교체·연결 교체까지). 겹쳐도 키체인과 메모리의 연결이 같다(TS 는 직렬화하지 않는다).
+//! - `disconnect` 는 위 잠금을 기다리므로 `async` 다.
 //! - `search`·`getMyId`·날짜 계산의 `RangeError` 문구는 TS 가 던지는 문구와 같다(아래 상수).
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
@@ -191,7 +194,9 @@ struct Epoch {
     token: CancellationToken,
 }
 
-type SharedDates = Shared<BoxFuture<'static, DateFieldIds>>;
+#[cfg(feature = "test-hooks")]
+type StageHook = Arc<dyn Fn(&'static str) + Send + Sync>;
+type SharedDates =Shared<BoxFuture<'static, DateFieldIds>>;
 type SharedAvatar = Shared<BoxFuture<'static, Option<String>>>;
 
 /// 프로필 사진 캐시: 주소 → (data URL 또는 null, 받은 시각). `order` 의 앞이 가장 오래 쓰지 않은 것
@@ -288,6 +293,14 @@ struct State {
     sleeper: Arc<dyn Sleeper>,
     date_fields_wait: Duration,
     avatar_slots: Semaphore,
+    /// connect·disconnect 를 한 번에 하나만 실행한다(저장·세대 교체·연결 교체가 다른 호출과 섞이지 않게)
+    change: tokio::sync::Mutex<()>,
+    /// 시험용: `data()` 가 세대를 잡은 뒤 날짜 필드 공유 작업을 잠그기 전에 불린다
+    #[cfg(feature = "test-hooks")]
+    before_date_fields: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// 시험용: connect·disconnect 의 단계마다 불린다
+    #[cfg(feature = "test-hooks")]
+    connect_stage: Mutex<Option<StageHook>>,
 }
 
 impl State {
@@ -337,7 +350,49 @@ impl JiraService {
             avatars: Avatars::default(),
             avatar_inflight: HashMap::new(),
         };
-        Self { st: Arc::new(State { inner: Mutex::new(inner), vault, client, site, clock, sleeper, date_fields_wait, avatar_slots: Semaphore::new(AVATAR_CONCURRENCY) }) }
+        Self {
+            st: Arc::new(State {
+                inner: Mutex::new(inner),
+                vault,
+                client,
+                site,
+                clock,
+                sleeper,
+                date_fields_wait,
+                avatar_slots: Semaphore::new(AVATAR_CONCURRENCY),
+                change: tokio::sync::Mutex::new(()),
+                #[cfg(feature = "test-hooks")]
+                before_date_fields: Mutex::new(None),
+                #[cfg(feature = "test-hooks")]
+                connect_stage: Mutex::new(None),
+            }),
+        }
+    }
+
+    /// connect·disconnect 의 단계 표시(시험 훅이 있을 때만 무언가 한다): `before_lock`(교체 잠금을 기다리기 직전), `after_save`(connect 가 저장한 직후)
+    #[cfg(feature = "test-hooks")]
+    fn stage(&self, name: &'static str) {
+        let hook = self.st.connect_stage.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(h) = hook {
+            h(name);
+        }
+    }
+
+    #[cfg(not(feature = "test-hooks"))]
+    fn stage(&self, _name: &'static str) {}
+
+    /// connect·disconnect 의 단계마다 불릴 함수를 정한다. 저장과 연결 교체 사이에 다른 연결 변경이 끼는 경합을 재현하는 시험용
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn set_connect_stage_for_test(&self, f: impl Fn(&'static str) + Send + Sync + 'static) {
+        *self.st.connect_stage.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(f));
+    }
+
+    /// 날짜 필드 공유 작업을 잠그기 직전에 불릴 함수를 정한다. `data()` 의 세대 잡기와 이 잠금 사이의 경합을 재현하는 시험용
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn set_before_date_fields_for_test(&self, f: impl Fn() + Send + Sync + 'static) {
+        *self.st.before_date_fields.lock().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(f));
     }
 
     /// 날짜 필드 조회를 다시 시도할 수 있게 되는 시각(ms). 쿨다운 시험용
@@ -382,8 +437,12 @@ impl JiraService {
             Err(e) if e.code == "JIRA_AUTH" => return Err(seal(JiraError::plain("이메일·토큰이 올바르지 않거나 만료되었습니다"))),
             Err(e) => return Err(seal(e)),
         };
+        // 저장·세대 교체·연결 교체를 다른 connect·disconnect 와 섞이지 않게 묶는다(키체인과 메모리의 연결이 어긋나지 않게)
+        self.stage("before_lock");
+        let _change = self.st.change.lock().await;
         // 저장하지 못하면(너무 긴 값 등) 세대를 바꾸기 전에 알린다 — 기존 연결은 그대로다
         self.st.vault.save_jira(&p, &display_name).map_err(|e| JiraError::plain(e.to_string()))?;
+        self.stage("after_save");
         {
             let mut g = self.st.lock();
             g.new_epoch();
@@ -392,8 +451,11 @@ impl JiraService {
         Ok(self.auth())
     }
 
-    /// `jira:disconnect`. 연결은 항상 끊는다. 키체인 삭제가 실패하면 그 오류를 돌려준다(토큰이 키체인에 남아 있을 수 있다)
-    pub fn disconnect(&self) -> Res<JiraAuthState> {
+    /// `jira:disconnect`. 연결은 항상 끊는다. 키체인 삭제가 실패하면 그 오류를 돌려준다(토큰이 키체인에 남아 있을 수 있다).
+    /// 진행 중인 connect 의 저장·교체가 끝난 뒤에 실행한다
+    pub async fn disconnect(&self) -> Res<JiraAuthState> {
+        self.stage("before_lock");
+        let _change = self.st.change.lock().await;
         {
             let mut g = self.st.lock();
             g.requests.clear();
@@ -444,9 +506,21 @@ impl JiraService {
 
     /// 시작·종료 날짜 필드 id. 연결 단위로 캐시하고 동시 호출은 같은 작업을 기다린다.
     /// 실패해도 던지지 않는다(그 날짜만 생략) — 캐시하지 않고 쿨다운 동안은 다시 묻지 않는다.
-    /// 조회 작업은 개별 요청이 아니라 연결 세대의 신호로 돈다: 한 조회의 취소가 다른 조회에 번지지 않게
-    fn shared_date_fields(&self, cred: &JiraCredential) -> SharedDates {
+    /// 조회 작업은 개별 요청이 아니라 연결 세대의 신호로 돈다: 한 조회의 취소가 다른 조회에 번지지 않게.
+    /// `generation` 은 `data()` 가 잡은 세대의 자식 토큰이다. 잠근 뒤 이미 취소됐으면(그 사이 연결이 바뀌었으면) 옛 자격 증명으로 새 세대에서
+    /// 작업을 시작하거나 캐시하지 않고 빈 결과를 돌려준다(호출한 조회는 어차피 `ABORTED` 로 끝난다). 세대 교체는 이 잠금 안에서 일어나므로 틈이 없다
+    fn shared_date_fields(&self, cred: &JiraCredential, generation: &CancellationToken) -> SharedDates {
+        #[cfg(feature = "test-hooks")]
+        {
+            let hook = self.st.before_date_fields.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if let Some(h) = hook {
+                h();
+            }
+        }
         let mut g = self.st.lock();
+        if generation.is_cancelled() {
+            return futures_util::future::ready(DateFieldIds::default()).boxed().shared();
+        }
         if let Some((_, p)) = &g.date_fields {
             return p.clone();
         }
@@ -464,7 +538,7 @@ impl JiraService {
     /// 공유 /field 작업을 이 조회에서 기다린다. 대기는 상한까지만 — 넘으면 날짜 없이 진행하고 공유 작업은 계속 돌아 끝나면 캐시된다.
     /// 이 조회가 취소되면 기다리지 않고 `ABORTED`
     async fn date_field_ids(&self, cred: &JiraCredential, cancel: &CancellationToken) -> Res<DateFieldIds> {
-        let shared = self.shared_date_fields(cred);
+        let shared = self.shared_date_fields(cred, cancel);
         tokio::select! {
             biased;
             () = cancel.cancelled() => Err(JiraError::aborted()),
@@ -825,11 +899,58 @@ async fn find_worklog_issues(api: &Api<'_>, jql: &str) -> Res<(Vec<api_map::Work
     Ok(finish(issues, true))
 }
 
-/// 이슈의 워크로그를 모두 받는다. Cloud 는 범위로 좁히고, startAt 페이징은 진전이 없으면 멈춘다(같은 id 는 한 번만)
-async fn fetch_issue_worklogs(api: &Api<'_>, key: &str, lo: f64, hi: f64) -> Res<Vec<Json>> {
+/// 워크로그를 받는 대로 작성자·범위로 거르고 결과 행으로 바꿔 이슈별로 담는다(원본은 쌓지 않는다).
+/// 상한은 모든 이슈가 공유하는 카운터로 센다 — 넘으면 truncated 로 하고 더 담지 않는다
+struct WorklogSink {
+    filter: api_map::WorklogFilter,
+    max: usize,
+    state: Mutex<SinkState>,
+}
+
+struct SinkState {
+    per_issue: Vec<Vec<Json>>,
+    count: usize,
+    truncated: bool,
+}
+
+impl WorklogSink {
+    fn new(filter: api_map::WorklogFilter, issues: usize) -> Self {
+        Self::with_max(filter, issues, WORKLOG_MAX)
+    }
+
+    fn with_max(filter: api_map::WorklogFilter, issues: usize, max: usize) -> Self {
+        Self { filter, max, state: Mutex::new(SinkState { per_issue: vec![Vec::new(); issues], count: 0, truncated: false }) }
+    }
+
+    fn state(&self) -> MutexGuard<'_, SinkState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `idx` 번째 이슈의 워크로그 하나. 조건에 안 맞으면 버리고, 맞아도 상한을 넘었으면 만들지 않고 truncated 만 표시한다
+    fn take(&self, idx: usize, issue: &api_map::WorklogIssue, x: &Json) {
+        if !self.filter.matches(x) {
+            return;
+        }
+        let mut g = self.state();
+        if g.count >= self.max {
+            g.truncated = true;
+            return;
+        }
+        g.count += 1;
+        g.per_issue[idx].push(self.filter.row(issue, x));
+    }
+
+    /// (이슈 순서로 이은 워크로그, 상한에 걸렸는지)
+    fn finish(self) -> (Vec<Json>, bool) {
+        let g = self.state.into_inner().unwrap_or_else(|e| e.into_inner());
+        (g.per_issue.into_iter().flatten().collect(), g.truncated)
+    }
+}
+
+/// 이슈의 워크로그를 받는 대로 `accept` 에 넘긴다(원본을 쌓지 않는다). Cloud 는 범위로 좁히고, startAt 페이징은 진전이 없으면 멈춘다(같은 id 는 한 번만)
+async fn fetch_issue_worklogs(api: &Api<'_>, key: &str, lo: f64, hi: f64, accept: impl Fn(&Json)) -> Res<()> {
     let path = format!("{}/issue/{}/worklog", api_base(api.cred.kind), encode_uri_component(key));
     let mut seen = std::collections::HashSet::new();
-    let mut out: Vec<Json> = Vec::new();
     let mut start_at = 0usize;
     for _ in 0..WORKLOG_FETCH_PAGES {
         // Data Center 는 쿼리 파라미터를 받지 않고 전부 돌려준다 — 거르는 것은 호출자의 몫
@@ -844,7 +965,7 @@ async fn fetch_issue_worklogs(api: &Api<'_>, key: &str, lo: f64, hi: f64) -> Res
             if !id.is_empty() && !seen.insert(id.to_string()) {
                 continue;
             }
-            out.push(w.clone());
+            accept(w);
             fresh += 1;
         }
         start_at += list.len();
@@ -853,7 +974,7 @@ async fn fetch_issue_worklogs(api: &Api<'_>, key: &str, lo: f64, hi: f64) -> Res
             break;
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 /// 그 이슈만 건너뛰어도 되는 오류: 이슈가 없거나(404) 볼 수 없거나(403) 워크로그 응답이 너무 큰 경우
@@ -908,45 +1029,41 @@ async fn get_worklogs(api: &Api<'_>, q: &validate::WorklogQuery, me: &Json) -> R
             find_worklog_issues(api, &format!("{} AND {dates}", author_clause(&team, &me_id, include_me)?)).await?
         }
     };
-    let (issues, mut truncated) = found;
+    let (mut issues, mut truncated) = found;
 
-    // 작성자·범위 거르기는 api_map 이 한다. 원본을 쌓지 않으려고 이슈마다 받는 즉시 변환한다
+    // 작성자·범위 거르기는 api_map 이 한다. 받는 대로 한 항목씩 거르고 변환해 담으므로 원본은 페이지가 끝나면 버려진다
     let wq = api_map::WorklogQuery { from: &q.from, to: &q.to, users: &team, include_me: q.include_me };
-    let convert = |issue: &api_map::WorklogIssue, entries: Vec<&Json>| -> Res<Vec<Json>> {
-        let r = js_range_error(api_map::worklog_result(kind, &wq, me, &[(issue, entries)], false))?;
-        Ok(arr_or_empty(field(Some(&r), "worklogs")).to_vec())
-    };
-    let mut per_issue: Vec<Vec<Json>> = vec![Vec::new(); issues.len()];
+    let sink = WorklogSink::new(js_range_error(api_map::WorklogFilter::new(kind, &wq, me))?, issues.len());
+    // 내장 worklog 가 전부인 이슈는 바로 쓰고(내장 원본은 쓴 뒤 비운다), 잘린 이슈만 이슈별로 다시 받는다
     let mut todo: Vec<usize> = Vec::new();
-    for (idx, issue) in issues.iter().enumerate() {
+    for (idx, issue) in issues.iter_mut().enumerate() {
+        let embedded = std::mem::take(&mut issue.embedded);
         if issue.complete {
-            per_issue[idx] = convert(issue, issue.embedded.iter().collect())?;
+            for x in &embedded {
+                sink.take(idx, issue, x);
+            }
         } else {
             todo.push(idx);
         }
     }
-    // 내장 worklog 가 잘린 이슈만 이슈별로 다시 받는다(동시 3개). 전체 실패가 확정되는 첫 오류에서 멈춘다(남은 요청은 시작하지 않고 진행 중인 것은 버린다)
+    // 이슈별로 다시 받는다(동시 3개). 전체 실패가 확정되는 첫 오류에서 멈춘다(남은 요청은 시작하지 않고 진행 중인 것은 버린다)
     let mut results = stream::iter(todo.iter().map(|&idx| {
-        let key = issues[idx].key.as_str();
-        async move { (idx, fetch_issue_worklogs(api, key, lo, hi).await) }
+        let (issue, sink) = (&issues[idx], &sink);
+        async move { fetch_issue_worklogs(api, &issue.key, lo, hi, |w| sink.take(idx, issue, w)).await }
     }))
     .buffer_unordered(WORKLOG_FETCH_CONCURRENCY);
-    while let Some((idx, r)) = results.next().await {
+    while let Some(r) = results.next().await {
         match r {
-            Ok(entries) => per_issue[idx] = convert(&issues[idx], entries.iter().collect())?,
-            // 이 이슈만 건너뛰고 부분 결과로 돌려준다
+            Ok(()) => {}
+            // 이 이슈만 건너뛰고 부분 결과로 돌려준다. 그 이슈에서 이미 받아 담은 것은 남는다
             Err(e) if skippable_issue_error(&e) => truncated = true,
             Err(e) => return Err(e),
         }
     }
     drop(results);
 
-    let mut worklogs: Vec<Json> = per_issue.into_iter().flatten().collect();
-    if worklogs.len() > WORKLOG_MAX {
-        worklogs.truncate(WORKLOG_MAX);
-        truncated = true;
-    }
-    Ok(worklog_json(worklogs, me, truncated, &invalid))
+    let (worklogs, over) = sink.finish();
+    Ok(worklog_json(worklogs, me, truncated || over, &invalid))
 }
 
 fn worklog_json(worklogs: Vec<Json>, me: &Json, truncated: bool, invalid: &[String]) -> Json {
@@ -955,4 +1072,48 @@ fn worklog_json(worklogs: Vec<Json>, me: &Json, truncated: bool, invalid: &[Stri
         o.push(("invalidUsers", Json::Arr(invalid.iter().map(|u| s(u)).collect())));
     }
     obj(o)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::net::json;
+
+    fn sink(max: usize, issues: usize) -> (WorklogSink, api_map::WorklogIssue) {
+        let me = json::parse(r#"{"id":"acc-me","name":"x"}"#).unwrap();
+        let q = api_map::WorklogQuery { from: "2026-10-19", to: "2026-10-20", users: &[], include_me: false };
+        let filter = api_map::WorklogFilter::new(JiraKind::Cloud, &q, &me).unwrap();
+        let issue = api_map::worklog_issue(&json::parse(r#"{"key":"K-1","fields":{"summary":"s","issuetype":{"name":"Task"}}}"#).unwrap());
+        (WorklogSink::with_max(filter, issues, max), issue)
+    }
+
+    fn entry(id: usize, author: &str, started: &str) -> Json {
+        json::parse(&format!(r#"{{"id":"{id}","author":{{"accountId":"{author}"}},"started":"{started}"}}"#)).unwrap()
+    }
+
+    #[test]
+    fn 워크로그_싱크는_상한을_넘으면_더_담지_않고_truncated_로_표시한다() {
+        let (sink, issue) = sink(3, 2);
+        for i in 0..10 {
+            sink.take(i % 2, &issue, &entry(i, "acc-me", "2026-10-19T09:00:00.000+0900"));
+        }
+        {
+            let g = sink.state();
+            assert_eq!((g.count, g.per_issue.iter().map(Vec::len).sum::<usize>(), g.truncated), (3, 3, true));
+        }
+        // 상한을 넘은 뒤 들어온 것은 늘리지 않는다
+        sink.take(0, &issue, &entry(99, "acc-me", "2026-10-19T09:00:00.000+0900"));
+        let (rows, truncated) = sink.finish();
+        assert_eq!((rows.len(), truncated), (3, true));
+    }
+
+    #[test]
+    fn 워크로그_싱크는_조건에_안_맞는_것을_세지_않고_상한_안이면_truncated_가_아니다() {
+        let (sink, issue) = sink(3, 1);
+        sink.take(0, &issue, &entry(1, "other", "2026-10-19T09:00:00.000+0900"));
+        sink.take(0, &issue, &entry(2, "acc-me", "2020-01-01T00:00:00.000+0900"));
+        sink.take(0, &issue, &entry(3, "acc-me", "2026-10-19T09:00:00.000+0900"));
+        let (rows, truncated) = sink.finish();
+        assert_eq!((rows.len(), truncated), (1, false));
+    }
 }

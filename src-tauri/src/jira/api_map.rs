@@ -548,56 +548,87 @@ pub struct WorklogQuery<'a> {
     pub include_me: bool,
 }
 
-/// `getWorklogs` 의 조립: 이슈마다 받은 워크로그(`entries`: 내장 또는 이슈별로 다시 받은 것)를 작성자·범위로 거르고 바꿔 담는다.
-/// 범위는 `[from-2일 00:00Z, to+2일 00:00Z+14h)` 다(UTC+14 ~ UTC-12 를 덮는다). `me` 는 `{id, name}` 객체다
-pub fn worklog_result(kind: JiraKind, q: &WorklogQuery<'_>, me: &Json, issues: &[(&WorklogIssue, Vec<&Json>)], truncated_in: bool) -> MapResult<Json> {
-    let include_me = !q.users.is_empty() && q.include_me;
-    // JQL 날짜를 만들 때 TS 는 해석할 수 없는 날짜에서 던진다
-    shift_day(q.from, -2.0)?;
-    shift_day(q.to, 2.0)?;
-    let lo = parse_date_ms(&format!("{}T00:00:00Z", q.from)).ok_or(MapError)? - 2.0 * DAY_MS;
-    let hi = parse_date_ms(&format!("{}T00:00:00Z", q.to)).ok_or(MapError)? + 2.0 * DAY_MS + 14.0 * 3_600_000.0;
-    let me_id = st(field(Some(me), "id")).to_string();
-    let mut wanted: HashSet<String> = if q.users.is_empty() { HashSet::from([me_id.clone()]) } else { q.users.iter().cloned().collect() };
-    if include_me {
-        wanted.insert(me_id);
+/// 워크로그 한 항목을 거르고 바꾸는 규칙(`getWorklogs` 의 `take`). 서비스가 받는 대로 한 항목씩 써서 원본을 쌓지 않는다.
+/// 범위는 `[from-2일 00:00Z, to+2일 00:00Z+14h)` 다(UTC+14 ~ UTC-12 를 덮는다)
+pub struct WorklogFilter {
+    kind: JiraKind,
+    wanted: HashSet<String>,
+    lo: f64,
+    hi: f64,
+}
+
+impl WorklogFilter {
+    /// `me` 는 `{id, name}` 객체다
+    pub fn new(kind: JiraKind, q: &WorklogQuery<'_>, me: &Json) -> MapResult<Self> {
+        let include_me = !q.users.is_empty() && q.include_me;
+        // JQL 날짜를 만들 때 TS 는 해석할 수 없는 날짜에서 던진다
+        shift_day(q.from, -2.0)?;
+        shift_day(q.to, 2.0)?;
+        let lo = parse_date_ms(&format!("{}T00:00:00Z", q.from)).ok_or(MapError)? - 2.0 * DAY_MS;
+        let hi = parse_date_ms(&format!("{}T00:00:00Z", q.to)).ok_or(MapError)? + 2.0 * DAY_MS + 14.0 * 3_600_000.0;
+        let me_id = st(field(Some(me), "id")).to_string();
+        let mut wanted: HashSet<String> = if q.users.is_empty() { HashSet::from([me_id.clone()]) } else { q.users.iter().cloned().collect() };
+        if include_me {
+            wanted.insert(me_id);
+        }
+        Ok(Self { kind, wanted, lo, hi })
     }
+
+    /// 작성자와 시작 시각이 조건에 맞는지(만들기 전에 싸게 거른다)
+    pub fn matches(&self, x: &Json) -> bool {
+        let w = Some(x);
+        let a = field(w, "author");
+        let author_id = self.author_id(a);
+        if author_id.is_empty() || !(self.wanted.contains(author_id) || (self.kind == JiraKind::Server && self.wanted.contains(st(field(a, "key"))))) {
+            return false;
+        }
+        parse_date_ms(st(field(w, "started"))).is_some_and(|t| t >= self.lo && t < self.hi)
+    }
+
+    /// Cloud 는 accountId, Data Center 는 name
+    fn author_id<'a>(&self, author: Option<&'a Json>) -> &'a str {
+        match self.kind {
+            JiraKind::Cloud => st(field(author, "accountId")),
+            JiraKind::Server => st(field(author, "name")),
+        }
+    }
+
+    /// [`WorklogFilter::matches`] 를 통과한 항목을 결과 행으로 바꾼다
+    pub fn row(&self, issue: &WorklogIssue, x: &Json) -> Json {
+        let w = Some(x);
+        let a = field(w, "author");
+        let author_id = self.author_id(a);
+        let display = st(field(a, "displayName"));
+        obj(vec![
+            ("id", s(st(field(w, "id")))),
+            ("issueKey", s(&issue.key)),
+            ("issueSummary", s(&issue.summary)),
+            ("issueType", s(&issue.issue_type)),
+            ("authorId", s(author_id)),
+            ("author", s(if display.is_empty() { author_id } else { display })),
+            ("started", s(st(field(w, "started")))),
+            ("seconds", field(w, "timeSpentSeconds").and_then(Json::as_f64).map_or(num(0.0), num)),
+            ("comment", s(&comment_text(field(w, "comment")))),
+        ])
+    }
+}
+
+/// `getWorklogs` 의 조립: 이슈마다 받은 워크로그(`entries`: 내장 또는 이슈별로 다시 받은 것)를 작성자·범위로 거르고 바꿔 담는다.
+/// 범위는 [`WorklogFilter`] 를 본다
+pub fn worklog_result(kind: JiraKind, q: &WorklogQuery<'_>, me: &Json, issues: &[(&WorklogIssue, Vec<&Json>)], truncated_in: bool) -> MapResult<Json> {
+    let filter = WorklogFilter::new(kind, q, me)?;
     let mut truncated = truncated_in;
-    let mut count = 0usize;
     let mut worklogs: Vec<Json> = Vec::new();
     for (issue, entries) in issues {
         for x in entries {
-            let w = Some(*x);
-            let a = field(w, "author");
-            let author_id = match kind {
-                JiraKind::Cloud => st(field(a, "accountId")),
-                JiraKind::Server => st(field(a, "name")),
-            };
-            if author_id.is_empty() || !(wanted.contains(author_id) || (kind == JiraKind::Server && wanted.contains(st(field(a, "key"))))) {
+            if !filter.matches(x) {
                 continue;
             }
-            let started = st(field(w, "started"));
-            let Some(t) = parse_date_ms(started) else { continue };
-            if t < lo || t >= hi {
-                continue;
-            }
-            if count >= WORKLOG_MAX {
+            if worklogs.len() >= WORKLOG_MAX {
                 truncated = true;
                 continue;
             }
-            count += 1;
-            let display = st(field(a, "displayName"));
-            worklogs.push(obj(vec![
-                ("id", s(st(field(w, "id")))),
-                ("issueKey", s(&issue.key)),
-                ("issueSummary", s(&issue.summary)),
-                ("issueType", s(&issue.issue_type)),
-                ("authorId", s(author_id)),
-                ("author", s(if display.is_empty() { author_id } else { display })),
-                ("started", s(started)),
-                ("seconds", field(w, "timeSpentSeconds").and_then(Json::as_f64).map_or(num(0.0), num)),
-                ("comment", s(&comment_text(field(w, "comment")))),
-            ]));
+            worklogs.push(filter.row(issue, x));
         }
     }
     Ok(obj(vec![("worklogs", Json::Arr(worklogs)), ("me", me.clone()), ("truncated", Json::Bool(truncated))]))
