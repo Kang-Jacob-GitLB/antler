@@ -144,7 +144,13 @@ function onLine(line: string): void {
     handleNote(repos, msg)
   } else if (msg.t === 'fetchApprove') {
     // 승인을 쓰는 유일한 길. req(채널) 경로로는 오지 않는다 — Rust 의 fetch 서비스만 이 줄을 만든다
-    handleFetchApprove(config, msg)
+    // 저장 실패(백신·OneDrive 가 설정 파일을 잡음, 디스크 가득 참)는 "다음에 다시 묻는다"로 끝낸다(Electron FetchService 와 같다).
+    // 감싸지 않으면 readline 처리기의 예외로 사이드카가 죽어 Rust 가 맡지 않은 모든 채널이 멈춘다(보안 리뷰)
+    try {
+      handleFetchApprove(config, msg)
+    } catch (err) {
+      console.error('fetch 승인 저장 실패:', err)
+    }
   } else if (msg.t === 'focus') {
     // src/main/index.ts 의 win.on('focus'|'blur') 와 같다
     watcher.setFocused(msg.focused)
