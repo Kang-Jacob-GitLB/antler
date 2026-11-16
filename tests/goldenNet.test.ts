@@ -35,6 +35,7 @@ import {
   parseUserSearch,
   parseWorklogQuery
 } from '../src/main/jira/validate'
+import { buildGithubMaps, buildJiraMaps } from './goldenMaps'
 import { itKeys } from './fixtures/itTitles'
 import {
   AUTH_CASES,
@@ -223,7 +224,16 @@ const HAND_WRITTEN: [string, string, string][] = [
   ['DATE_RE', 'src/main/jira/validate.ts', String.raw`/^(\d{4})-(\d{2})-(\d{2})$/`],
   ['JIRA_BODY_SPACES', 'src/main/jira/client.ts', String.raw`/[\s\u0000-\u001f\u007f]+/g`],
   ['USABLE_TOKEN', 'src/main/git/githubCache.ts', String.raw`/[\s\0]/`],
-  ['TRAILING_SLASH', 'src/main/jira/validate.ts', String.raw`/\/+$/`]
+  ['TRAILING_SLASH', 'src/main/jira/validate.ts', String.raw`/\/+$/`],
+  ['REPOSITORY_URL', 'src/main/github/launchpad.ts', String.raw`/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/`],
+  ['CUSTOM_FIELD_RE', 'src/main/jira/api.ts', String.raw`/^customfield_\d+$/`],
+  ['DATE_ONLY_RE', 'src/main/jira/api.ts', String.raw`/^\d{4}-\d{2}-\d{2}/`],
+  ['DEV_INSTANCE_RE', 'src/main/jira/api.ts', String.raw`/^[A-Za-z0-9_.-]{1,40}$/`],
+  ['DEV_HTTPS_URL', 'src/main/jira/api.ts', String.raw`/^https:\/\/[^\s]+$/`],
+  ['DEV_COMMIT_SHA', 'src/main/jira/api.ts', String.raw`/^[0-9a-f]{7,64}$/i`],
+  ['DEV_ISSUE_ID', 'src/main/jira/api.ts', String.raw`/^\d{1,18}$/`],
+  ['AVATAR_SCHEME', 'src/main/jira/api.ts', String.raw`/^https?:\/\//i`],
+  ['CONTROL_RE(jira api)', 'src/main/jira/api.ts', String.raw`/[\u0000-\u001f\u007f]/`]
 ]
 
 // ── 골든 만들기 ───────────────────────────────────────────────────────────
@@ -577,7 +587,9 @@ async function buildAll(): Promise<Record<string, string>> {
     'urls.json': render({ ...urlRest, requests: await __async.requests(), jiraRequests: await __async.jiraRequests(), images: await __async.images() }),
     'http.json': render({ runtime, ...buildHttp() }),
     'device.json': render(await buildDevice()),
-    'env.json': render(buildEnv())
+    'env.json': render(buildEnv()),
+    'ghmap.json': render(await buildGithubMaps()),
+    'jiramap.json': render(await buildJiraMaps())
   }
 }
 
