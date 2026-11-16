@@ -1,0 +1,1564 @@
+{
+  "steps": [
+    {
+      "envelope": {
+        "data": {
+          "connected": false
+        },
+        "ok": true
+      },
+      "name": "미연결 상태",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "JIRA_AUTH",
+        "ok": false
+      },
+      "name": "미연결에서 이슈 조회",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "JIRA_AUTH",
+        "ok": false
+      },
+      "name": "미연결에서 전환 목록",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": null,
+        "ok": true
+      },
+      "name": "미연결에서 사진",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "연결 입력이 없다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "연결 입력의 종류가 틀렸다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "http 평문(루프백이 아닌 호스트)",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "토큰에 공백",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "이메일에 콜론",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "연결 401",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_FORBIDDEN",
+        "ok": false
+      },
+      "name": "연결 403",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_NOT_FOUND",
+        "ok": false
+      },
+      "name": "연결 404",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_RATE_LIMIT",
+        "ok": false
+      },
+      "name": "연결 429(오래 기다려야 한다)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_REDIRECT",
+        "ok": false
+      },
+      "name": "연결 리다이렉트",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_HTTP",
+        "ok": false
+      },
+      "name": "연결 500",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_NETWORK",
+        "ok": false
+      },
+      "name": "연결 네트워크 오류(닫힌 포트)",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": false
+        },
+        "ok": true
+      },
+      "name": "실패한 연결 뒤에도 미연결이다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": true,
+          "displayName": "홍길동",
+          "email": "a@b.c",
+          "kind": "cloud",
+          "siteUrl": "{base}"
+        },
+        "ok": true
+      },
+      "name": "Cloud 연결(429 한 번 뒤 재시도)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": true,
+          "displayName": "홍길동",
+          "email": "a@b.c",
+          "kind": "cloud",
+          "siteUrl": "{base}"
+        },
+        "ok": true
+      },
+      "name": "연결 상태",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": {
+          "assignee": "홍길동",
+          "created": "2026-01-01T00:00:00.000+0000",
+          "descriptionHtml": "<p>설명 &lt;b&gt;본문&lt;/b&gt;</p>",
+          "dueDate": "2026-02-01",
+          "endDate": "",
+          "issueType": "Bug",
+          "key": "ABC-1",
+          "priority": "High",
+          "reporter": "김철수",
+          "startDate": "2026-01-05",
+          "status": "진행 중",
+          "statusCategory": "indeterminate",
+          "summary": "로그인 오류",
+          "updated": "2026-01-02T00:00:00.000+0000",
+          "url": "{base}/browse/ABC-1"
+        },
+        "ok": true
+      },
+      "name": "이슈 조회(날짜 필드 포함)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/field",
+          "query": []
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-1",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "assignee": "홍길동",
+          "created": "2026-01-01T00:00:00.000+0000",
+          "descriptionHtml": "<p>설명 &lt;b&gt;본문&lt;/b&gt;</p>",
+          "dueDate": "2026-02-01",
+          "endDate": "",
+          "issueType": "Bug",
+          "key": "ABC-1",
+          "priority": "High",
+          "reporter": "김철수",
+          "startDate": "2026-01-05",
+          "status": "진행 중",
+          "statusCategory": "indeterminate",
+          "summary": "로그인 오류",
+          "updated": "2026-01-02T00:00:00.000+0000",
+          "url": "{base}/browse/ABC-1"
+        },
+        "ok": true
+      },
+      "name": "같은 이슈 다시(날짜 필드는 캐시)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-1",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "이슈 키가 소문자",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "이슈 키가 문자열이 아니다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "이슈 키가 없다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "JIRA_NOT_FOUND",
+        "ok": false
+      },
+      "name": "없는 이슈(404)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-9",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_FORBIDDEN",
+        "ok": false
+      },
+      "name": "볼 수 없는 이슈(403)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-3",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_AUTH",
+        "ok": false
+      },
+      "name": "세션 중 401",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-3",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_RATE_LIMIT",
+        "ok": false
+      },
+      "name": "세션 중 429",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-3",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "JIRA_HTTP",
+        "ok": false
+      },
+      "name": "응답이 JSON 이 아니다",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-3",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": [
+          {
+            "id": "31",
+            "name": "완료로",
+            "to": {
+              "category": "done",
+              "name": "완료"
+            }
+          }
+        ],
+        "ok": true
+      },
+      "name": "전환 목록",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-1/transitions",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "ok": true
+      },
+      "name": "상태 전환",
+      "requests": [
+        {
+          "auth": "Basic",
+          "body": {
+            "transition": {
+              "id": "31"
+            }
+          },
+          "method": "POST",
+          "path": "/rest/api/3/issue/ABC-1/transitions",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "전환 id 가 숫자가 아니다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "전환 id 가 없다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "JIRA_HTTP",
+        "ok": false
+      },
+      "name": "전환이 400",
+      "requests": [
+        {
+          "auth": "Basic",
+          "body": {
+            "transition": {
+              "id": "31"
+            }
+          },
+          "method": "POST",
+          "path": "/rest/api/3/issue/ABC-1/transitions",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": [
+          {
+            "author": "이영희",
+            "bodyHtml": "<p>댓글</p>",
+            "created": "2026-01-03T00:00:00.000+0000"
+          }
+        ],
+        "ok": true
+      },
+      "name": "댓글",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-1/comment",
+          "query": [
+            [
+              "maxResults",
+              "5"
+            ],
+            [
+              "orderBy",
+              "-created"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "available": false,
+          "commits": [],
+          "pulls": []
+        },
+        "ok": true
+      },
+      "name": "개발 정보(연동 없음)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-1",
+          "query": [
+            [
+              "fields",
+              "issuetype"
+            ]
+          ]
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/dev-status/latest/issue/summary",
+          "query": [
+            [
+              "issueId",
+              "10001"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "available": true,
+          "commits": [],
+          "pulls": [
+            {
+              "author": "홍",
+              "branch": "",
+              "repo": "",
+              "state": "merged",
+              "title": "고침",
+              "updated": "2026-01-02T00:00:00.000Z",
+              "url": "https://github.com/o/r/pull/1"
+            }
+          ]
+        },
+        "ok": true
+      },
+      "name": "개발 정보(연동 있음)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-1",
+          "query": [
+            [
+              "fields",
+              "issuetype"
+            ]
+          ]
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/dev-status/latest/issue/detail",
+          "query": [
+            [
+              "applicationType",
+              "GitHub"
+            ],
+            [
+              "dataType",
+              "pullrequest"
+            ],
+            [
+              "issueId",
+              "10001"
+            ]
+          ]
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/dev-status/latest/issue/summary",
+          "query": [
+            [
+              "issueId",
+              "10001"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "items": [
+            {
+              "assignee": "",
+              "dueDate": "",
+              "issueType": "",
+              "key": "ABC-2",
+              "priority": "",
+              "status": "할 일",
+              "statusCategory": "new",
+              "summary": "검색 결과",
+              "updated": ""
+            }
+          ],
+          "nextCursor": "tok2"
+        },
+        "ok": true
+      },
+      "name": "검색",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/search/jql",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate"
+            ],
+            [
+              "jql",
+              "project = ABC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "items": [
+            {
+              "assignee": "",
+              "dueDate": "",
+              "issueType": "",
+              "key": "ABC-2",
+              "priority": "",
+              "status": "할 일",
+              "statusCategory": "new",
+              "summary": "검색 결과",
+              "updated": ""
+            }
+          ],
+          "nextCursor": "tok2"
+        },
+        "ok": true
+      },
+      "name": "검색 이어 받기",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/search/jql",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate"
+            ],
+            [
+              "jql",
+              "project = ABC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ],
+            [
+              "nextPageToken",
+              "tok2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "검색 조건이 틀렸다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "검색 페이지가 틀렸다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "검색 표지가 틀렸다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "JIRA_HTTP",
+        "ok": false
+      },
+      "name": "검색 400",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/search/jql",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate"
+            ],
+            [
+              "jql",
+              "bad bad"
+            ],
+            [
+              "maxResults",
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": [
+          {
+            "id": "acc-2",
+            "name": "김철수"
+          }
+        ],
+        "ok": true
+      },
+      "name": "사용자 검색",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/user/search",
+          "query": [
+            [
+              "maxResults",
+              "20"
+            ],
+            [
+              "query",
+              "김"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "사용자 검색어가 비었다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": {
+          "me": {
+            "id": "acc-me",
+            "name": "홍길동"
+          },
+          "truncated": false,
+          "worklogs": [
+            {
+              "author": "홍길동",
+              "authorId": "acc-me",
+              "comment": "",
+              "id": "w1",
+              "issueKey": "ABC-1",
+              "issueSummary": "로그인 오류",
+              "issueType": "Bug",
+              "seconds": 3600,
+              "started": "2026-10-19T09:00:00.000+0900"
+            },
+            {
+              "author": "홍길동",
+              "authorId": "acc-me",
+              "comment": "",
+              "id": "w2",
+              "issueKey": "ABC-2",
+              "issueSummary": "긴 작업",
+              "issueType": "Task",
+              "seconds": 600,
+              "started": "2026-10-19T10:00:00.000+0900"
+            }
+          ]
+        },
+        "ok": true
+      },
+      "name": "워크로그(나만)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-2/worklog",
+          "query": [
+            [
+              "maxResults",
+              "1000"
+            ],
+            [
+              "startAt",
+              "0"
+            ],
+            [
+              "startedAfter",
+              "1792195200000"
+            ],
+            [
+              "startedBefore",
+              "1792677600000"
+            ]
+          ]
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/myself",
+          "query": []
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/search/jql",
+          "query": [
+            [
+              "fields",
+              "summary,issuetype,worklog"
+            ],
+            [
+              "jql",
+              "worklogAuthor = currentUser() AND worklogDate >= \"2026-10-17\" AND worklogDate < \"2026-10-22\" ORDER BY key ASC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "me": {
+            "id": "acc-me",
+            "name": "홍길동"
+          },
+          "truncated": false,
+          "worklogs": [
+            {
+              "author": "홍길동",
+              "authorId": "acc-me",
+              "comment": "",
+              "id": "w1",
+              "issueKey": "ABC-1",
+              "issueSummary": "로그인 오류",
+              "issueType": "Bug",
+              "seconds": 3600,
+              "started": "2026-10-19T09:00:00.000+0900"
+            },
+            {
+              "author": "홍길동",
+              "authorId": "acc-me",
+              "comment": "",
+              "id": "w2",
+              "issueKey": "ABC-2",
+              "issueSummary": "긴 작업",
+              "issueType": "Task",
+              "seconds": 600,
+              "started": "2026-10-19T10:00:00.000+0900"
+            },
+            {
+              "author": "남",
+              "authorId": "acc-other",
+              "comment": "",
+              "id": "w3",
+              "issueKey": "ABC-2",
+              "issueSummary": "긴 작업",
+              "issueType": "Task",
+              "seconds": 300,
+              "started": "2026-10-19T11:00:00.000+0900"
+            }
+          ]
+        },
+        "ok": true
+      },
+      "name": "워크로그(팀원 + 나)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-2/worklog",
+          "query": [
+            [
+              "maxResults",
+              "1000"
+            ],
+            [
+              "startAt",
+              "0"
+            ],
+            [
+              "startedAfter",
+              "1792195200000"
+            ],
+            [
+              "startedBefore",
+              "1792677600000"
+            ]
+          ]
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/search/jql",
+          "query": [
+            [
+              "fields",
+              "summary,issuetype,worklog"
+            ],
+            [
+              "jql",
+              "worklogAuthor in (\"acc-other\",\"acc-me\") AND worklogDate >= \"2026-10-17\" AND worklogDate < \"2026-10-22\" ORDER BY key ASC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "워크로그 날짜가 틀렸다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "워크로그 범위가 뒤집혔다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "워크로그 사용자 id 가 틀렸다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "JIRA_FORBIDDEN",
+        "ok": false
+      },
+      "name": "워크로그 검색이 403",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/search/jql",
+          "query": [
+            [
+              "fields",
+              "summary,issuetype,worklog"
+            ],
+            [
+              "jql",
+              "worklogAuthor = currentUser() AND worklogDate >= \"2026-10-17\" AND worklogDate < \"2026-10-22\" ORDER BY key ASC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "me": {
+            "id": "acc-me",
+            "name": "홍길동"
+          },
+          "truncated": true,
+          "worklogs": [
+            {
+              "author": "홍길동",
+              "authorId": "acc-me",
+              "comment": "",
+              "id": "w1",
+              "issueKey": "ABC-1",
+              "issueSummary": "로그인 오류",
+              "issueType": "Bug",
+              "seconds": 3600,
+              "started": "2026-10-19T09:00:00.000+0900"
+            }
+          ]
+        },
+        "ok": true
+      },
+      "name": "워크로그 이슈별 조회가 403이면 그 이슈만 건너뛴다",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-2/worklog",
+          "query": [
+            [
+              "maxResults",
+              "1000"
+            ],
+            [
+              "startAt",
+              "0"
+            ],
+            [
+              "startedAfter",
+              "1792195200000"
+            ],
+            [
+              "startedBefore",
+              "1792677600000"
+            ]
+          ]
+        },
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/search/jql",
+          "query": [
+            [
+              "fields",
+              "summary,issuetype,worklog"
+            ],
+            [
+              "jql",
+              "worklogAuthor = currentUser() AND worklogDate >= \"2026-10-17\" AND worklogDate < \"2026-10-22\" ORDER BY key ASC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==",
+        "ok": true
+      },
+      "name": "프로필 사진(사이트 안)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/secure/avatar.png",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": null,
+        "ok": true
+      },
+      "name": "프로필 사진(허용하지 않는 호스트)",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": null,
+        "ok": true
+      },
+      "name": "프로필 사진(주소가 문자열이 아니다)",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": null,
+        "ok": true
+      },
+      "name": "프로필 사진(없는 주소)",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/secure/none.png",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "ok": true
+      },
+      "name": "외부 열기(사이트 안)",
+      "opened": [
+        "{base}/browse/ABC-1"
+      ],
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "외부 열기(다른 사이트)",
+      "opened": [],
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "외부 열기(자격 증명이 든 주소)",
+      "opened": [],
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "외부 열기(문자열이 아니다)",
+      "opened": [],
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "ABORTED",
+        "ok": false
+      },
+      "name": "느린 이슈 조회를 취소한다",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-4",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description,customfield_10015,customfield_10016"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": true,
+          "displayName": "홍길동",
+          "email": "a@b.c",
+          "kind": "cloud",
+          "siteUrl": "{base}"
+        },
+        "ok": true
+      },
+      "name": "앱을 다시 켠 뒤 연결이 복원된다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": [
+          {
+            "id": "31",
+            "name": "완료로",
+            "to": {
+              "category": "done",
+              "name": "완료"
+            }
+          }
+        ],
+        "ok": true
+      },
+      "name": "복원된 연결로 조회",
+      "requests": [
+        {
+          "auth": "Basic",
+          "method": "GET",
+          "path": "/rest/api/3/issue/ABC-1/transitions",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": false
+        },
+        "ok": true
+      },
+      "name": "연결 해제",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "code": "JIRA_AUTH",
+        "ok": false
+      },
+      "name": "해제 뒤 조회",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": false
+        },
+        "ok": true
+      },
+      "name": "해제 뒤 다시 켜도 미연결이다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": true,
+          "displayName": "서버 사용자",
+          "kind": "server",
+          "siteUrl": "{base}"
+        },
+        "ok": true
+      },
+      "name": "Data Center 연결(PAT)",
+      "requests": [
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/myself",
+          "query": []
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "assignee": "",
+          "created": "2026-01-01T00:00:00.000+0000",
+          "descriptionHtml": "<p>서버 렌더</p>",
+          "dueDate": "",
+          "endDate": "",
+          "issueType": "Task",
+          "key": "DC-1",
+          "priority": "",
+          "reporter": "",
+          "startDate": "",
+          "status": "열림",
+          "statusCategory": "new",
+          "summary": "서버 이슈",
+          "updated": "2026-01-02T00:00:00.000+0000",
+          "url": "{base}/browse/DC-1"
+        },
+        "ok": true
+      },
+      "name": "Data Center 이슈",
+      "requests": [
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/field",
+          "query": []
+        },
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/issue/DC-1",
+          "query": [
+            [
+              "expand",
+              "renderedFields"
+            ],
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate,reporter,created,description"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": [
+          {
+            "author": "나",
+            "bodyHtml": "<p>4</p>",
+            "created": "2026-01-04T00:00:00.000+0000"
+          },
+          {
+            "author": "가",
+            "bodyHtml": "<p>3</p>",
+            "created": "2026-01-03T00:00:00.000+0000"
+          }
+        ],
+        "ok": true
+      },
+      "name": "Data Center 댓글(마지막 페이지)",
+      "requests": [
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/issue/DC-1/comment",
+          "query": [
+            [
+              "expand",
+              "renderedBody"
+            ],
+            [
+              "maxResults",
+              "5"
+            ],
+            [
+              "startAt",
+              "0"
+            ]
+          ]
+        },
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/issue/DC-1/comment",
+          "query": [
+            [
+              "expand",
+              "renderedBody"
+            ],
+            [
+              "maxResults",
+              "5"
+            ],
+            [
+              "startAt",
+              "2"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "items": [
+            {
+              "assignee": "",
+              "dueDate": "",
+              "issueType": "",
+              "key": "DC-3",
+              "priority": "",
+              "status": "",
+              "statusCategory": "",
+              "summary": "서버 검색",
+              "updated": ""
+            }
+          ],
+          "nextCursor": "1"
+        },
+        "ok": true
+      },
+      "name": "Data Center 검색",
+      "requests": [
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/search",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate"
+            ],
+            [
+              "jql",
+              "project = DC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ],
+            [
+              "startAt",
+              "0"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "items": [
+            {
+              "assignee": "",
+              "dueDate": "",
+              "issueType": "",
+              "key": "DC-3",
+              "priority": "",
+              "status": "",
+              "statusCategory": "",
+              "summary": "서버 검색",
+              "updated": ""
+            }
+          ],
+          "nextCursor": "26"
+        },
+        "ok": true
+      },
+      "name": "Data Center 검색 이어 받기",
+      "requests": [
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/search",
+          "query": [
+            [
+              "fields",
+              "summary,status,issuetype,priority,assignee,updated,duedate"
+            ],
+            [
+              "jql",
+              "project = DC"
+            ],
+            [
+              "maxResults",
+              "25"
+            ],
+            [
+              "startAt",
+              "25"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "name": "Data Center 검색 표지가 숫자가 아니다",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": [
+          {
+            "id": "kim",
+            "name": "김서버"
+          }
+        ],
+        "ok": true
+      },
+      "name": "Data Center 사용자 검색",
+      "requests": [
+        {
+          "auth": "Bearer",
+          "method": "GET",
+          "path": "/rest/api/2/user/search",
+          "query": [
+            [
+              "maxResults",
+              "20"
+            ],
+            [
+              "username",
+              "김"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": true,
+          "displayName": "서버 사용자",
+          "kind": "server",
+          "siteUrl": "{base}"
+        },
+        "ok": true
+      },
+      "name": "Data Center 연결 상태",
+      "requests": []
+    },
+    {
+      "envelope": {
+        "data": {
+          "connected": false
+        },
+        "ok": true
+      },
+      "name": "Data Center 연결 해제",
+      "requests": []
+    }
+  ]
+}

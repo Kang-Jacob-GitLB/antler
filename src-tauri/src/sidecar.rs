@@ -36,7 +36,8 @@ impl Sidecar {
     /// `mirror` 는 사이드카가 보내는 `repos` 메시지로 채워진다(라우터가 같은 것을 읽는다).
     /// `fetch_kinds` 가 있으면 env `ANTLER_RUST_FETCH_KINDS` 로 넘겨 사이드카가 그 환경의 저장소를 fetch 하지 않게 한다(Rust 가 맡는다). 없으면 사이드카가 전부 맡는다.
     /// **`FetchPrefsSink` 를 먼저 manage 한 뒤에 불러야 한다** — 첫 fetchPrefs 가 ready 전에 한 번만 온다
-    pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror, fetch_kinds: Option<&str>) -> Result<Self, String> {
+    /// `rust_api` 이면 env `ANTLER_RUST_API=1` 로 넘겨 사이드카가 `jira:*` 를 소유하지 않게 한다(Rust 가 처리한다). 아니면 부모 환경의 값도 지운다.
+    pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror, fetch_kinds: Option<&str>, rust_api: bool) -> Result<Self, String> {
         let node = std::env::var("ANTLER_NODE").unwrap_or_else(|_| "node".into());
         let script = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../out-tauri/sidecar/index.cjs"));
         // git 이 아니라 개발 전용 Node 사이드카를 띄운다 — git 실행기(src/git/exec)의 대상이 아니다
@@ -52,6 +53,11 @@ impl Sidecar {
             Some(kinds) => cmd.env("ANTLER_RUST_FETCH_KINDS", kinds),
             None => cmd.env_remove("ANTLER_RUST_FETCH_KINDS"),
         };
+        if rust_api {
+            cmd.env("ANTLER_RUST_API", "1");
+        } else {
+            cmd.env_remove("ANTLER_RUST_API");
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

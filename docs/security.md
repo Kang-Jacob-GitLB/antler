@@ -49,6 +49,10 @@
 - 경로·diff: `GIT_LITERAL_PATHSPECS=1` 이라 renderer 가 보낸 경로가 pathspec 매직으로 해석되지 않고,
   `--no-textconv`·`--no-ext-diff` 로 저장소 설정이 외부 프로그램을 실행하지 못하게 한다.
 
+**Tauri 판의 Jira**: `jira:*` 는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
+토큰은 Rust 프로세스 밖(renderer·사이드카)으로 나가지 않는다 — 사이드카는 `ANTLER_RUST_API=1` 이면 `jira:` 를 처리하지 않는다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
+리다이렉트를 따라가지 않으며, `jira:openExternal` 은 연결한 사이트의 https 주소만 연다. 자세한 것은 docs/tauri.md "PR 6".
+
 ## GitHub 원격 전용 저장소의 예외
 
 저장소 추가 대화상자의 GitHub 탭으로 추가한 저장소는 작업 폴더 없이 앱 캐시

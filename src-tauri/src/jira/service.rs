@@ -1047,7 +1047,8 @@ async fn get_worklogs(api: &Api<'_>, q: &validate::WorklogQuery, me: &Json) -> R
         }
     }
     // 이슈별로 다시 받는다(동시 3개). 전체 실패가 확정되는 첫 오류에서 멈춘다(남은 요청은 시작하지 않고 진행 중인 것은 버린다)
-    let mut results = stream::iter(todo.iter().map(|&idx| {
+    // `copied()` 로 값을 넘긴다 — 참조 인자를 받는 클로저면 이 future 를 tauri command 에서 `Send` 로 증명하지 못한다("FnOnce is not general enough")
+    let mut results = stream::iter(todo.iter().copied().map(|idx| {
         let (issue, sink) = (&issues[idx], &sink);
         async move { fetch_issue_worklogs(api, &issue.key, lo, hi, |w| sink.take(idx, issue, w)).await }
     }))
