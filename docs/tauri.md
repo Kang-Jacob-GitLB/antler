@@ -255,7 +255,12 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
 | `git:fileHistory` | `repoId, {path, rev?, skip, count}, requestId?` | `rev-parse --verify --quiet HEAD`(rev 생략 때) → `log --follow --no-color --no-ext-diff -z --name-status -M --format=… --max-count=skip+count+1 --end-of-options <rev> -- path` | 없음(HEAD 가 움직인다) | 프로세스에 바로 닿는다(`queue.run(None, Some(token))`) |
 | `git:blame` | `repoId, {path, rev?}, requestId?` | `rev-parse HEAD`(rev 생략 때) → `cat-file -s <rev>:<path>` → `blame --no-textconv --porcelain <rev> -- path`(128MB 버퍼, `blame.ignoreRevsFile` 이 깨졌으면 `--no-ignore-revs-file` 로 한 번 더) | 없음 | 프로세스에 바로 닿는다 |
 
-- **잘림·전체 불러오기**: diff 는 기본 8MB·3,000줄에서 줄 객체 만들기를 멈추고 이후 줄 수만 센다(`truncated`, 20만 줄·64MB 를 넘으면 `totalIsLowerBound`). `full` 이면 줄 수 상한 없이 64MB 까지 읽는다.
+- **잘림·전체 불러오기**: diff 는 기본 8MB·3,000줄에서 줄 객체 만들기를 멈추고 이후 줄 수만 센다(`truncated`, 20만 줄·64MB 를 넘으면 `totalIsLowerBound`). `full` 이면 64MB·**20만 줄**까지 읽는다.
+  - **알려진 차이**: TS 의 `full` 은 줄 수 상한이 없다. Rust 는 줄 객체를 `serde_json::Value`(줄당 수백 바이트)로 만들므로 한 줄 1바이트짜리 64MB 파일이면
+    수십 GB 가 되어 앱이 죽는다(보안 리뷰) — 그래서 20만 줄에서 자르고(`truncated`) 줄 수는 끝까지 센다. 캐시에 들어가지 않은 큰 결과는 응답할 때 복사하지 않는다.
+  - **blame 목록 파일**: `blame.ignoreRevsFile` 이 OID 가 아닌 줄을 담은 파일을 가리키면 git 은 `invalid object name: <그 줄>` 로 파일 내용을 stderr 에 낸다.
+    악성 저장소가 이 설정을 사용자 파일(자격 증명 등)로 가리키면 그 첫 줄이 오류 문구로 renderer 에 갔다(TS 도 같다 — 별도 수정). 이런 실패도 `--no-ignore-revs-file`
+    로 다시 돌리고, 그래도 실패하면 원문 대신 `git blame failed` 를 돌려준다(테스트 `blame_ignore_revs_file_의_내용이_응답으로_새지_않는다`).
   상한을 넘기고 세기도 끝났으면 스트림을 버려 git 을 끊고, EOF 까지 읽었으면 `finish()` 로 종료 코드를 확인한다(없는 해시는 `GIT`). `full` 은 JS 참 거짓으로 읽는다(`1`·`"no"` 는 참, `0`·`""`·`null` 은 거짓).
   blame 은 512KiB 가 넘는 파일이면 blame 하지 않고 `tooLarge`, 그 시점에 경로가 없거나 파일이 아니면(`cat-file -s` 실패) `missing`, 출력에 NUL 이 있으면 `binary`, HEAD 를 풀 수 없으면 `no commits yet`(ERROR).
   fileHistory 는 `skip` 이 10만 이상이면 git 을 부르지 않고 `{entries:[], hasMore:false}`, 커밋 없는 저장소도 같다(`rev` 키 없음).

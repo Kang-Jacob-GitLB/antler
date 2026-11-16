@@ -28,6 +28,9 @@ use crate::git::parsers::{js_number_or_zero, js_trim, JsNumber};
 pub const DIFF_MAX_BYTES: usize = 8 * 1024 * 1024;
 /// "전체 보기"(full) 요청의 입력 바이트 상한(`DIFF_FULL_MAX_BYTES`)
 pub const DIFF_FULL_MAX_BYTES: usize = 64 * 1024 * 1024;
+/// "전체 보기"의 줄 수 상한. **TS 에는 없다(알려진 차이)** — 한 줄이 1바이트인 64MB 파일은 3,300만 줄이고, 그것을 `serde_json::Value`
+/// 로 만들면(줄당 수백 바이트) 수십 GB 가 되어 앱이 죽는다(보안 리뷰). 잘린 diff 가 줄 수를 세는 상한(`DEFAULT_COUNT_LIMIT`)과 같은 값이다
+pub const DIFF_FULL_MAX_LINES: usize = crate::git::parsers::diff::DEFAULT_COUNT_LIMIT;
 /// 한 번에 받을 수 있는 히스토리 항목 수 상한
 pub const FILE_HISTORY_MAX_COUNT: usize = 500;
 /// 건너뛸 수 있는 최대 항목 수. 이 이상은 git 을 부르지 않고 빈 페이지다
@@ -224,7 +227,7 @@ pub async fn file_diff(exec: &GitExecutor, repo_path: &str, req: &DiffRequest) -
     };
     let args = diff_args(req, parent.as_ref());
     let parse_opts = if req.full {
-        DiffParseOpts { max_lines: Some(usize::MAX), max_bytes: Some(DIFF_FULL_MAX_BYTES), ..DiffParseOpts::default() }
+        DiffParseOpts { max_lines: Some(DIFF_FULL_MAX_LINES), max_bytes: Some(DIFF_FULL_MAX_BYTES), ..DiffParseOpts::default() }
     } else {
         DiffParseOpts { max_bytes: Some(DIFF_MAX_BYTES), ..DiffParseOpts::default() }
     };
@@ -387,10 +390,20 @@ pub async fn file_blame(exec: &GitExecutor, repo_path: &str, req: &BlameRequest,
     let run_opts = RunOpts { cancel: Some(cancel.clone()), max_buffer: Some(BLAME_MAX_BUFFER) };
     let mut args = blame_args(&rev, &req.path, false);
     let mut r = exec.run(repo_path, &args, &run_opts).await?;
-    // blame.ignoreRevsFile 이 없는 파일을 가리키면 git 이 blame 자체를 거부한다 — 이번 실행에서만 설정된 목록을 비운다
-    if r.code != 0 && r.stderr.to_ascii_lowercase().contains("could not open object name list") {
+    // blame.ignoreRevsFile 이 없는 파일을 가리키면 git 이 blame 자체를 거부한다 — 이번 실행에서만 설정된 목록을 비운다.
+    // 목록 파일이 OID 가 아닌 줄을 담으면 git 은 `invalid object name: <그 줄>` 로 **파일 내용**을 stderr 에 낸다 —
+    // 악성 저장소가 ignoreRevsFile 을 사용자 파일(자격 증명 등)로 가리키면 그 첫 줄이 오류 메시지로 renderer 에 간다(보안 리뷰).
+    // 그런 실패도 목록을 끄고 다시 돌리고, 그래도 실패하면 원문 대신 고정 문구를 돌려준다
+    let list_broken = |stderr: &str| {
+        let s = stderr.to_ascii_lowercase();
+        s.contains("object name list") || s.contains("invalid object name")
+    };
+    if r.code != 0 && list_broken(&r.stderr) {
         args = blame_args(&rev, &req.path, true);
         r = exec.run(repo_path, &args, &run_opts).await?;
+        if r.code != 0 && list_broken(&r.stderr) {
+            return Err(ExecError::Other { message: "git blame failed".into() });
+        }
     }
     let out = ok(r, &args)?;
     let parsed = parse_blame(&out);

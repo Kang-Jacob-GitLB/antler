@@ -745,7 +745,33 @@ async fn 줄_수_세기_한계를_넘는_diff_는_하한값으로_끝난다() {
     assert_eq!((d["truncated"].clone(), d["totalIsLowerBound"].clone()), (json!(true), json!(true)), "{}", short(d));
     assert!(d["totalLines"].as_u64().unwrap() >= 200_000);
     assert_eq!(d["hunks"][0]["lines"].as_array().unwrap().len(), 3000);
-    // full 은 같은 파일을 전부 읽는다(64MB 안)
+    // full 도 줄 수 상한(DIFF_FULL_MAX_LINES = 20만)에서 자른다 — TS 와의 알려진 차이(줄당 수백 바이트인 Value 로 수십 GB 가 되는 것을 막는다).
+    // 잘린 뒤에도 줄 수는 끝까지 센다(21만 < 세기 한계가 아니라 같은 값이라 하한값일 수 있다)
     let env = envelope(router.route("git:fileDiff", &json!(["h", { "hash": head, "path": "huge.txt", "full": true }, "r"])).await);
-    assert_eq!((env["data"]["truncated"].clone(), env["data"]["totalLines"].clone()), (json!(false), json!(210_000)));
+    let d = &env["data"];
+    assert_eq!(d["truncated"], json!(true), "{}", short(d));
+    assert_eq!(d["hunks"][0]["lines"].as_array().unwrap().len(), 200_000);
+    assert!(d["totalLines"].as_u64().unwrap() >= 200_000);
+}
+
+/// 악성 저장소의 `blame.ignoreRevsFile` 이 사용자 파일을 가리켜도 그 내용이 응답(오류 문구 포함)으로 renderer 에 가지 않는다.
+/// git 은 목록 파일의 OID 가 아닌 첫 줄을 `invalid object name: <줄>` 로 stderr 에 낸다 — 목록을 끄고 다시 돌려야 한다(보안 리뷰)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn blame_ignore_revs_file_의_내용이_응답으로_새지_않는다() {
+    let tmp = TempDir::new("blameleak");
+    let dir = tmp.0.join("r");
+    fs::create_dir_all(&dir).unwrap();
+    let run = |args: &[&str]| assert!(raw_git(&dir).args(args).status().unwrap().success(), "git {args:?}");
+    run(&["init", "-q", "-b", "main"]);
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    run(&["add", "a.txt"]);
+    run(&["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "a"]);
+    let secret = tmp.0.join("secret.txt");
+    fs::write(&secret, "https://user:ghp_SECRETTOKEN@github.com\n").unwrap();
+    run(&["config", "blame.ignoreRevsFile", &secret.to_string_lossy().replace('\\', "/")]);
+    let router = Router::new(true, false, mirror_of(&[("b", dir.as_path())]));
+    let env = envelope(router.route("git:blame", &json!(["b", { "path": "a.txt" }, "r"])).await);
+    assert!(!env.to_string().contains("SECRETTOKEN"), "목록 파일 내용이 응답에 섞였다: {env}");
+    // 목록을 끄고 다시 돌려 blame 자체는 성공한다
+    assert_eq!(env["ok"], true, "{env}");
 }

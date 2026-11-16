@@ -410,7 +410,8 @@ impl Router {
         let result = self.file_job(repo_id, &target, job, &token).await;
         drop(reg);
         Routed::Done(match result {
-            Ok(data) => ok_env((*data).clone()),
+            // 캐시에 들어가지 않은(상한 초과) 큰 결과는 참조가 하나뿐이다 — 복사하지 않고 꺼낸다
+            Ok(data) => ok_env(Arc::try_unwrap(data).unwrap_or_else(|a| (*a).clone())),
             Err(e) => err_env(&e.to_string(), e.envelope_code()),
         })
     }
