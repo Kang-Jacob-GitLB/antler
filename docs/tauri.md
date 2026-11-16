@@ -309,7 +309,9 @@ fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목�
   길이·자르기는 UTF-16 단위(이모지 경계에서 짝이 쪼개지면 TS 는 `\ud83d` 로 드러내고, Rust 안쪽은 `&[u16]` 로 같게 처리한다) / `toLowerCase` 로 길이가 바뀌는 문자(`İ`)가 있는 refspec 의 어긋남까지 그대로 / NT 네임스페이스(`\??\`)는 URL 어디에 있어도 거부.
 - **Unicode 판은 Node 에 고정한다**: 소문자화(`js_to_lowercase` — Node 변환표 + 최종 시그마용 Cased·Case_Ignorable 범위)와 `SPECIAL` 은 모두 Node 에서 뽑은 생성 표(`lowercase_table.rs`·`special_table.rs`)만 쓰고, Rust std 의 `to_lowercase` 는 쓰지 않는다
   (std 는 Node 가 모르는 대소문자 쌍 48개 — U+A7CE→A7CF 등 — 을 바꿔 `remote."꟎".fetch` 가 TS 는 "알 수 없는 설정", Rust 는 허용으로 갈렸다). 표는 `lists.json` 의 `runtime.unicode` 판에 묶인다.
-  CI 의 Node 판이 달라 골든이 어긋나면 골든과 표를 함께 다시 만든다(`node scripts/gen-fetch-special.mjs`).
+  그래서 CI(`build.yml`)의 Node 를 골든을 만든 판(**22.17.1 = Unicode 16.0**)으로 고정한다 — `"22"` 로 두었을 때 러너의 최신 22.x(Unicode 17.0)가
+  골든과 달라 실패했다. 골든을 다시 만들 때는 같은 판의 Node 로 만들고(`UPDATE_GOLDEN=1 npx vitest run tests/goldenFetch.test.ts` 후 `node scripts/gen-fetch-special.mjs`),
+  `build.yml` 의 판도 함께 올린다. 다른 판의 Node 로 로컬 테스트를 돌리면 이 골든 비교만 실패한다.
 - **매처 메모리**: `pattern.rs` 는 입력을 `Vec<char>` 로 풀지 않고 바이트 오프셋 비트셋으로 판정한다(악성 설정의 수천만 자 키에서도 입력 크기의 1/8 짜리 집합 몇 개뿐).
 - **뒤 단계가 따를 API 계약**(`guard.rs`): 범위별 설정 읽기는 `ScopeWalk::start()` → `scope()` 실행 → `feed(…)` 가 다음 `WalkStep::Read` 나 `Done` 을 돌려주는 값 이동 방식이라 순서를 어길 수 없고,
   `http.followRedirects` 는 `FollowRedirects` 열거형, `core.hooksPath` 는 `hooks_path_for` 가 만드는 `HooksPath`(빈 값·상대 경로 불가, 로컬은 존재하는 빈 디렉터리 — 테스트용 `hooks_path_with` 는 `doc(hidden)`)다.
