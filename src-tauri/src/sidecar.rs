@@ -17,7 +17,7 @@ use crate::dialogs;
 use crate::git::fetch::service::{approve_message, ApprovalKind, FetchPrefs, FetchPrefsSink};
 use crate::git::log_service::NoteOp;
 use crate::mirror::RepoMirror;
-use crate::router::Router;
+use crate::router::{in_runtime_of, Router};
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
 
@@ -33,8 +33,10 @@ fn error_env(msg: &str) -> Value {
 }
 
 impl Sidecar {
-    /// `mirror` 는 사이드카가 보내는 `repos` 메시지로 채워진다(라우터가 같은 것을 읽는다)
-    pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror) -> Result<Self, String> {
+    /// `mirror` 는 사이드카가 보내는 `repos` 메시지로 채워진다(라우터가 같은 것을 읽는다).
+    /// `fetch_kinds` 가 있으면 env `ANTLER_RUST_FETCH_KINDS` 로 넘겨 사이드카가 그 환경의 저장소를 fetch 하지 않게 한다(Rust 가 맡는다). 없으면 사이드카가 전부 맡는다.
+    /// **`FetchPrefsSink` 를 먼저 manage 한 뒤에 불러야 한다** — 첫 fetchPrefs 가 ready 전에 한 번만 온다
+    pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror, fetch_kinds: Option<&str>) -> Result<Self, String> {
         let node = std::env::var("ANTLER_NODE").unwrap_or_else(|_| "node".into());
         let script = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../out-tauri/sidecar/index.cjs"));
         // git 이 아니라 개발 전용 Node 사이드카를 띄운다 — git 실행기(src/git/exec)의 대상이 아니다
@@ -45,6 +47,11 @@ impl Sidecar {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // 부모 환경에 남아 있는 값이 되돌리기(없음)를 뒤집지 않게 항상 정한다
+        match fetch_kinds {
+            Some(kinds) => cmd.env("ANTLER_RUST_FETCH_KINDS", kinds),
+            None => cmd.env_remove("ANTLER_RUST_FETCH_KINDS"),
+        };
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -108,10 +115,10 @@ impl Sidecar {
         let _ = self.write(&json!({ "t": "note", "op": op.as_str(), "repoId": repo_id }));
     }
 
-    /// fetch 승인을 설정 파일에 남겨 달라고 사이드카에 부탁한다(`{t:"fetchApprove"}`). `FetchHost::approve` 의 구현이 부르는 유일한 길이다 —
-    /// 서비스가 두 지점(수동 fetch 성공 뒤, "항상 허용" 응답 뒤)에서만 호출하고, 사이드카는 이 메시지가 아니면 승인을 받지 않는다. 앱 연결은 PR D 다
-    #[allow(dead_code)]
-    pub fn approve(&self, kind: ApprovalKind, repo_id: &str, fingerprint: &str) {
+    /// fetch 승인을 설정 파일에 남겨 달라고 사이드카에 부탁한다(`{t:"fetchApprove"}`). `FetchHost::approve` 의 구현(`fetch_host.rs`)이 부르는 유일한 길이다 —
+    /// 서비스가 두 지점(수동 fetch 성공 뒤, "항상 허용" 응답 뒤)에서만 호출하고, 사이드카는 이 메시지가 아니면 승인을 받지 않는다.
+    /// 그래서 crate 밖에 열지 않고, 호출이 그 한 곳뿐임을 `tests/channels.rs` 가 소스로 강제한다
+    pub(crate) fn approve(&self, kind: ApprovalKind, repo_id: &str, fingerprint: &str) {
         let _ = self.write(&approve_message(kind, repo_id, fingerprint));
     }
 
@@ -146,7 +153,8 @@ fn handle_message(app: &AppHandle, stdin: &Arc<Mutex<ChildStdin>>, pending: &Pen
             if mirror.apply_message(&msg) {
                 // 사라졌거나 대상이 바뀐 저장소의 로그 커서(열린 git 프로세스)를 닫는다
                 if let Some(router) = app.try_state::<Router>() {
-                    router.on_mirror_changed();
+                    // 이 스레드는 tokio 런타임 밖이다 — 서비스 정리가 태스크를 만질 수 있어 앱 런타임에 들어가서 부른다
+                    in_runtime_of(tauri::async_runtime::handle().inner(), || router.on_mirror_changed());
                 }
             } else {
                 eprintln!("[sidecar] repos 메시지를 적용하지 않았다(모양이 틀렸거나 오래된 gen)");

@@ -8,9 +8,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::future::Future;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
+use antler_lib::git::exec::{GitExecutor, LocalExecutor};
+use antler_lib::git::fetch::confirm_text::ConfirmBox;
+use antler_lib::git::fetch::service::{ApprovalKind, FetchHost, FetchService, HostEvent};
+use antler_lib::git::log_service::NoteOp;
 use antler_lib::git::scope::{log_args, parse_scope};
 use antler_lib::mirror::{MirrorRepo, RepoMirror};
 use antler_lib::router::{Routed, Router, RUST_CHANNELS};
@@ -23,6 +28,14 @@ fn isolate() {
     std::env::set_var("GIT_CONFIG_GLOBAL", global);
     std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
     std::env::set_var("GCM_INTERACTIVE", "never");
+    // git:fetch 시나리오가 루프백 서버(127.0.0.1)에 붙는다 — 사용자의 프록시·자격 증명 환경을 타지 않게 한다
+    for k in [
+        "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_ALLOW_PROTOCOL",
+        "GIT_TERMINAL_PROMPT",
+    ] {
+        std::env::remove_var(k);
+    }
+    std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
 }
 
 fn repo_root() -> PathBuf {
@@ -774,4 +787,170 @@ async fn blame_ignore_revs_file_의_내용이_응답으로_새지_않는다() {
     assert!(!env.to_string().contains("SECRETTOKEN"), "목록 파일 내용이 응답에 섞였다: {env}");
     // 목록을 끄고 다시 돌려 blame 자체는 성공한다
     assert_eq!(env["ok"], true, "{env}");
+}
+
+// ── git:fetch ──────────────────────────────────────────
+
+/// 확인 창 응답(`reply`)·확인 중 실행할 git(`during`)을 정하고, 확인 횟수·변경 알림·승인 요청을 세는 호스트
+#[derive(Default)]
+struct RigState {
+    confirms: AtomicUsize,
+    changed: AtomicUsize,
+    approvals: Mutex<Vec<String>>,
+    reply: Mutex<Option<i64>>,
+    during: Mutex<Option<(PathBuf, Vec<String>)>>,
+}
+
+#[derive(Clone, Default)]
+struct RigHost(Arc<RigState>);
+
+impl FetchHost for RigHost {
+    fn emit(&self, event: HostEvent) {
+        if matches!(event, HostEvent::RepoChanged(_)) {
+            self.0.changed.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn confirm(&self, _repo_id: &str, _confirm: &ConfirmBox) -> impl Future<Output = Option<i64>> + Send {
+        let state = self.0.clone();
+        async move {
+            state.confirms.fetch_add(1, Ordering::SeqCst);
+            // 확인 창이 떠 있는 동안 저장소 설정이 바뀌는 경우(검사와 실행 사이)
+            if let Some((dir, args)) = state.during.lock().unwrap().clone() {
+                assert!(raw_git(&dir).args(&args).status().unwrap().success(), "during: {args:?}");
+            }
+            *state.reply.lock().unwrap()
+        }
+    }
+
+    fn approve(&self, kind: ApprovalKind, _repo_id: &str, _fingerprint: &str) {
+        self.0.approvals.lock().unwrap().push(kind.as_str().to_string());
+    }
+
+    fn note(&self, _op: NoteOp, _repo_id: &str) {}
+}
+
+/// 401 로만 답하는 루프백 서버(연결마다 스레드 — git 이 미리 연결만 열어 두는 경우에 막히지 않게). 끝나면 `stop` 으로 멈춘다
+fn auth_server() -> (u16, Arc<AtomicBool>, std::thread::JoinHandle<()>) {
+    use std::io::{Read, Write};
+    const RESPONSE: &[u8] = b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"x\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flag = stop.clone();
+    let handle = std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if flag.load(Ordering::SeqCst) {
+                return;
+            }
+            let Ok(mut s) = stream else { continue };
+            std::thread::spawn(move || {
+                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                let mut buf = [0u8; 4096];
+                let mut seen = Vec::new();
+                while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut buf) {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => seen.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let _ = s.write_all(RESPONSE);
+            });
+        }
+    });
+    (port, stop, handle)
+}
+
+/// TS 골든(`fetchState`)과 같은 규칙: 시각은 유무만, 오류 문구는 유무와 file 전송 안내 여부만
+fn fetch_state(data: &Value) -> Value {
+    json!({
+        "fetching": data["fetching"],
+        "lastOk": !data["lastOkAt"].is_null(),
+        "error": !data["error"].is_null(),
+        "fileHint": data["error"].as_str().is_some_and(|e| e.starts_with("자동 fetch 는 로컬 경로(file) remote")),
+        "blocked": data["blocked"],
+        "authPaused": data["authPaused"],
+        "needsManual": data["needsManual"],
+        "noRemote": data["noRemote"],
+    })
+}
+
+/// 시나리오의 git 단계(`{in, git}`)를 실행한다. `{port}` 는 401 서버 포트로 바꾼다
+fn run_step_git(step: &Value, origin: &Path, repo: &Path, port: u16) {
+    let dir = if step["in"] == "origin" { origin } else { repo };
+    let args: Vec<String> = step["git"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().replace("{port}", &port.to_string())).collect();
+    assert!(raw_git(dir).args(&args).status().unwrap().success(), "git {args:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn git_fetch_시나리오가_ts_골든과_같다() {
+    let scenarios = read_json("tests/fixtures/repos/fetch.scenarios.json");
+    let golden = read_json("tests/golden/channels/fetch.json");
+    let scenarios = scenarios["scenarios"].as_array().expect("scenarios");
+    let golden = golden["scenarios"].as_array().expect("golden scenarios");
+    assert_eq!(scenarios.len(), golden.len(), "시나리오 수가 골든과 다르다 — UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts 로 골든을 다시 만든다");
+
+    let tmp = TempDir::new("fetchgold");
+    let mut diffs = Vec::new();
+    for (n, (sc, g)) in scenarios.iter().zip(golden).enumerate() {
+        let name = sc["name"].as_str().unwrap();
+        assert_eq!(g["name"], sc["name"], "{name}: 골든의 시나리오 순서가 다르다");
+        let dir = tmp.0.join(format!("s{n}"));
+        fs::create_dir_all(&dir).unwrap();
+        // 원격(basic.fi) 과 그 복제본(경로 URL — file 전송)
+        let origin = import(&dir, "basic");
+        let repo = dir.join("repo");
+        assert!(raw_git(&dir).args(["clone", "-q"]).arg(&origin).arg(&repo).status().unwrap().success(), "clone");
+        let server = (sc.get("server") == Some(&json!("auth401"))).then(auth_server);
+        let port = server.as_ref().map_or(0, |s| s.0);
+
+        let mirror = mirror_of(&[("r", repo.as_path())]);
+        let router = Router::new(true, false, mirror.clone());
+        let host = RigHost::default();
+        let make_runner = |_: &antler_lib::mirror::Target| Arc::new(GitExecutor::Local(LocalExecutor::default()));
+        router.set_fetch(Arc::new(FetchService::new(host.clone(), mirror, make_runner, Some(dir.join("no-hooks").to_string_lossy().into_owned()))));
+
+        let mut got = Vec::new();
+        for step in sc["steps"].as_array().unwrap() {
+            if step.get("git").is_some() {
+                run_step_git(step, &origin, &repo, port);
+                continue;
+            }
+            let f = &step["fetch"];
+            *host.0.reply.lock().unwrap() = match f.get("confirm") {
+                None => Some(2),
+                Some(Value::Null) => None,
+                Some(v) => v.as_i64(),
+            };
+            *host.0.during.lock().unwrap() = f.get("during").map(|d| {
+                let args = d["git"].as_array().unwrap().iter().map(|a| a.as_str().unwrap().to_string()).collect();
+                (if d["in"] == "origin" { origin.clone() } else { repo.clone() }, args)
+            });
+            host.0.confirms.store(0, Ordering::SeqCst);
+            host.0.changed.store(0, Ordering::SeqCst);
+            host.0.approvals.lock().unwrap().clear();
+            // manual 은 renderer 가 보낸 값 그대로(없으면 빈 자리 표식)다 — 라우터가 정확히 true 만 참으로 읽는다
+            let manual = f.get("manual").cloned().unwrap_or_else(|| json!({ antler_lib::router::UNDEFINED_ARG: true }));
+            let env = envelope(router.route("git:fetch", &json!(["r", manual])).await);
+            assert_eq!(env["ok"], true, "{name}: {env}");
+            got.push(json!({
+                "manual": f.get("manual").cloned().unwrap_or(Value::Null),
+                "confirm": f.get("confirm").cloned().unwrap_or(Value::Null),
+                "state": fetch_state(&env["data"]),
+                "confirms": host.0.confirms.load(Ordering::SeqCst),
+                "changed": host.0.changed.load(Ordering::SeqCst),
+                "approvals": *host.0.approvals.lock().unwrap(),
+            }));
+        }
+        router.shutdown();
+        if let Some((port, stop, handle)) = server {
+            stop.store(true, Ordering::SeqCst);
+            let _ = std::net::TcpStream::connect(("127.0.0.1", port));
+            handle.join().unwrap();
+        }
+        if Value::Array(got.clone()) != g["steps"] {
+            diffs.push(format!("{name}: 골든과 다르다\n  Rust: {}\n  TS  : {}", short(&Value::Array(got)), short(&g["steps"])));
+        }
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
 }

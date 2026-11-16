@@ -1,5 +1,5 @@
 //! 저장소 미러. 라우터가 저장소 경로·환경을 얻는 **유일한** 출처다. 설정을 쓰는 쪽은 Node 사이드카(main 의 ConfigStore)이고,
-//! 사이드카가 시작 때(ready 전)와 목록이 바뀔 때마다 보내는 `{t:"repos", gen, repos:[{id,kind,path,distro?}]}` 로 채운다
+//! 사이드카가 시작 때(ready 전)와 목록이 바뀔 때마다 보내는 `{t:"repos", gen, repos:[{id,kind,path,name,distro?}]}` 로 채운다
 //! (`src/sidecar/protocol.ts`·`mirror.ts`). renderer 가 보낸 경로·kind·배포판은 어디서도 쓰지 않는다.
 
 use std::collections::HashMap;
@@ -60,6 +60,8 @@ pub enum Resolved {
 struct Inner {
     gen: u64,
     repos: HashMap<String, MirrorRepo>,
+    /// 저장소 id → 사용자가 붙인 이름(확인 창 제목에만 쓴다. 비밀이 아니고 경로·kind 판정에는 쓰지 않는다)
+    names: HashMap<String, String>,
 }
 
 #[derive(Clone, Default)]
@@ -70,21 +72,36 @@ pub struct RepoMirror {
 impl RepoMirror {
     /// 미러를 통째로 바꾼다. 이미 받은 것보다 gen 이 작거나 같으면 버린다(뒤처진 메시지). 바꿨으면 true
     pub fn apply(&self, gen: u64, repos: Vec<MirrorRepo>) -> bool {
+        self.apply_named(gen, repos, HashMap::new())
+    }
+
+    fn apply_named(&self, gen: u64, repos: Vec<MirrorRepo>, names: HashMap<String, String>) -> bool {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         if gen <= inner.gen {
             return false;
         }
         inner.gen = gen;
         inner.repos = repos.into_iter().map(|r| (r.id.clone(), r)).collect();
+        inner.names = names;
         true
+    }
+
+    /// 저장소 이름(사이드카가 `name` 을 보냈을 때만)
+    pub fn name(&self, repo_id: &str) -> Option<String> {
+        self.inner.read().unwrap_or_else(PoisonError::into_inner).names.get(repo_id).cloned()
     }
 
     /// 사이드카의 `repos` 메시지(JSON)를 받아 적용한다. 모양이 틀린 메시지는 버리고, 틀린 항목은 그 항목만 뺀다
     pub fn apply_message(&self, msg: &Value) -> bool {
         let Some(gen) = msg.get("gen").and_then(Value::as_u64) else { return false };
         let Some(list) = msg.get("repos").and_then(Value::as_array) else { return false };
-        let repos = list.iter().filter_map(parse_repo).collect();
-        self.apply(gen, repos)
+        let repos: Vec<MirrorRepo> = list.iter().filter_map(parse_repo).collect();
+        let names = list
+            .iter()
+            .filter_map(|v| Some((v.get("id")?.as_str()?.to_string(), v.get("name")?.as_str()?.to_string())))
+            .filter(|(id, _)| repos.iter().any(|r| &r.id == id))
+            .collect();
+        self.apply_named(gen, repos, names)
     }
 
     pub fn resolve(&self, repo_id: &str) -> Resolved {
@@ -262,13 +279,16 @@ mod tests {
     fn 메시지의_틀린_항목만_뺀다() {
         let m = RepoMirror::default();
         let msg = json!({ "t": "repos", "gen": 1, "repos": [
-            { "id": "a", "kind": "local", "path": "/r" },
+            { "id": "a", "kind": "local", "path": "/r", "name": "에이" },
             { "id": 5, "kind": "local", "path": "/r" },
             { "id": "b", "kind": "wsl", "path": "/x", "distro": "U" },
             "x"
         ]});
         assert!(m.apply_message(&msg));
         assert_eq!(m.count(), 2);
+        // 이름은 보낸 저장소에만 있다
+        assert_eq!(m.name("a").as_deref(), Some("에이"));
+        assert_eq!(m.name("b"), None);
         assert!(!m.apply_message(&json!({ "gen": "x", "repos": [] })));
         assert!(!m.apply_message(&json!({ "gen": 9 })));
     }

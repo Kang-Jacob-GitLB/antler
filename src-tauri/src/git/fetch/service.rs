@@ -1,4 +1,4 @@
-//! fetch 상태 기계(`src/main/services/FetchService.ts` 의 이식, GitHub 원격 전용 갈래는 뺐다). 앱에는 아직 연결하지 않았다(PR D).
+//! fetch 상태 기계(`src/main/services/FetchService.ts` 의 이식, GitHub 원격 전용 갈래는 뺐다). 앱에서는 라우터가 [`FetchControl`] 로 부른다(local·WSL 저장소만).
 //!
 //! 이 앱이 저장소에 하는 유일한 쓰기라 흐름을 TS 와 같게 둔다:
 //! - 저장소당 진행 중인 요청은 하나다 — 진행 중이면 같은 [`FetchFuture`] 를 돌려준다(두 번째 호출의 `manual` 은 무시된다. TS 와 같다).
@@ -114,10 +114,11 @@ pub fn approve_message(kind: ApprovalKind, repo_id: &str, fingerprint: &str) -> 
     serde_json::json!({ "t": "fetchApprove", "kind": kind.as_str(), "repoId": repo_id, "fingerprint": fingerprint })
 }
 
-/// 사이드카의 fetchPrefs 를 받는 곳(Tauri 관리 상태로 등록한다 — PR D 가 서비스의 [`FetchService::apply_prefs`] 를 연결한다)
+/// 사이드카의 fetchPrefs 를 받는 곳(Tauri 관리 상태로 등록한다). **`Sidecar::spawn` 보다 먼저 등록해야 한다** — 첫 fetchPrefs 는 ready 전에 한 번만 오고
+/// 같은 내용이면 다시 오지 않는다(`lib.rs` 의 등록 순서와 `tests/channels.rs` 가 강제한다)
 pub struct FetchPrefsSink(pub Box<dyn Fn(FetchPrefs) + Send + Sync>);
 
-/// 서비스가 바깥에 기대는 것. 앱에서는 Tauri 이벤트·네이티브 확인 창·사이드카 쓰기로 구현한다(PR D)
+/// 서비스가 바깥에 기대는 것. 앱에서는 Tauri 이벤트·네이티브 확인 창·사이드카 쓰기로 구현한다(`fetch_host.rs`)
 pub trait FetchHost: Send + Sync + 'static {
     fn emit(&self, event: HostEvent);
 
@@ -131,7 +132,7 @@ pub trait FetchHost: Send + Sync + 'static {
     /// 사이드카의 RepoService 에 알린다(`{t:"note"}`)
     fn note(&self, op: NoteOp, repo_id: &str);
 
-    /// 확인 창 제목에 쓸 저장소 이름(TS `config.repo(id)?.name ?? id`). 미러에는 이름이 없어 호스트가 안다. 없으면 id 를 쓴다
+    /// 확인 창 제목에 쓸 저장소 이름(TS `config.repo(id)?.name ?? id`). 앱은 미러의 `name` 에서 꺼낸다. 없으면 id 를 쓴다
     fn repo_name(&self, _repo_id: &str) -> Option<String> {
         None
     }
@@ -688,6 +689,21 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
         true
     }
 
+    /// 미러가 바뀐 직후: 더 이상 Rust 가 맡지 않는(미러에서 사라졌거나 다른 환경으로 바뀐) 저장소의 상태를 비운다
+    pub fn sync_mirror(&self) {
+        let gone: Vec<String> = {
+            let core = lock(&self.inner.core);
+            let mut ids: Vec<&String> = core.states.keys().chain(core.inflight.keys()).chain(core.overlay_approvals.keys()).chain(core.overlay_trusted.keys()).collect();
+            ids.extend(core.active.iter());
+            ids.sort();
+            ids.dedup();
+            ids.into_iter().filter(|id| !self.inner.is_rust_repo(id)).cloned().collect()
+        };
+        for id in gone {
+            self.forget(&id);
+        }
+    }
+
     pub fn dispose(&self) {
         let mut core = lock(&self.inner.core);
         if let Some(t) = core.timer.take() {
@@ -697,6 +713,46 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
         for running in core.inflight.values() {
             running.token.cancel();
         }
+    }
+}
+
+/// 라우터가 서비스를 다루는 입구. 서비스는 호스트·실행기 타입에 제네릭이라(`FetchHost::confirm` 이 `impl Future` 라 dyn 이 안 된다)
+/// 라우터(`State<Router>`)가 제네릭이 되지 않게 이 객체 안전한 포트로만 부른다.
+///
+/// **tokio 런타임 안에서 불러야 하는 것**: `fetch`·`set_active`·`on_focus`·`apply_prefs`(예약이 태스크를 만든다). 사이드카 읽기 스레드·창 이벤트 스레드에서 부를 때는
+/// 앱이 런타임에 들어간 뒤 부른다(`router::in_runtime_of`)
+pub trait FetchControl: Send + Sync + 'static {
+    fn fetch(&self, repo_id: &str, manual: bool) -> FetchFuture;
+    fn set_active(&self, repo_id: Option<&str>);
+    fn on_focus(&self);
+    fn apply_prefs(&self, prefs: FetchPrefs) -> bool;
+    fn sync_mirror(&self);
+    fn dispose(&self);
+}
+
+impl<H: FetchHost, R: GitRunner + Send + 'static> FetchControl for FetchService<H, R> {
+    fn fetch(&self, repo_id: &str, manual: bool) -> FetchFuture {
+        FetchService::fetch(self, repo_id, manual)
+    }
+
+    fn set_active(&self, repo_id: Option<&str>) {
+        FetchService::set_active(self, repo_id);
+    }
+
+    fn on_focus(&self) {
+        FetchService::on_focus(self);
+    }
+
+    fn apply_prefs(&self, prefs: FetchPrefs) -> bool {
+        FetchService::apply_prefs(self, prefs)
+    }
+
+    fn sync_mirror(&self) {
+        FetchService::sync_mirror(self);
+    }
+
+    fn dispose(&self) {
+        FetchService::dispose(self);
     }
 }
 

@@ -1,8 +1,12 @@
 //! 채널 라우터. renderer 의 `antler_invoke` 를 Rust 가 직접 처리할지 Node 사이드카로 넘길지 정한다.
 //!
-//! Rust 가 처리하는 것: [`RUST_CHANNELS`] 에 있는 채널이고, 인자의 저장소 id 가 미러([`RepoMirror`])에 있고 kind 가 local·wsl 이고,
+//! Rust 가 처리하는 것: [`RUST_CHANNELS`](`git:fetch` 포함 — fetch 가드·상태 기계는 `git::fetch`)에 있는 채널이고, 인자의 저장소 id 가 미러([`RepoMirror`])에 있고 kind 가 local·wsl 이고,
 //! 환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아닐 때. 그 밖에는 전부 사이드카가 지금까지처럼 처리한다
 //! (미러에 없는 id 의 오류 문구도 사이드카가 만든다). `ANTLER_RUST_GIT=0` 은 즉시 되돌리는 스위치다.
+//!
+//! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
+//! `ANTLER_RUST_FETCH_KINDS=local,wsl` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
+//! 스위치가 꺼져 있으면 env 도 서비스도 없다 — 사이드카가 전부 맡는다(이중 fetch 없음).
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
@@ -24,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
 use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, WSL_LIMIT};
 use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, WslExecutor};
+use crate::git::fetch::service::{FetchControl, FetchPrefs};
 use crate::git::file_channels::{
     compare, estimate_compare_bytes, estimate_diff_bytes, file_blame, file_diff, file_history, parse_compare, BlameRequest, DiffRequest, HistoryRequest,
 };
@@ -33,7 +38,22 @@ use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
 /// (`tests/channels.rs` 가 `tests/golden/exec/channels.json` 으로 강제한다)
-pub const RUST_CHANNELS: &[&str] = &["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame"];
+pub const RUST_CHANNELS: &[&str] = &["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame", "git:fetch"];
+
+/// Rust 가 fetch 를 맡는 소스 종류(사이드카 env `ANTLER_RUST_FETCH_KINDS` 의 값. `src/sidecar/fetchOwns.ts` 가 읽는다)
+pub const RUST_FETCH_KINDS: &str = "local,wsl";
+
+/// 사이드카를 띄울 때 넣을 `ANTLER_RUST_FETCH_KINDS` 값. 라우터가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 없다 — 사이드카가 fetch 를 전부 맡는다
+pub fn sidecar_fetch_kinds(router_enabled: bool) -> Option<&'static str> {
+    router_enabled.then_some(RUST_FETCH_KINDS)
+}
+
+/// 주어진 tokio 런타임 안에서 `f` 를 부른다. 서비스의 예약·fetch 시작은 태스크를 만들어서 런타임 밖 스레드(사이드카 읽기 스레드·창 이벤트)에서는 패닉한다 —
+/// 그 스레드들은 이 함수로 앱 런타임에 들어간 뒤 라우터를 부른다
+pub fn in_runtime_of<T>(handle: &tokio::runtime::Handle, f: impl FnOnce() -> T) -> T {
+    let _guard = handle.enter();
+    f()
+}
 
 /// bridge 의 `encodeArgs` 가 인자 배열의 빈 자리(undefined)에 넣는 표식(`src/sidecar/protocol.ts` 의 `UNDEFINED_ARG`)
 pub const UNDEFINED_ARG: &str = "__antlerUndefinedArg";
@@ -207,6 +227,10 @@ pub struct Router {
     diff_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
     logs: LogService,
     rust_handled: AtomicU64,
+    /// fetch 서비스(앱이 켜져 있을 때만 주입한다). 없으면 fetch 채널은 오류다
+    fetch: Mutex<Option<Arc<dyn FetchControl>>>,
+    /// 서비스가 주입되기 전에 도착한 fetchPrefs(마지막 것만). 주입될 때 적용한다
+    pending_prefs: Mutex<Option<FetchPrefs>>,
 }
 
 impl Router {
@@ -222,6 +246,48 @@ impl Router {
             diff_cache: Arc::new(Mutex::new(LruCache::new(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES))),
             logs: LogService::new(mirror),
             rust_handled: AtomicU64::new(0),
+            fetch: Mutex::default(),
+            pending_prefs: Mutex::default(),
+        }
+    }
+
+    /// 스위치가 켜져 있는가(`ANTLER_RUST_GIT` 이 0 이 아니다)
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn fetch_port(&self) -> Option<Arc<dyn FetchControl>> {
+        self.fetch.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// fetch 서비스를 주입한다. 앞서 도착해 있던 fetchPrefs 가 있으면 적용한다. 스위치가 꺼져 있으면 주입하지 않는다(이중 fetch 방지)
+    pub fn set_fetch(&self, service: Arc<dyn FetchControl>) {
+        if !self.enabled {
+            return;
+        }
+        *self.fetch.lock().unwrap_or_else(PoisonError::into_inner) = Some(service.clone());
+        if let Some(prefs) = self.pending_prefs.lock().unwrap_or_else(PoisonError::into_inner).take() {
+            service.apply_prefs(prefs);
+        }
+    }
+
+    /// 사이드카의 fetchPrefs 를 서비스에 적용한다(서비스가 아직 없으면 마지막 것을 보관한다). 런타임 안에서 불러야 한다([`in_runtime_of`])
+    pub fn apply_fetch_prefs(&self, prefs: FetchPrefs) {
+        if !self.enabled {
+            return;
+        }
+        match self.fetch_port() {
+            Some(service) => {
+                service.apply_prefs(prefs);
+            }
+            None => *self.pending_prefs.lock().unwrap_or_else(PoisonError::into_inner) = Some(prefs),
+        }
+    }
+
+    /// 창이 포커스를 얻었다 — 활성 저장소의 자동 fetch 가 밀렸으면 바로 한다. 런타임 안에서 불러야 한다
+    pub fn fetch_on_focus(&self) {
+        if let Some(service) = self.fetch_port() {
+            service.on_focus();
         }
     }
 
@@ -247,11 +313,19 @@ impl Router {
     /// 미러가 바뀐 직후 불린다 — 사라졌거나 대상이 바뀐 저장소의 로그 커서를 닫는다
     pub fn on_mirror_changed(&self) {
         self.logs.sync_mirror();
+        // 사라졌거나 Rust 가 맡지 않게 된 저장소의 fetch 상태를 비운다
+        if let Some(service) = self.fetch_port() {
+            service.sync_mirror();
+        }
     }
 
     /// 앱 종료: 열려 있는 로그 커서(git 프로세스)를 모두 닫는다
     pub fn shutdown(&self) {
         self.logs.close_all();
+        // 진행 중인 fetch 를 끊는다(git 프로세스가 끝나기를 기다리지는 않는다 — 종료 때 Job 이 정리한다)
+        if let Some(service) = self.fetch_port() {
+            service.dispose();
+        }
     }
 
     /// 열려 있는 로그 커서 수(테스트·확인용)
@@ -288,6 +362,13 @@ impl Router {
                 _ => None,
             };
             self.logs.close_others(active);
+            // 자동 fetch 대상. Rust 가 맡는 저장소(미러에 있고 local·wsl)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
+            // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
+            if self.enabled {
+                if let Some(service) = self.fetch_port() {
+                    service.set_active(active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))));
+                }
+            }
             return Routed::Sidecar;
         }
         if !RUST_CHANNELS.contains(&channel) {
@@ -302,6 +383,7 @@ impl Router {
             "git:commit" => self.git_commit(&args).await,
             "git:log" => self.git_log(&args).await,
             "git:compare" | "git:fileDiff" | "git:fileHistory" | "git:blame" => self.git_file_channel(channel, &args).await,
+            "git:fetch" => self.git_fetch(&args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -372,6 +454,32 @@ impl Router {
         drop(reg);
         Routed::Done(match result.and_then(|page| serde_json::to_value(&page).map_err(|e| crate::git::exec::ExecError::Other { message: e.to_string() }.into())) {
             Ok(page) => ok_env(page),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    /// `git:fetch(repoId, manual)`. `manual` 은 정확히 `true` 일 때만 참이다(`handlers.ts` 의 `manual === true`) — renderer 가 주장하는 값이라 다른 모양은 모두 자동 fetch 다.
+    /// 저장소의 경로·kind 는 미러에서만 얻고(서비스가 다시 미러로 푼다), 미러에 없거나 ssh·github 면 사이드카가 처리한다.
+    /// local·wsl 이면 **절대 사이드카로 보내지 않는다** — 사이드카는 그 저장소를 맡지 않아(`ANTLER_RUST_FETCH_KINDS`) 보내면 오류가 나고, 보내서 둘이 fetch 하는 길도 없어야 한다
+    async fn git_fetch(&self, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        match self.mirror.resolve(repo_id) {
+            Resolved::Rust(_) => {}
+            Resolved::Sidecar => {
+                self.note("git:fetch", "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        }
+        let Some(service) = self.fetch_port() else {
+            return Routed::Done(err_env("fetch 서비스가 준비되지 않았습니다", "ERROR"));
+        };
+        let manual = matches!(args.get(1), Some(Some(Value::Bool(true))));
+        self.note("git:fetch", "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let status = service.fetch(repo_id, manual).await;
+        Routed::Done(match to_value(&status) {
+            Ok(data) => ok_env(data),
             Err(e) => err_env(&e.to_string(), e.envelope_code()),
         })
     }
