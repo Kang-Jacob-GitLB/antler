@@ -295,7 +295,7 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
 ## fetch 가드 판정 로직(Phase 3, `src-tauri/src/git/fetch/`)
 
 fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목록·URL 판정·확인 창 표시·오류 분류)를 **1:1 로** 옮긴다 — 더 엄격하게도, 느슨하게도 바꾸지 않는다(바꾸려면 TS 에 먼저 고친다).
-판정 로직(이 절)은 git 을 실행하지 않는다. 실행(`git config`·`remote`·`fetch`)은 바로 아래 "fetch 실행"이고, 둘 다 앱에는 아직 연결하지 않았다. 상태 기계(진행·큐·백오프·승인 저장)·라우팅은 뒤 단계다.
+판정 로직(이 절)은 git 을 실행하지 않는다. 실행(`git config`·`remote`·`fetch`)은 바로 아래 "fetch 실행"이고, 둘 다 앱에는 아직 연결하지 않았다. 상태 기계(진행·큐·백오프·승인 저장)는 아래 "fetch 상태 기계"(`service.rs`, PR C)이고, 라우팅(앱 연결)은 PR D 다.
 
 - **파일**: `guard.rs`(`fetch.ts` 의 순수 함수), `confirm_text.rs`(`confirmText.ts`), `pattern.rs`(허용 목록 매처), `special_table.rs`·`lowercase_table.rs`(생성 파일).
 - **허용 목록은 regex 크레이트 없이** TS 정규식 소스 문자열(`ALLOWED_KEY_SOURCES`)을 그대로 두고 `pattern.rs` 의 작은 매처가 해석한다.
@@ -316,7 +316,7 @@ fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목�
   `build.yml` 의 판도 함께 올린다. 다른 판의 Node 로 로컬 테스트를 돌리면 이 골든 비교만 실패한다.
 - **매처 메모리**: `pattern.rs` 는 입력을 `Vec<char>` 로 풀지 않고 바이트 오프셋 비트셋으로 판정한다(악성 설정의 수천만 자 키에서도 입력 크기의 1/8 짜리 집합 몇 개뿐).
 - **뒤 단계가 따를 API 계약**(`guard.rs`): 범위별 설정 읽기는 `ScopeWalk::start()` → `scope()` 실행 → `feed(…)` 가 다음 `WalkStep::Read` 나 `Done` 을 돌려주는 값 이동 방식이라 순서를 어길 수 없고,
-  `http.followRedirects` 는 `FollowRedirects` 열거형, `core.hooksPath` 는 `hooks_path_for` 가 만드는 `HooksPath`(빈 값·상대 경로 불가, 로컬은 존재하는 빈 디렉터리 — 테스트용 `hooks_path_with` 는 `doc(hidden)`)다.
+  `http.followRedirects` 는 `FollowRedirects` 열거형, `core.hooksPath` 는 `hooks_path_for` 가 만드는 `HooksPath`(빈 값·상대 경로 불가, 로컬은 존재하는 빈 디렉터리 — 플랫폼을 주입하는 `hooks_path_for_test` 는 `doc(hidden)` 테스트 전용이다)다.
   TS 보다 엄격한 유일한 지점이다(TS 는 빈 값·상대 경로를 거부하지 않는다). 훅 경로는 앱이 정하는 값이라 정상 경로에는 영향이 없고,
   "Rust 가 TS 보다 넓게 허용하지 않는다"는 원칙에 맞다. 그래서 `fetchConfigArgs` 골든 중 `hooksPath: ""` 9건은 값 비교 대신 빈 값 거부를 따로 확인한다.
 - 알려진 차이: TS `ALLOWED_VALUES[key]` 는 일반 객체 조회라 키가 `constructor`·`__proto__` 면 `TypeError` 를 던진다(git 키는 점이 있어야 해 실제로는 오지 않는다). Rust 는 허용 목록에 없는 키로 본다.
@@ -330,7 +330,7 @@ local·WSL 저장소만 다룬다. ssh·github fetch 와 `filter`·`FollowRedire
 - **env 는 닫힌 타입으로만**: local 은 `GIT_ENV` 위에 덮어쓰고, WSL 은 `env K=V…` 순서를 JS `{...GIT_ENV, ...fetchEnv}` 와 같게(이미 있는 키는 제자리에서 값 교체, 새 키는 fetch 환경 순서로 뒤에) 만든다 —
   `tests/golden/exec/env.json` 의 `fetch` 가 TS `runFetch` 가 실제로 spawn 에 준 argv·환경(local)과 wsl.exe argv 를 담고 `tests/exec.rs` 가 비교한다.
 - **훅 경로는 run.rs 가 실행기 종류로 만든다**(호출자가 `HooksPath` 를 넘길 수 없다): local 은 앱 소유 빈 디렉터리(드라이브 문자 경로, Windows 에서 없으면 거부), WSL 은 `/dev/null` — Windows 경로가 WSL 로 갈 수 없다.
-  경로는 `canonicalize` 하지 않는다(Windows 에서 `\\?\` 가 붙는다). `hooks_path_for` 는 `//` 로 시작하거나 `/??/` 가 든 경로(UNC·NT 네임스페이스)를 거부한다(TS 보다 엄격한 두 번째 지점. 앱이 정하는 값이라 정상 경로에는 영향이 없다).
+  경로는 `canonicalize` 하지 않는다(Windows 에서 `\\?\` 가 붙는다). `hooks_path_for` 는 `//` 로 시작하거나 `/??/` 가 든 경로(UNC·NT 네임스페이스)를 거부한다(TS 보다 엄격한 두 번째 지점. 앱이 정하는 값이라 정상 경로에는 영향이 없다). Windows 에서는 **드라이브 문자 경로(`X:/`)만** 인정한다 — `/tmp/no-hooks` 같은 루트 상대 경로는 git.exe 가 현재 드라이브 기준으로 풀어 저장소 드라이브의 경로가 되므로 거부한다(세 번째 지점. 그 밖의 플랫폼은 `/…` 만 인정).
 - **인자 순서**: 모든 `-c` 는 `fetch` 앞, `--refmap=`(빈 값) 필수, 같은 `-c` 키 중복 없음, remote 이름은 `--` 뒤와 refspec 안에만. 옛 git 이 `--no-write-fetch-head` 를 모르면 그 옵션 없이 한 번 더 한다.
 - **`GIT_ASKPASS=''` 는 실제 git 에 빈 값으로 도착한다**(local·WSL 실측: 환경에 `GIT_ASKPASS=` 가 보이고, 저장소 설정의 `core.askpass` 스크립트가 실행되지 않는다 — fetch 환경이 없는 대조군에서는 실행된다).
   git 은 `GIT_ASKPASS` 가 비어 있으면 `core.askpass` 로 물러서지 않는다. 확인은 `tests/fetch.rs` 의 `위험9_…`(alias 셸이 본 자식 환경과 효과 둘 다 — git.exe 자신의 `getenv` 를 직접 읽은 것은 아니다).
@@ -338,10 +338,64 @@ local·WSL 저장소만 다룬다. ssh·github fetch 와 `filter`·`FollowRedire
   Windows 에서 부모가 `Git_Pager` 처럼 다른 철자로 갖고 있으면 자식 환경의 이름이 그 철자로 남지만 값은 실행기 것이다(git.exe 는 대소문자를 구분하지 않아 문제없고, MSYS 셸 자식만 이름을 철자대로 본다).
 - git 버전은 실행기별(`cache_key`: local 은 실행 파일, WSL 은 배포판)로 한 번만 읽고 실패도 기억한다(`GitVersions`).
 - **확인 창 인자**: TS `fetchConfirmOptions(name, items)`(순수 함수, `confirmText.ts`; `handlers.ts` 는 이것을 부르기만 한다 — 동작 불변은 `goldenFetch.test.ts` 가 분리 전 인라인 코드의 사본과 비교해 증명)와
-  Rust `fetch_confirm_box` 가 같은 인자를 만든다. 사이드카 shim 이 만드는 `MessageBoxArg`(본문 = message + 빈 줄 + detail, `defaultId` 는 가지 않는다)는 shim 을 실제로 불러 얻은 `confirmBox.json` 골든으로 고정한다.
+  Rust `fetch_confirm_plan` 이 같은 인자를 만든다. 사이드카 shim 이 만드는 `MessageBoxArg`(본문 = message + 빈 줄 + detail, `defaultId` 는 가지 않는다)는 shim 을 실제로 불러 얻은 `confirmBox.json` 골든으로 고정한다.
 - **테스트**: `src-tauri/tests/fetch.rs`(실제 git, 127.0.0.1 가짜 서버만). TS `tests/fetch.test.ts` 의 모든 `it` 이 `tests/golden/fetch/test-map.json` 에 있어야 하고(vitest 가 강제),
-  각 항목은 Rust 테스트 이름이거나 `N/A: 사유`다. `fetcher.fetch(...)` 를 거치는 시나리오는 검사·실행 부분만 옮겼고 상태 기계(진행 합치기·확인→재검사 TOCTOU·승인 저장·백오프·authPaused)는 다음 단계(PR C)다.
+  각 항목은 Rust 테스트 이름이거나 `N/A: 사유`다. `fetcher.fetch(...)` 를 거치는 시나리오는 이 파일에서는 검사·실행 부분만 옮겼고, 상태 기계(진행 합치기·확인→재검사 TOCTOU·승인 저장·백오프·authPaused)는 `fetch_service.rs`(PR C)가 옮겼다 — 지금 표는 71개 전부 이식이고 N/A 가 없다.
   전역 git 설정 파일(커밋된 `tests/gitconfig`)은 고치지 않는다 — 전역 값이 필요한 시나리오는 가짜 실행기의 `--global` 응답으로 준다. WSL 의 git 은 격리를 받지 않으므로 `/tmp` 저장소로만 돌린다.
+
+### fetch 상태 기계(`service.rs`, 앱에는 아직 연결하지 않음 — PR C)
+
+`FetchService.ts` 의 이식이다(GitHub 원격 전용 갈래는 사이드카에 남는다). 앱에 연결하는 라우팅은 PR D 다. 외부 의존은 `FetchHost` 트레이트(`emit`·`confirm`·`approve`·`note`·`repo_name`)로 주입하고,
+git 은 `GitRunner` 로 주입한다(운영은 `GitExecutor`, 주기·백오프·60초 검증은 프로세스를 띄우지 않는 가짜).
+
+- **진행·큐**: 저장소당 진행 중인 요청은 하나(`fetch()` 가 같은 `FetchFuture`(`Shared`)를 돌려준다 — 두 번째 호출의 `manual` 은 TS 처럼 무시된다). 본체는 spawn 한 태스크라 기다리는 쪽이 사라져도 끝까지 가고,
+  패닉하면 `fetching=false` 로 되돌려 fetch 하지 않은 채 끝난다. 환경(`source_key`)마다 전용 큐 슬롯이 하나(`ProcessQueue::new(1)`, TS `fetchQueue`)다.
+- **60초 제한은 요청 시점부터**다 — 큐에서 기다린 시간과 확인 창이 떠 있던 시간을 포함한다(TS 와 같다. 확인 창은 취소되지 않고, 닫힌 뒤 다음 git 호출이 취소를 보고 "시간 초과(60초)"로 끝난다).
+- **흐름**: 검사 → remote URL 거부(확인 없음) → 위험 설정이면 수동 fetch 에서만 확인 → **실행 직전 재검사**(TOCTOU: 확인 중에 위험 항목이 늘었거나 remote URL 이 거부 대상이 되면 멈춘다) → fetch.
+  ref 시그니처(`for-each-ref`·`symbolic-ref`·`rev-parse HEAD` 의 원문 — TS 의 sha1 요약과 같은 동등 비교)가 달라졌으면 **note(`fetchChanged`)를 먼저, 그다음 `repo:changed`** 를 낸다.
+- **실패 분류**: 인증·허용 안 된 전송은 `authPaused`(수동 새로고침 전까지 자동 중단), 네트워크·시간 초과는 지수 백오프(주기×2ⁿ, 30분 상한), 수동 fetch 로 승인되지 않은 http(s) remote 의 자동 인증 실패는 `needsManual`.
+  오류 문구는 300 UTF-16 단위로 자른다(서로게이트가 쪼개지면 U+FFFD — `slice_utf16_lossy`).
+- **자동 fetch**: 활성 저장소만. 선택 3초 뒤 → 주기마다, 창 포커스 때 마지막 시도가 주기보다 오래됐으면 즉시. 시계는 `tokio::time::Instant` 라 `start_paused` 테스트가 움직인다.
+  **첫 `fetchPrefs` 를 받기 전에는 주기를 몰라 예약하지 않는다**(기본값 5분을 정하는 곳은 사이드카 한 곳이다).
+- **확인 창 응답 해석은 타입에 묶여 있다**(`confirm_text.rs`): `fetch_confirm_plan` 이 `ConfirmPlan::Blocked`(항목이 12개를 넘어 "닫기"만 있는 차단 창)·`Ask`(이번만·항상·취소)를 만들고,
+  `decide(응답)` 이 `Decision{Once, Always, Deny}` 를 낸다 — 차단 창은 어떤 응답이든 `Deny`, 확인 창은 0 → `Once`·1 → `Always`·그 밖(취소·실패 `None`)은 `Deny`(TS `handlers.ts` 와 같다).
+  `FetchHost::confirm` 은 눌린 버튼 번호만 돌려주고 허용 여부는 서비스가 `decide` 로만 정한다. 저장소 이름(창 제목)은 미러에 없어 `FetchHost::repo_name`(없으면 id)로 받는다 — **PR D 에서 출처를 정해야 한다**.
+
+#### 승인 저장과 프로토콜
+
+승인(`fetchApprovals` 수동 fetch 로 승인된 remote 지문, `trustedConfigs` "항상 허용"한 위험 설정 지문)은 **main(사이드카의 `ConfigStore`)만 쓴다.** Rust 는 쓰지 않고 부탁만 한다.
+
+| 방향 | 메시지 | 내용 |
+|---|---|---|
+| Node → Rust | `{t:"fetchPrefs", gen, autoFetchMinutes, approvals:{repoId:지문}, trusted:{repoId:지문}}` | 별도 `FetchPrefsSender`(`src/sidecar/fetchPrefs.ts`, gen 은 미러와 따로 1 부터). `config.onChange` 에서 `mirror.push` **다음에**, 시작 때 ready 전에. 같은 내용이면 보내지 않는다. 주기는 기본값(5) 적용 후이며 0 이면 끈다. 설정에 있는 저장소의 승인만 담는다. 기존 `MirrorSender`·`on_mirror_changed` 는 그대로다 |
+| Rust → Node | `{t:"fetchApprove", kind:"approval"\|"trusted", repoId, fingerprint}` | 사이드카(`src/sidecar/fetchApprove.ts`)가 kind 허용 목록(`includes`)·`config.repo(repoId)` 존재·지문 모양(소문자 hex 64자)을 검사한 뒤 `setFetchApproval`/`setTrustedConfig`. 해제(null)는 받지 않는다 |
+| Rust → Node | `{t:"note", op:"fetchChanged", repoId}` | `RepoService.noteLog` → 기억한 시그니처를 버린다. 항상 `repo:changed` 보다 먼저 |
+
+- **승인 경로는 `fetchApprove` 하나다. renderer 의 `req`(채널)로는 절대 받지 않는다**(채널 허용 목록에 없고, 메시지의 `t` 는 Rust 가 정한다). 보내는 곳은 서비스의 두 지점뿐이다 —
+  수동 fetch **성공 뒤**(`approval`: 그 remote 의 이름+URL 지문)와 확인 창에서 **"이 저장소에서 항상 허용"** 을 받은 뒤(`trusted`: 위험 항목 지문). `tests/fetch_service.rs` 와 `tests/sidecarFetchPrefs.test.ts` 가
+  소스를 훑어 이를 강제한다(`host.approve(` 한 곳·`send_approval(` 호출 둘·`"fetchApprove"` 리터럴 한 곳·승인을 쓰는 TS 코드는 ConfigStore·Electron FetchService·fetchApprove 핸들러뿐). `config:setUi` 로 승인을 위조할 수 없다는 기존 TS 테스트(`fetch.test.ts`)도 그대로다.
+- **판정은 항상 "지문이 같은가"**다(항목이 있는가가 아니다): 자동 fetch 의 자격 증명 도우미는 `fetchPrefs.approvals[repo] == 지금 remotes 지문`일 때만 켜지고, 위험 설정은 `trusted[repo] == 지금 위험 항목 지문`이거나 이번 실행에서 허용한 지문일 때만 통과한다.
+- **메모리 오버레이**: 방금 부탁한 값은 사이드카가 `fetchPrefs` 로 되돌려 주기 전까지 Rust 메모리에 쥔다(그 사이의 자동 fetch 가 승인을 놓치지 않게). 같은 값 또는 다른 값이 돌아오면 정리하고, 값이 없는 스냅샷(처리 전)은 남겨 두며(안전한 쪽),
+  저장소가 사라지면(`forget`·미러에서 빠짐) 지운다. gen 이 이미 받은 것 이하인 `fetchPrefs` 는 버린다.
+- **소유권**: 사이드카 `FetchService` 에 `owns(repoId)` 술어가 생겼다(기본 전부 소유 — Electron 판 동작 불변). 소유하지 않은 저장소는 `fetch` 가 ERROR(거부)이고 `setActive` 는 null 로 취급한다(이중 fetch 방지).
+  **술어를 실제로 거는 배선(Rust 가 맡는 local·WSL 을 뺀다)은 PR D 다** — 지금 하면 Tauri 판의 local fetch 가 끊긴다.
+
+#### PR B 보안 리뷰의 잠재 결함 4건(이 PR 에서 막음)
+
+1. **플랫폼 주입**: `run_fetch_with`·`fetch_config_for`·`fetch_env_for`·`hooks_path_with` 가 플랫폼 값을 호출자에게 받던 것을, 운영 경로는 항상 `cfg!(windows)` 인 진입점(`run_fetch`·`fetch_config_for`·`fetch_env_for`·`hooks_path_for`)으로 줄이고
+   주입 버전은 `#[doc(hidden)]` + `*_for_test` 로 바꿨다(통합 테스트가 별도 크레이트라 `#[cfg(test)]` 는 쓸 수 없다). 운영 코드(`service.rs`·`sidecar.rs` 등)에 그 이름이 없음을 `fetch_service.rs::운영_코드는_플랫폼을_주입하지_않는다` 가 소스로 강제한다.
+2. **확인 창 응답**: 위 `ConfirmPlan`/`Decision`. 골든(`confirmBox.json`)은 그대로 통과한다.
+3. **WSL askpass 실측**(`tests/fetch.rs`)에 `-c credential.helper=` 를 넣어 사용자의 실제 WSL 자격 증명 도우미가 불리지 않게 했다.
+4. **훅 경로**: Windows 는 드라이브 문자 경로만 인정(위 "fetch 실행"). `tests/fetch.rs` 의 `/tmp/no-hooks` Windows 통과 단언을 거부 단언으로 고쳤고, 골든 `env.json` 의 POSIX 값(`/tmp/no-hooks`)은 값의 모양으로 플랫폼을 골라 통과시킨다.
+
+#### 테스트
+
+`src-tauri/tests/fetch_service.rs`: 가짜 git + 멈춘 시계(`start_paused`, dev-dependency tokio `test-util`)로 주기·첫 지연·백오프·60초(확인 창·큐 대기 포함)·환경별 큐·포커스·활성 전환·취소·패닉·오버레이·응답 해석을,
+실제 git(127.0.0.1 401 서버, 명령줄 범위 `GIT_CONFIG_COUNT` 로 심은 자격 증명 도우미)으로 TS 의 PR C 몫 시나리오 7개를 옮겼다. 멈춘 시계는 런타임이 한가하면 다음 타이머로 건너뛰므로 프로세스를 띄우는 테스트와 섞지 않는다.
+`test-map.json`: TS `fetch.test.ts` 의 71개 `it` 이 모두 Rust 테스트에 대응한다(N/A 없음).
+
+**남은 일(PR D)**: `git:fetch`(`manual === true`)·`repos:watch` 가로채기·포커스·`fetchPrefs` 적용(`FetchPrefsSink` 연결)·미러 제거 → `forget`·이벤트 `antler:evt`·확인 창을 `dialogs::message_box` 로 직접·`FetchHost::approve` 를 `Sidecar::approve` 로 연결·`FetchHost::repo_name` 출처·
+사이드카 `owns` 배선(`ANTLER_RUST_FETCH_KINDS=local,wsl`, `ANTLER_RUST_GIT=0` 이면 없음), 채널 골든·실측(이중 fetch 없음).
 
 ## Phase 0 에서 확인한 것
 

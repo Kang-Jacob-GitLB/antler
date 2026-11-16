@@ -16,6 +16,8 @@ import { RepoService } from '../main/services/RepoService'
 import { RepoWatcher } from '../main/services/RepoWatcher'
 import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
+import { handleFetchApprove } from './fetchApprove'
+import { FetchPrefsSender } from './fetchPrefs'
 import { MirrorSender } from './mirror'
 import { handleNote } from './note'
 import { UNDEFINED_ARG, type FromSidecar, type ToSidecar } from './protocol'
@@ -52,8 +54,14 @@ const config = new ConfigStore(join(userData, 'antler.config.json'), { cacheDir 
 // Rust 라우터가 쓰는 저장소 미러. 시작 때(ready 전) 한 번, 이후 목록이 바뀔 때마다 보낸다. update 안에서 동기로 불리므로
 // 저장소를 바꾸는 호출의 res 줄보다 repos 줄이 먼저 나가 renderer 의 다음 호출은 새 미러를 본다
 const mirror = new MirrorSender(out)
-config.onChange = (c) => mirror.push(c)
+// fetch 설정(자동 주기·승인 지문)은 미러와 따로 보낸다. 반드시 미러 다음에(저장소가 사라진 설정을 승인 맵이 앞서가지 않게), 시작 때도 ready 전에
+const fetchPrefs = new FetchPrefsSender(out)
+config.onChange = (c) => {
+  mirror.push(c)
+  fetchPrefs.push(c)
+}
 mirror.push(config.get())
+fetchPrefs.push(config.get())
 let netConfig: readonly NetworkConfigEntry[] = []
 const netReady = readNetworkConfig().then((c) => {
   netConfig = c
@@ -134,6 +142,9 @@ function onLine(line: string): void {
     )
   } else if (msg.t === 'note') {
     handleNote(repos, msg)
+  } else if (msg.t === 'fetchApprove') {
+    // 승인을 쓰는 유일한 길. req(채널) 경로로는 오지 않는다 — Rust 의 fetch 서비스만 이 줄을 만든다
+    handleFetchApprove(config, msg)
   } else if (msg.t === 'focus') {
     // src/main/index.ts 의 win.on('focus'|'blur') 와 같다
     watcher.setFocused(msg.focused)

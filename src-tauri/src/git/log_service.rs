@@ -443,6 +443,8 @@ pub enum NoteOp {
     FirstPage,
     /// 이어 읽으려던 위치의 커밋이 바뀌었다 — 기억한 시그니처를 버린다
     Stale,
+    /// Rust 의 fetch 가 ref 를 바꿨다 — 기억한 시그니처를 버린다(`repo:changed` 보다 먼저 보낸다: 그 이벤트로 다시 계산하는 쪽이 낡은 값을 쓰지 않게)
+    FetchChanged,
 }
 
 impl NoteOp {
@@ -451,6 +453,7 @@ impl NoteOp {
         match self {
             NoteOp::FirstPage => "logFirstPage",
             NoteOp::Stale => "logStale",
+            NoteOp::FetchChanged => "fetchChanged",
         }
     }
 }
@@ -893,5 +896,6 @@ mod tests {
         assert_eq!(LogError::Exec(ExecError::Other { message: "m".into() }).envelope_code(), "ERROR");
         assert_eq!(NoteOp::FirstPage.as_str(), "logFirstPage");
         assert_eq!(NoteOp::Stale.as_str(), "logStale");
+        assert_eq!(NoteOp::FetchChanged.as_str(), "fetchChanged");
     }
 }

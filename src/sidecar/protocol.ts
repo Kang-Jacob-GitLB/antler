@@ -9,16 +9,30 @@ import type { IpcEnvelope } from '@shared/ipc'
 export const UNDEFINED_ARG = '__antlerUndefinedArg'
 
 /**
- * Rust 가 `git:log` 를 직접 처리할 때 사이드카의 RepoService 에 알리는 일(`RepoService.noteLog`).
+ * Rust 가 `git:log`·fetch 를 직접 처리할 때 사이드카의 RepoService 에 알리는 일(`RepoService.noteLog`). fetchChanged 는 fetch 가 ref 를 바꿨다 —
+ * 기억한 시그니처를 버린다(Rust 는 이 note 를 먼저 보내고 그다음 `repo:changed` 를 낸다).
  * 이 메시지는 Rust 만 만든다 — renderer 의 값은 항상 `req` 의 `args` 안에만 들어가고 `t` 는 Rust 가 정한다.
  */
-export const NOTE_OPS = ['logFirstPage', 'logStale'] as const
+export const NOTE_OPS = ['logFirstPage', 'logStale', 'fetchChanged'] as const
 export type NoteOp = (typeof NOTE_OPS)[number]
+
+/**
+ * Rust 의 fetch 가 설정 파일에 남겨 달라고 부탁하는 승인의 종류.
+ * - approval: 수동 fetch 가 성공한 remote(이름+URL 지문) → `ConfigStore.setFetchApproval`
+ * - trusted: 확인 창에서 "항상 허용" 한 위험 설정 지문 → `ConfigStore.setTrustedConfig`
+ */
+export const FETCH_APPROVE_KINDS = ['approval', 'trusted'] as const
+export type FetchApproveKind = (typeof FETCH_APPROVE_KINDS)[number]
 
 /** Rust → Node */
 export type ToSidecar =
   | { t: 'req'; id: number; ch: string; args: unknown[] }
   | { t: 'note'; op: NoteOp; repoId: string }
+  /**
+   * 승인 저장 부탁. 승인을 쓰는 **유일한** 길이다 — renderer 의 `req` 경로(채널)로는 받지 않는다. 사이드카가 kind 허용 목록·저장소 존재·지문 모양(소문자 hex 64자)을 다시 검사한다.
+   * 보내는 곳은 Rust fetch 서비스의 두 지점(수동 fetch 성공 뒤, "항상 허용" 응답 뒤)뿐이다
+   */
+  | { t: 'fetchApprove'; kind: FetchApproveKind; repoId: string; fingerprint: string }
   | { t: 'focus'; focused: boolean }
   | { t: 'hostres'; id: number; ok: boolean; value?: unknown }
 
@@ -49,6 +63,11 @@ export type FromSidecar =
   | { t: 'res'; id: number; env: IpcEnvelope<unknown> }
   /** 저장소 미러 전체. gen 은 1 부터 1씩 늘고, Rust 는 이전 것보다 작거나 같은 gen 을 버린다. 시작 때 ready 전에, 이후 목록이 바뀔 때마다 보낸다 */
   | { t: 'repos'; gen: number; repos: MirrorRepo[] }
+  /**
+   * fetch 설정 스냅샷. 미러와 gen 을 따로 센다(1 부터, Rust 는 이미 받은 것 이하를 버린다). 시작 때 ready 전에, 값이 바뀔 때마다 `repos` 다음에 보낸다.
+   * autoFetchMinutes 는 기본값(5)이 적용된 값이고 0 이면 끈다. approvals·trusted 는 저장소 id → 지문(sha256 hex)이며 설정에 있는 저장소만 담는다 — 비밀이 아니다
+   */
+  | { t: 'fetchPrefs'; gen: number; autoFetchMinutes: number; approvals: Record<string, string>; trusted: Record<string, string> }
   | { t: 'evt'; name: string; payload: unknown }
   | { t: 'host'; id: number; op: HostOp; arg: unknown }
   | { t: 'ready' }

@@ -79,7 +79,12 @@ export class FetchService {
      * 로컬 git 이 core.hooksPath 로 쓸 앱 소유의 빈 디렉터리(드라이브 문자가 있는 절대 경로). Windows 에서는 필수다.
      * 시작할 때 만들고, fetch 마다 비어 있는지 다시 확인한다
      */
-    private readonly noHooksDir: string | null = null
+    private readonly noHooksDir: string | null = null,
+    /**
+     * 이 서비스가 fetch 를 맡는 저장소인가. 기본은 전부다(Electron 판 동작 불변). Tauri 판은 Rust 가 맡는 저장소(local·WSL)를 뺀다 —
+     * 소유하지 않은 저장소는 fetch 가 오류이고 자동 fetch 대상(setActive)이 되지 못한다(이중 fetch 방지)
+     */
+    private readonly owns: (repoId: string) => boolean = () => true
   ) {
     if (noHooksDir) {
       try {
@@ -106,6 +111,7 @@ export class FetchService {
 
   /** 자동 fetch 대상(활성 저장소)을 바꾼다 */
   setActive(repoId: string | null): void {
+    if (repoId && !this.owns(repoId)) repoId = null
     if (repoId === this.active) return
     this.active = repoId
     this.schedule()
@@ -145,6 +151,7 @@ export class FetchService {
   }
 
   fetch(repoId: string, opts: FetchOptions): Promise<FetchStatus> {
+    if (!this.owns(repoId)) return Promise.reject(new Error(`이 저장소의 fetch 는 이 서비스가 맡지 않습니다: ${repoId}`))
     const existing = this.inflight.get(repoId)
     if (existing) return existing
     const p = this.run(repoId, opts).finally(() => {

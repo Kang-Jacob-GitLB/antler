@@ -1,7 +1,7 @@
 //! fetch 실행(`antler_lib::git::fetch::run`) 통합 테스트 — 실제 git 을 띄운다. TS `tests/fetch.test.ts` 의 git 실행 시나리오를 이름 단위로 옮겼다.
 //! 어느 TS 테스트가 어느 Rust 테스트가 됐는지(또는 왜 옮기지 않았는지)는 `tests/golden/fetch/test-map.json` 이고, vitest(`tests/goldenFetch.test.ts`)가
 //! 원본의 모든 `it` 이 표에 있는지, `대응표가_가리키는_rust_테스트가_있다` 가 표가 가리키는 Rust 테스트가 있는지 강제한다.
-//! 옮기지 않은 것은 FetchService 의 상태 기계(진행 합치기·확인→재검사·승인 저장·백오프)로 PR C 의 몫이다 — 여기서는 검사(`inspect_config`)와 실행(`run_fetch`)만 본다.
+//! 이 파일은 검사(`inspect_config`)와 실행(`run_fetch`)만 본다. FetchService 의 상태 기계(진행 합치기·확인→재검사·승인 저장·백오프)는 `fetch_service.rs` 다(PR C).
 //!
 //! 격리: 이 바이너리가 시작될 때(`isolate`) `GIT_CONFIG_GLOBAL`(커밋된 `tests/gitconfig`)·`GIT_CONFIG_NOSYSTEM` 을 넣고, 프록시·askpass·ssh 환경변수를 비운다
 //! (127.0.0.1 요청이 프록시로 나가거나 askpass 대조가 흐려지지 않게). **전역 git 설정 파일을 고치지 않는다**(커밋된 파일이고 테스트가 병렬이다) —
@@ -17,10 +17,10 @@ use std::sync::{Arc, Mutex};
 
 use antler_lib::git::exec::{ExecError, FetchEnv, GitExecutor, LocalExecutor, RunOpts, RunResult, WslExecutor};
 use antler_lib::git::fetch::guard::{
-    classify_failure, hooks_path_for, hooks_path_with, inspect_entries, version_at_least, ConfigInspection, FetchFailure, FILE_TRANSPORT_MIN_GIT, SSH_COMMAND_DEFAULT,
+    classify_failure, hooks_path_for, hooks_path_for_test, inspect_entries, version_at_least, ConfigInspection, FetchFailure, FILE_TRANSPORT_MIN_GIT, SSH_COMMAND_DEFAULT,
 };
 use antler_lib::git::fetch::run::{
-    fetch_args, fetch_config_for, fetch_env_for, inspect_config, process_ssh_env, run_fetch, run_fetch_with, ssh_env, FetchRunOpts, GitRunner, GitVersions,
+    fetch_args, fetch_config_for, fetch_config_for_test, fetch_env_for, fetch_env_for_test, inspect_config, process_ssh_env, run_fetch, run_fetch_for_test, ssh_env, FetchRunOpts, GitRunner, GitVersions,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -353,12 +353,13 @@ fn 대응표가_가리키는_rust_테스트가_있다() {
         let v = v.as_str().unwrap();
         if let Some(why) = v.strip_prefix("N/A: ") {
             assert!(why.chars().count() > 8, "{title}: N/A 사유가 비어 있다");
+            assert!(!why.starts_with("PR C"), "{title}: PR C(상태 기계)는 fetch_service.rs 로 옮겼다");
             na += 1;
             continue;
         }
         let (file, rest) = v.split_once("::").unwrap_or_else(|| panic!("{title}: '<파일>.rs::<이름>' 이어야 한다 → {v}"));
         let name = rest.split_whitespace().next().unwrap();
-        assert!(["fetch.rs", "fetch_guard.rs", "exec.rs"].contains(&file), "{title}: {file}");
+        assert!(["fetch.rs", "fetch_guard.rs", "fetch_service.rs", "exec.rs"].contains(&file), "{title}: {file}");
         let src = fs::read_to_string(root.join("src-tauri/tests").join(file)).unwrap();
         assert!(src.contains(&format!("fn {name}(")), "{title}: {file} 에 fn {name} 이 없다");
         ported += 1;
@@ -488,15 +489,15 @@ async fn 검사를_우회해_직접_호출해도_ext_전송은_막힌다() {
 fn 훅_디렉터리_로컬은_앱_소유_디렉터리_원격은_dev_null() {
     let t = TempDir::new("hooks");
     let dir = t.path().to_string_lossy().into_owned();
-    assert_eq!(hooks_path_for(true, Some(&dir), cfg!(windows)).unwrap().as_str(), posix(t.path()));
-    assert_eq!(hooks_path_for(false, Some(&dir), cfg!(windows)).unwrap().as_str(), "/dev/null");
-    assert_eq!(hooks_path_for(false, None, cfg!(windows)).unwrap().as_str(), "/dev/null");
-    assert_eq!(hooks_path_for(true, None, false).unwrap().as_str(), "/dev/null");
-    assert!(hooks_path_for(true, None, true).unwrap_err().contains("훅 차단"));
+    assert_eq!(hooks_path_for(true, Some(&dir)).unwrap().as_str(), posix(t.path()));
+    assert_eq!(hooks_path_for(false, Some(&dir)).unwrap().as_str(), "/dev/null");
+    assert_eq!(hooks_path_for(false, None).unwrap().as_str(), "/dev/null");
+    assert_eq!(hooks_path_for_test(true, None, false, |_| true).unwrap().as_str(), "/dev/null");
+    assert!(hooks_path_for_test(true, None, true, |_| true).unwrap_err().contains("훅 차단"));
     // 비어 있지 않거나 없으면 거부
     fs::write(t.path().join("reference-transaction"), "").unwrap();
-    assert!(hooks_path_for(true, Some(&dir), cfg!(windows)).unwrap_err().contains("비어 있지 않아"));
-    assert!(hooks_path_for(true, Some(&format!("{dir}/missing")), cfg!(windows)).unwrap_err().contains("없거나"));
+    assert!(hooks_path_for(true, Some(&dir)).unwrap_err().contains("비어 있지 않아"));
+    assert!(hooks_path_for(true, Some(&format!("{dir}/missing"))).unwrap_err().contains("없거나"));
 }
 
 #[tokio::test]
@@ -513,7 +514,7 @@ async fn 앱_소유_훅_디렉터리를_쓰면_훅_경로가_그_안으로_풀�
             String::from_utf8_lossy(&r.stdout).trim().replace('\\', "/")
         }
     };
-    let cfg = fetch_config_for("local", Some(&nh), cfg!(windows), false).unwrap();
+    let cfg = fetch_config_for("local", Some(&nh), false).unwrap();
     let resolved = hook_path(cfg).await;
     assert!(resolved.to_lowercase().starts_with(&nh.replace('\\', "/").to_lowercase()), "{resolved}");
     assert!(!resolved.contains("dev/null"));
@@ -1014,7 +1015,7 @@ async fn 옛_git_은_no_write_fetch_head_없이_다시_한다() {
     let old = Fake::new("wsl", |a: &[String]| {
         has(a, "fetch").then(|| if has(a, "--no-write-fetch-head") { res(129, "", "error: unknown option `no-write-fetch-head'\n") } else { res(0, "", "") })
     });
-    run_fetch_with(&old, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: false }, &HashMap::new(), true).await.unwrap();
+    run_fetch_for_test(&old, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: false }, &HashMap::new(), true).await.unwrap();
     let calls = old.args();
     assert_eq!(calls.len(), 4, "{calls:?}");
     for (i, with_flag) in [true, false, true, false].into_iter().enumerate() {
@@ -1022,7 +1023,7 @@ async fn 옛_git_은_no_write_fetch_head_없이_다시_한다() {
     }
     // 다른 이유로 실패하면 다시 하지 않고, 첫 오류를 돌려주되 나머지 remote 도 계속한다
     let failing = Fake::new("wsl", |a: &[String]| has(a, "fetch").then(|| res(128, "", "fatal: 서버가 거부했다\n")));
-    let err = run_fetch_with(&failing, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: false }, &HashMap::new(), true)
+    let err = run_fetch_for_test(&failing, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: false }, &HashMap::new(), true)
         .await
         .unwrap_err();
     assert_eq!(failing.args().len(), 2, "remote 마다 한 번, 재시도 없음");
@@ -1040,7 +1041,7 @@ async fn 위험6_argv_순서_c_는_모두_fetch_앞_refmap_존재_c_키_중복_�
     ins.remote_names = names.iter().map(ToString::to_string).collect();
     for (kind, helpers) in [("wsl", false), ("wsl", true)] {
         let ok = Fake::new(kind, |_: &[String]| Some(res(0, "", "")));
-        run_fetch_with(&ok, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: helpers }, &HashMap::new(), true).await.unwrap();
+        run_fetch_for_test(&ok, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: helpers }, &HashMap::new(), true).await.unwrap();
         let calls = ok.args();
         assert_eq!(calls.len(), names.len());
         for (name, a) in names.iter().zip(&calls) {
@@ -1070,7 +1071,7 @@ async fn 위험6_argv_순서_c_는_모두_fetch_앞_refmap_존재_c_키_중복_�
         }
     }
     // 같은 결과를 순수 함수로도: 첫 시도(--no-write-fetch-head)와 재시도의 차이는 그 옵션 하나뿐이다
-    let cfg = fetch_config_for("wsl", None, true, false).unwrap();
+    let cfg = fetch_config_for_test("wsl", None, true, false).unwrap();
     let (first, retry) = (fetch_args(&cfg, "o", false), fetch_args(&cfg, "o", true));
     assert_eq!(first.len(), retry.len() + 1);
     assert!(first.contains(&"--no-write-fetch-head".to_string()) && !retry.contains(&"--no-write-fetch-head".to_string()));
@@ -1079,21 +1080,21 @@ async fn 위험6_argv_순서_c_는_모두_fetch_앞_refmap_존재_c_키_중복_�
 #[tokio::test]
 async fn 위험7_wsl_에_windows_no_hooks_경로가_가지_않는다() {
     // 호출자가 로컬용 드라이브 문자 경로를 줘도 WSL 은 그것을 쓰지 않는다(훅 경로는 실행기 종류로 run.rs 가 만든다)
-    let cfg = fetch_config_for("wsl", Some("C:/Users/me/no-hooks"), true, false).unwrap();
+    let cfg = fetch_config_for_test("wsl", Some("C:/Users/me/no-hooks"), true, false).unwrap();
     assert!(cfg.contains(&"core.hooksPath=/dev/null".to_string()), "{cfg:?}");
     assert!(!cfg.iter().any(|a| a.contains("C:") || a.contains("no-hooks")), "{cfg:?}");
     // 실제 호출 인자로도(디렉터리가 없어도 WSL 은 검사하지 않는다)
     let mut ins = inspect_entries(&[]);
     ins.remote_names = vec!["origin".into()];
     let wsl = Fake::new("wsl", |_: &[String]| Some(res(0, "", "")));
-    run_fetch_with(&wsl, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: Some("C:/없는/디렉터리"), allow_file: false, credential_helpers: false }, &HashMap::new(), true)
+    run_fetch_for_test(&wsl, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: Some("C:/없는/디렉터리"), allow_file: false, credential_helpers: false }, &HashMap::new(), true)
         .await
         .unwrap();
     let a = &wsl.args()[0];
     assert!(a.contains(&"core.hooksPath=/dev/null".to_string()) && !a.iter().any(|x| x.contains("C:")), "{a:?}");
     // 로컬은 반대다: Windows 에서 디렉터리가 없으면 /dev/null 로 물러서지 않고 거부한다
     let local_fake = Fake::new("local", |_: &[String]| Some(res(0, "", "")));
-    let err = run_fetch_with(&local_fake, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: false }, &HashMap::new(), true)
+    let err = run_fetch_for_test(&local_fake, ".", &ins, &FetchRunOpts { cancel: None, no_hooks_dir: None, allow_file: false, credential_helpers: false }, &HashMap::new(), true)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("훅 차단"), "{err}");
@@ -1113,17 +1114,24 @@ fn 위험8_canonicalize_를_쓰지_않고_unc_nt_모양_훅_경로를_거부한�
     }
     // 디렉터리 검사를 통과한다고 가정해도 UNC·NT 모양은 거부한다
     for bad in ["\\\\?\\C:\\Users\\me\\no-hooks", "//?/C:/Users/me/no-hooks", "\\\\host\\share\\no-hooks", "//host/share/no-hooks", "\\??\\C:\\x", "/??/C:/x", "\\\\.\\C:\\x", "\\\\?\\UNC\\h\\s\\x"] {
-        assert!(hooks_path_with(true, Some(bad), true, |_| true).is_err(), "{bad}");
+        assert!(hooks_path_for_test(true, Some(bad), true, |_| true).is_err(), "{bad}");
     }
-    for ok in ["C:\\Users\\me\\no-hooks", "C:/Users/me/no-hooks", "D:\\a b\\한글", "/tmp/no-hooks"] {
-        assert!(hooks_path_with(true, Some(ok), true, |_| true).is_ok(), "{ok}");
+    for ok in ["C:\\Users\\me\\no-hooks", "C:/Users/me/no-hooks", "D:\\a b\\한글"] {
+        assert!(hooks_path_for_test(true, Some(ok), true, |_| true).is_ok(), "{ok}");
     }
+    // Windows 는 드라이브 문자 경로만 인정한다 — `/tmp/…` 같은 루트 상대 경로는 git.exe 가 현재 드라이브 기준으로 풀어 저장소 드라이브의 경로가 된다
+    for root_relative in ["/tmp/no-hooks", "\\tmp\\no-hooks", "/", "C:", "C:no-hooks", "1:/x"] {
+        assert!(hooks_path_for_test(true, Some(root_relative), true, |_| true).is_err(), "Windows 에서 거부해야 한다: {root_relative}");
+    }
+    // POSIX 는 `/…` 만 인정한다(`C:/…` 는 상대 경로다)
+    assert!(hooks_path_for_test(true, Some("/tmp/no-hooks"), false, |_| true).is_ok());
+    assert!(hooks_path_for_test(true, Some("C:/Users/me/no-hooks"), false, |_| true).is_err());
     // 실제로 Windows 의 canonicalize 는 \\?\ 를 붙인다 — 그 결과를 그대로 넘기면 거부된다(canonicalize 를 쓰면 안 되는 이유)
     if cfg!(windows) {
         let t = TempDir::new("canon");
         let canon = fs::canonicalize(t.path()).unwrap();
         assert!(canon.to_string_lossy().starts_with("\\\\?\\"), "{canon:?}");
-        assert!(hooks_path_for(true, Some(&canon.to_string_lossy()), true).is_err());
+        assert!(hooks_path_for(true, Some(&canon.to_string_lossy())).is_err());
     }
 }
 
@@ -1193,16 +1201,16 @@ fn 위험10_ssh_명령은_사용자_설정_다음_local_일_때만_환경에서_
     let win_env: HashMap<String, String> = [("GIT_SSH_COMMAND", "C:\\Win\\ssh.exe -F x"), ("GIT_SSH", "C:\\Win\\plink.exe")].map(|(k, v)| (k.to_string(), v.to_string())).into();
     // Windows 의 GIT_SSH_COMMAND·GIT_SSH 는 WSL 로 새지 않는다(Windows 경로를 리눅스 git 이 실행하려 한다)
     for allow in [false, true] {
-        assert_eq!(fetch_env_for(&ins, "wsl", &win_env, true, allow).ssh_command, SSH_COMMAND_DEFAULT);
+        assert_eq!(fetch_env_for_test(&ins, "wsl", &win_env, true, allow).ssh_command, SSH_COMMAND_DEFAULT);
     }
-    assert_eq!(fetch_env_for(&ins, "local", &win_env, true, false).ssh_command, "C:\\Win\\ssh.exe -F x");
+    assert_eq!(fetch_env_for_test(&ins, "local", &win_env, true, false).ssh_command, "C:\\Win\\ssh.exe -F x");
     let only_ssh: HashMap<String, String> = [("GIT_SSH".to_string(), "C:\\Win\\plink.exe".to_string())].into();
-    assert_eq!(fetch_env_for(&ins, "local", &only_ssh, true, false).ssh_command, "'C:/Win/plink.exe'");
-    assert_eq!(fetch_env_for(&ins, "local", &HashMap::new(), true, false).ssh_command, SSH_COMMAND_DEFAULT);
+    assert_eq!(fetch_env_for_test(&ins, "local", &only_ssh, true, false).ssh_command, "'C:/Win/plink.exe'");
+    assert_eq!(fetch_env_for_test(&ins, "local", &HashMap::new(), true, false).ssh_command, SSH_COMMAND_DEFAULT);
     // 사용자(시스템·전역) core.sshCommand 가 환경보다 앞서고 WSL 에도 적용된다. 저장소 안의 것은 어디에도 없다
     let user = inspect_entries(&antler_lib::git::fetch::guard::parse_config_list("global\0core.sshcommand\nssh -F u\0local\0core.sshcommand\nevil\0"));
-    assert_eq!(fetch_env_for(&user, "local", &win_env, true, false).ssh_command, "ssh -F u");
-    assert_eq!(fetch_env_for(&user, "wsl", &win_env, true, false).ssh_command, "ssh -F u");
+    assert_eq!(fetch_env_for_test(&user, "local", &win_env, true, false).ssh_command, "ssh -F u");
+    assert_eq!(fetch_env_for_test(&user, "wsl", &win_env, true, false).ssh_command, "ssh -F u");
     assert!(user.dangerous.iter().any(|d| d.key == "core.sshcommand"));
 }
 
@@ -1214,8 +1222,8 @@ async fn 위험11_env_상속은_대소문자를_구분하지_않는_플랫폼에
     let env = process_ssh_env();
     assert_eq!(env.get("GIT_SSH_COMMAND").map(String::as_str), Some(PARENT_SSH), "부모의 `{}` 를 찾지 못했다", if cfg!(windows) { "Git_Ssh_Command" } else { "GIT_SSH_COMMAND" });
     let ins = inspect_entries(&[]);
-    assert_eq!(fetch_env_for(&ins, "local", &env, cfg!(windows), false).ssh_command, PARENT_SSH);
-    assert_eq!(fetch_env_for(&ins, "wsl", &env, cfg!(windows), false).ssh_command, SSH_COMMAND_DEFAULT);
+    assert_eq!(fetch_env_for(&ins, "local", &env, false).ssh_command, PARENT_SSH);
+    assert_eq!(fetch_env_for(&ins, "wsl", &env, false).ssh_command, SSH_COMMAND_DEFAULT);
     let src = code_only("src/git/fetch/run.rs");
     assert!(src.contains("std::env::var(") && !src.contains("env::vars"), "run.rs 는 이름을 정해 std::env::var 로 읽어야 한다");
     // 이름 조회 함수는 주어진 것만 읽는다
@@ -1366,13 +1374,13 @@ mod wsl {
         f.sh(&format!("git -C '{repo}' update-ref -d refs/remotes/origin/main && git -C '{repo}' fetch -q origin"));
         assert_eq!(f.sh(&format!("test -e '{marker}' && echo y || echo n")).1, "y", "대조군에서 훅이 실행되지 않았다 — 위 검증이 의미 없다");
         // 훅 경로가 실제로 /dev/null 로 풀린다
-        let mut args = fetch_config_for("wsl", None, true, false).unwrap();
+        let mut args = fetch_config_for_test("wsl", None, true, false).unwrap();
         args.extend(["rev-parse", "--git-path", "hooks/reference-transaction"].map(String::from));
         let r = exec.run(&repo, &args, &RunOpts::default()).await.unwrap();
         assert!(String::from_utf8_lossy(&r.stdout).trim().starts_with("/dev/null"), "{:?}", String::from_utf8_lossy(&r.stdout));
         // 같은 환경 상속: WSL 의 git 은 Windows 의 GIT_SSH_COMMAND(부모 환경)를 보지 않는다
         let ins = inspect_entries(&[]);
-        assert_eq!(fetch_env_for(&ins, "wsl", &process_ssh_env(), true, false).ssh_command, SSH_COMMAND_DEFAULT);
+        assert_eq!(fetch_env_for_test(&ins, "wsl", &process_ssh_env(), true, false).ssh_command, SSH_COMMAND_DEFAULT);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1394,12 +1402,12 @@ mod wsl {
         let (ok, _) = f.sh(&format!("printf '#!/bin/sh\\necho x > \"{marker}\"\\necho user\\n' > '{script}' && chmod +x '{script}'"));
         assert!(ok);
         let askpass = format!("core.askpass={script}");
-        let r = exec.run(&repo, &["-c", &askpass, "-c", ASKPASS_ALIAS, "antlerprobe"], &fetch_opts(false)).await.unwrap();
+        let r = exec.run(&repo, &["-c", "credential.helper=", "-c", &askpass, "-c", ASKPASS_ALIAS, "antlerprobe"], &fetch_opts(false)).await.unwrap();
         assert_ne!(r.code, 0);
         assert!(r.stderr.contains("terminal prompts disabled"), "프롬프트까지 가지 못했다: {}", r.stderr);
         assert_eq!(f.sh(&format!("test -e '{marker}' && echo y || echo n")).1, "n", "WSL: GIT_ASKPASS='' 인데 core.askpass 가 실행됐다");
         // 대조: fetch 환경 없이는 실행된다
-        let _ = exec.run(&repo, &["-c", &askpass, "-c", ASKPASS_ALIAS, "antlerprobe"], &RunOpts::default()).await.unwrap();
+        let _ = exec.run(&repo, &["-c", "credential.helper=", "-c", &askpass, "-c", ASKPASS_ALIAS, "antlerprobe"], &RunOpts::default()).await.unwrap();
         assert_eq!(f.sh(&format!("test -e '{marker}' && echo y || echo n")).1, "y", "대조군에서 askpass 가 실행되지 않았다 — 이 테스트는 아무것도 증명하지 못한다");
     }
 }

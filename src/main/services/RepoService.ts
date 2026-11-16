@@ -610,9 +610,10 @@ export class RepoService {
    * - logFirstPage: 첫 로그 페이지가 나갔다 — `log()` 의 skip 0 처리와 같다
    * - logStale: 이어 읽으려던 위치의 커밋이 바뀌었다 — `log()` 의 StaleLogError 처리와 같다
    */
-  noteLog(op: 'logFirstPage' | 'logStale', repoId: string): void {
+  noteLog(op: 'logFirstPage' | 'logStale' | 'fetchChanged', repoId: string): void {
     if (!this.config.repo(repoId)) return
-    if (op === 'logStale') this.invalidateSignature(repoId)
+    // fetchChanged: Rust 가 fetch 로 ref 를 바꿨다 — 이 서비스를 거치지 않은 변경이라 기억한 시그니처가 낡았다(Electron 판은 fetch 뒤 signature() 가 새로 기록한다)
+    if (op === 'logStale' || op === 'fetchChanged') this.invalidateSignature(repoId)
     else this.openFirstPage(repoId)
   }
 

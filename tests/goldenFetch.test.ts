@@ -1207,14 +1207,14 @@ describe('fetch 가드 골든', () => {
     expect(keys.filter((k) => !(k in map)), '대응표에 없는 it (fetch.test.ts 에 테스트를 더했으면 test-map.json 에도 적는다)').toEqual([])
     expect(Object.keys(map).filter((k) => !keys.includes(k)), '원본에 없는 대응표 항목').toEqual([])
     const rustSources = Object.fromEntries(
-      ['fetch.rs', 'fetch_guard.rs', 'exec.rs'].map((f) => [f, readFileSync(join(__dirname, '..', 'src-tauri', 'tests', f), 'utf8')])
+      ['fetch.rs', 'fetch_guard.rs', 'fetch_service.rs', 'exec.rs'].map((f) => [f, readFileSync(join(__dirname, '..', 'src-tauri', 'tests', f), 'utf8')])
     )
     for (const [title, value] of Object.entries(map)) {
       if (value.startsWith('N/A: ')) {
         expect(value.length, `${title}: N/A 사유가 비어 있다`).toBeGreaterThan(8)
         continue
       }
-      const m = /^(fetch\.rs|fetch_guard\.rs|exec\.rs)::(\S+)/.exec(value)
+      const m = /^(fetch\.rs|fetch_guard\.rs|fetch_service\.rs|exec\.rs)::(\S+)/.exec(value)
       expect(m, `${title}: 'N/A: 사유' 또는 '<파일>.rs::<테스트 이름>' 이어야 한다 → ${value}`).not.toBeNull()
       const [, file, name] = m!
       expect(new RegExp(String.raw`\bfn ${name}\(`).test(rustSources[file!]!), `${title}: ${file} 에 fn ${name} 이 없다`).toBe(true)
