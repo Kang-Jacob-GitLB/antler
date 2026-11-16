@@ -7,7 +7,7 @@ import { LocalExecutor } from '../src/main/executors/LocalExecutor'
 import { commitActivity } from '../src/main/git/activity'
 import { logArgs, scopeArgs, search } from '../src/main/git/commands'
 import { parseLog } from '../src/main/git/parsers/log'
-import { scopeKey } from '../src/shared/logScope'
+import { isValidScopeRef, scopeKey } from '../src/shared/logScope'
 import type { LogScope } from '../src/shared/types'
 
 const exec = new LocalExecutor()
@@ -283,5 +283,31 @@ describe('scopeKey', () => {
   })
   it('includeHead 가 다르면 다른 키', () => {
     expect(scopeKey({ hide: ['a'] })).not.toBe(scopeKey({ hide: ['a'], includeHead: false }))
+  })
+})
+
+// Rust 판 검증(src-tauri/src/git/scope.rs)이 손으로 옮긴 JS `\s`·UTF-16 길이 규칙의 기준
+describe('isValidScopeRef', () => {
+  it('JS 공백(BOM·NBSP·전각)은 거부하고 U+0085 는 허용한다', () => {
+    expect(isValidScopeRef('refs/heads/a﻿b')).toBe(false)
+    expect(isValidScopeRef('refs/heads/a b')).toBe(false)
+    expect(isValidScopeRef('refs/heads/a　b')).toBe(false)
+    expect(isValidScopeRef('refs/heads/a b')).toBe(false)
+    expect(isValidScopeRef('refs/heads/a\u0085b')).toBe(true)
+    expect(isValidScopeRef('refs/heads/a\u007fb')).toBe(false)
+    expect(isValidScopeRef('refs/heads/a]b')).toBe(true)
+  })
+  it('길이는 UTF-16 코드 단위로 1024 까지', () => {
+    const base = 'refs/heads/'
+    expect(isValidScopeRef(base + 'a'.repeat(1024 - base.length))).toBe(true)
+    expect(isValidScopeRef(base + 'a'.repeat(1025 - base.length))).toBe(false)
+    expect(isValidScopeRef(base + '😀'.repeat(600))).toBe(false)
+  })
+  it('해시는 소문자 40·64 자만, 리모트 전체는 이름에 / 허용', () => {
+    expect(isValidScopeRef('a'.repeat(40))).toBe(true)
+    expect(isValidScopeRef('A'.repeat(40))).toBe(false)
+    expect(isValidScopeRef(`${'a'.repeat(40)}\n`)).toBe(false)
+    expect(isValidScopeRef('refs/remotes/team/alice/*')).toBe(true)
+    expect(isValidScopeRef('refs/remotes//*')).toBe(false)
   })
 })

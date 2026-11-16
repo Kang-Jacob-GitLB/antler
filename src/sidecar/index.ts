@@ -17,6 +17,7 @@ import { RepoWatcher } from '../main/services/RepoWatcher'
 import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
 import { MirrorSender } from './mirror'
+import { handleNote } from './note'
 import { UNDEFINED_ARG, type FromSidecar, type ToSidecar } from './protocol'
 import { IPC_CHANNELS } from '@shared/ipc'
 
@@ -131,6 +132,8 @@ function onLine(line: string): void {
     void onRequest(msg.id, msg.ch, Array.isArray(msg.args) ? msg.args : []).catch((err) =>
       out({ t: 'res', id: msg.id, env: { ok: false, error: err instanceof Error ? err.message : String(err), code: 'ERROR' } })
     )
+  } else if (msg.t === 'note') {
+    handleNote(repos, msg)
   } else if (msg.t === 'focus') {
     // src/main/index.ts 의 win.on('focus'|'blur') 와 같다
     watcher.setFocused(msg.focused)

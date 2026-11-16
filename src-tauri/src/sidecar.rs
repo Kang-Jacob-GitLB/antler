@@ -9,12 +9,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::oneshot;
 
 use crate::dialogs;
+use crate::git::log_service::NoteOp;
 use crate::mirror::RepoMirror;
+use crate::router::Router;
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
 
@@ -99,6 +101,12 @@ impl Sidecar {
         rx.await.map_err(|_| "사이드카 응답 대기가 끊겼습니다".to_string())
     }
 
+    /// Rust 가 처리한 `git:log` 가 사이드카의 RepoService 에 알릴 일을 보낸다(`{t:"note",op,repoId}` — protocol.ts 의 `NOTE_OPS`).
+    /// 이 줄은 Rust 만 만든다: renderer 의 값은 `req` 의 `args` 안에만 들어가고, 여기서는 미러가 아는 저장소 id 와 상수 op 만 쓴다
+    pub fn note(&self, op: NoteOp, repo_id: &str) {
+        let _ = self.write(&json!({ "t": "note", "op": op.as_str(), "repoId": repo_id }));
+    }
+
     pub fn set_focus(&self, focused: bool) {
         let _ = self.write(&json!({ "t": "focus", "focused": focused }));
     }
@@ -127,7 +135,12 @@ fn handle_message(app: &AppHandle, stdin: &Arc<Mutex<ChildStdin>>, pending: &Pen
     match msg.get("t").and_then(Value::as_str) {
         // 저장소 미러. 같은 stdout 에서 순서대로 읽으므로 저장소를 바꾼 호출의 res 보다 먼저 반영된다
         Some("repos") => {
-            if !mirror.apply_message(&msg) {
+            if mirror.apply_message(&msg) {
+                // 사라졌거나 대상이 바뀐 저장소의 로그 커서(열린 git 프로세스)를 닫는다
+                if let Some(router) = app.try_state::<Router>() {
+                    router.on_mirror_changed();
+                }
+            } else {
                 eprintln!("[sidecar] repos 메시지를 적용하지 않았다(모양이 틀렸거나 오래된 gen)");
             }
         }

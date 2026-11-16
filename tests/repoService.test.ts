@@ -54,6 +54,33 @@ describe('RepoService.log', { timeout: 30_000 }, () => {
     expect(fresh.commits[0]!.subject).toBe('new')
   })
 
+  it('count·skip 이 유한한 숫자가 아니면 invalid query 로 거부하고, 숫자면(renderer 가 보내는 값) 그대로 처리한다', () => {
+    const { svc, repoId } = setup()
+    const bad = [
+      { skip: 0, count: '100' },
+      { skip: '0', count: 100 },
+      { skip: 0, count: null },
+      { skip: null, count: 100 },
+      { skip: 0, count: undefined },
+      { count: 100 },
+      { skip: 0, count: Number.NaN },
+      { skip: 0, count: Number.POSITIVE_INFINITY },
+      { skip: 0, count: [10] },
+      null,
+      5,
+      'x'
+    ]
+    for (const q of bad) expect(() => svc.log(repoId, q as never), JSON.stringify(q)).toThrow('invalid query')
+    // scope 오류는 query 가 맞을 때만 나온다
+    expect(() => svc.log(repoId, { skip: 0, count: 10, scope: { solo: ['-c'] } })).toThrow('invalid solo')
+  })
+
+  it('숫자 count·skip 은 정규화해서 읽는다(0 → 1, 소수는 내림, 음수 skip 은 0)', async () => {
+    const { svc, repoId } = setup()
+    expect((await svc.log(repoId, { skip: 0, count: 0 })).commits).toHaveLength(1)
+    expect((await svc.log(repoId, { skip: -5, count: 2.9 })).commits).toHaveLength(2)
+  })
+
   it('빈 저장소에서 끝까지 읽은 커서를 다시 쓰지 않아, 첫 커밋이 생기면 처음부터 읽을 때 보인다', async () => {
     const config = new ConfigStore(join(mkdtempSync(join(root, 'cfg-')), 'antler.config.json'))
     const empty = join(mkdtempSync(join(root, 'empty-')), 'repo')
@@ -79,6 +106,31 @@ describe('RepoService 첫 페이지 문', { timeout: 30_000 }, () => {
     await svc.log(repoId, { skip: 0, count: 10 })
     await waiting
     expect(opened).toBe(true)
+  })
+
+  it('noteLog(logFirstPage)는 Rust 가 첫 페이지를 내보냈을 때 같은 문을 연다', async () => {
+    const { svc, repoId } = setup()
+    svc.armFirstPage(repoId)
+    let opened = false
+    const waiting = svc.afterFirstPage(repoId).then(() => (opened = true))
+    await new Promise((r) => setTimeout(r, 30))
+    expect(opened).toBe(false)
+    svc.noteLog('logFirstPage', repoId)
+    await waiting
+    expect(opened).toBe(true)
+    // 모르는 저장소 id 는 아무 일도 하지 않는다
+    expect(() => svc.noteLog('logFirstPage', 'nope')).not.toThrow()
+    expect(() => svc.noteLog('logStale', 'nope')).not.toThrow()
+  })
+
+  it('noteLog(logStale)는 기억한 시그니처를 버려 다음 계산이 새로 이뤄지게 한다', async () => {
+    const { svc, repoId } = setup()
+    await svc.signature(repoId) // 감시의 기준 시그니처
+    const before = (await svc.activity(repoId, undefined)).total
+    execFileSync('git', ['-C', repoPath, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'note-stale'])
+    // Rust 가 StaleLogError 에 해당하는 일을 알려 오면 `log()` 의 처리와 같이 낡은 기준을 버린다
+    svc.noteLog('logStale', repoId)
+    expect((await svc.activity(repoId, undefined)).total).toBe(before + 1)
   })
 
   it('감시가 계산한 ref 시그니처를 활동 조회가 다시 계산하지 않고 쓴다', async () => {

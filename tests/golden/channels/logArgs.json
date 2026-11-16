@@ -1,0 +1,292 @@
+{
+  "cases": [
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--branches",
+        "--remotes",
+        "--tags",
+        "HEAD",
+        "--"
+      ],
+      "name": "범위 없음"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--skip=250",
+        "--ignore-missing",
+        "--branches",
+        "--remotes",
+        "--tags",
+        "HEAD",
+        "--"
+      ],
+      "name": "범위 없음 skip"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--branches",
+        "--remotes",
+        "--tags",
+        "HEAD",
+        "--"
+      ],
+      "name": "빈 객체"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--skip=10",
+        "--ignore-missing",
+        "--end-of-options",
+        "refs/heads/b",
+        "refs/heads/a",
+        "--"
+      ],
+      "name": "solo 브랜치 둘"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--end-of-options",
+        "refs/tags/v1",
+        "refs/remotes/origin/main",
+        "--"
+      ],
+      "name": "solo 태그·리모트"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--glob=refs/remotes/origin/*",
+        "--glob=refs/remotes/team/x/*",
+        "--end-of-options",
+        "refs/heads/a",
+        "--"
+      ],
+      "name": "solo 리모트 전체와 브랜치"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--end-of-options",
+        "0123456789abcdef0123456789abcdef01234567",
+        "--"
+      ],
+      "name": "solo 해시(40)"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--end-of-options",
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "--"
+      ],
+      "name": "solo 해시(64)"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--end-of-options",
+        "refs/heads/--output=x",
+        "--"
+      ],
+      "name": "solo 옵션처럼 보이는 이름"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--end-of-options",
+        "refs/heads/a",
+        "refs/heads/b",
+        "--"
+      ],
+      "name": "solo 중복"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--end-of-options",
+        "refs/heads/a",
+        "--"
+      ],
+      "name": "solo 와 hide(solo 우선)"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--exclude=a",
+        "--branches",
+        "--exclude=origin/main",
+        "--exclude=up/*",
+        "--exclude=*/HEAD",
+        "--remotes",
+        "--exclude=t",
+        "--tags",
+        "HEAD",
+        "--"
+      ],
+      "name": "hide 브랜치·태그·리모트"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--branches",
+        "--exclude=up/*",
+        "--remotes",
+        "--tags",
+        "HEAD",
+        "--"
+      ],
+      "name": "hide 리모트 전체만"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--skip=3",
+        "--ignore-missing",
+        "--exclude=a",
+        "--branches",
+        "--remotes",
+        "--tags",
+        "--"
+      ],
+      "name": "hide includeHead false"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--branches",
+        "--remotes",
+        "--tags",
+        "HEAD",
+        "--"
+      ],
+      "name": "hide 비어 있음"
+    },
+    {
+      "error": "invalid hide",
+      "name": "hide 해시는 거부"
+    },
+    {
+      "error": "invalid scope",
+      "name": "범위가 null"
+    },
+    {
+      "error": "invalid scope",
+      "name": "범위가 문자열"
+    },
+    {
+      "error": "invalid solo",
+      "name": "solo 가 문자열"
+    },
+    {
+      "error": "invalid solo",
+      "name": "solo 에 옵션 -c"
+    },
+    {
+      "error": "invalid hide",
+      "name": "hide 에 --output"
+    },
+    {
+      "error": "invalid solo",
+      "name": "solo 개행"
+    },
+    {
+      "error": "invalid solo",
+      "name": "solo BOM"
+    },
+    {
+      "args": [
+        "log",
+        "-z",
+        "--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s",
+        "--decorate=full",
+        "--date-order",
+        "--ignore-missing",
+        "--end-of-options",
+        "refs/heads/ab",
+        "--"
+      ],
+      "name": "solo NEL 은 허용"
+    },
+    {
+      "error": "invalid scope",
+      "name": "includeHead 가 문자열"
+    }
+  ]
+}

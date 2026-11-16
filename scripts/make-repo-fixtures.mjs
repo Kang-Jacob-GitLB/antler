@@ -35,6 +35,15 @@ class Stream {
     for (const [op, path, m] of files) this.raw(op === 'D' ? `D ${path}\n` : `M 100644 :${m} ${path}\n`)
     this.raw('\n')
   }
+  /** 이미 만든 커밋(mark)에 ref 를 붙인다(가벼운 태그·리모트 추적 ref) */
+  reset(ref, from) {
+    this.raw(`reset ${ref}\nfrom :${from}\n\n`)
+  }
+  /** 주석 태그 */
+  tag(name, from, n, msg) {
+    this.raw(`tag ${name}\nfrom :${from}\ntagger ${WHO} ${BASE + n * 3600} +0900\n`)
+    this.data(msg)
+  }
   write(name) {
     writeFileSync(join(OUT, name), Buffer.concat(this.parts))
   }
@@ -92,5 +101,46 @@ const lines = (n, tag = 'line') => `${Array.from({ length: n }, (_, i) => `${tag
   s.commit({ mark: 10, n: 1, msg: 'many files\n', files })
   s.write('many.fi')
 }
+
+// ---- branchy: git:log 시나리오용 — 병합·가지·태그·리모트 추적 ref 가 여럿이고 date-order 에서 가지가 섞인다 ----
+{
+  const s = new Stream()
+  s.blob(1, 'x\n')
+  const f = [['M', 'a.txt', 1]]
+  // n(시각) 순서가 곧 --date-order 의 순서다. 같은 n 은 쓰지 않는다
+  s.commit({ mark: 10, n: 1, msg: 'main 1: root\n', files: f })
+  s.commit({ mark: 11, n: 2, from: 10, msg: 'main 2\n', files: [] })
+  s.commit({ mark: 12, n: 3, from: 11, msg: 'main 3\n', files: [] })
+  s.commit({ ref: 'refs/heads/feature/a', mark: 20, n: 4, from: 11, msg: 'feature/a 1\n', files: [] })
+  s.commit({ mark: 13, n: 5, from: 12, msg: 'main 4\n', files: [] })
+  s.commit({ ref: 'refs/heads/feature/a', mark: 21, n: 6, from: 20, msg: 'feature/a 2\n', files: [] })
+  s.commit({ mark: 14, n: 7, from: 13, merge: 21, msg: "Merge branch 'feature/a'\n", files: [] })
+  s.commit({ ref: 'refs/heads/dev', mark: 30, n: 8, from: 14, msg: 'dev 1\n', files: [] })
+  s.commit({ ref: 'refs/heads/dev', mark: 31, n: 9, from: 30, msg: 'dev 2\n', files: [] })
+  s.commit({ mark: 15, n: 10, from: 14, msg: 'main 5\n', files: [] })
+  s.commit({ ref: 'refs/heads/release/1.0', mark: 40, n: 11, from: 13, msg: 'release 1\n', files: [] })
+  s.commit({ mark: 16, n: 12, from: 15, msg: 'main 6\n', files: [] })
+  s.commit({ ref: 'refs/heads/dev', mark: 32, n: 13, from: 31, msg: 'dev 3\n', files: [] })
+  s.commit({ mark: 17, n: 14, from: 16, merge: 32, msg: "Merge branch 'dev'\n", files: [] })
+  s.commit({ ref: 'refs/heads/release/1.0', mark: 41, n: 15, from: 40, msg: 'release 2\n', files: [] })
+  s.commit({ mark: 18, n: 16, from: 17, msg: 'main 7\n', files: [] })
+  s.commit({ mark: 19, n: 17, from: 18, msg: 'main 8\n', files: [] })
+  s.commit({ mark: 50, n: 18, from: 19, msg: 'main 9\n', files: [] })
+  s.commit({ mark: 51, n: 19, from: 50, msg: 'main 10\n', files: [] })
+  s.commit({ mark: 52, n: 20, from: 51, msg: 'main 11\n', files: [] })
+  // 어느 가지에도 합쳐지지 않은 가장 최신 가지 — 지우면 앞쪽 순서가 바뀐다(STALE 시나리오)
+  s.commit({ ref: 'refs/heads/topic', mark: 60, n: 21, from: 52, msg: 'topic 1\n', files: [] })
+  s.commit({ ref: 'refs/heads/topic', mark: 61, n: 22, from: 60, msg: 'topic 2\n', files: [] })
+  s.commit({ ref: 'refs/heads/topic', mark: 62, n: 23, from: 61, msg: 'topic 3\n', files: [] })
+  s.reset('refs/tags/v1.0', 13)
+  s.tag('v2.0', 18, 16, 'release 2.0\n')
+  s.reset('refs/remotes/origin/main', 15)
+  s.reset('refs/remotes/origin/dev', 31)
+  s.reset('refs/remotes/team/alice/work', 21)
+  s.write('branchy.fi')
+}
+
+// ---- empty: 커밋이 하나도 없는 저장소(빈 스트림) ----
+writeFileSync(join(OUT, 'empty.fi'), '')
 
 console.log(`wrote ${OUT}`)

@@ -6,7 +6,7 @@
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 해시뿐이다.
-//! - git 인자는 `git::commit` 이 서브커맨드·옵션 상수 + 검증된 해시로만 만든다. 이 파일은 인자를 만들지 않는다.
+//! - git 인자는 `git::commit`·`git::scope`(log) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다. 이 파일은 인자를 만들지 않는다.
 //! - 취소: `requestId → CancellationToken` 레지스트리. cancel 이 등록보다 먼저 도착해도(별개 호출이라 순서가 보장되지 않는다)
 //!   tombstone 이 기억했다가 등록 때 이미 취소된 토큰을 준다.
 //!
@@ -23,12 +23,13 @@ use tokio_util::sync::CancellationToken;
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
 use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, WSL_LIMIT};
 use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, WslExecutor};
+use crate::git::log_service::{parse_query, LogService, NoteSink};
 use crate::git::lru::LruCache;
 use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
 /// (`tests/channels.rs` 가 `tests/golden/exec/channels.json` 으로 강제한다)
-pub const RUST_CHANNELS: &[&str] = &["git:commit"];
+pub const RUST_CHANNELS: &[&str] = &["git:commit", "git:log"];
 
 /// bridge 의 `encodeArgs` 가 인자 배열의 빈 자리(undefined)에 넣는 표식(`src/sidecar/protocol.ts` 의 `UNDEFINED_ARG`)
 pub const UNDEFINED_ARG: &str = "__antlerUndefinedArg";
@@ -183,6 +184,7 @@ pub struct Router {
     cancels: Arc<CancelRegistry>,
     sources: Mutex<HashMap<String, Arc<SourceRuntime>>>,
     commit_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
+    logs: LogService,
     rust_handled: AtomicU64,
 }
 
@@ -191,10 +193,11 @@ impl Router {
         Router {
             enabled,
             log,
-            mirror,
+            mirror: mirror.clone(),
             cancels: Arc::default(),
             sources: Mutex::default(),
             commit_cache: Arc::new(Mutex::new(LruCache::new(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES))),
+            logs: LogService::new(mirror),
             rust_handled: AtomicU64::new(0),
         }
     }
@@ -205,6 +208,37 @@ impl Router {
         let enabled = rust_git_enabled(std::env::var("ANTLER_RUST_GIT").ok().as_deref());
         let log = std::env::var("ANTLER_ROUTE_LOG").as_deref() == Ok("1");
         Router::new(enabled, log, mirror)
+    }
+
+    /// 로그 커서의 유휴 시간·훑는 주기를 바꾼다(테스트용 — 프로세스 목록을 읽는 테스트가 느려도 커서가 먼저 닫히지 않게). 만든 직후에만 부른다
+    pub fn with_log_timing(mut self, idle: Duration, sweep: Duration) -> Self {
+        self.logs = LogService::with_timing(self.mirror.clone(), idle, sweep);
+        self
+    }
+
+    /// `git:log` 가 사이드카에 알릴 일(첫 페이지가 나갔다·이력이 바뀌었다)을 받는 곳. 앱은 사이드카에 `note` 메시지로 보낸다
+    pub fn set_note_sink(&self, sink: NoteSink) {
+        self.logs.set_sink(sink);
+    }
+
+    /// 미러가 바뀐 직후 불린다 — 사라졌거나 대상이 바뀐 저장소의 로그 커서를 닫는다
+    pub fn on_mirror_changed(&self) {
+        self.logs.sync_mirror();
+    }
+
+    /// 앱 종료: 열려 있는 로그 커서(git 프로세스)를 모두 닫는다
+    pub fn shutdown(&self) {
+        self.logs.close_all();
+    }
+
+    /// 열려 있는 로그 커서 수(테스트·확인용)
+    pub fn log_cursor_count(&self) -> usize {
+        self.logs.cursor_count()
+    }
+
+    /// 열려 있는 로그 커서의 git PID(테스트·확인용)
+    pub fn log_cursor_pids(&self) -> Vec<u32> {
+        self.logs.cursor_pids()
     }
 
     /// 지금까지 Rust 가 처리한 호출 수(테스트·확인용)
@@ -224,6 +258,15 @@ impl Router {
             }
             return Routed::Sidecar;
         }
+        if channel == "repos:watch" {
+            // 사이드카로 넘기기 전에 다른 저장소(또는 null 이면 전부)의 로그 커서를 닫는다 — 멈춘 git log 가 pack 파일 핸들을 쥐지 않게
+            let active = match raw.first() {
+                Some(Value::String(id)) => Some(id.as_str()),
+                _ => None,
+            };
+            self.logs.close_others(active);
+            return Routed::Sidecar;
+        }
         if !RUST_CHANNELS.contains(&channel) {
             return Routed::Sidecar;
         }
@@ -234,6 +277,7 @@ impl Router {
         let args = decode_args(raw);
         match channel {
             "git:commit" => self.git_commit(&args).await,
+            "git:log" => self.git_log(&args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -272,6 +316,38 @@ impl Router {
         drop(reg);
         Routed::Done(match result {
             Ok(detail) => ok_env((*detail).clone()),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    /// `git:log(repoId, query, requestId?)`. query 는 renderer 가 보낸 값이라 숫자·scope 형식을 검증한 뒤에야 git 인자가 된다
+    async fn git_log(&self, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note("git:log", "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        // 검증 실패는 git 도 커서도 건드리지 않는다
+        let query = match parse_query(args.get(1).copied().flatten()) {
+            Ok(q) => q,
+            Err(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        let reg = match args.get(2) {
+            Some(Some(Value::String(id))) if is_request_id(id) => Some(self.cancels.register(id)),
+            _ => None,
+        };
+        let token = reg.as_ref().map_or_else(CancellationToken::new, |r| r.token.clone());
+        self.note("git:log", "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let rt = self.runtime(&target);
+        let result = self.logs.log(repo_id, &rt.exec, &target, &query, &token).await;
+        drop(reg);
+        Routed::Done(match result.and_then(|page| serde_json::to_value(&page).map_err(|e| crate::git::exec::ExecError::Other { message: e.to_string() }.into())) {
+            Ok(page) => ok_env(page),
             Err(e) => err_env(&e.to_string(), e.envelope_code()),
         })
     }
@@ -374,7 +450,7 @@ mod tests {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache")]);
         let r = Router::new(true, false, m.clone());
         // 채널이 등록되지 않았다
-        assert!(is_sidecar(&r.route("git:log", &json!(["a", {}])).await));
+        assert!(is_sidecar(&r.route("git:refs", &json!(["a"])).await));
         // 미러에 없는 저장소·ssh·github
         for id in ["nope", "s", "g"] {
             assert!(is_sidecar(&r.route("git:commit", &json!([id, "abcd"])).await), "{id}");
@@ -447,6 +523,45 @@ mod tests {
         assert_eq!(env["code"], "ABORTED");
         // 쓴 tombstone 은 사라지고 등록도 끝나며 지워진다(이 테스트는 git 을 띄우지 않는다)
         assert_eq!(r.cancels.counts(), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn 등록_전에_온_cancel_은_로그_요청도_git_없이_취소하고_첫_페이지를_알린다() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler")]);
+        let r = Router::new(true, false, m);
+        let notes: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+        let sink = notes.clone();
+        r.set_note_sink(Arc::new(move |op, id| sink.lock().unwrap().push((op.as_str().to_string(), id.to_string()))));
+        assert!(is_sidecar(&r.route("req:cancel", &json!(["early"])).await));
+        // skip 0 — 취소돼도 백그라운드 조회를 풀어 준다(TS 는 실패해도 openFirstPage). git·커서는 만들지 않는다
+        let env = envelope(r.route("git:log", &json!(["a", { "skip": 0, "count": 10 }, "early"])).await);
+        assert_eq!(env["code"], "ABORTED");
+        assert_eq!(r.log_cursor_count(), 0);
+        assert_eq!(*notes.lock().unwrap(), [("logFirstPage".to_string(), "a".to_string())]);
+        // skip > 0 이면 알리지 않는다
+        assert!(is_sidecar(&r.route("req:cancel", &json!(["early2"])).await));
+        let env = envelope(r.route("git:log", &json!(["a", { "skip": 5, "count": 10 }, "early2"])).await);
+        assert_eq!(env["code"], "ABORTED");
+        assert_eq!(notes.lock().unwrap().len(), 1);
+        // 검증에서 거부되면 알리지 않는다(TS 는 검증 오류를 첫 페이지 처리 전에 던진다)
+        let env = envelope(r.route("git:log", &json!(["a", { "skip": 0, "count": "10" }])).await);
+        assert_eq!(env["error"], "invalid query");
+        assert_eq!(notes.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn log_채널도_미러에_없거나_스위치가_꺼지면_사이드카() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv")]);
+        let r = Router::new(true, false, m.clone());
+        for id in ["nope", "s"] {
+            assert!(is_sidecar(&r.route("git:log", &json!([id, { "skip": 0, "count": 1 }])).await), "{id}");
+        }
+        for args in [json!([]), json!([null]), json!([5, { "skip": 0, "count": 1 }])] {
+            assert!(is_sidecar(&r.route("git:log", &args).await), "{args}");
+        }
+        let off = Router::new(false, false, m);
+        assert!(is_sidecar(&off.route("git:log", &json!(["a", { "skip": 0, "count": 1 }])).await));
+        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
     }
 
     #[test]

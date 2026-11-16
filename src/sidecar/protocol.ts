@@ -8,9 +8,17 @@ import type { IpcEnvelope } from '@shared/ipc'
  */
 export const UNDEFINED_ARG = '__antlerUndefinedArg'
 
+/**
+ * Rust 가 `git:log` 를 직접 처리할 때 사이드카의 RepoService 에 알리는 일(`RepoService.noteLog`).
+ * 이 메시지는 Rust 만 만든다 — renderer 의 값은 항상 `req` 의 `args` 안에만 들어가고 `t` 는 Rust 가 정한다.
+ */
+export const NOTE_OPS = ['logFirstPage', 'logStale'] as const
+export type NoteOp = (typeof NOTE_OPS)[number]
+
 /** Rust → Node */
 export type ToSidecar =
   | { t: 'req'; id: number; ch: string; args: unknown[] }
+  | { t: 'note'; op: NoteOp; repoId: string }
   | { t: 'focus'; focused: boolean }
   | { t: 'hostres'; id: number; ok: boolean; value?: unknown }
 
