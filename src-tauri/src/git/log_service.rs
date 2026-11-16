@@ -28,9 +28,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use crate::git::exec::{ExecError, GitExecutor, GitStream, RunOpts};
+use crate::git::exec::{ExecError, GitExecutor, GitStream, RunOpts, DEFAULT_MAX_BUFFER};
 use crate::git::parsers::log::{parse_log_record, Commit};
-use crate::git::parsers::nul_records::NulRecordSplitter;
+use crate::git::parsers::nul_records::{NulRecordSplitter, MAX_STREAM_RECORD};
 use crate::git::scope::{log_args, parse_scope, scope_args, scope_key, Scope};
 use crate::mirror::{RepoMirror, Resolved, Target};
 
@@ -42,6 +42,8 @@ pub const CURSOR_SWEEP: Duration = Duration::from_millis(2500);
 pub const MAX_COUNT: usize = 5000;
 /// stdout 에서 한 번에 읽는 크기(Node 스트림 청크와 비슷하다)
 const READ_CHUNK: usize = 64 * 1024;
+/// 기억하는 앵커 수 상한. 범위(solo·hide) 조합마다 앵커가 하나씩 쌓이므로 가장 오래된 것부터 버린다
+const MAX_ANCHORS: usize = 32;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,6 +145,8 @@ struct Meta {
     closed: bool,
     /// 끝까지 읽어 더 내보낼 커밋이 없다
     exhausted: bool,
+    /// git 프로세스 PID(테스트용). 읽기 태스크가 띄운 뒤에 채워진다
+    pid: Option<u32>,
 }
 
 struct Req {
@@ -178,15 +182,14 @@ pub struct LogCursor {
     tx: mpsc::UnboundedSender<Req>,
     task: JoinHandle<()>,
     token: CancellationToken,
-    pid: Option<u32>,
 }
 
 impl LogCursor {
-    /// `args` 는 `start_at` 위치부터 읽도록 만든 `git log` 인자다. tokio 런타임 안에서 불러야 한다
+    /// `args` 는 `start_at` 위치부터 읽도록 만든 `git log` 인자다. tokio 런타임 안에서 불러야 한다.
+    /// git 은 여기서 띄우지 않는다 — 서비스는 상태 락을 쥔 채 이 함수를 부르는데 CreateProcess 는 느리다(부하가 있으면 초 단위).
+    /// 읽기 태스크가 첫 요청을 처리하기 전에(락 밖에서) 띄운다
     pub fn new(exec: &GitExecutor, repo_path: &str, args: &[String], start_at: u64) -> LogCursor {
         let token = CancellationToken::new();
-        let stream = exec.stream(repo_path, args, &RunOpts::with_cancel(token.clone()));
-        let pid = stream.as_ref().ok().and_then(GitStream::pid);
         let meta = Arc::new(Mutex::new(Meta {
             position: start_at,
             next_position: start_at,
@@ -196,20 +199,25 @@ impl LogCursor {
             failed: false,
             closed: false,
             exhausted: false,
+            pid: None,
         }));
         let (tx, rx) = mpsc::unbounded_channel();
-        let reader = Reader { stream: None, init_err: None, splitter: NulRecordSplitter::new(), buffered: VecDeque::new(), done: false, token: token.clone(), chunk: vec![0u8; READ_CHUNK] };
-        let reader = match stream {
-            Ok(s) => Reader { stream: Some(s), ..reader },
-            Err(e) => Reader { init_err: Some(e), ..reader },
+        let reader = Reader {
+            launch: Some(Launch { exec: exec.clone(), repo_path: repo_path.to_string(), args: args.to_vec() }),
+            stream: None,
+            splitter: NulRecordSplitter::with_limit(MAX_STREAM_RECORD),
+            buffered: VecDeque::new(),
+            done: false,
+            token: token.clone(),
+            chunk: vec![0u8; READ_CHUNK],
         };
         let task = tokio::spawn(run_reader(reader, rx, meta.clone()));
-        LogCursor { meta, tx, task, token, pid }
+        LogCursor { meta, tx, task, token }
     }
 
-    /// git 프로세스 PID(테스트용). 띄우지 못했으면 None
+    /// git 프로세스 PID(테스트용). 아직 띄우기 전이거나 띄우지 못했으면 None
     pub fn pid(&self) -> Option<u32> {
-        self.pid
+        lock(&self.meta).pid
     }
 
     /// 닫혔거나 실패한 커서는 재사용하면 안 된다
@@ -259,7 +267,8 @@ impl LogCursor {
     fn enqueue(&self, verify: Option<String>, count: usize) -> impl Future<Output = Result<LogPage, CursorError>> + Send + 'static {
         {
             let mut m = lock(&self.meta);
-            m.next_position += count as u64 + u64::from(verify.is_some());
+            // skip 이 u64 끝까지 올 수 있다(`1e300` → 포화) — 넘쳐도 패닉하지 않고 포화한다
+            m.next_position = m.next_position.saturating_add(count as u64).saturating_add(u64::from(verify.is_some()));
             m.pending += 1;
         }
         let (reply, rx) = oneshot::channel();
@@ -289,10 +298,17 @@ impl Drop for LogCursor {
     }
 }
 
+/// 읽기 태스크가 첫 요청 전에 git 을 띄우는 데 필요한 것
+struct Launch {
+    exec: GitExecutor,
+    repo_path: String,
+    args: Vec<String>,
+}
+
 struct Reader {
+    /// 아직 띄우지 않았으면 Some — 첫 요청을 처리하기 전에 [`Reader::ensure_started`] 가 띄운다
+    launch: Option<Launch>,
     stream: Option<GitStream>,
-    /// git 을 띄우지 못했다 — 첫 요청이 이 오류를 받는다
-    init_err: Option<ExecError>,
     splitter: NulRecordSplitter,
     buffered: VecDeque<Commit>,
     done: bool,
@@ -302,6 +318,24 @@ struct Reader {
 }
 
 impl Reader {
+    /// 아직 안 띄웠으면 git 을 띄운다. CreateProcess 가 느려 런타임 스레드를 막지 않게 blocking 풀에서 하고, PID 를 meta 에 적는다.
+    /// 띄우는 도중 커서가 닫히면(abort) 결과가 버려지며 스트림의 Drop 이 프로세스 트리를 죽인다
+    async fn ensure_started(&mut self, meta: &Mutex<Meta>) -> Result<(), ExecError> {
+        let Some(l) = self.launch.take() else { return Ok(()) };
+        let token = self.token.clone();
+        let started = tokio::task::spawn_blocking(move || {
+            if token.is_cancelled() {
+                return Err(ExecError::Aborted);
+            }
+            l.exec.stream(&l.repo_path, &l.args, &RunOpts::with_cancel(token))
+        })
+        .await
+        .map_err(|e| ExecError::Other { message: e.to_string() })??;
+        lock(meta).pid = started.pid();
+        self.stream = Some(started);
+        Ok(())
+    }
+
     fn push_records(&mut self, records: Vec<String>) {
         for r in records {
             if let Some(c) = parse_log_record(&r) {
@@ -311,10 +345,11 @@ impl Reader {
     }
 
     /// 버퍼에 count 개보다 많이(다음 페이지 존재 여부를 알기 위해 하나 더) 쌓일 때까지, 또는 끝까지 읽는다
+    ///
+    /// 한 번 채우는 동안 읽는 바이트는 [`DEFAULT_MAX_BUFFER`](실행기 `run` 의 출력 상한과 같은 64MB)를 넘지 않는다 —
+    /// 레코드 상한만으로는 큰 메시지의 커밋 1000개가 페이지 하나에 수 GB 를 쌓을 수 있다(압축돼 저장소는 작아도 된다).
     async fn fill(&mut self, count: usize) -> Result<(), ExecError> {
-        if let Some(e) = self.init_err.take() {
-            return Err(e);
-        }
+        let mut read_bytes = 0usize;
         while self.buffered.len() <= count && !self.done {
             let Some(stream) = self.stream.as_mut() else { return Err(ExecError::Aborted) };
             let n = match stream.read(&mut self.chunk).await {
@@ -335,7 +370,12 @@ impl Reader {
                 let rest = self.splitter.end();
                 self.push_records(rest);
             } else {
-                let records = self.splitter.push(&self.chunk[..n]);
+                read_bytes = read_bytes.saturating_add(n);
+                if read_bytes > DEFAULT_MAX_BUFFER {
+                    return Err(ExecError::Other { message: "git log page too large".into() });
+                }
+                // 한 레코드가 상한을 넘으면 오류로 끝낸다(커서는 실패 처리되고 스트림이 버려진다)
+                let records = self.splitter.push_checked(&self.chunk[..n]).map_err(|_| ExecError::Other { message: "git log record too long".into() })?;
                 self.push_records(records);
             }
         }
@@ -354,9 +394,9 @@ impl Reader {
 /// 한 번 읽은 결과를 메타에 반영한다(`readNow` 의 끝부분)
 fn commit_progress(meta: &Mutex<Meta>, reader: &Reader, reserved: usize, commits: &[Commit]) {
     let mut m = lock(meta);
-    m.position += commits.len() as u64;
+    m.position = m.position.saturating_add(commits.len() as u64);
     // 끝에 닿아 덜 받았으면 예약했던 위치를 되돌린다
-    m.next_position -= (reserved - commits.len()) as u64;
+    m.next_position = m.next_position.saturating_sub(reserved.saturating_sub(commits.len()) as u64);
     if let Some(last) = commits.last() {
         m.last_hash = Some(last.hash.clone());
     }
@@ -366,6 +406,7 @@ fn commit_progress(meta: &Mutex<Meta>, reader: &Reader, reserved: usize, commits
 
 async fn serve(reader: &mut Reader, meta: &Mutex<Meta>, req: &Req) -> Result<LogPage, CursorError> {
     lock(meta).last_used = Instant::now();
+    reader.ensure_started(meta).await.map_err(CursorError::Exec)?;
     if let Some(expected) = &req.verify {
         let (head, _) = reader.take(1).await.map_err(CursorError::Exec)?;
         commit_progress(meta, reader, 1, &head);
@@ -429,10 +470,55 @@ struct Anchor {
     hash: String,
 }
 
+/// 키마다 하나씩 기억하는 앵커. 개수 상한을 넘으면 가장 오래전에 넣은 것부터 버린다(`order` 가 삽입 순서)
+#[derive(Default)]
+struct Anchors {
+    map: HashMap<String, Anchor>,
+    order: VecDeque<String>,
+}
+
+impl Anchors {
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    fn get(&self, key: &str) -> Option<&Anchor> {
+        self.map.get(key)
+    }
+
+    fn insert(&mut self, key: String, anchor: Anchor) {
+        self.order.retain(|k| k != &key);
+        self.order.push_back(key.clone());
+        self.map.insert(key, anchor);
+        while self.order.len() > MAX_ANCHORS {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            }
+        }
+    }
+
+    fn remove(&mut self, key: &str) {
+        if self.map.remove(key).is_some() {
+            self.order.retain(|k| k != key);
+        }
+    }
+
+    fn retain(&mut self, mut keep: impl FnMut(&Anchor) -> bool) {
+        self.map.retain(|_, a| keep(a));
+        let map = &self.map;
+        self.order.retain(|k| map.contains_key(k));
+    }
+
+    fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+    }
+}
+
 #[derive(Default)]
 struct State {
     cursors: HashMap<String, Entry>,
-    anchors: HashMap<String, Anchor>,
+    anchors: Anchors,
 }
 
 impl State {
@@ -572,7 +658,7 @@ impl LogService {
         for k in gone {
             st.drop_cursor(&k);
         }
-        st.anchors.retain(|_, a| same(&a.repo_id, &a.target));
+        st.anchors.retain(|a| same(&a.repo_id, &a.target));
     }
 
     /// 모든 커서를 닫고 앵커를 지운다(앱 종료)
@@ -649,6 +735,8 @@ impl LogService {
         for k in others {
             st.retire(&k);
         }
+        // 활성 저장소의 앵커만 남긴다(다른 저장소로 옮겨 간 뒤의 앵커는 쓸모없다. 개수 상한은 `Anchors` 가 따로 건다)
+        st.anchors.retain(|a| a.repo_id == repo_id);
         if skip == 0 {
             st.anchors.remove(key);
         }
@@ -755,6 +843,46 @@ mod tests {
         for s in ["", "fatal: not a git repository", "fatal: bad revision 'main'", "fatal: ambiguous argument 'main'"] {
             assert!(!is_empty_repo_error(s), "{s}");
         }
+    }
+
+    fn anchor(repo: &str, position: u64) -> Anchor {
+        Anchor { repo_id: repo.into(), target: Target::Local { path: "/r".into() }, position, hash: "h".into() }
+    }
+
+    #[test]
+    fn 앵커는_상한을_넘으면_오래된_것부터_버린다() {
+        let mut a = Anchors::default();
+        for i in 0..MAX_ANCHORS + 5 {
+            a.insert(format!("k{i}"), anchor("r", i as u64));
+        }
+        assert_eq!(a.len(), MAX_ANCHORS);
+        assert!(a.get("k0").is_none() && a.get("k4").is_none());
+        assert!(a.get("k5").is_some() && a.get(&format!("k{}", MAX_ANCHORS + 4)).is_some());
+        // 같은 키를 다시 넣으면 가장 최근으로 올라가 개수가 늘지 않는다
+        a.insert("k5".into(), anchor("r", 99));
+        a.insert("new".into(), anchor("r", 1));
+        assert_eq!(a.len(), MAX_ANCHORS);
+        assert!(a.get("k5").is_some() && a.get("k6").is_none());
+        assert_eq!(a.get("k5").map(|x| x.position), Some(99));
+    }
+
+    #[test]
+    fn 앵커_제거와_걸러내기는_삽입_순서를_함께_정리한다() {
+        let mut a = Anchors::default();
+        a.insert("a".into(), anchor("x", 1));
+        a.insert("b".into(), anchor("y", 2));
+        a.insert("c".into(), anchor("x", 3));
+        a.remove("a");
+        a.retain(|n| n.repo_id == "x");
+        assert_eq!((a.len(), a.order.len()), (1, 1));
+        // 정리한 키가 순서에 남아 있으면 상한 계산이 틀어진다
+        for i in 0..MAX_ANCHORS {
+            a.insert(format!("n{i}"), anchor("x", 0));
+        }
+        assert_eq!(a.len(), MAX_ANCHORS);
+        assert!(a.get("c").is_none());
+        a.clear();
+        assert_eq!((a.len(), a.order.len()), (0, 0));
     }
 
     #[test]

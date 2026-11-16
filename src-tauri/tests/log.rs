@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use antler_lib::git::exec::{GitExecutor, LocalExecutor, RunOpts};
-use antler_lib::git::log_service::{CursorError, LogCursor, LogError, LogRequest, LogService, NoteOp};
+use antler_lib::git::log_service::{parse_query, CursorError, LogCursor, LogError, LogRequest, LogService, NoteOp};
 use antler_lib::git::parsers::log::{parse_log, Commit};
 use antler_lib::git::scope::log_args;
 use antler_lib::mirror::{MirrorRepo, RepoMirror, Target};
@@ -422,16 +422,17 @@ async fn 요청을_취소하면_커서를_버리고_git_이_끝난다() {
         let tok = CancellationToken::new();
         let (s, e, t, k) = (svc.clone(), exec.clone(), target(dir), tok.clone());
         let task = tokio::spawn(async move { s.log("a", &e, &t, &req(0, 5000), &k).await });
-        // 커서가 생긴 뒤에 취소한다(그 git 의 pid 를 기억해 두었다가 끝났는지 본다)
+        // git 이 뜬 뒤에 취소한다(그 git 의 pid 를 기억해 두었다가 끝났는지 본다). git 은 읽기 태스크가 락 밖에서 띄우므로
+        // 커서가 생긴 뒤 pid 가 보이기까지 시간이 걸린다(부하가 있으면 CreateProcess 가 수백 ms)
         #[cfg(windows)]
         {
-            let end = Instant::now() + Duration::from_millis(500);
+            let end = Instant::now() + Duration::from_secs(10);
             while Instant::now() < end {
                 if let Some(p) = svc.cursor_pids().first() {
                     pids.push(*p);
                     break;
                 }
-                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(2)).await;
             }
         }
         tokio::time::sleep(Duration::from_millis(round * 3)).await;
@@ -601,4 +602,25 @@ async fn 이미_끝까지_읽은_커서는_다시_열어_그_뒤에_생긴_커�
     g(&["commit", "-q", "--allow-empty", "-m", "first"]);
     let page = log_page(&router, "a", 0, 50).await;
     assert_eq!(page["data"]["commits"][0]["subject"], "first");
+}
+
+/// `{"skip":1e300,"count":1}` — skip 은 u64 로 포화하고 위치 예약(`next_position`)의 덧셈·뺄셈도 포화해, debug 빌드에서 패닉하지 않는다.
+/// git 이 그 값을 받아 주지 않아 TS 처럼 GIT 오류로 끝난다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 아주_큰_skip_도_패닉하지_않고_결정적으로_끝난다() {
+    let (_tmp, dir) = shared_repo();
+    let dir = &dir;
+    let svc = LogService::new(mirror_of(&[("a", dir)]));
+    let (exec, t, tok) = (local(), target(dir), CancellationToken::new());
+    for skip in [json!(1e300), json!(u64::MAX as f64), json!(9_007_199_254_740_992.0_f64)] {
+        let r = parse_query(Some(&json!({ "skip": skip, "count": 1 }))).unwrap();
+        let out = svc.log("a", &exec, &t, &r, &tok).await;
+        // git 이 정수로 받아 주지 않는다("not an integer", 128) — TS 도 같은 오류다
+        match out {
+            Err(LogError::Exec(e)) => assert_eq!(e.envelope_code(), "GIT", "{skip}"),
+            other => panic!("{skip}: {other:?}"),
+        }
+    }
+    // 이어서 보통 요청이 정상으로 돌아온다
+    assert_eq!(svc.log("a", &exec, &t, &req(0, 5), &tok).await.unwrap().commits.len(), 5);
 }

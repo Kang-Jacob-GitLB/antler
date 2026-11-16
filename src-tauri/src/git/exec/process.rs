@@ -5,7 +5,12 @@ use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::process::Stdio;
+#[cfg(windows)]
+use std::sync::{Mutex, PoisonError};
 use std::task::{Context, Poll};
+use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 
 use tokio::io::{AsyncRead, AsyncReadExt, ReadBuf};
 use tokio::process::{Child, ChildStderr, ChildStdout};
@@ -19,6 +24,9 @@ use super::wsl;
 /// Windows: 콘솔 창을 띄우지 않는다
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Windows: 주 스레드를 멈춘 채 만든다 — Job 에 넣은 뒤에 재개해야 래퍼가 띄우는 손자도 Job 안에 있다
+#[cfg(windows)]
+const CREATE_SUSPENDED: u32 = 0x0000_0004;
 
 /// WSL 실패 메시지용으로 stdout 앞부분을 이만큼만 기억한다
 const WSL_HEAD: usize = 4096;
@@ -44,18 +52,36 @@ fn is_cancelled(cancel: &Option<CancellationToken>) -> bool {
     cancel.as_ref().is_some_and(CancellationToken::is_cancelled)
 }
 
-/// Windows 에서 PATH 의 git 이 Git for Windows 래퍼(cmd\git.exe)면 실제 git.exe 는 손자 프로세스라
-/// `Child::kill` 로는 남는다 — `taskkill /pid N /T /F` 로 트리를 종료한다(TS 와 같은 명령).
+/// Windows 에서 PATH 의 git 이 Git for Windows 래퍼(cmd\git.exe)면 실제 git.exe 는 손자 프로세스라 `Child::kill` 로는 남는다.
+/// 트리는 **Job Object**(`job.rs`)로 종료한다: 프로세스마다 Job 을 만들어 `KILL_ON_JOB_CLOSE` 를 걸고, 종료는 동기 `TerminateJobObject` 다.
+/// Job 에 넣지 못했을 때(생성·할당 실패)만 아래 `taskkill /pid N /T /F`(TS 와 같은 명령)로 물러난다.
 ///
-/// **별도 스레드에서** 띄우고 기다린다. taskkill 을 띄우는 CreateProcess 는 부하가 없어도 100ms 를 넘고 부하가 있으면
+/// 폴백은 **별도 스레드에서** 띄우고 기다린다. taskkill 을 띄우는 CreateProcess 는 부하가 없어도 100ms 를 넘고 부하가 있으면
 /// 초 단위라, 런타임 스레드에서 하면 취소한 호출과 그 런타임의 다른 작업이 그동안 멈춘다(실측 — docs/tauri.md 실행기 절).
 /// 루트 프로세스 핸들(`process`)을 taskkill 이 끝날 때까지 쥐고 있어 그 사이 PID 가 다른 프로세스에 재사용되지 않는다.
 /// taskkill 이 실패하면 그 핸들로 루트만이라도 끝낸다(루트를 먼저 끝내면 `/T` 의 트리 탐색이 깨지므로 순서는 이렇다).
+///
+/// 스레드는 분리하지 않고 [`KILLS`] 에 모은다 — 앱 종료(`ExitProcess`)가 CreateProcess 도중의 스레드를 죽이면 taskkill.exe 가
+/// 일시 정지된 채 고아로 남는다(실측). 종료 시 [`shutdown_kills`] 가 기다리고, 그 뒤 들어온 폴백은 프로세스를 새로 만들지 않고 루트만 끝낸다.
 #[cfg(windows)]
 fn taskkill_in_background(pid: u32, process: std::os::windows::io::OwnedHandle) {
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
-    std::thread::spawn(move || {
+    let terminate_root = |process: &std::os::windows::io::OwnedHandle| {
+        // 이미 끝난 프로세스면 실패해도 무해하다
+        let h = windows::Win32::Foundation::HANDLE(process.as_raw_handle());
+        unsafe {
+            let _ = windows::Win32::System::Threading::TerminateProcess(h, 1);
+        }
+    };
+    // 종료 여부 확인과 스레드 등록을 한 락 안에서 한다(shutdown_kills 가 빈 목록을 본 뒤에 스레드가 뜨지 않게)
+    let mut kills = KILLS.lock().unwrap_or_else(PoisonError::into_inner);
+    if kills.shutting_down {
+        terminate_root(&process);
+        return;
+    }
+    kills.threads.retain(|t| !t.is_finished());
+    kills.threads.push(std::thread::spawn(move || {
         // taskkill 도 자식 프로세스지만 git 이 아니라 실행기 자신의 종료 수단이라 여기서만 직접 띄운다
         #[allow(clippy::disallowed_methods)]
         let mut cmd = std::process::Command::new("taskkill");
@@ -66,17 +92,59 @@ fn taskkill_in_background(pid: u32, process: std::os::windows::io::OwnedHandle) 
             .creation_flags(CREATE_NO_WINDOW);
         let ok = cmd.status().is_ok_and(|s| s.success());
         if !ok {
-            // 이미 끝난 프로세스면 실패해도 무해하다
-            let h = windows::Win32::Foundation::HANDLE(process.as_raw_handle());
-            unsafe {
-                let _ = windows::Win32::System::Threading::TerminateProcess(h, 1);
-            }
+            terminate_root(&process);
         }
         drop(process);
-    });
+    }));
 }
 
-/// 프로세스 트리를 종료한다. 이미 끝난(수거된) 자식이면 아무것도 하지 않는다 —
+/// 진행 중인 taskkill 폴백 스레드와 종료 여부
+#[cfg(windows)]
+struct Kills {
+    shutting_down: bool,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(windows)]
+static KILLS: Mutex<Kills> = Mutex::new(Kills { shutting_down: false, threads: Vec::new() });
+
+/// 테스트용: true 면 Job 을 만들지 않아 모든 자식이 taskkill 폴백으로 끝난다(평소에는 타지 않는 경로를 검증하려는 수동 테스트가 쓴다)
+#[cfg(windows)]
+static JOBS_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 테스트용: Job Object 사용을 끄거나 켠다. Windows 밖에서는 아무 일도 하지 않는다
+pub fn set_jobs_disabled(disabled: bool) {
+    #[cfg(windows)]
+    JOBS_DISABLED.store(disabled, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(windows))]
+    let _ = disabled;
+}
+
+/// 앱 종료 때 부른다: 진행 중인 폴백 taskkill 이 끝나기를 `timeout` 까지 기다리고, 이후의 폴백은 새 프로세스 없이 루트만 끝내게 한다.
+/// Job Object 로 종료하는 보통의 경로에는 기다릴 것이 없다.
+pub fn shutdown_kills(timeout: Duration) {
+    #[cfg(windows)]
+    {
+        let threads = {
+            let mut kills = KILLS.lock().unwrap_or_else(PoisonError::into_inner);
+            kills.shutting_down = true;
+            std::mem::take(&mut kills.threads)
+        };
+        let deadline = Instant::now() + timeout;
+        for t in threads {
+            while !t.is_finished() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if t.is_finished() {
+                let _ = t.join();
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = timeout;
+}
+
+/// Job 에 넣지 못한 자식의 프로세스 트리를 종료한다. 이미 끝난(수거된) 자식이면 아무것도 하지 않는다 —
 /// 끝난 PID 는 다른 프로세스가 재사용할 수 있어 그 번호로 taskkill 을 부르면 엉뚱한 프로세스(사용자의 앱 포함)를 죽인다.
 fn kill_tree(child: &mut Child) {
     if !matches!(child.try_wait(), Ok(None)) {
@@ -105,15 +173,30 @@ pub(super) struct ChildGuard {
     child: Child,
     /// 한 번만 죽인다 — 명시적 kill 뒤 Drop 이 다시 taskkill 을 띄우지 않게(taskkill 이 아직 안 끝나 try_wait 는 '실행 중'이다)
     killed: bool,
+    /// 트리를 담은 Job(Windows). 없으면(생성·할당 실패) taskkill 폴백을 쓴다. 이 핸들이 닫히면 `KILL_ON_JOB_CLOSE` 로 트리가 죽는다 —
+    /// 앱이 비정상 종료해도 마찬가지다
+    #[cfg(windows)]
+    job: Option<super::job::Job>,
 }
 
 impl ChildGuard {
-    fn new(child: Child) -> Self {
-        Self { child, killed: false }
+    fn new(child: Child, #[cfg(windows)] job: Option<super::job::Job>) -> Self {
+        Self {
+            child,
+            killed: false,
+            #[cfg(windows)]
+            job,
+        }
     }
 
     pub(super) fn kill_tree(&mut self) {
         if std::mem::replace(&mut self.killed, true) {
+            return;
+        }
+        // Job 은 핸들 기반이라 PID 재사용 문제가 없고 루트가 이미 끝났어도 남은 자손까지 끝낸다(명시적 중단이므로)
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            job.terminate();
             return;
         }
         kill_tree(&mut self.child);
@@ -131,8 +214,42 @@ impl ChildGuard {
 
 impl Drop for ChildGuard {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        if !self.killed && self.job.is_some() {
+            // 루트가 스스로 끝났으면 트리를 건드리지 않는다(남은 자손 — 예: 분리된 `gc --auto` — 은 이전처럼 둔다). 핸들은 필드 drop 에서 닫힌다
+            let running = self.is_running();
+            if let Some(job) = &self.job {
+                if running {
+                    job.terminate();
+                } else {
+                    job.disarm();
+                }
+            }
+            return;
+        }
         self.kill_tree();
     }
+}
+
+/// `CREATE_SUSPENDED` 로 띄운 자식을 Job 에 넣고 재개한다. Job 이 없으면(정지 없이 띄웠다) 할 일이 없다.
+/// 할당이 실패해도 재개는 한다(taskkill 폴백으로 간다 — 정지된 자식을 남기지 않는다). 재개가 실패하면 자식을 죽이고 오류.
+#[cfg(windows)]
+fn attach_job(child: &mut Child, job: Option<super::job::Job>) -> Result<Option<super::job::Job>, ExecError> {
+    let Some(job) = job else { return Ok(None) };
+    let Some(raw) = child.raw_handle() else {
+        let _ = child.start_kill();
+        return Err(ExecError::SpawnFailed { message: "자식 프로세스의 핸들을 얻지 못했다".into() });
+    };
+    let attached = job.assign(raw).is_ok();
+    if let Err(e) = super::job::resume_process(raw) {
+        if attached {
+            job.terminate();
+        } else {
+            let _ = child.start_kill();
+        }
+        return Err(ExecError::SpawnFailed { message: format!("자식 프로세스를 재개하지 못했다: {e}") });
+    }
+    Ok(attached.then_some(job))
 }
 
 struct Launched {
@@ -152,15 +269,24 @@ fn launch(spec: &Spec) -> Result<Launched, ExecError> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(false);
+    // Job 은 spawn 전에 만든다(spawn 과 할당 사이에 다른 일을 끼우지 않는다 — 정지된 채 남는 창이다). 못 만들면 정지 없이 띄우고 taskkill 폴백
     #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
+    let job = if JOBS_DISABLED.load(std::sync::atomic::Ordering::Relaxed) { None } else { super::job::Job::new().ok() };
+    #[cfg(windows)]
+    cmd.creation_flags(if job.is_some() { CREATE_NO_WINDOW | CREATE_SUSPENDED } else { CREATE_NO_WINDOW });
     let mut child = cmd.spawn().map_err(|e| ExecError::spawn(&e))?;
+    #[cfg(windows)]
+    let job = attach_job(&mut child, job)?;
+    #[cfg(windows)]
+    let new_guard = |child| ChildGuard::new(child, job);
+    #[cfg(not(windows))]
+    let new_guard = ChildGuard::new;
     let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
-        let mut guard = ChildGuard::new(child);
+        let mut guard = new_guard(child);
         guard.kill_tree();
         return Err(ExecError::SpawnFailed { message: "자식 프로세스의 파이프를 얻지 못했다".into() });
     };
-    Ok(Launched { guard: ChildGuard::new(child), stdout, stderr: drain_stderr(stderr) })
+    Ok(Launched { guard: new_guard(child), stdout, stderr: drain_stderr(stderr) })
 }
 
 /// stderr 는 앞 4MB 만 담고 파이프는 끝까지 비운다(비우지 않으면 git 이 stderr 파이프에서 멈춘다)

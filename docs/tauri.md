@@ -131,9 +131,17 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
   (1)·(2)는 라우터 PR 에서 채웠고(아래 "라우터"), (3)은 `git:log` PR 에서 채웠다(아래 "git:log").
   Rust CI(`tauri.yml`)는 main 룰셋의 필수 체크(`Rust · 골든 · clippy`)다(2026-11-16 지정) — clippy 의 `disallowed-methods`·주입 거부 테스트가
   실패한 PR 은 머지되지 않는다. 워크플로는 모든 PR 에서 항상 결과를 보고한다(관련 없는 PR 은 건너뛰고 성공).
-- Windows: `CREATE_NO_WINDOW`, 취소·Drop 때 `taskkill /pid N /T /F` 를 **한 번만**, **별도 스레드에서** 띄우고 기다린다. 이미 끝나 수거된 자식에는 보내지 않는다.
-  루트 프로세스 핸들 복제본을 taskkill 이 끝날 때까지 쥐고 있어 그 사이 PID 가 재사용되지 않고, taskkill 이 실패하면 그 핸들로 루트를 `TerminateProcess` 한다.
-  처음 이식은 런타임 스레드에서 taskkill 을 2~3번(명시적 kill + Drop) 띄워, 병렬 테스트 부하에서 취소→반환이 8~22초까지 늘었다(현재 1ms 미만).
+- Windows: `CREATE_NO_WINDOW`. **트리 종료는 Job Object**(`exec/job.rs`)다. git 을 띄울 때마다 Job 을 만들어 `KILL_ON_JOB_CLOSE` 를 걸고, `CREATE_SUSPENDED` 로 띄운 뒤
+  Job 에 넣고 `NtResumeProcess` 로 재개한다(래퍼 `cmd\git.exe` 가 손자를 띄우기 전에 Job 안에 있어야 손자도 Job 에 든다. 주 스레드 핸들을 std 가 닫아 프로세스 단위로 재개한다 —
+  Toolhelp 스레드 스냅샷으로 재개하는 방법은 호출당 60ms~1.5초가 걸려 버렸다). 취소·Drop 은 동기 `TerminateJobObject` 이고 프로세스를 만들지 않아 **호출이 70µs 안팎**에 돌아온다(실측).
+  Job 핸들은 `ChildGuard` 가 쥐므로 앱이 비정상 종료해도 커널이 트리를 죽인다. 루트가 스스로 끝난 뒤의 Drop 은 `KILL_ON_JOB_CLOSE` 를 풀고 닫는다(남은 자손을 건드리지 않는다 — fetch 의 분리된 `gc --auto` 등).
+  재개가 실패하면 자식을 죽이고 `SpawnFailed`. 남는 창: `CreateProcess` 직후 Job 에 넣기 전(마이크로초)에 앱이 죽으면 정지된 git 이 남는다.
+  **taskkill 폴백**은 Job 생성·할당이 실패할 때만 쓴다(`taskkill /pid N /T /F` 를 한 번만, 이미 끝나 수거된 자식에는 보내지 않는다). **별도 스레드**에서 띄우고 `JoinHandle` 을 모아 두며,
+  앱 종료 때 `shutdown_kills`(lib.rs `RunEvent::Exit`, 라우터 종료 뒤 2초 상한)가 기다린다. 그 뒤 들어온 폴백은 프로세스를 새로 만들지 않고 루트만 `TerminateProcess` 한다.
+  루트 핸들 복제본을 taskkill 이 끝날 때까지 쥐어 그 사이 PID 가 재사용되지 않는다. `tests/exec.rs` 의 수동 테스트가 폴백도 검증한다(`set_jobs_disabled`).
+  이력: 처음 이식은 런타임 스레드에서 taskkill 을 2~3번 띄워 병렬 테스트 부하에서 취소→반환이 8~22초까지 늘었고, 스레드로 옮긴 뒤에도 앱이 끝나는 순간 `ExitProcess` 가 CreateProcess 도중의
+  스레드를 죽여 **일시 정지된 taskkill.exe·conhost.exe 가 재부팅까지 고아로 남았다**(상속된 stdout 핸들을 쥐어 `cargo test | tail` 이 끝나지 않았다). Job Object 로 바꾼 이유다.
+  std 는 Windows 자식을 `bInheritHandles=TRUE` 로 띄워 stdio 를 null 로 줘도 부모의 상속 가능 핸들을 물려주지만, git 은 파이프 stdio 고 taskkill 은 폴백에서만 뜨므로 std 핸들의 상속 플래그는 건드리지 않았다.
 - 오류는 `ExecError`(`Git`·`Aborted`·`SpawnFailed`) → envelope code `GIT`·`ABORTED`·`ERROR`. WSL 은 wsl.exe 자신의 실패(종료 코드 -1, stderr 빔)를 stdout 의 WSL 메시지로 바꾼다.
 - `ProcessQueue`: local 6 / wsl 4 동시성(저장소마다 하나), 같은 키 요청은 `Shared` 로 합치고(키가 있는 요청에는 취소 신호를 걸지 않는다), 기다리는 쪽이 모두 사라지면 프로세스도 정리된다.
 - **git 을 띄우는 `Command::new` 는 `process.rs` 한 곳뿐이다.** `src-tauri/clippy.toml` 의 `disallowed-methods` 가 `std::process::Command::new`·`tokio::process::Command::new` 를 막고,
@@ -206,7 +214,12 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
   (code STALE, 문구 `commit history changed while paging`)다. 이 앞부분(커서 선택·요청 넣기)은 await 없이 한 번의 락 안에서 끝난다 — TS 가 첫 await 전에 하는 일이다.
   확인 읽기와 본 읽기는 한 요청으로 묶어 그 사이에 다른 읽기가 끼지 못하게 했다(TS 는 둘을 따로 예약한다).
 - **유휴 정리**: 5초 안 쓰인 커서는 닫고(2.5초마다 훑는다) 읽는 중인 커서는 건드리지 않는다. 훑는 태스크는 첫 커서를 만들 때 띄우고(`setup` 은 tokio 런타임 밖이다) 커서가 없어지면 스스로 끝난다.
-  앱 종료(`RunEvent::Exit`)·저장소 제거 때는 `Router::shutdown`·`on_mirror_changed` 가 닫는다. 종료 때 닫지 못한 git 은 부모가 죽으면 stdout 파이프가 끊겨 스스로 끝난다.
+  앱 종료(`RunEvent::Exit`)·저장소 제거 때는 `Router::shutdown`·`on_mirror_changed` 가 닫는다. 종료 때 닫지 못한 git 은 앱이 어떻게 끝나든 Job 핸들이 닫히며(`KILL_ON_JOB_CLOSE`) 커널이 트리를 죽인다.
+  git 은 **읽기 태스크가 첫 요청 전에**(상태 락 밖, `spawn_blocking`) 띄운다 — 서비스가 락을 쥔 채 동기 CreateProcess 를 부르지 않게. PID 는 태스크가 meta 에 적는다.
+  한 레코드(NUL 사이)가 16MB 를 넘으면 스트림을 오류(`ERROR`)로 끝내 커서를 닫는다(`NulRecordSplitter::push_checked` — `run` 결과를 파싱하는 `split_nul` 에는 상한이 없다).
+  한 페이지를 채우는 동안 읽은 바이트도 64MB(`DEFAULT_MAX_BUFFER`)를 넘으면 오류로 끝낸다 — 큰 메시지의 커밋 1000개(압축돼 저장소는 작다)가
+  페이지 하나에 수 GB 를 쌓지 못하게. 분리기는 새 청크만 훑는다(긴 미완성 조각을 매번 다시 훑으면 시간이 길이의 제곱으로 는다).
+  위치 계산(`skip` 이 u64 끝까지 올 수 있다)은 포화 산술이라 `{"skip":1e300,"count":1}` 도 패닉 없이 git 오류로 끝난다.
 - **스트림 drop(앞의 "앱에 연결하기 전 필수" (3))**: 커서를 닫는 모든 길 — `dispose`(유휴·다른 저장소·요청 취소·STALE·미러 변경·종료), 서비스에서 빠질 때의 `Drop`, 읽기 오류 —
   이 `GitStream` 을 버린다. `dispose` 는 토큰을 취소하고 읽기 태스크를 `abort` 해 태스크가 쥔 스트림을 버리게 한다(토큰만 취소하면 스트림은 다음 읽기 때만 깬다).
   `tests/log.rs` 가 4000 커밋 저장소로 git 이 파이프에서 멈춘 상태를 만들고, 닫은 뒤 프로세스 트리가 모두 사라지는지(powershell 스냅샷) 본다.
@@ -227,7 +240,7 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
 - **TS 와 같음을 보는 곳**: 채널 골든(아래), `tests/logCursor.test.ts` 의 케이스를 옮긴 `tests/log.rs`, `src/shared/logScope.ts` 의 JS 규칙을 못 박은 `tests/logScope.test.ts`.
 - 앱 확인(`drive.mjs`, `ANTLER_ROUTE_LOG=1` 로 `git:log -> rust` 확인, 10만 커밋 저장소 1회씩이라 **추세만** 본다): Solo `커밋 1,000개+`·diff `f32.txt` 3줄·검색 `1 / 2250` 이 Rust 경로·`ANTLER_RUST_GIT=0`·Electron 에서 모두 같다.
   콜드 스타트(첫 커밋 행) 7.6초(Rust) / 13.0초(`ANTLER_RUST_GIT=0`) / 16.3초(Electron), 스크롤 p95 26.6 / 26.6 / 26.7ms(스크롤 중 읽은 행 7,000+ / 1,000+ / 6,000+) — 부하가 있는 머신에서 1회씩이라 콜드 스타트 차이는 결론을 내지 않는다.
-- 알려진 차이: 확인 읽기+본 읽기를 한 요청으로 묶는다(위). 앵커는 TS 처럼 키마다 하나씩 쌓이고 상한이 없다(범위 조합이 늘면 커진다 — 둘 다 같다).
+- 알려진 차이: 확인 읽기+본 읽기를 한 요청으로 묶는다(위). 앵커는 TS 처럼 키마다 하나씩이지만 Rust 쪽은 **활성 저장소의 것만 남기고 32개를 넘으면 오래된 것부터 버린다**(TS 는 상한이 없다).
 
 ## Phase 0 에서 확인한 것
 

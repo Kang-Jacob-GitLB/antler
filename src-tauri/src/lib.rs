@@ -134,6 +134,8 @@ pub fn run() {
                 if let Some(r) = app.try_state::<router::Router>() {
                     r.shutdown();
                 }
+                // 폴백 taskkill 이 진행 중이면 기다린다(Job 으로 끝나는 보통의 경로에는 없다). 종료 때 CreateProcess 가 끊기면 정지된 고아가 남는다
+                git::exec::shutdown_kills(std::time::Duration::from_secs(2));
                 if let Some(s) = app.try_state::<sidecar::Sidecar>() {
                     s.kill();
                 }

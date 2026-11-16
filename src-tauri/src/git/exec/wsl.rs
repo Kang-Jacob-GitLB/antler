@@ -4,7 +4,7 @@
 //! `--cd ~` 로 배포판 사용자 홈에서 시작하므로 repo 경로는 홈 기준 상대 경로(`proj`)도 된다.
 //! Windows 환경변수는 WSLENV 없이는 WSL 로 넘어가지 않아 [`GIT_ENV`] 를 `env` 명령으로 전달한다.
 //!
-//! 취소: `taskkill /T` 가 wsl.exe 를 죽이면 리눅스 쪽 git 도 끝나는지는 `tests/exec.rs` 의 WSL 통합 테스트에서 실측한다.
+//! 취소: Job Object 종료가 wsl.exe 를 죽이면 리눅스 쪽 git 도 끝나는지는 `tests/exec.rs` 의 WSL 통합 테스트에서 실측한다.
 
 use super::common::{build_git_args, to_strings, RunOpts, RunResult, Spec, GIT_ENV};
 use super::error::ExecError;
@@ -63,6 +63,7 @@ pub(super) fn failure_error(code: i32, stderr: &str, stdout_head: &[u8], git_arg
     None
 }
 
+#[derive(Clone)]
 pub struct WslExecutor {
     distro: String,
 }

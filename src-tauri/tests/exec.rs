@@ -595,6 +595,70 @@ async fn 트리_kill_출력_없는_손자까지_죽는다() {
     eprintln!("[tree-kill/sleep] 트리 {}개 프로세스가 모두 종료됨", tree.len());
 }
 
+/// 트리 종료(Job 의 TerminateJobObject)는 동기이고 프로세스를 만들지 않아 호출이 바로 돌아온다. 띄우는 데 걸린 시간과 함께 출력한다
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "수동: kill 호출 시간 실측(--nocapture)"]
+async fn 트리_kill_호출은_바로_돌아온다() {
+    let mut worst = Duration::ZERO;
+    for _ in 0..5 {
+        let t = CancellationToken::new();
+        let spawn_at = Instant::now();
+        let mut st = local().stream(&root_str(), &SLEEP_ARGS, &RunOpts::with_cancel(t.clone())).unwrap();
+        let spawn_took = spawn_at.elapsed();
+        let pid = st.pid().expect("pid");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let tree = tree_of(pid, &process_snapshot());
+        t.cancel();
+        let kill_at = Instant::now();
+        let mut buf = [0u8; 8];
+        assert!(st.read(&mut buf).await.is_err());
+        let kill_took = kill_at.elapsed();
+        eprintln!("[tree-kill/timing] spawn={spawn_took:?} cancel→read 반환={kill_took:?} tree={}", tree.len());
+        worst = worst.max(kill_took);
+        assert_tree_dies(&tree).await;
+    }
+    assert!(worst < Duration::from_millis(250), "kill 이 느리다: {worst:?}");
+}
+
+/// Job 을 만들지 못했을 때의 폴백(taskkill)도 트리를 죽이고, `shutdown_kills` 가 끝나기를 기다린다. 전역 스위치를 만지므로 이 테스트만 따로 돌린다
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "수동: 이 테스트 하나만 — Job 을 끄는 전역 스위치를 쓴다(cargo test --test exec -- --ignored 폴백)"]
+async fn 트리_kill_폴백_taskkill_도_트리를_죽이고_종료가_기다린다() {
+    antler_lib::git::exec::set_jobs_disabled(true);
+    let t = CancellationToken::new();
+    let mut st = local().stream(&root_str(), &SLEEP_ARGS, &RunOpts::with_cancel(t.clone())).unwrap();
+    let pid = st.pid().expect("pid");
+    let mut tree = vec![pid];
+    for _ in 0..40 {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        tree = tree_of(pid, &process_snapshot());
+        if tree.len() >= 4 {
+            break;
+        }
+    }
+    assert!(tree.len() >= 3, "sleep 까지 뜨지 않았다: {tree:?}");
+    t.cancel();
+    let mut buf = [0u8; 8];
+    assert!(st.read(&mut buf).await.is_err());
+    // 종료 절차: 진행 중인 taskkill 스레드가 끝나기를 기다린다 — 돌아온 뒤에는 트리가 이미 사라졌다
+    let at = Instant::now();
+    antler_lib::git::exec::shutdown_kills(Duration::from_secs(5));
+    eprintln!("[tree-kill/fallback] shutdown_kills 가 {:?} 기다림", at.elapsed());
+    let snap = process_snapshot();
+    let alive: Vec<u32> = tree.iter().copied().filter(|p| snap.iter().any(|(pid, _)| pid == p)).collect();
+    assert!(alive.is_empty(), "폴백 뒤에도 남았다: {alive:?}");
+    // 종료 뒤의 폴백은 새 프로세스 없이 루트만 끝낸다
+    let t2 = CancellationToken::new();
+    let mut st2 = local().stream(&root_str(), &SLEEP_ARGS, &RunOpts::with_cancel(t2.clone())).unwrap();
+    let root2 = st2.pid().expect("pid");
+    t2.cancel();
+    assert!(st2.read(&mut buf).await.is_err());
+    assert_tree_dies(&[root2]).await;
+    antler_lib::git::exec::set_jobs_disabled(false);
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // wslExecutor.test.ts — 배포판이 없으면(CI 러너 포함) 건너뛴다
 // ---------------------------------------------------------------------------------------------------------------------
