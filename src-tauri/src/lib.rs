@@ -1,5 +1,6 @@
 mod commands;
 mod dialogs;
+mod fetch_host;
 pub mod git;
 pub mod mirror;
 pub mod router;
@@ -11,6 +12,10 @@ use std::path::PathBuf;
 use tauri::window::Color;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
+
+use git::exec::{GitExecutor, LocalExecutor, WslExecutor};
+use git::fetch::service::{FetchPrefsSink, FetchService};
+use mirror::Target;
 
 /// 첫 페인트 전 흰 화면을 막는다. 토큰 --bg-base(Dark)와 같은 값
 const BG: Color = Color(0x14, 0x11, 0x0F, 0xFF);
@@ -88,8 +93,27 @@ pub fn run() {
                     s.note(op, repo_id);
                 }
             }));
+            // fetch 서비스(local·wsl 저장소). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다
+            if router.enabled() {
+                let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone());
+                let no_hooks_dir = user_data.join("no-hooks").to_string_lossy().into_owned();
+                let make_runner = |target: &Target| match target {
+                    Target::Local { .. } => std::sync::Arc::new(GitExecutor::Local(LocalExecutor::default())),
+                    Target::Wsl { distro, .. } => std::sync::Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))),
+                };
+                router.set_fetch(std::sync::Arc::new(FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir))));
+            }
+            let fetch_kinds = router::sidecar_fetch_kinds(router.enabled());
             app.manage(router);
-            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror)?);
+            // fetchPrefs 를 받는 곳은 **사이드카를 띄우기 전에** 등록한다 — 첫 fetchPrefs 는 ready 전에 한 번만 오고 같은 내용이면 다시 오지 않는다.
+            // 사이드카 읽기 스레드에서 불리므로 앱 런타임에 들어가서 라우터를 부른다(예약이 태스크를 만든다)
+            let prefs_app = app.handle().clone();
+            app.manage(FetchPrefsSink(Box::new(move |prefs| {
+                if let Some(r) = prefs_app.try_state::<router::Router>() {
+                    router::in_runtime_of(tauri::async_runtime::handle().inner(), || r.apply_fetch_prefs(prefs));
+                }
+            })));
+            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, fetch_kinds)?);
 
             let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Antler")
@@ -123,6 +147,12 @@ pub fn run() {
             if let WindowEvent::Focused(focused) = event {
                 if let Some(s) = window.app_handle().try_state::<sidecar::Sidecar>() {
                     s.set_focus(*focused);
+                }
+                // Rust 가 맡는 저장소의 자동 fetch(밀렸으면 바로). 이 스레드는 런타임 밖이라 들어가서 부른다
+                if *focused {
+                    if let Some(r) = window.app_handle().try_state::<router::Router>() {
+                        router::in_runtime_of(tauri::async_runtime::handle().inner(), || r.fetch_on_focus());
+                    }
                 }
             }
         })

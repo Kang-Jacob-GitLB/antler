@@ -22,7 +22,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
-| 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 진행 중 — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"). 상태 기계·라우팅은 남음 |
+| 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
@@ -73,7 +73,7 @@ pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 �
 UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts   # TS 파서 출력으로 골든(tests/golden/parsers) 다시 쓰기
 npx vitest run tests/golden.test.ts                   # TS 파서가 골든과 같은지
 cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 같은 골든과 같은지(건너뛴 수 출력)
-cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels --test log   # CI 와 같은 전체(라우터·채널 패리티·로그 커서 포함)
+cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route   # CI 와 같은 전체(라우터·채널 패리티·로그 커서 포함)
 UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts   # 채널 골든(tests/golden/channels, exec/channels.json) 다시 쓰기
 ANTLER_RUST_GIT=0 <exe>                               # 라우터를 끄고 모든 채널을 사이드카로(되돌리기 스위치)
 ```
@@ -295,7 +295,7 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
 ## fetch 가드 판정 로직(Phase 3, `src-tauri/src/git/fetch/`)
 
 fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목록·URL 판정·확인 창 표시·오류 분류)를 **1:1 로** 옮긴다 — 더 엄격하게도, 느슨하게도 바꾸지 않는다(바꾸려면 TS 에 먼저 고친다).
-판정 로직(이 절)은 git 을 실행하지 않는다. 실행(`git config`·`remote`·`fetch`)은 바로 아래 "fetch 실행"이고, 둘 다 앱에는 아직 연결하지 않았다. 상태 기계(진행·큐·백오프·승인 저장)는 아래 "fetch 상태 기계"(`service.rs`, PR C)이고, 라우팅(앱 연결)은 PR D 다.
+판정 로직(이 절)은 git 을 실행하지 않는다. 실행(`git config`·`remote`·`fetch`)은 바로 아래 "fetch 실행"이다(둘 다 앱에서는 아래 라우팅이 부른다). 상태 기계(진행·큐·백오프·승인 저장)는 아래 "fetch 상태 기계"(`service.rs`, PR C)이고, 라우팅(앱 연결)은 아래 "fetch 라우팅 — PR D"다.
 
 - **파일**: `guard.rs`(`fetch.ts` 의 순수 함수), `confirm_text.rs`(`confirmText.ts`), `pattern.rs`(허용 목록 매처), `special_table.rs`·`lowercase_table.rs`(생성 파일).
 - **허용 목록은 regex 크레이트 없이** TS 정규식 소스 문자열(`ALLOWED_KEY_SOURCES`)을 그대로 두고 `pattern.rs` 의 작은 매처가 해석한다.
@@ -321,7 +321,7 @@ fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목�
   "Rust 가 TS 보다 넓게 허용하지 않는다"는 원칙에 맞다. 그래서 `fetchConfigArgs` 골든 중 `hooksPath: ""` 9건은 값 비교 대신 빈 값 거부를 따로 확인한다.
 - 알려진 차이: TS `ALLOWED_VALUES[key]` 는 일반 객체 조회라 키가 `constructor`·`__proto__` 면 `TypeError` 를 던진다(git 키는 점이 있어야 해 실제로는 오지 않는다). Rust 는 허용 목록에 없는 키로 본다.
 
-### fetch 실행(`run.rs`, 앱에는 아직 연결하지 않음)
+### fetch 실행(`run.rs`)
 
 `inspectConfig`(`config --list --show-scope --includes -z` → `--show-scope` 를 모르면 `ScopeWalk` 로 범위별 읽기 → `remote` / `remote get-url --all -- <n>`)와 `runFetch` 의 이식이다.
 git 은 `GitRunner` 트레이트로만 부른다(실제는 `GitExecutor`, 테스트는 옛 git 을 흉내 내는 래퍼를 끼운다 — 프로세스를 띄우는 길은 늘지 않는다).
@@ -343,9 +343,9 @@ local·WSL 저장소만 다룬다. ssh·github fetch 와 `filter`·`FollowRedire
   각 항목은 Rust 테스트 이름이거나 `N/A: 사유`다. `fetcher.fetch(...)` 를 거치는 시나리오는 이 파일에서는 검사·실행 부분만 옮겼고, 상태 기계(진행 합치기·확인→재검사 TOCTOU·승인 저장·백오프·authPaused)는 `fetch_service.rs`(PR C)가 옮겼다 — 지금 표는 71개 전부 이식이고 N/A 가 없다.
   전역 git 설정 파일(커밋된 `tests/gitconfig`)은 고치지 않는다 — 전역 값이 필요한 시나리오는 가짜 실행기의 `--global` 응답으로 준다. WSL 의 git 은 격리를 받지 않으므로 `/tmp` 저장소로만 돌린다.
 
-### fetch 상태 기계(`service.rs`, 앱에는 아직 연결하지 않음 — PR C)
+### fetch 상태 기계(`service.rs`, PR C)
 
-`FetchService.ts` 의 이식이다(GitHub 원격 전용 갈래는 사이드카에 남는다). 앱에 연결하는 라우팅은 PR D 다. 외부 의존은 `FetchHost` 트레이트(`emit`·`confirm`·`approve`·`note`·`repo_name`)로 주입하고,
+`FetchService.ts` 의 이식이다(GitHub 원격 전용 갈래는 사이드카에 남는다). 앱에 연결하는 라우팅은 아래 "fetch 라우팅 — PR D"다. 외부 의존은 `FetchHost` 트레이트(`emit`·`confirm`·`approve`·`note`·`repo_name`)로 주입하고,
 git 은 `GitRunner` 로 주입한다(운영은 `GitExecutor`, 주기·백오프·60초 검증은 프로세스를 띄우지 않는 가짜).
 
 - **진행·큐**: 저장소당 진행 중인 요청은 하나(`fetch()` 가 같은 `FetchFuture`(`Shared`)를 돌려준다 — 두 번째 호출의 `manual` 은 TS 처럼 무시된다). 본체는 spawn 한 태스크라 기다리는 쪽이 사라져도 끝까지 가고,
@@ -359,7 +359,7 @@ git 은 `GitRunner` 로 주입한다(운영은 `GitExecutor`, 주기·백오프�
   **첫 `fetchPrefs` 를 받기 전에는 주기를 몰라 예약하지 않는다**(기본값 5분을 정하는 곳은 사이드카 한 곳이다).
 - **확인 창 응답 해석은 타입에 묶여 있다**(`confirm_text.rs`): `fetch_confirm_plan` 이 `ConfirmPlan::Blocked`(항목이 12개를 넘어 "닫기"만 있는 차단 창)·`Ask`(이번만·항상·취소)를 만들고,
   `decide(응답)` 이 `Decision{Once, Always, Deny}` 를 낸다 — 차단 창은 어떤 응답이든 `Deny`, 확인 창은 0 → `Once`·1 → `Always`·그 밖(취소·실패 `None`)은 `Deny`(TS `handlers.ts` 와 같다).
-  `FetchHost::confirm` 은 눌린 버튼 번호만 돌려주고 허용 여부는 서비스가 `decide` 로만 정한다. 저장소 이름(창 제목)은 미러에 없어 `FetchHost::repo_name`(없으면 id)로 받는다 — **PR D 에서 출처를 정해야 한다**.
+  `FetchHost::confirm` 은 눌린 버튼 번호만 돌려주고 허용 여부는 서비스가 `decide` 로만 정한다. 저장소 이름(창 제목)은 `FetchHost::repo_name` 으로 받는다(출처는 미러의 `name` — 아래 "fetch 라우팅 — PR D").
 
 #### 승인 저장과 프로토콜
 
@@ -378,7 +378,7 @@ git 은 `GitRunner` 로 주입한다(운영은 `GitExecutor`, 주기·백오프�
 - **메모리 오버레이**: 방금 부탁한 값은 사이드카가 `fetchPrefs` 로 되돌려 주기 전까지 Rust 메모리에 쥔다(그 사이의 자동 fetch 가 승인을 놓치지 않게). 같은 값 또는 다른 값이 돌아오면 정리하고, 값이 없는 스냅샷(처리 전)은 남겨 두며(안전한 쪽),
   저장소가 사라지면(`forget`·미러에서 빠짐) 지운다. gen 이 이미 받은 것 이하인 `fetchPrefs` 는 버린다.
 - **소유권**: 사이드카 `FetchService` 에 `owns(repoId)` 술어가 생겼다(기본 전부 소유 — Electron 판 동작 불변). 소유하지 않은 저장소는 `fetch` 가 ERROR(거부)이고 `setActive` 는 null 로 취급한다(이중 fetch 방지).
-  **술어를 실제로 거는 배선(Rust 가 맡는 local·WSL 을 뺀다)은 PR D 다** — 지금 하면 Tauri 판의 local fetch 가 끊긴다.
+  술어를 거는 배선(Rust 가 맡는 local·WSL 을 뺀다)은 아래 "fetch 라우팅 — PR D"다.
 
 #### PR B 보안 리뷰의 잠재 결함 4건(이 PR 에서 막음)
 
@@ -394,8 +394,36 @@ git 은 `GitRunner` 로 주입한다(운영은 `GitExecutor`, 주기·백오프�
 실제 git(127.0.0.1 401 서버, 명령줄 범위 `GIT_CONFIG_COUNT` 로 심은 자격 증명 도우미)으로 TS 의 PR C 몫 시나리오 7개를 옮겼다. 멈춘 시계는 런타임이 한가하면 다음 타이머로 건너뛰므로 프로세스를 띄우는 테스트와 섞지 않는다.
 `test-map.json`: TS `fetch.test.ts` 의 71개 `it` 이 모두 Rust 테스트에 대응한다(N/A 없음).
 
-**남은 일(PR D)**: `git:fetch`(`manual === true`)·`repos:watch` 가로채기·포커스·`fetchPrefs` 적용(`FetchPrefsSink` 연결)·미러 제거 → `forget`·이벤트 `antler:evt`·확인 창을 `dialogs::message_box` 로 직접·`FetchHost::approve` 를 `Sidecar::approve` 로 연결·`FetchHost::repo_name` 출처·
-사이드카 `owns` 배선(`ANTLER_RUST_FETCH_KINDS=local,wsl`, `ANTLER_RUST_GIT=0` 이면 없음), 채널 골든·실측(이중 fetch 없음).
+### fetch 라우팅 — PR D
+
+Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github 는 사이드카 그대로). 켜고 끄는 스위치는 라우터와 같은 `ANTLER_RUST_GIT`(`0` 이면 전부 사이드카)이다.
+
+- **라우팅 채널**: `RUST_CHANNELS` 에 `git:fetch` 가 늘었다(`git:commit`·`git:log`·`git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`·`git:fetch`). `git:fetch(repoId, manual)` 의 `manual` 은 **정확히 `true` 일 때만** 참이다
+  (`handlers.ts` 의 `manual === true` 와 같다 — 문자열·숫자·배열·빈 자리는 자동 fetch). 미러에 있는 local·wsl 이면 Rust, 미러에 없거나 ssh·github 면 사이드카다.
+  미러 검사에 걸린 local·wsl 저장소(UNC 경로 등)와 서비스가 없을 때는 **사이드카로 보내지 않고 ERROR** 를 낸다 — 사이드카는 그 환경을 맡지 않아 보내면 이중 경로가 된다.
+- **자동 fetch 배선**(라우터 → `FetchControl` 포트): `repos:watch` 가로채기에서 `set_active`(미러에 있고 Rust 가 맡는 저장소만, 아니면 비운다), 창 포커스(`lib.rs` 의 `Focused`) → `on_focus`,
+  `fetchPrefs`(`FetchPrefsSink`) → `apply_prefs`(주기 변경은 `config:setUi` → 사이드카 설정 변경 → `fetchPrefs` 로 와 재예약된다), 미러가 바뀔 때 `sync_mirror`(사라졌거나 Rust 가 맡지 않게 된 저장소는 `forget`),
+  앱 종료 때 `dispose`(진행 중인 fetch 취소).
+- **런타임**: 예약·fetch 시작은 tokio 태스크를 만든다. 사이드카 읽기 스레드(`fetchPrefs`·미러 변경)와 창 이벤트 스레드(포커스)는 런타임 밖이라 `router::in_runtime_of(앱 런타임 핸들, …)` 로 들어가서 부른다
+  (`tests/fetch_route.rs` 가 활성 저장소가 있을 때 런타임 밖 호출은 패닉하고 들어가서 부르면 안전함을 보인다).
+- **호스트**(`src-tauri/src/fetch_host.rs`): 이벤트는 `antler:evt` 로 `fetch:status`·`repo:changed`(사이드카 이벤트와 같은 `{name,payload}`), 확인 창은 `dialogs::message_box`(Rust 네이티브, `spawn_blocking`)로 띄우고
+  실패·닫기는 `None` = 거부(`decide`), 승인은 `Sidecar::approve`, 알림은 `Sidecar::note`(`fetchChanged` 가 `repo:changed` 보다 먼저). 저장소 이름(확인 창 제목)은 **미러의 `name`**(비밀 아님 —
+  `{id,kind,path,name,distro?}`; 이름만 바뀌어도 미러가 다시 간다)이고 없으면 id 다.
+- **소유권(이중 fetch 방지)**: 라우터가 켜져 있을 때만 사이드카를 env `ANTLER_RUST_FETCH_KINDS=local,wsl` 로 띄운다(`router::sidecar_fetch_kinds`; 꺼져 있으면 부모 환경의 값도 지워서 띄운다). 사이드카(`src/sidecar/fetchOwns.ts`)는
+  이 값으로 FetchService 의 `owns` 를 정해 local·wsl 저장소를 **fetch 도 자동 예약도 하지 않는다**(알 수 없는 토큰은 무시 — 아무도 안 맡는 일이 없게). `ANTLER_RUST_GIT=0` 이면 env 도 Rust 서비스도 없어 사이드카가 전부 맡는다(되돌리기).
+  Electron 판은 `owns` 기본(전부)이라 동작이 그대로다. 증명: `tests/sidecarFetchOwns.test.ts`(사이드카가 소유하지 않은 저장소는 fetch·setActive·onFocus 에서 아무것도 하지 않는다)와
+  `tests/fetch_route.rs`(Rust 라우터는 local·wsl 의 `git:fetch` 를 절대 사이드카로 보내지 않고, 스위치가 꺼지면 서비스를 주입하지도 건드리지도 않는다).
+  WSL 은 Windows 에서만 Rust 가 맡는다(미러가 그 밖의 OS 에서는 사이드카로 돌린다) — Tauri 판은 Windows 전용이라 다른 OS 의 WSL 저장소 fetch 는 어느 쪽도 하지 않는다.
+- **PR C 보안 리뷰 후속**: (1) `FetchPrefsSink` 는 `Sidecar::spawn` **보다 먼저** manage 한다(첫 `fetchPrefs` 는 ready 전에 한 번만 온다) — `fetch_prefs_받는_곳은_사이드카를_띄우기_전에_등록한다` 가 `lib.rs` 의 순서를 강제하고,
+  서비스가 아직 없을 때 도착한 prefs 는 라우터가 마지막 것을 보관했다가 주입 때 적용한다. (2) `Sidecar::approve` 는 `pub(crate)`(+`#[allow(dead_code)]` 제거)이고, 운영 코드의 `.approve(` 는 서비스의 `host.approve(` 한 곳과
+  호스트 구현의 `sidecar.approve(` 한 곳뿐임을 `사이드카에_승인을_부탁하는_호출은_호스트_구현_한_곳뿐이다` 가 소스로 강제한다.
+- **채널 골든**: `tests/fixtures/repos/fetch.scenarios.json` 을 TS `FetchService`(`tests/goldenChannels.test.ts`)와 Rust 라우터(`src-tauri/tests/channels.rs`)가 같은 순서로 돌려 단계별 상태·확인 창 횟수·변경 알림·승인 저장을
+  `tests/golden/channels/fetch.json` 과 비교한다(수동 성공·변경 없음, 자동 file 전송 거부, `manual` 엄격성, remote 없음, 위험 설정의 자동 차단·취소·창 실패·이번만·항상 허용·바뀌면 재질문·TOCTOU,
+  UNC·`ext::` 거부와 확인 중 변경, 인증 실패(자동은 `needsManual`, 수동은 일시 정지)). 시각은 유무만, 오류 문구는 유무와 file 안내 여부만 비교한다.
+  갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts -t "channels/fetch.json"`.
+- **되돌리기**: `ANTLER_RUST_GIT=0` 으로 실행하면 사이드카가 fetch 를 전부 맡는다(env·Rust 서비스 없음). 확인용 로그는 `ANTLER_ROUTE_LOG=1`(`[route] git:fetch -> rust`).
+
+**사람 확인 필요**: 확인 창(`[이번만][항상][취소]`)이 실제로 뜨고 버튼이 맞게 동작하는지(자동화는 입력을 합성하지 않는다), WSL 저장소의 실제 fetch.
 
 ## Phase 0 에서 확인한 것
 

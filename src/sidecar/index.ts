@@ -17,6 +17,7 @@ import { RepoWatcher } from '../main/services/RepoWatcher'
 import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
 import { handleFetchApprove } from './fetchApprove'
+import { fetchOwner, parseRustFetchKinds } from './fetchOwns'
 import { FetchPrefsSender } from './fetchPrefs'
 import { MirrorSender } from './mirror'
 import { handleNote } from './note'
@@ -74,7 +75,9 @@ const fetcher = new FetchService(
   repos,
   (status) => emit('fetch:status', status),
   (repoId) => emit('repo:changed', { repoId }),
-  noHooksDir
+  noHooksDir,
+  // Rust 가 fetch 를 맡는 환경(env 가 있을 때만)의 저장소는 이 서비스가 fetch·자동 예약하지 않는다
+  fetchOwner(() => config.get(), parseRustFetchKinds(process.env['ANTLER_RUST_FETCH_KINDS']))
 )
 
 // 안전한 암호화 저장소가 없으므로 토큰은 메모리에만 둔다(디스크에 쓰지 않는다)

@@ -1,4 +1,4 @@
-// 저장소 미러(Rust 라우터용). 설정에서 저장소별 {id, kind, path, distro?} 만 뽑아 바뀔 때만 보낸다. 프로토콜은 protocol.ts.
+// 저장소 미러(Rust 라우터용). 설정에서 저장소별 {id, kind, path, name, distro?} 만 뽑아 바뀔 때만 보낸다. 프로토콜은 protocol.ts.
 import type { AppConfig } from '@shared/types'
 import type { FromSidecar, MirrorRepo } from './protocol'
 
@@ -8,7 +8,7 @@ export function mirrorOf(config: AppConfig): MirrorRepo[] {
   for (const r of config.repos) {
     const s = config.sources.find((x) => x.id === r.sourceId)
     if (!s) continue
-    out.push({ id: r.id, kind: s.kind, path: r.path, ...(s.kind === 'wsl' && s.distro ? { distro: s.distro } : {}) })
+    out.push({ id: r.id, kind: s.kind, path: r.path, name: r.name, ...(s.kind === 'wsl' && s.distro ? { distro: s.distro } : {}) })
   }
   return out
 }

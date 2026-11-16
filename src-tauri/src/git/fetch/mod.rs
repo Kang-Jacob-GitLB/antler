@@ -1,5 +1,5 @@
 //! fetch 가드의 판정 로직(`src/main/git/fetch.ts`·`src/main/ipc/confirmText.ts`·`FetchService.ts` 의 순수 함수) 이식.
-//! git 을 실행하지 않고 앱에도 아직 연결되지 않았다 — Phase 3 의 첫 단계로, 허용 목록·URL 판정·설정 파싱·확인 창 표시·오류 분류가
+//! git 을 실행하지 않는다(실행은 `run.rs`, 상태 기계는 `service.rs`, 앱 연결은 라우터) — Phase 3 의 첫 단계로, 허용 목록·URL 판정·설정 파싱·확인 창 표시·오류 분류가
 //! TS 와 글자 그대로 같은 결과를 내는지만 골든(`tests/golden/fetch/*.json`)으로 고정한다. 실행(run.rs)·상태 기계는 뒤 단계다.
 //!
 //! 이식 규칙(어기면 보안 판정이 TS 와 달라진다):

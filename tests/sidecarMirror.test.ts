@@ -9,15 +9,15 @@ import type { FromSidecar } from '../src/sidecar/protocol'
 const tmp = (): string => join(mkdtempSync(join(tmpdir(), 'antler-mirror-')), 'antler.config.json')
 
 describe('사이드카 저장소 미러', () => {
-  it('저장소마다 id·kind·path(+wsl 의 distro)만 담고 이름·그룹 같은 것은 담지 않는다', () => {
+  it('저장소마다 id·kind·path·name(+wsl 의 distro)만 담고 그룹 같은 것은 담지 않는다', () => {
     const c = new ConfigStore(tmp())
     const local = c.addRepo({ sourceId: 'local', path: 'C:\\work\\a', name: 'a', group: 'g' })
     const wsl = c.addRepo({ sourceId: 'wsl:Ubuntu', path: '/home/me/b', name: 'b' }, { id: 'wsl:Ubuntu', kind: 'wsl', label: 'WSL: Ubuntu', distro: 'Ubuntu' })
     const ssh = c.addRepo({ sourceId: 'ssh:h', path: '/srv/c', name: 'c' }, { id: 'ssh:h', kind: 'ssh', label: 'SSH: h', sshHost: 'h' })
     expect(mirrorOf(c.get())).toEqual([
-      { id: local.id, kind: 'local', path: 'C:\\work\\a' },
-      { id: wsl.id, kind: 'wsl', path: '/home/me/b', distro: 'Ubuntu' },
-      { id: ssh.id, kind: 'ssh', path: '/srv/c' }
+      { id: local.id, kind: 'local', path: 'C:\\work\\a', name: 'a' },
+      { id: wsl.id, kind: 'wsl', path: '/home/me/b', name: 'b', distro: 'Ubuntu' },
+      { id: ssh.id, kind: 'ssh', path: '/srv/c', name: 'c' }
     ])
   })
 
@@ -32,11 +32,14 @@ describe('사이드카 저장소 미러', () => {
     c.setUi({ diffMode: 'split' })
     expect(sent).toHaveLength(1)
     const r = c.addRepo({ sourceId: 'local', path: '/tmp/x', name: 'x' })
-    expect(sent.at(-1)).toEqual({ t: 'repos', gen: 2, repos: [{ id: r.id, kind: 'local', path: '/tmp/x' }] })
-    // 이름만 바뀌어도 미러(id·kind·path)는 같다
+    expect(sent.at(-1)).toEqual({ t: 'repos', gen: 2, repos: [{ id: r.id, kind: 'local', path: '/tmp/x', name: 'x' }] })
+    // 이름이 바뀌면 미러도 바뀐다(Rust 의 확인 창 제목이 낡지 않게)
     c.updateRepo(r.id, { name: 'y' })
-    expect(sent).toHaveLength(2)
+    expect(sent.at(-1)).toEqual({ t: 'repos', gen: 3, repos: [{ id: r.id, kind: 'local', path: '/tmp/x', name: 'y' }] })
+    // 그룹처럼 미러에 없는 값만 바뀌면 보내지 않는다
+    c.updateRepo(r.id, { group: 'g2' })
+    expect(sent).toHaveLength(3)
     c.removeRepo(r.id)
-    expect(sent.at(-1)).toEqual({ t: 'repos', gen: 3, repos: [] })
+    expect(sent.at(-1)).toEqual({ t: 'repos', gen: 4, repos: [] })
   })
 })

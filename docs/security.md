@@ -43,6 +43,8 @@
   공격자가 설정을 정할 수 있는 저장소를 여는 일반적인 한계다(Antler 는 네트워크 공유 저장소 경로 자체는 거부한다).
   (2) 사용자가 "알 수 없는 설정" 확인 창에서 허용하면, 저장소의 `http.<url>.*` 같은 키가 우리가 `-c` 로 준 기본값을 덮을 수 있다 — 허용은 사용자의 결정이다.
   (3) renderer 가 주장하는 `manual` 값은 main 이 검증할 수 없다. 침해된 renderer 가 수동 fetch 를 요청해도 알 수 없는 설정은 main 의 확인 창에서 사용자가 눌러야 한다.
+  **Tauri 판**: local·WSL 저장소의 fetch 가드(허용 목록·URL 판정·상태 기계)는 Rust(`src-tauri/src/git/fetch/`)에 있고, 사이드카의 FetchService 는 그 저장소를 맡지 않는다(이중 fetch 없음).
+  확인 창은 webview 가 아니라 Rust 네이티브 대화상자(`dialogs::message_box`)이며 renderer 에는 그것을 띄우거나 누를 경로가 없다. 승인은 Rust 가 사이드카에 부탁해(`fetchApprove`) 설정 파일에 남기고, renderer 의 값은 그 경로로 가지 않는다 — 자세한 것은 docs/tauri.md "fetch 라우팅".
 - 코드 탐색기: 저장소 문서(README 등)의 외부 링크는 사용자가 누를 때만 `code:openLink` 로 연다 — https 만, 사용자 정보가 든 URL 은 거부, 마우스를 올리면 실제 주소를 보여 준다.
 - 경로·diff: `GIT_LITERAL_PATHSPECS=1` 이라 renderer 가 보낸 경로가 pathspec 매직으로 해석되지 않고,
   `--no-textconv`·`--no-ext-diff` 로 저장소 설정이 외부 프로그램을 실행하지 못하게 한다.

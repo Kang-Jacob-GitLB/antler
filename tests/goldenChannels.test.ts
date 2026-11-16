@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AbortError, GitError } from '../src/main/executors/GitExecutor'
 import { ConfigStore } from '../src/main/services/ConfigStore'
+import { FetchService } from '../src/main/services/FetchService'
 import { logArgs } from '../src/main/git/commands'
 import { RepoService, StaleLogError } from '../src/main/services/RepoService'
 import type { LogQuery } from '../src/shared/types'
@@ -16,6 +19,7 @@ import { IPC_CHANNELS } from '../src/shared/ipc'
 //  - tests/golden/channels/{compare,fileDiff,fileHistory,blame}.json: 파일 단위 채널 시나리오(tests/fixtures/repos/files.scenarios.json)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
+//  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
 // 골든 갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts`
 
 const FIXTURES = join(__dirname, 'fixtures', 'repos')
@@ -304,4 +308,122 @@ describe('파일 단위 채널 골든(channels/{compare,fileDiff,fileHistory,bla
     }
     await svc.dispose()
   }, 120_000)
+})
+
+// ── git:fetch ──────────────────────────────────────────
+
+interface FetchStep {
+  in?: 'origin' | 'repo'
+  git?: string[]
+  fetch?: { manual?: unknown; confirm?: number | null; during?: { in: 'origin' | 'repo'; git: string[] } }
+}
+interface FetchScenario {
+  name: string
+  server?: 'auth401'
+  steps: FetchStep[]
+}
+
+/** 상태에서 비교할 것만 남긴다: 시각(lastOkAt)은 유무만, 오류 문구는 유무와 file 전송 안내 여부만(문구 패리티는 하지 않는다) */
+function fetchState(st: {
+  fetching: boolean
+  lastOkAt: number | null
+  error: string | null
+  blocked: { keys: string[]; confirmable: boolean } | null
+  authPaused: boolean
+  needsManual: boolean
+  noRemote: boolean
+}): Record<string, unknown> {
+  return {
+    fetching: st.fetching,
+    lastOk: st.lastOkAt !== null,
+    error: st.error !== null,
+    fileHint: st.error?.startsWith('자동 fetch 는 로컬 경로(file) remote') ?? false,
+    blocked: st.blocked,
+    authPaused: st.authPaused,
+    needsManual: st.needsManual,
+    noRemote: st.noRemote
+  }
+}
+
+describe('git:fetch 채널 골든(channels/fetch.json)', () => {
+  const scenarios = (JSON.parse(readFileSync(join(FIXTURES, 'fetch.scenarios.json'), 'utf8')) as { scenarios: FetchScenario[] }).scenarios
+  let root: string
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, { cwd, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-fetch-chan-'))
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const results: unknown[] = []
+    for (const [n, sc] of scenarios.entries()) {
+      const dir = join(root, `s${n}`)
+      mkdirSync(dir)
+      const origin = join(dir, 'origin')
+      mkdirSync(origin)
+      git(origin, ['init', '-q', '-b', 'main'])
+      execFileSync('git', ['fast-import', '--quiet'], { cwd: origin, input: readFileSync(join(FIXTURES, 'basic.fi')), env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } })
+      const repo = join(dir, 'repo')
+      execFileSync('git', ['clone', '-q', origin, repo], { env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } })
+
+      let server: ReturnType<typeof createServer> | null = null
+      let port = 0
+      if (sc.server === 'auth401') {
+        server = createServer((_req, res) => {
+          res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="x"' })
+          res.end()
+        })
+        await new Promise<void>((r) => server!.listen(0, '127.0.0.1', r))
+        port = (server.address() as AddressInfo).port
+      }
+      const run = (s: { in: 'origin' | 'repo'; git: string[] }): void => {
+        git(s.in === 'origin' ? origin : repo, s.git.map((a) => a.replace('{port}', String(port))))
+      }
+
+      const config = new ConfigStore(join(dir, 'config.json'))
+      const id = config.addRepo({ sourceId: 'local', path: repo, name: 'repo' }).id
+      const svc = new RepoService(config)
+      let changed = 0
+      let confirms = 0
+      let reply: number | null = 2
+      let during: { in: 'origin' | 'repo'; git: string[] } | undefined
+      const approvals: string[] = []
+      const setApproval = config.setFetchApproval.bind(config)
+      config.setFetchApproval = (...a) => (approvals.push('approval'), setApproval(...a))
+      const setTrusted = config.setTrustedConfig.bind(config)
+      config.setTrustedConfig = (...a) => (approvals.push('trusted'), setTrusted(...a))
+      const fetcher = new FetchService(config, svc, () => {}, () => void (changed += 1), join(dir, 'no-hooks'))
+
+      const steps: unknown[] = []
+      for (const step of sc.steps) {
+        if (step.git) {
+          run({ in: step.in!, git: step.git })
+          continue
+        }
+        const f = step.fetch!
+        reply = f.confirm === undefined ? 2 : f.confirm
+        during = f.during
+        changed = 0
+        confirms = 0
+        approvals.length = 0
+        // src/main/ipc/handlers.ts 의 git:fetch 와 confirmDangerousConfig 의 해석: manual 은 정확히 true 만, 버튼 0 → 허용, 1 → 항상, 그 밖 → 거부
+        const st = await fetcher.fetch(id, {
+          manual: f.manual === true,
+          confirm: async () => {
+            confirms += 1
+            if (during) run(during)
+            return reply === 0 ? true : reply === 1 ? 'always' : false
+          }
+        })
+        steps.push({ manual: f.manual ?? null, confirm: f.confirm ?? null, state: fetchState(st), confirms, changed, approvals: [...approvals] })
+      }
+      fetcher.dispose()
+      await svc.dispose()
+      await new Promise<void>((r) => (server ? server.close(() => r()) : r()))
+      results.push({ name: sc.name, steps })
+    }
+    check(join(GOLDEN_DIR, 'channels', 'fetch.json'), stable({ scenarios: results }))
+  }, 180_000)
 })

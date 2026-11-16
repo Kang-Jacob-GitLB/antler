@@ -55,6 +55,8 @@ export interface MirrorRepo {
   id: string
   kind: 'local' | 'wsl' | 'ssh' | 'github'
   path: string
+  /** 사용자가 붙인 이름. Rust 는 fetch 확인 창 제목에만 쓴다(경로·kind 판정에는 쓰지 않는다) */
+  name: string
   distro?: string
 }
 

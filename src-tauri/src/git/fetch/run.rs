@@ -1,5 +1,5 @@
 //! fetch 실행: 저장소 설정 검사(`inspectConfig`)와 `git fetch` 호출(`runFetch`), git 버전 조회. `src/main/git/fetch.ts` 의 이식이다.
-//! 판정 로직은 [`super::guard`](PR A)에 있고 여기서는 git 을 부르는 순서와 인자만 정한다. 앱에는 아직 연결하지 않았다.
+//! 판정 로직은 [`super::guard`](PR A)에 있고 여기서는 git 을 부르는 순서와 인자만 정한다. 앱에서는 상태 기계(`service.rs`)가 부른다.
 //!
 //! 이식 규칙(어기면 보안 모델이 약해진다):
 //! - **환경변수는 [`FetchEnv`] 로만 바꾼다.** 일반 env 를 받지 않는다 — 키는 상수이고 자유 문자열은 `GIT_SSH_COMMAND` 의 값뿐이다.
