@@ -3347,6 +3347,1519 @@ mod live {
         assert!(defs >= 6, "훅 정의를 {defs}개만 찾았다");
         assert!(bad.is_empty(), "test-hooks feature 뒤에 있지 않은 테스트 훅:\n{}", bad.join("\n"));
     }
+
+    // ── Jira 서비스(PR 5) ───────────────────────────────────────────────────
+    //
+    // 루프백 목 서버(127.0.0.1)와 메모리 보관소만 쓴다. `start_paused` 는 쓰지 않는다 — /field 대기 상한은 짧은 실제 시간(`wait_ms`)으로 건다.
+    // 시계(`Clock`)를 주입하는 시험(쿨다운)은 소켓 없이 닫힌 포트(연결 거부)로 만든다.
+    mod service {
+        use std::sync::atomic::AtomicU64;
+
+        use antler_lib::jira::api_map as jira_map;
+        use antler_lib::jira::service::{Clock, JiraError, JiraService, SystemClock, TokioSleeper};
+        use antler_lib::jira::validate::{parse_connect_input, SiteOptions};
+        use antler_lib::net::js_date::parse_date_ms;
+        use antler_lib::net::json::Json;
+        use antler_lib::secret::memory::MemoryStore;
+        use antler_lib::secret::{GithubMethod, SecretError, SecretStore, Vault};
+        use serde_json::{json, Value};
+        use zeroize::Zeroizing;
+
+        use super::*;
+
+        const SECRET: &str = "tok_SECRET_0123456789";
+        const PNG: [u8; 16] = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52];
+
+        // ── 도우미 ──────────────────────────────────────────────────────────
+
+        struct FakeClock(AtomicU64);
+
+        impl FakeClock {
+            fn at(ms: u64) -> Arc<Self> {
+                Arc::new(Self(AtomicU64::new(ms)))
+            }
+
+            fn set(&self, ms: u64) {
+                self.0.store(ms, Ordering::SeqCst);
+            }
+        }
+
+        impl Clock for FakeClock {
+            fn now_ms(&self) -> f64 {
+                self.0.load(Ordering::SeqCst) as f64
+            }
+        }
+
+        fn new_vault() -> Arc<Vault> {
+            Arc::new(Vault::new(Arc::new(MemoryStore::standing_in_for_keychain())))
+        }
+
+        fn service_on(vault: Arc<Vault>, clock: Arc<dyn Clock>, wait_ms: u64) -> JiraService {
+            let client = JiraClient::new_for_test(Duration::from_secs(5), None, Duration::from_millis(1)).unwrap();
+            JiraService::with_parts(vault, client, SiteOptions::insecure_loopback_for_test(), clock, Arc::new(TokioSleeper), Duration::from_millis(wait_ms))
+        }
+
+        fn service() -> JiraService {
+            service_on(new_vault(), Arc::new(SystemClock), 4000)
+        }
+
+        fn service_wait(wait_ms: u64) -> JiraService {
+            service_on(new_vault(), Arc::new(SystemClock), wait_ms)
+        }
+
+        fn j(j: &Json) -> Value {
+            serde_json::from_str(&stringify(j)).unwrap()
+        }
+
+        fn ok(v: Value) -> Resp {
+            Resp::new(200).json(&v.to_string())
+        }
+
+        fn status(code: u16, v: Value) -> Resp {
+            Resp::new(code).json(&v.to_string())
+        }
+
+        fn path_of(r: &Req) -> &str {
+            r.target.split('?').next().unwrap_or("")
+        }
+
+        fn qp(r: &Req, k: &str) -> Option<String> {
+            url::Url::parse(&format!("http://x{}", r.target)).unwrap().query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.into_owned())
+        }
+
+        fn cloud_in(base: &str) -> Value {
+            json!({"kind": "cloud", "siteUrl": base, "email": "a@b.c", "token": SECRET})
+        }
+
+        fn server_in(base: &str) -> Value {
+            json!({"kind": "server", "siteUrl": base, "token": SECRET})
+        }
+
+        async fn connect_cloud(svc: &JiraService, m: &Mock) {
+            svc.connect(&cloud_in(&m.base())).await.unwrap();
+        }
+
+        async fn connect_server(svc: &JiraService, m: &Mock) {
+            svc.connect(&server_in(&m.base())).await.unwrap();
+        }
+
+        fn key(k: &str) -> Value {
+            json!(k)
+        }
+
+        fn failure<T: std::fmt::Debug>(r: Result<T, JiraError>) -> JiraError {
+            r.expect_err("오류여야 한다")
+        }
+
+        /// 조건이 참이 될 때까지 기다린다(최대 `WAIT_LIMIT`)
+        async fn wait_for(f: impl Fn() -> bool) {
+            let t = Instant::now();
+            while !f() {
+                assert!(t.elapsed() < WAIT_LIMIT, "조건이 되지 않았다");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+
+        /// 목 응답을 테스트가 직접 푸는 문. 처리기가 `wait` 로 응답을 붙들고, 테스트가 `open` 으로 놓아 준다.
+        /// 시간이 아니라 순서로 "응답이 오기 전/후"를 만든다. 열리지 않아도 처리기 스레드가 영원히 남지 않게 `GATE_LIMIT` 뒤에는 풀린다
+        #[derive(Clone, Default)]
+        struct Gate(Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+        const GATE_LIMIT: Duration = Duration::from_secs(30);
+        /// 테스트가 기다리는 최대 시간(조건이 되지 않아 걸리는 경우에만 쓰인다. 정상이면 곧바로 끝난다)
+        const WAIT_LIMIT: Duration = Duration::from_secs(10);
+
+        impl Gate {
+            fn wait(&self) {
+                let (lock, cv) = &*self.0;
+                let g = lock.lock().unwrap();
+                let _ = cv.wait_timeout_while(g, GATE_LIMIT, |open| !*open).unwrap();
+            }
+
+            fn open(&self) {
+                let (lock, cv) = &*self.0;
+                *lock.lock().unwrap() = true;
+                cv.notify_all();
+            }
+        }
+
+        /// 문이 닫힌 채로 끝나야 하는 비동기 작업을 기다린다(상한 안에 안 끝나면 실패)
+        async fn within<T>(f: impl std::future::Future<Output = T>) -> T {
+            tokio::time::timeout(WAIT_LIMIT, f).await.expect("상한 안에 끝나지 않았다")
+        }
+
+        fn count(m: &Mock, f: impl Fn(&Req) -> bool) -> usize {
+            m.requests().iter().filter(|r| f(r)).count()
+        }
+
+        const ADF: &str = r#"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"설명 <b>본문</b>","marks":[{"type":"strong"}]}]},{"type":"paragraph","content":[{"type":"text","text":"x","marks":[{"type":"link","attrs":{"href":"javascript:alert(1)"}}]}]}]}"#;
+
+        fn jira_handler(_n: usize, r: &Req) -> Resp {
+            let path = path_of(r);
+            if path.ends_with("/myself") {
+                return ok(json!({"displayName": "홍길동"}));
+            }
+            if path.ends_with("/issue/ABC-1") {
+                let adf: Value = serde_json::from_str(ADF).unwrap();
+                return ok(json!({
+                    "key": "ABC-1",
+                    "fields": {"summary": "로그인 오류", "status": {"name": "진행 중", "statusCategory": {"key": "indeterminate"}}, "issuetype": {"name": "Bug"}, "priority": {"name": "High"},
+                        "assignee": {"displayName": "홍길동"}, "reporter": {"displayName": "김철수"}, "created": "2026-01-01T00:00:00.000+0000", "updated": "2026-01-02T00:00:00.000+0000", "description": adf},
+                    "renderedFields": {"description": "<p>서버 렌더</p>"}
+                }));
+            }
+            if path.ends_with("/comment") {
+                let adf: Value = serde_json::from_str(ADF).unwrap();
+                return ok(json!({"comments": [{"author": {"displayName": "이영희"}, "created": "2026-01-03", "body": adf, "renderedBody": "<p>댓글 렌더</p>"}]}));
+            }
+            if path.ends_with("/search/jql") {
+                return ok(json!({"issues": [{"key": "ABC-2", "fields": {"summary": "s"}}], "nextPageToken": "tok2"}));
+            }
+            if path.ends_with("/search") {
+                return ok(json!({"issues": [{"key": "ABC-3", "fields": {"summary": "s"}}], "startAt": 0, "total": 99}));
+            }
+            status(404, json!({"errorMessages": ["nf"]}))
+        }
+
+        // ── 연결·복원·해제 ──────────────────────────────────────────────────
+
+        #[tokio::test]
+        async fn 서비스는_연결하면_myself_로_확인하고_상태_응답_어디에도_토큰이_없다() {
+            let _g = Guard;
+            let m = Mock::start(jira_handler);
+            let svc = service();
+            let state = svc.connect(&json!({"kind": "cloud", "siteUrl": format!("{}/", m.base()), "email": "me@example.com", "token": format!(" {SECRET} ")})).await.unwrap();
+            let text = serde_json::to_string(&state).unwrap();
+            // 상태에는 토큰 필드가 없다: 키 목록과 직렬화 문자열 둘 다 본다
+            let keys: Vec<String> = serde_json::from_str::<Value>(&text).unwrap().as_object().unwrap().keys().cloned().collect();
+            let mut want = vec!["connected", "kind", "siteUrl", "email", "displayName"];
+            want.sort_unstable();
+            let mut got = keys.clone();
+            got.sort_unstable();
+            assert_eq!(got, want, "{text}");
+            assert!(!text.to_lowercase().contains("token") && !text.contains(SECRET));
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), json!({"connected": true, "kind": "cloud", "siteUrl": m.base(), "email": "me@example.com", "displayName": "홍길동"}));
+            assert_eq!(m.requests()[0].target, "/rest/api/3/myself");
+            assert_eq!(m.requests()[0].header("authorization"), Some(format!("Basic {}", b64(&format!("me@example.com:{SECRET}")).as_str()).as_str()));
+
+            let detail = svc.issue(&key("ABC-1"), None).await.unwrap();
+            let comments = svc.comments(&key("ABC-1"), None).await.unwrap();
+            let found = svc.search(&json!({"jql": "project = ABC"}), None).await.unwrap();
+            let all = format!("{}{}{}{:?}", stringify(&detail), stringify(&comments), stringify(&found), svc.auth());
+            assert!(!all.contains(SECRET));
+        }
+
+        #[tokio::test]
+        async fn 서비스는_다시_시작해도_저장된_연결을_복원한다() {
+            let _g = Guard;
+            let m = Mock::start(jira_handler);
+            let vault = new_vault();
+            connect_server(&service_on(vault.clone(), Arc::new(SystemClock), 4000), &m).await;
+            let again = service_on(vault.clone(), Arc::new(SystemClock), 4000);
+            let a = again.auth();
+            assert_eq!((a.connected, a.kind, a.site_url.as_deref()), (true, Some("server"), Some(m.base().as_str())));
+            again.issue(&key("ABC-1"), None).await.unwrap();
+            assert_eq!(m.requests().last().unwrap().header("authorization"), Some(format!("Bearer {SECRET}").as_str()));
+            assert!(!again.disconnect().await.unwrap().connected);
+            assert!(vault.load_jira_with(SiteOptions::insecure_loopback_for_test()).is_none());
+            assert!(!service_on(vault, Arc::new(SystemClock), 4000).auth().connected);
+        }
+
+        #[tokio::test]
+        async fn 서비스는_401_이면_저장하지_않고_토큰_없는_메시지로_거부한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| status(401, json!({})));
+            let vault = new_vault();
+            let svc = service_on(vault.clone(), Arc::new(SystemClock), 4000);
+            let e = failure(svc.connect(&cloud_in(&m.base())).await);
+            assert!(!e.message.contains(SECRET), "{e}");
+            assert_eq!((e.code, e.message.as_str()), ("ERROR", "이메일·토큰이 올바르지 않거나 만료되었습니다"));
+            assert!(!svc.auth().connected);
+            assert!(vault.load_jira_with(SiteOptions::insecure_loopback_for_test()).is_none());
+        }
+
+        #[tokio::test]
+        async fn 서비스는_연결_전에는_조회할_수_없고_열_수_있는_주소는_연결한_사이트의_것뿐이다() {
+            let _g = Guard;
+            let svc = service();
+            let e = failure(svc.issue(&key("ABC-1"), None).await);
+            assert_eq!((e.code, e.message.as_str()), ("JIRA_AUTH", "Jira 에 연결되어 있지 않습니다"));
+            assert_eq!(svc.external_url(&json!("https://x.atlassian.net/browse/ABC-1")), None);
+            let m = Mock::start(jira_handler);
+            connect_server(&svc, &m).await;
+            let own = format!("{}/browse/ABC-1", m.base());
+            assert_eq!(svc.external_url(&json!(own)), Some(own));
+            let alt = format!("http://127.0.0.1:{}/browse/ABC-1", m.addr.port().wrapping_add(1));
+            assert_eq!(svc.external_url(&json!(alt)), None);
+            assert_eq!(svc.external_url(&json!("https://evil.example/browse/ABC-1")), None);
+        }
+
+        #[tokio::test]
+        async fn 서비스_상태는_저장소가_못_남기면_jira_만_storage_unavailable_이다() {
+            let _g = Guard;
+            struct NoWrite(Arc<MemoryStore>);
+            impl SecretStore for NoWrite {
+                fn get(&self, a: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+                    self.0.get(a)
+                }
+                fn set(&self, _: &str, _: &[u8]) -> Result<(), SecretError> {
+                    Err(SecretError::Backend)
+                }
+                fn delete(&self, a: &str) -> Result<(), SecretError> {
+                    self.0.delete(a)
+                }
+                fn persistent(&self) -> bool {
+                    true
+                }
+            }
+            let m = Mock::start(jira_handler);
+            let vault = Arc::new(Vault::new(Arc::new(NoWrite(Arc::new(MemoryStore::standing_in_for_keychain())))));
+            let svc = service_on(vault.clone(), Arc::new(SystemClock), 4000);
+            assert!(!svc.auth().storage_unavailable);
+            let state = svc.connect(&server_in(&m.base())).await.unwrap();
+            assert!(state.connected && state.storage_unavailable);
+            assert_eq!(serde_json::to_value(&state).unwrap()["storageUnavailable"], json!(true));
+            // GitHub 계정은 따로다 — Jira 의 쓰기 실패가 GitHub 상태를 바꾸지 않는다
+            assert!(!vault.github_storage_unavailable());
+            assert!(vault.save_github(&SecretString::new("ghp_x"), GithubMethod::Pat).is_ok());
+            assert!(vault.jira_storage_unavailable());
+        }
+
+        #[tokio::test]
+        async fn 서비스는_키체인_삭제가_실패하면_연결은_끊고_오류를_돌려준다() {
+            let _g = Guard;
+            struct NoDelete(Arc<MemoryStore>);
+            impl SecretStore for NoDelete {
+                fn get(&self, a: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+                    self.0.get(a)
+                }
+                fn set(&self, a: &str, v: &[u8]) -> Result<(), SecretError> {
+                    self.0.set(a, v)
+                }
+                fn delete(&self, _: &str) -> Result<(), SecretError> {
+                    Err(SecretError::Backend)
+                }
+                fn persistent(&self) -> bool {
+                    true
+                }
+            }
+            let m = Mock::start(jira_handler);
+            let svc = service_on(Arc::new(Vault::new(Arc::new(NoDelete(Arc::new(MemoryStore::standing_in_for_keychain()))))), Arc::new(SystemClock), 4000);
+            connect_server(&svc, &m).await;
+            let e = failure(svc.disconnect().await);
+            assert_eq!(e.code, "ERROR");
+            assert!(e.message.contains("토큰을 지우지 못했습니다") && !e.message.contains(SECRET), "{e}");
+            assert!(!svc.auth().connected, "연결은 끊겨 있어야 한다");
+        }
+
+        #[tokio::test]
+        async fn 서비스_오류_문구는_마지막에_비밀을_가린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r).ends_with("/myself") { ok(json!({"displayName": "x"})) } else { status(400, json!({"errorMessages": [format!("토큰 {SECRET} 가 틀립니다")]})) });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let e = failure(svc.transition(&key("ABC-1"), &json!("31")).await);
+            assert_eq!((e.code, e.status), ("JIRA_HTTP", Some(400)));
+            assert!(!e.message.contains(SECRET) && e.message.contains("***"), "{e}");
+        }
+
+        // ── 조회 ────────────────────────────────────────────────────────────
+
+        #[tokio::test]
+        async fn 서비스_cloud_이슈는_adf_를_html_로_바꾸고_이스케이프하며_위험한_링크는_싣지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(jira_handler);
+            let svc = service();
+            connect_cloud(&svc, &m).await;
+            let d = j(&svc.issue(&key("ABC-1"), None).await.unwrap());
+            assert_eq!(
+                (d["key"].clone(), d["summary"].clone(), d["status"].clone(), d["statusCategory"].clone(), d["issueType"].clone(), d["priority"].clone(), d["assignee"].clone(), d["reporter"].clone(), d["url"].clone()),
+                (json!("ABC-1"), json!("로그인 오류"), json!("진행 중"), json!("indeterminate"), json!("Bug"), json!("High"), json!("홍길동"), json!("김철수"), json!(format!("{}/browse/ABC-1", m.base())))
+            );
+            let html = d["descriptionHtml"].as_str().unwrap();
+            assert!(html.contains("<strong>설명 &lt;b&gt;본문&lt;/b&gt;</strong>"), "{html}");
+            assert!(!html.contains("javascript:") && !html.contains("<b>"));
+            assert_eq!(j(&svc.comments(&key("ABC-1"), None).await.unwrap())[0]["author"], json!("이영희"));
+            let r = m.requests().into_iter().find(|r| r.target.contains("/issue/ABC-1?")).unwrap();
+            assert_eq!(qp(&r, "expand"), None, "Cloud 는 ADF 를 직접 변환하므로 서버 렌더 HTML 을 요청하지 않는다");
+        }
+
+        #[tokio::test]
+        async fn 서비스_server_이슈는_서버가_렌더한_html_을_쓴다() {
+            let _g = Guard;
+            let m = Mock::start(jira_handler);
+            let svc = service();
+            connect_server(&svc, &m).await;
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["descriptionHtml"], json!("<p>서버 렌더</p>"));
+            assert_eq!(j(&svc.comments(&key("ABC-1"), None).await.unwrap())[0]["bodyHtml"], json!("<p>댓글 렌더</p>"));
+            let r = m.requests().into_iter().find(|r| r.target.starts_with("/rest/api/2/issue/ABC-1?")).expect("v2 이슈 요청");
+            assert_eq!(qp(&r, "expand").as_deref(), Some("renderedFields"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_검색은_cloud_는_토큰_server_는_start_at_이고_페이지_상한에서_멈춘다() {
+            let _g = Guard;
+            let m = Mock::start(jira_handler);
+            let cloud = service();
+            connect_cloud(&cloud, &m).await;
+            let r = j(&cloud.search(&json!({"jql": "x = 1"}), None).await.unwrap());
+            assert_eq!(r["nextCursor"], json!("tok2"));
+            let last = j(&cloud.search(&json!({"jql": "x = 1", "cursor": "tok2", "page": 8}), None).await.unwrap());
+            assert!(last.get("nextCursor").is_none());
+            assert_eq!(qp(m.requests().last().unwrap(), "nextPageToken").as_deref(), Some("tok2"));
+            assert!(failure(cloud.search(&json!({"jql": "x = 1", "page": 9}), None).await).message.contains("잘못된 페이지"));
+
+            let dc = service();
+            connect_server(&dc, &m).await;
+            let r = j(&dc.search(&json!({"jql": "x = 1"}), None).await.unwrap());
+            assert_eq!((r["items"][0]["key"].clone(), r["nextCursor"].clone()), (json!("ABC-3"), json!("1")));
+            dc.search(&json!({"jql": "x = 1", "cursor": "25", "page": 2}), None).await.unwrap();
+            let last = m.requests().last().unwrap().clone();
+            assert_eq!((qp(&last, "startAt").as_deref(), qp(&last, "maxResults").as_deref()), (Some("25"), Some("25")));
+            // TS 와 같은 문구이고, 요청을 보내기 전에 거부한다
+            let before = m.requests().len();
+            let e = failure(dc.search(&json!({"jql": "x = 1", "cursor": "100000", "page": 2}), None).await);
+            assert_eq!((e.code, e.message.as_str()), ("ERROR", "잘못된 페이지 표지입니다"));
+            assert_eq!(m.requests().len(), before);
+        }
+
+        #[tokio::test]
+        async fn 서비스_개발_정보는_이슈_id_에서_연동_종류_상세로_가고_나쁜_주소와_sha_는_버린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let path = path_of(r);
+                if path.ends_with("/myself") {
+                    return ok(json!({"displayName": "x"}));
+                }
+                if path.ends_with("/issue/ABC-1") {
+                    return ok(json!({"id": "10001", "key": "ABC-1", "fields": {}}));
+                }
+                if path.ends_with("/dev-status/latest/issue/summary") {
+                    return ok(json!({"summary": {"pullrequest": {"byInstanceType": {"GitHub": {}}}, "repository": {"byInstanceType": {"GitHub": {}, "bad type!": {}}}}}));
+                }
+                if path.ends_with("/dev-status/latest/issue/detail") {
+                    if qp(r, "dataType").as_deref() == Some("pullrequest") {
+                        return ok(json!({"detail": [{"pullRequests": [
+                            {"name": "로그인 수정", "url": "https://github.com/o/r/pull/7", "status": "MERGED", "author": {"name": "홍길동"}, "repositoryName": "o/r", "source": {"branch": "fix/ABC-1"}, "lastUpdate": "2026-01-02T00:00:00.000+0000"},
+                            {"name": "나쁜 주소", "url": "javascript:alert(1)", "status": "OPEN", "repositoryName": "o/r"}]}]}));
+                    }
+                    return ok(json!({"detail": [{"repositories": [{"name": "o/r", "commits": [
+                        {"id": "abcdef1234567", "message": "ABC-1 로그인 수정\n\n본문", "url": "https://github.com/o/r/commit/abcdef1234567", "author": {"name": "홍길동"}, "authorTimestamp": 1767225600000u64},
+                        {"id": "not-a-sha", "message": "x"}]}]}]}));
+                }
+                status(404, json!({}))
+            });
+            let svc = service();
+            connect_cloud(&svc, &m).await;
+            let dev = j(&svc.dev_info(&key("ABC-1"), None).await.unwrap());
+            assert_eq!(dev["available"], json!(true));
+            assert_eq!(
+                dev["pulls"],
+                json!([
+                    {"title": "로그인 수정", "url": "https://github.com/o/r/pull/7", "state": "merged", "author": "홍길동", "repo": "o/r", "branch": "fix/ABC-1", "updated": "2026-01-02T00:00:00.000+0000"},
+                    {"title": "나쁜 주소", "url": "", "state": "open", "author": "", "repo": "o/r", "branch": "", "updated": ""}
+                ])
+            );
+            assert_eq!(
+                dev["commits"],
+                json!([{"sha": "abcdef1234567", "message": "ABC-1 로그인 수정", "url": "https://github.com/o/r/commit/abcdef1234567", "author": "홍길동", "repo": "o/r", "date": "2026-01-01T00:00:00.000Z"}])
+            );
+            assert!(m.requests().iter().all(|r| !r.target.contains("bad")), "이상한 연동 종류 이름은 요청하지 않는다");
+            assert!(!dev.to_string().contains(SECRET));
+        }
+
+        #[tokio::test]
+        async fn 서비스_개발_정보는_연동_api_가_없으면_오류가_아니라_available_false() {
+            let _g = Guard;
+            let none = json!({"available": false, "pulls": [], "commits": []});
+            let m = Mock::start(jira_handler);
+            let svc = service();
+            connect_server(&svc, &m).await;
+            // 이슈 응답에 id 가 없으면 요약까지 가지 않는다
+            assert_eq!(j(&svc.dev_info(&key("ABC-1"), None).await.unwrap()), none);
+            let m2 = Mock::start(|_, r| if r.target.contains("/myself") { ok(json!({"displayName": "x"})) } else if r.target.contains("/issue/ABC-1") { ok(json!({"id": "5"})) } else { status(404, json!({})) });
+            let svc2 = service();
+            connect_server(&svc2, &m2).await;
+            assert_eq!(j(&svc2.dev_info(&key("ABC-1"), None).await.unwrap()), none);
+            assert!(m2.requests().iter().any(|r| r.target.starts_with("/rest/dev-status/latest/issue/summary?issueId=5")));
+        }
+
+        #[tokio::test]
+        async fn 서비스는_요청_id_로_진행_중인_조회를_취소할_수_있다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let m = Mock::start(move |_, r| if path_of(r).ends_with("/myself") { ok(json!({"displayName": "x"})) } else {
+                g2.wait();
+                ok(json!({}))
+            });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let s2 = svc.clone();
+            let task = tokio::spawn(async move { s2.issue(&key("ABC-1"), Some("req-1")).await });
+            // 응답이 문에 막힌 요청이 서버에 도착한 뒤 취소한다
+            wait_for(|| count(&m, |r| !path_of(r).ends_with("/myself")) >= 1).await;
+            svc.cancel("req-1");
+            // 문이 닫힌 채로 끝난다 — 응답을 기다리지 않고 취소로 돌아온다
+            let e = failure(within(task).await.unwrap());
+            assert_eq!((e.code, e.message.as_str()), ("ABORTED", "aborted"));
+            gate.open();
+            // 없는 id 는 무시한다
+            svc.cancel("nope");
+        }
+
+        #[tokio::test]
+        async fn 서비스는_연결이_바뀌면_진행_중인_조회를_버린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r).ends_with("/myself") { ok(json!({"displayName": "x"})) } else { ok(json!({"key": "ABC-1", "fields": {}})).delay(Duration::from_secs(2)) });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let (s2, base) = (svc.clone(), m.base());
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                s2.connect(&server_in(&base)).await.unwrap();
+            });
+            let e = failure(svc.issue(&key("ABC-1"), None).await);
+            assert_eq!(e.code, "ABORTED");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn 서비스_날짜_필드는_조회가_세대를_잡은_뒤_연결이_바뀌면_옛_자격_증명으로_작업을_시작하거나_캐시하지_않는다() {
+            let _g = Guard;
+            let old = Mock::start(date_handler(Dates { fields: standard_fields(), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
+            let new_fields = json!([{"id": "customfield_20001", "name": "Start date", "schema": {"type": "date"}}]);
+            let new = Mock::start(date_handler(Dates { fields: new_fields, issue_fields: json!({"customfield_20001": "2026-11-01"}), ..Default::default() }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &old).await;
+            // data() 가 세대를 잡은 뒤 날짜 필드 공유 작업을 잠그기 전에 연결을 바꾼다(두 잠금 사이의 경합)
+            let fired = Arc::new(AtomicBool::new(false));
+            let (hook_svc, new_base, rt) = (svc.clone(), new.base(), tokio::runtime::Handle::current());
+            svc.set_before_date_fields_for_test(move || {
+                if !fired.swap(true, Ordering::SeqCst) {
+                    tokio::task::block_in_place(|| rt.block_on(hook_svc.connect(&cloud_in(&new_base)))).unwrap();
+                }
+            });
+            let s2 = svc.clone();
+            let stale = tokio::spawn(async move { s2.issue(&key("ABC-1"), None).await }).await.unwrap();
+            assert_eq!(failure(stale).code, "ABORTED");
+            // 새 연결의 조회는 새 사이트의 날짜 필드를 쓴다 — 옛 사이트로 시작한 작업이 새 세대에 캐시돼 있으면 날짜가 비거나 옛 id 를 쓴다
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!("2026-11-01"));
+            assert_eq!((field_calls(&old), field_calls(&new)), (0, 1));
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn 서비스_겹친_connect_와_disconnect_뒤에도_키체인과_메모리의_연결이_같다() {
+            let _g = Guard;
+            let site = SiteOptions::insecure_loopback_for_test();
+            let (a, b) = (Mock::start(|_, _| ok(json!({"displayName": "a"}))), Mock::start(|_, _| ok(json!({"displayName": "b"}))));
+            for second_is_disconnect in [false, true] {
+                let vault = new_vault();
+                let svc = service_on(vault.clone(), Arc::new(SystemClock), 4000);
+                // 첫 connect 가 저장한 직후(연결 교체 전)에 멈추고, 두 번째 호출이 교체 잠금 앞까지 온 것을 확인하고서야 놓아 준다.
+                // 직렬화되어 있지 않으면 두 번째가 그 사이에 끝까지 실행되어 키체인과 메모리가 어긋난다
+                let (arrived, paused) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+                let (arrived2, paused2) = (arrived.clone(), paused.clone());
+                svc.set_connect_stage_for_test(move |stage| match stage {
+                    "before_lock" => {
+                        arrived2.fetch_add(1, Ordering::SeqCst);
+                    }
+                    "after_save" if !paused2.swap(true, Ordering::SeqCst) => {
+                        let t = Instant::now();
+                        while arrived2.load(Ordering::SeqCst) < 2 && t.elapsed() < WAIT_LIMIT {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                    }
+                    _ => {}
+                });
+                let (s1, s2, ca, cb) = (svc.clone(), svc.clone(), server_in(&a.base()), server_in(&b.base()));
+                let first = tokio::spawn(async move { s1.connect(&ca).await });
+                wait_for(|| paused.load(Ordering::SeqCst)).await;
+                let second = tokio::spawn(async move {
+                    if second_is_disconnect { s2.disconnect().await } else { s2.connect(&cb).await }
+                });
+                first.await.unwrap().unwrap();
+                second.await.unwrap().unwrap();
+                let mem = svc.auth();
+                let disk = vault.load_jira_with(site).map(|st| st.input.site_url);
+                assert_eq!(mem.site_url, disk, "disconnect={second_is_disconnect}: 메모리와 키체인의 연결이 다르다");
+                // 나중에 시작한 호출이 이긴다
+                assert_eq!(mem.site_url, (!second_is_disconnect).then(|| b.base()));
+            }
+        }
+
+        #[tokio::test]
+        async fn 서비스는_거부된_입력으로_jira_에_요청을_보내지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"accountId": "a", "displayName": "x"})));
+            let svc = service();
+            connect_cloud(&svc, &m).await;
+            let before = m.requests().len();
+            let ok_range = json!({"from": "2026-10-19", "to": "2026-10-20"});
+            let bad_users = json!({"from": ok_range["from"], "to": ok_range["to"], "users": ["a\" OR 1=1"]});
+            assert_eq!(failure(svc.worklogs(&bad_users, None).await).code, "ERROR");
+            assert_eq!(failure(svc.user_search(&json!("a\u{1}"), None).await).code, "ERROR");
+            assert_eq!(failure(svc.transition(&key("abc-1"), &json!("31")).await).code, "ERROR");
+            assert_eq!(m.requests().len(), before);
+        }
+
+        #[tokio::test]
+        async fn 서비스_검색과_연결_확인_404_는_각각의_문구이다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if r.target.contains("/myself") { ok(json!({"displayName": "x"})) } else { status(404, json!({})) });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let e = failure(svc.search(&json!({"jql": "x = 1"}), None).await);
+            assert_eq!((e.code, e.message.contains("검색 API")), ("JIRA_NOT_FOUND", true));
+            assert!(failure(svc.issue(&key("ABC-1"), None).await).message.contains("이슈를 찾을 수 없"));
+            let m2 = Mock::start(|_, _| status(404, json!({})));
+            assert!(failure(service().connect(&server_in(&m2.base())).await).message.contains("사이트 주소"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_댓글은_dc_가_total_로_마지막_페이지를_받아_뒤집고_cloud_는_order_by_를_쓴다() {
+            let _g = Guard;
+            let all: Vec<Value> = (1..=12).map(|i| json!({"author": {"displayName": format!("u{i}")}, "created": format!("c{i}"), "renderedBody": format!("<p>{i}</p>")})).collect();
+            let m = Mock::start(move |_, r| {
+                if path_of(r).ends_with("/myself") {
+                    return ok(json!({"displayName": "x"}));
+                }
+                let start: usize = qp(r, "startAt").and_then(|s| s.parse().ok()).unwrap_or(0);
+                let max: usize = qp(r, "maxResults").and_then(|s| s.parse().ok()).unwrap_or(50);
+                ok(json!({"comments": all.iter().skip(start).take(max).collect::<Vec<_>>(), "total": all.len(), "startAt": start}))
+            });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let list = j(&svc.comments(&key("ABC-1"), None).await.unwrap());
+            let names: Vec<&str> = list.as_array().unwrap().iter().map(|c| c["author"].as_str().unwrap()).collect();
+            assert_eq!(names, ["u12", "u11", "u10", "u9", "u8"]);
+            let calls: Vec<Req> = m.requests().into_iter().filter(|r| r.target.contains("/comment")).collect();
+            assert_eq!(calls.iter().map(|r| qp(r, "startAt").unwrap()).collect::<Vec<_>>(), ["0", "7"]);
+            assert!(calls.iter().all(|r| !r.target.contains("orderBy")));
+
+            let m2 = Mock::start(|_, r| if r.target.contains("/myself") { ok(json!({"displayName": "x"})) } else { ok(json!({"comments": []})) });
+            let cloud = service();
+            connect_cloud(&cloud, &m2).await;
+            cloud.comments(&key("ABC-1"), None).await.unwrap();
+            let r = m2.requests().into_iter().find(|r| r.target.contains("/comment")).unwrap();
+            assert_eq!((qp(&r, "orderBy").as_deref(), qp(&r, "expand")), (Some("-created"), None));
+        }
+
+        #[tokio::test]
+        async fn 서비스_이슈_주소는_요청한_키_기준이다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if r.target.contains("/myself") { ok(json!({"displayName": "x"})) } else { ok(json!({"key": "NEW-9", "fields": {"summary": "s"}})) });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            assert_eq!(j(&svc.issue(&key("OLD-1"), None).await.unwrap())["url"], json!(format!("{}/browse/OLD-1", m.base())));
+        }
+
+        // ── 날짜 필드 ───────────────────────────────────────────────────────
+
+        #[derive(Clone, Default)]
+        struct Dates {
+            fields: Value,
+            field_status: u16,
+            /// 있으면 /field 응답을 이 문이 열릴 때까지 붙든다
+            field_gate: Option<Gate>,
+            field_huge: bool,
+            issue_fields: Value,
+            by_key: Value,
+        }
+
+        fn date_handler(o: Dates) -> impl Fn(usize, &Req) -> Resp + Send + Sync + 'static {
+            move |_, r| {
+                let path = path_of(r);
+                if path.ends_with("/myself") {
+                    return ok(json!({"displayName": "x"}));
+                }
+                if path.ends_with("/field") {
+                    if let Some(g) = &o.field_gate {
+                        g.wait();
+                    }
+                    if o.field_huge {
+                        return ok(json!([{"id": "customfield_1", "name": "Start date", "pad": "x".repeat(6 * 1024 * 1024)}]));
+                    }
+                    return if o.field_status != 0 && o.field_status != 200 { status(o.field_status, json!({"errorMessages": ["x"]})) } else { ok(if o.fields.is_null() { json!([]) } else { o.fields.clone() }) };
+                }
+                if let Some(k) = path.rsplit('/').next().filter(|k| path.contains("/issue/") && k.starts_with("ABC-")) {
+                    let mut f = json!({"summary": "s"});
+                    let extra = if o.by_key.get(k).is_some() { &o.by_key[k] } else { &o.issue_fields };
+                    if let Some(e) = extra.as_object() {
+                        f.as_object_mut().unwrap().extend(e.clone());
+                    }
+                    return ok(json!({"key": k, "fields": f}));
+                }
+                status(404, json!({}))
+            }
+        }
+
+        fn field_calls(m: &Mock) -> usize {
+            count(m, |r| path_of(r).ends_with("/field"))
+        }
+
+        fn fields_param(m: &Mock) -> Vec<String> {
+            let r = m.requests().into_iter().rev().find(|r| r.target.contains("/issue/ABC-1?")).expect("이슈 요청");
+            qp(&r, "fields").unwrap().split(',').map(str::to_string).collect()
+        }
+
+        fn standard_fields() -> Value {
+            json!([
+                {"id": "customfield_10015", "name": "Start date", "schema": {"type": "date"}},
+                {"id": "customfield_10016", "name": "End date", "schema": {"type": "date"}},
+                {"id": "duedate", "name": "Due date"}
+            ])
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드가_대기_상한을_넘긴_채로_재연결해도_새_연결에서_다시_부른다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_gate: Some(gate.clone()), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
+            let svc = service_wait(10);
+            connect_cloud(&svc, &m).await;
+            // /field 응답을 붙들어 둔 채라 10ms 상한을 넘겨 날짜 없이 돌아온다
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!(""));
+            wait_for(|| field_calls(&m) == 1).await;
+            // 응답을 놓아 첫 연결의 공유 작업이 끝나 캐시될 때까지 기다린 뒤 재연결한다
+            gate.open();
+            start_date_eventually(&svc, "2026-10-01").await;
+            connect_cloud(&svc, &m).await;
+            start_date_eventually(&svc, "2026-10-01").await;
+            assert_eq!(field_calls(&m), 2);
+        }
+
+        /// 공유 /field 작업이 끝나 캐시될 때까지(날짜가 나올 때까지) 이슈 조회를 되풀이한다
+        async fn start_date_eventually(svc: &JiraService, want: &str) {
+            let t = Instant::now();
+            loop {
+                if j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"] == json!(want) {
+                    return;
+                }
+                assert!(t.elapsed() < WAIT_LIMIT, "날짜가 나오지 않았다");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드는_id_를_찾아_fields_에_싣고_값은_날짜_부분만_돌려준다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates {
+                fields: standard_fields(),
+                issue_fields: json!({"duedate": "2026-10-22", "customfield_10015": "2026-10-01T09:00:00.000+0900", "customfield_10016": "2026/10/30"}),
+                ..Default::default()
+            }));
+            let svc = service();
+            connect_cloud(&svc, &m).await;
+            let d = j(&svc.issue(&key("ABC-1"), None).await.unwrap());
+            let f = fields_param(&m);
+            assert!(["duedate", "customfield_10015", "customfield_10016"].iter().all(|x| f.iter().any(|y| y == x)), "{f:?}");
+            assert!(m.requests().iter().any(|r| r.target == "/rest/api/3/field"));
+            assert_eq!((d["dueDate"].clone(), d["startDate"].clone(), d["endDate"].clone()), (json!("2026-10-22"), json!("2026-10-01"), json!("")));
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드가_404_403_이어도_이슈_조회는_성공하고_해당_날짜만_빈다() {
+            let _g = Guard;
+            for st in [404u16, 403] {
+                let m = Mock::start(date_handler(Dates { field_status: st, issue_fields: json!({"duedate": "2026-10-22", "customfield_10015": "2026-10-01"}), ..Default::default() }));
+                let svc = service();
+                connect_cloud(&svc, &m).await;
+                let d = j(&svc.issue(&key("ABC-1"), None).await.unwrap());
+                assert_eq!((d["key"].clone(), d["dueDate"].clone(), d["startDate"].clone(), d["endDate"].clone()), (json!("ABC-1"), json!("2026-10-22"), json!(""), json!("")));
+                assert_eq!(fields_param(&m), ["summary", "status", "issuetype", "priority", "assignee", "updated", "duedate", "reporter", "created", "description"]);
+            }
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드는_연결_동안_한_번만_부르고_재연결하면_다시_부른다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), ..Default::default() }));
+            // 이슈가 /field 를 끝까지 기다리게 해 부하와 무관하게 호출 수를 센다
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            let k = key("ABC-1");
+            let (a, b) = tokio::join!(svc.issue(&k, None), svc.issue(&k, None)); // 동시 호출은 같은 작업
+            a.unwrap();
+            b.unwrap();
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            assert_eq!(field_calls(&m), 1);
+            connect_cloud(&svc, &m).await;
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            assert_eq!(field_calls(&m), 2);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드_실패는_캐시하지_않지만_쿨다운_동안은_다시_묻지_않고_재연결하면_다시_시도한다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates { field_status: 404, ..Default::default() }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            assert_eq!(field_calls(&m), 1);
+            connect_cloud(&svc, &m).await;
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            assert_eq!(field_calls(&m), 2);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드_쿨다운은_주입한_시계로_5분이고_소켓이_필요_없다() {
+            // 닫힌 포트(연결 거부)라 모든 요청이 곧바로 실패한다. 시계는 가짜라 5분을 기다리지 않는다
+            let _g = Guard;
+            let closed = format!("http://{}", closed_addr());
+            let vault = new_vault();
+            vault.save_jira(&parse_connect_input(&server_in(&closed), SiteOptions::insecure_loopback_for_test()).unwrap(), "x").unwrap();
+            let clock = FakeClock::at(1_000);
+            let svc = service_on(vault, clock.clone(), 60_000);
+            assert!(svc.auth().connected, "저장된 연결을 복원한다");
+            let ask = || async {
+                let e = failure(svc.issue(&key("ABC-1"), None).await);
+                assert_eq!(e.code, "JIRA_NETWORK");
+                // 공유 /field 작업이 끝나 쿨다운이 기록될 때까지 기다린다
+            };
+            ask().await;
+            wait_for(|| svc.date_fields_retry_at() > 0.0).await;
+            assert_eq!(svc.date_fields_retry_at(), 301_000.0);
+            clock.set(2_000);
+            ask().await;
+            assert_eq!(svc.date_fields_retry_at(), 301_000.0, "쿨다운 안에서는 다시 묻지 않는다");
+            clock.set(301_001);
+            ask().await;
+            wait_for(|| svc.date_fields_retry_at() == 601_001.0).await;
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드는_server_에서_api_v2_를_쓴다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), issue_fields: json!({"customfield_10016": "2026-11-02"}), ..Default::default() }));
+            let svc = service_wait(60_000);
+            connect_server(&svc, &m).await;
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["endDate"], json!("2026-11-02"));
+            assert!(m.requests().iter().any(|r| r.target == "/rest/api/2/field"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드는_이상한_id_를_버리고_요청에_싣지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates {
+                fields: json!([
+                    {"id": "customfield_1; drop", "name": "Start date", "schema": {"type": "date"}},
+                    {"id": "summary", "name": "End date", "schema": {"type": "date"}},
+                    {"id": "customfield_20", "name": "Target start"}
+                ]),
+                ..Default::default()
+            }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            let f = fields_param(&m);
+            assert!(f.contains(&"customfield_20".to_string()));
+            assert!(!f.iter().any(|x| x.contains("drop") || x.contains(';')));
+            assert_eq!(f.iter().filter(|x| *x == "summary").count(), 1);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드는_동명_필드가_여럿이면_date_형식을_먼저_두고_이름은_별칭도_받는다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates {
+                fields: json!([
+                    {"id": "customfield_1", "name": "start date", "schema": {"type": "string"}},
+                    {"id": "customfield_2", "name": "Start Date", "schema": {"type": "datetime"}},
+                    {"id": "customfield_3", "name": "종료일", "schema": {"type": "string"}},
+                    {"id": "customfield_4", "name": "종료 날짜"}
+                ]),
+                ..Default::default()
+            }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            let custom: Vec<String> = fields_param(&m).into_iter().filter(|x| x.starts_with("customfield_")).collect();
+            assert_eq!(custom, ["customfield_2", "customfield_1", "customfield_3", "customfield_4"]);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드는_scope_가_다른_동명_필드_중_이슈에_값이_있는_쪽이_나온다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates {
+                fields: json!([
+                    {"id": "customfield_11", "name": "End date", "schema": {"type": "date"}, "scope": {"type": "PROJECT", "project": {"id": "1"}}},
+                    {"id": "customfield_12", "name": "End date", "schema": {"type": "date"}, "scope": {"type": "PROJECT", "project": {"id": "2"}}}
+                ]),
+                by_key: json!({"ABC-1": {"customfield_11": "2026-12-01", "customfield_12": null}, "ABC-2": {"customfield_11": null, "customfield_12": "2026-12-02"}}),
+                ..Default::default()
+            }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["endDate"], json!("2026-12-01"));
+            assert_eq!(j(&svc.issue(&key("ABC-2"), None).await.unwrap())["endDate"], json!("2026-12-02"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드는_start_date_가_target_start_보다_우선이고_없으면_다음_후보로_넘어간다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates {
+                fields: json!([
+                    {"id": "customfield_21", "name": "Target start", "schema": {"type": "date"}},
+                    {"id": "customfield_22", "name": "Start date", "schema": {"type": "date"}}
+                ]),
+                by_key: json!({"ABC-1": {"customfield_21": "2026-01-01", "customfield_22": "2026-02-02"}, "ABC-2": {"customfield_21": "2026-03-03"}}),
+                ..Default::default()
+            }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!("2026-02-02"));
+            assert_eq!(j(&svc.issue(&key("ABC-2"), None).await.unwrap())["startDate"], json!("2026-03-03"));
+        }
+
+        #[test]
+        fn 서비스_날짜_필드는_같은_이름_안에서_전역_필드가_scoped_보다_먼저고_후보는_8개까지이다() {
+            let list = json::parse(
+                r#"[{"id":"customfield_31","name":"Start date","schema":{"type":"date"},"scope":{"type":"PROJECT"}},{"id":"customfield_32","name":"Start date","schema":{"type":"date"}}]"#,
+            )
+            .unwrap();
+            assert_eq!(jira_map::pick_date_fields(&list).start, ["customfield_32", "customfield_31"]);
+            let many: Vec<Value> = (0..12).map(|i| json!({"id": format!("customfield_{}", 100 + i), "name": "Start date", "schema": {"type": "date"}})).collect();
+            let picked = jira_map::pick_date_fields(&json::parse(&Value::Array(many.clone()).to_string()).unwrap()).start;
+            assert_eq!(picked, many.iter().take(8).map(|f| f["id"].as_str().unwrap().to_string()).collect::<Vec<_>>());
+            assert_eq!(jira_map::MAX_DATE_FIELD_CANDIDATES, 8);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드_후보는_요청에_최대_8개만_싣는다() {
+            let _g = Guard;
+            let many: Vec<Value> = (0..12).map(|i| json!({"id": format!("customfield_{}", 100 + i), "name": "Start date", "schema": {"type": "date"}})).collect();
+            let m = Mock::start(date_handler(Dates { fields: Value::Array(many), ..Default::default() }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            assert_eq!(fields_param(&m).iter().filter(|x| x.starts_with("customfield_")).count(), 8);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드가_늦으면_이슈는_날짜_없이_상한_안에_돌아오고_끝난_뒤_조회에는_날짜가_나온다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_gate: Some(gate.clone()), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
+            let svc = service_wait(50);
+            connect_cloud(&svc, &m).await;
+            // /field 응답이 아직 오지 않은 채(문이 닫혀 있다) 대기 상한(50ms)에서 날짜 없이 돌아온다
+            assert_eq!(j(&within(svc.issue(&key("ABC-1"), None)).await.unwrap())["startDate"], json!(""));
+            gate.open();
+            start_date_eventually(&svc, "2026-10-01").await; // 공유 /field 요청이 끝나 캐시될 때까지
+            assert_eq!(field_calls(&m), 1);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드_대기_중_개별_취소는_즉시_거절되고_다른_조회는_날짜를_받는다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let m = Mock::start(date_handler(Dates { fields: standard_fields(), field_gate: Some(gate.clone()), issue_fields: json!({"customfield_10015": "2026-10-01"}), ..Default::default() }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            let (sa, sb) = (svc.clone(), svc.clone());
+            let a = tokio::spawn(async move { sa.issue(&key("ABC-1"), Some("req-a")).await });
+            wait_for(|| field_calls(&m) == 1).await; // a 가 공유 /field 를 시작했고 응답은 문에 막혀 있다
+            let b = tokio::spawn(async move { sb.issue(&key("ABC-1"), Some("req-b")).await });
+            svc.cancel("req-a");
+            // 문이 닫힌 채로 a 가 곧바로 거절된다(응답을 기다리지 않는다)
+            assert_eq!(failure(within(a).await.unwrap()).code, "ABORTED");
+            gate.open();
+            assert_eq!(j(&within(b).await.unwrap().unwrap())["startDate"], json!("2026-10-01"));
+            assert_eq!(field_calls(&m), 1);
+        }
+
+        #[tokio::test]
+        async fn 서비스_날짜_필드_응답이_너무_크면_연결_동안_다시_묻지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(date_handler(Dates { field_huge: true, ..Default::default() }));
+            let svc = service_wait(60_000);
+            connect_cloud(&svc, &m).await;
+            assert_eq!(j(&svc.issue(&key("ABC-1"), None).await.unwrap())["startDate"], json!(""));
+            svc.issue(&key("ABC-1"), None).await.unwrap();
+            assert_eq!(field_calls(&m), 1);
+            assert!(!fields_param(&m).contains(&"customfield_1".to_string()));
+        }
+
+        // ── 상태 전환 ───────────────────────────────────────────────────────
+
+        fn transitions_handler(_n: usize, r: &Req) -> Resp {
+            if r.target.ends_with("/myself") {
+                return ok(json!({"displayName": "홍길동"}));
+            }
+            if path_of(r).ends_with("/issue/ABC-1/transitions") {
+                if r.method == "POST" {
+                    return Resp::new(204);
+                }
+                return ok(json!({"transitions": [
+                    {"id": "11", "name": "진행 시작", "to": {"name": "진행 중", "statusCategory": {"key": "indeterminate"}}},
+                    {"id": "31", "name": "완료", "to": {"name": "완료됨", "statusCategory": {"key": "done"}}},
+                    {"name": "id 없음", "to": {"name": "x"}}
+                ]}));
+            }
+            status(404, json!({}))
+        }
+
+        #[tokio::test]
+        async fn 서비스_전환_목록을_매핑하고_전환을_post_한다() {
+            let _g = Guard;
+            for (cloud, base) in [(true, "/rest/api/3"), (false, "/rest/api/2")] {
+                let m = Mock::start(transitions_handler);
+                let svc = service();
+                if cloud { connect_cloud(&svc, &m).await } else { connect_server(&svc, &m).await }
+                assert_eq!(
+                    j(&svc.transitions(&key("ABC-1"), None).await.unwrap()),
+                    json!([{"id": "11", "name": "진행 시작", "to": {"name": "진행 중", "category": "indeterminate"}}, {"id": "31", "name": "완료", "to": {"name": "완료됨", "category": "done"}}])
+                );
+                svc.transition(&key("ABC-1"), &json!("31")).await.unwrap();
+                let post = m.requests().into_iter().find(|r| r.method == "POST").unwrap();
+                assert_eq!(post.target, format!("{base}/issue/ABC-1/transitions"));
+                assert_eq!(serde_json::from_slice::<Value>(&post.body).unwrap(), json!({"transition": {"id": "31"}}));
+                assert_eq!((post.header("x-atlassian-token"), post.header("content-type")), (Some("no-check"), Some("application/json")));
+            }
+        }
+
+        #[tokio::test]
+        async fn 서비스_전환은_잘못된_키_전환_id_를_요청_없이_거부한다() {
+            let _g = Guard;
+            let m = Mock::start(transitions_handler);
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let before = m.requests().len();
+            for (k, id) in [(json!("abc-1"), json!("31")), (json!("ABC-1"), json!("../31")), (json!("ABC-1"), json!("")), (json!("ABC-1"), json!("12345678901")), (json!("ABC-1"), json!(31))] {
+                assert_eq!(failure(svc.transition(&k, &id).await).code, "ERROR", "{k} {id}");
+            }
+            assert_eq!(failure(svc.transitions(&json!("x/../y"), None).await).code, "ERROR");
+            assert_eq!(m.requests().len(), before);
+        }
+
+        #[tokio::test]
+        async fn 서비스_전환은_400_이면_오류로_알리고_필드별_오류의_제어문자는_뺀다() {
+            let _g = Guard;
+            // 본문은 글자 그대로 보낸다(serde_json 의 객체는 키를 정렬하지만 Jira 응답의 키 순서가 메시지 순서다)
+            let bodies = [r#"{"errorMessages":["전환할 수 없습니다"]}"#, r#"{"errorMessages":[],"errors":{"resolution":"해결 사유는\n필수입니다","assignee":"담당자가 필요합니다"}}"#];
+            let mut messages = Vec::new();
+            for body in bodies {
+                let m = Mock::start(move |n, r| if r.method == "POST" { Resp::new(400).json(body) } else { transitions_handler(n, r) });
+                let svc = service();
+                connect_server(&svc, &m).await;
+                messages.push(failure(svc.transition(&key("ABC-1"), &json!("31")).await).message);
+            }
+            assert!(messages[0].contains("전환할 수 없습니다"), "{}", messages[0]);
+            assert_eq!(messages[1], "Jira API 오류(400): 해결 사유는 필수입니다 / 담당자가 필요합니다");
+        }
+
+        #[tokio::test]
+        async fn 서비스_전환은_요청_id_로_취소되지_않고_429_도_다시_보내지_않는다() {
+            let _g = Guard;
+            // 취소 시도: transition 은 requestId 를 받지 않는다. 같은 id 로 cancel 을 불러도 끝까지 간다
+            let m = Mock::start(|n, r| if r.method == "POST" { Resp::new(204).delay(Duration::from_millis(300)) } else { transitions_handler(n, r) });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let s2 = svc.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                s2.cancel("tr-1");
+            });
+            svc.transition(&key("ABC-1"), &json!("31")).await.unwrap();
+
+            // 429(Retry-After 0 이어도) POST 는 한 번만 보낸다
+            let m2 = Mock::start(|n, r| if r.method == "POST" { Resp::new(429).header("Retry-After", "0").json("{}") } else { transitions_handler(n, r) });
+            let svc2 = service();
+            connect_server(&svc2, &m2).await;
+            let e = failure(svc2.transition(&key("ABC-1"), &json!("31")).await);
+            assert_eq!(e.code, "JIRA_RATE_LIMIT");
+            assert_eq!(count(&m2, |r| r.method == "POST"), 1);
+        }
+
+        // ── 워크로그·사용자 검색 ────────────────────────────────────────────
+
+        #[derive(Clone)]
+        struct Wl {
+            id: String,
+            author: String,
+            started: String,
+            author_key: Option<String>,
+            comment: Option<Value>,
+        }
+
+        fn wl(id: &str, author: &str, started: &str) -> Wl {
+            Wl { id: id.into(), author: author.into(), started: started.into(), author_key: None, comment: None }
+        }
+
+        #[derive(Clone)]
+        struct Fi {
+            key: String,
+            worklogs: Vec<Wl>,
+            embed: Option<usize>,
+            status: Option<u16>,
+            huge: bool,
+            /// 있으면 이 이슈의 worklog 응답을 문이 열릴 때까지 붙든다
+            gate: Option<Gate>,
+        }
+
+        fn fi(key: &str, worklogs: Vec<Wl>) -> Fi {
+            Fi { key: key.into(), worklogs, embed: None, status: None, huge: false, gate: None }
+        }
+
+        #[derive(Clone)]
+        struct Site {
+            cloud: bool,
+            issues: Vec<Fi>,
+            bad_users: Vec<String>,
+            users: Value,
+        }
+
+        fn site(cloud: bool, issues: Vec<Fi>) -> Site {
+            Site { cloud, issues, bad_users: vec![], users: json!([]) }
+        }
+
+        fn to_worklog(cloud: bool, w: &Wl) -> Value {
+            let author = if cloud { json!({"accountId": w.author, "displayName": format!("표시-{}", w.author)}) } else { json!({"name": w.author, "key": w.author_key.clone().unwrap_or(w.author.clone()), "displayName": format!("표시-{}", w.author)}) };
+            let mut o = json!({"id": w.id, "author": author, "started": w.started, "timeSpentSeconds": 3600});
+            if let Some(c) = &w.comment {
+                o["comment"] = c.clone();
+            }
+            o
+        }
+
+        fn worklog_handler(site: Site) -> impl Fn(usize, &Req) -> Resp + Send + Sync + 'static {
+            move |_, r| {
+                let (cloud, path) = (site.cloud, path_of(r));
+                if path.ends_with("/myself") {
+                    return ok(if cloud { json!({"accountId": "acc-me", "displayName": "나"}) } else { json!({"name": "me", "key": "JIRAUSER1", "displayName": "나"}) });
+                }
+                if path.ends_with("/user/search") {
+                    return ok(site.users.clone());
+                }
+                if let Some(rest) = path.split("/issue/").nth(1).and_then(|p| p.strip_suffix("/worklog")) {
+                    let Some(issue) = site.issues.iter().find(|i| i.key == rest) else { return status(404, json!({})) };
+                    if let Some(g) = &issue.gate {
+                        g.wait();
+                    }
+                    if let Some(st) = issue.status {
+                        return status(st, json!({"errorMessages": ["x"]}));
+                    }
+                    if issue.huge {
+                        return ok(json!({"worklogs": [], "pad": "x".repeat(21 * 1024 * 1024)}));
+                    }
+                    if cloud {
+                        let num = |k: &str, d: f64| qp(r, k).and_then(|v| v.parse::<f64>().ok()).unwrap_or(d);
+                        let (after, before) = (num("startedAfter", f64::NEG_INFINITY), num("startedBefore", f64::INFINITY));
+                        let list: Vec<&Wl> = issue.worklogs.iter().filter(|w| parse_date_ms(&w.started).is_some_and(|t| t >= after && t < before)).collect();
+                        let (start, max) = (num("startAt", 0.0) as usize, num("maxResults", 5000.0) as usize);
+                        return ok(json!({"startAt": start, "maxResults": max, "total": list.len(), "worklogs": list.iter().skip(start).take(max).map(|w| to_worklog(true, w)).collect::<Vec<_>>()}));
+                    }
+                    return ok(json!({"worklogs": issue.worklogs.iter().map(|w| to_worklog(false, w)).collect::<Vec<_>>()}));
+                }
+                if path.ends_with("/search/jql") || path.ends_with("/search") {
+                    let jql = qp(r, "jql").unwrap_or_default();
+                    if site.bad_users.iter().any(|b| jql.contains(&format!("\"{b}\""))) {
+                        return status(400, json!({"errorMessages": ["사용자가 없습니다"]}));
+                    }
+                    let max: usize = qp(r, "maxResults").and_then(|v| v.parse().ok()).unwrap_or(50);
+                    let start: usize = qp(r, if cloud { "nextPageToken" } else { "startAt" }).and_then(|v| v.parse().ok()).unwrap_or(0);
+                    let page: Vec<&Fi> = site.issues.iter().skip(start).take(max).collect();
+                    let issues: Vec<Value> = page
+                        .iter()
+                        .map(|i| {
+                            let embed = i.embed.unwrap_or(i.worklogs.len());
+                            json!({"key": i.key, "fields": {"summary": format!("요약 {}", i.key), "issuetype": {"name": "Task"},
+                                "worklog": {"startAt": 0, "maxResults": embed, "total": i.worklogs.len(), "worklogs": i.worklogs.iter().take(embed).map(|w| to_worklog(cloud, w)).collect::<Vec<_>>()}}})
+                        })
+                        .collect();
+                    let end = start + page.len();
+                    return ok(if cloud {
+                        if end < site.issues.len() { json!({"issues": issues, "nextPageToken": end.to_string()}) } else { json!({"issues": issues, "isLast": true}) }
+                    } else {
+                        json!({"issues": issues, "startAt": start, "total": site.issues.len()})
+                    });
+                }
+                status(404, json!({"errorMessages": ["nf"]}))
+            }
+        }
+
+        async fn connected(s: Site) -> (JiraService, Mock) {
+            let cloud = s.cloud;
+            let m = Mock::start(worklog_handler(s));
+            let svc = service();
+            if cloud { connect_cloud(&svc, &m).await } else { connect_server(&svc, &m).await }
+            (svc, m)
+        }
+
+        fn q() -> Value {
+            json!({"from": "2026-10-19", "to": "2026-10-20", "users": []})
+        }
+
+        fn q_with(users: &[&str], include_me: Option<bool>) -> Value {
+            let mut v = q();
+            v["users"] = json!(users);
+            if let Some(b) = include_me {
+                v["includeMe"] = json!(b);
+            }
+            v
+        }
+
+        fn ids(r: &Json) -> Vec<String> {
+            j(r)["worklogs"].as_array().unwrap().iter().map(|w| w["id"].as_str().unwrap().to_string()).collect()
+        }
+
+        fn jql_of(r: &Req) -> String {
+            qp(r, "jql").unwrap_or_default()
+        }
+
+        fn worklog_reqs(m: &Mock) -> Vec<Req> {
+            m.requests().into_iter().filter(|r| path_of(r).contains("/issue/") && path_of(r).ends_with("/worklog")).collect()
+        }
+
+        const T: &str = "2026-10-19T09:00:00.000+0900";
+
+        #[tokio::test]
+        async fn 서비스_워크로그_cloud_는_내장_worklog_로_충분하면_다시_받지_않고_나만_범위_안만_남긴다() {
+            let _g = Guard;
+            let mut first = wl("1", "acc-me", T);
+            first.comment = Some(json!({"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": "작업"}]}, {"type": "paragraph", "content": [{"type": "text", "text": "둘째"}]}]}));
+            let (svc, m) = connected(site(true, vec![fi("ABC-1", vec![first, wl("2", "acc-other", T), wl("3", "acc-me", "2026-10-10T09:00:00.000+0900"), wl("4", "acc-me", "2026-10-21T23:00:00.000+0900")])])).await;
+            let r = svc.worklogs(&q(), None).await.unwrap();
+            let v = j(&r);
+            assert_eq!(v["me"], json!({"id": "acc-me", "name": "나"}));
+            assert_eq!(v["truncated"], json!(false));
+            assert_eq!(ids(&r), ["1", "4"]); // 4 는 로컬 날짜 필터가 화면 몫인 여유분
+            assert_eq!(
+                v["worklogs"][0],
+                json!({"id": "1", "issueKey": "ABC-1", "issueSummary": "요약 ABC-1", "issueType": "Task", "authorId": "acc-me", "author": "표시-acc-me", "started": T, "seconds": 3600, "comment": "작업 둘째"})
+            );
+            let search = m.requests().into_iter().find(|x| x.target.starts_with("/rest/api/3/search/jql")).unwrap();
+            assert_eq!(jql_of(&search), "worklogAuthor = currentUser() AND worklogDate >= \"2026-10-17\" AND worklogDate < \"2026-10-22\" ORDER BY key ASC");
+            assert_eq!((qp(&search, "fields").as_deref(), qp(&search, "maxResults").as_deref()), (Some("summary,issuetype,worklog"), Some("25")));
+            assert!(worklog_reqs(&m).is_empty());
+            assert!(m.requests().iter().all(|x| x.method == "GET"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그_cloud_는_내장_worklog_가_total_보다_적으면_그_이슈만_범위를_주어_다시_받는다() {
+            let _g = Guard;
+            let t = "2026-10-20T10:00:00.000+0900";
+            let mk = |n: usize, p: &str| (0..n).map(|i| wl(&format!("{p}{i}"), "acc-x", t)).collect::<Vec<_>>();
+            let mut i1 = fi("ABC-1", mk(3, "w"));
+            i1.embed = Some(1);
+            let mut far = vec![wl("far", "acc-x", "2026-01-01T10:00:00.000+0900")];
+            far.extend(mk(2, "nw"));
+            let mut i3 = fi("ABC-3", far);
+            i3.embed = Some(0);
+            let (svc, m) = connected(site(true, vec![i1, fi("ABC-2", vec![wl("z", "acc-x", t)]), i3])).await;
+            let r = svc.worklogs(&q_with(&["acc-x", "acc-y"], None), None).await.unwrap();
+            let mut got = ids(&r);
+            got.sort();
+            assert_eq!(got, ["nw0", "nw1", "w0", "w1", "w2", "z"].iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            let reqs = worklog_reqs(&m);
+            let mut paths: Vec<&str> = reqs.iter().map(path_of).collect();
+            paths.sort_unstable();
+            assert_eq!(paths, ["/rest/api/3/issue/ABC-1/worklog", "/rest/api/3/issue/ABC-3/worklog"]);
+            assert_eq!(qp(&reqs[0], "startedAfter").unwrap().parse::<f64>().unwrap(), parse_date_ms("2026-10-17T00:00:00Z").unwrap());
+            assert_eq!(qp(&reqs[0], "startedBefore").unwrap().parse::<f64>().unwrap(), parse_date_ms("2026-10-22T14:00:00Z").unwrap());
+            let search = m.requests().into_iter().find(|x| x.target.starts_with("/rest/api/3/search/jql")).unwrap();
+            assert!(jql_of(&search).contains("worklogAuthor in (\"acc-x\",\"acc-y\")"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그_server_는_name_과_key_둘_다로_작성자를_맞추고_전체를_클라이언트에서_거른다() {
+            let _g = Guard;
+            let mut bob = wl("2", "bob", T);
+            bob.author_key = Some("JIRAUSER9".into());
+            let mut first = wl("1", "alice", T);
+            first.comment = Some(json!("평문 설명"));
+            let mut i = fi("DC-1", vec![first, bob, wl("3", "carol", T), wl("4", "alice", "2026-09-01T09:00:00.000+0900")]);
+            i.embed = Some(0);
+            let (svc, m) = connected(site(false, vec![i])).await;
+            let r = svc.worklogs(&q_with(&["alice", "JIRAUSER9"], None), None).await.unwrap();
+            let v = j(&r);
+            assert_eq!(v["me"], json!({"id": "me", "name": "나"}));
+            let rows: Vec<Value> = v["worklogs"].as_array().unwrap().iter().map(|w| json!([w["id"], w["authorId"], w["comment"]])).collect();
+            assert_eq!(rows, [json!(["1", "alice", "평문 설명"]), json!(["2", "bob", ""])]);
+            assert_eq!(worklog_reqs(&m).iter().map(|r| r.target.clone()).collect::<Vec<_>>(), ["/rest/api/2/issue/DC-1/worklog"]);
+            let search = m.requests().into_iter().find(|x| x.target.starts_with("/rest/api/2/search")).unwrap();
+            assert!(jql_of(&search).contains("worklogAuthor in (\"alice\",\"JIRAUSER9\")"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_사용자를_비우면_server_도_me_id_로_거른다() {
+            let _g = Guard;
+            let (svc, _m) = connected(site(false, vec![fi("DC-1", vec![wl("1", "me", T), wl("2", "alice", T)])])).await;
+            assert_eq!(ids(&svc.worklogs(&q(), None).await.unwrap()), ["1"]);
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그의_내_id_는_연결_동안_캐시하고_재연결하면_다시_읽는다() {
+            let _g = Guard;
+            let (svc, m) = connected(site(true, vec![])).await;
+            let myself = |m: &Mock| count(m, |x| x.target.ends_with("/myself"));
+            let base = myself(&m);
+            svc.worklogs(&q(), None).await.unwrap();
+            svc.worklogs(&q(), None).await.unwrap();
+            assert_eq!(myself(&m), base + 1);
+            connect_cloud(&svc, &m).await;
+            let after = myself(&m);
+            svc.worklogs(&q(), None).await.unwrap();
+            assert_eq!(myself(&m), after + 1);
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_이슈가_300건을_넘으면_300건에서_자르고_truncated_로_알린다() {
+            let _g = Guard;
+            for cloud in [true, false] {
+                let author = if cloud { "acc-me" } else { "me" };
+                let issues: Vec<Fi> = (0..350).map(|i| fi(&format!("ABC-{}", i + 1), vec![wl(&format!("w{i}"), author, T)])).collect();
+                let (svc, _m) = connected(site(cloud, issues)).await;
+                let r = svc.worklogs(&q(), None).await.unwrap();
+                assert_eq!(ids(&r).len(), 300);
+                assert_eq!(j(&r)["truncated"], json!(true));
+            }
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그_include_me_는_팀원_jql_과_필터에_내_id_를_더하고_팀원이_없으면_무시한다() {
+            let _g = Guard;
+            let (svc, m) = connected(site(true, vec![fi("ABC-1", vec![wl("1", "acc-me", T), wl("2", "acc-x", T), wl("3", "acc-z", T)])])).await;
+            let r = svc.worklogs(&q_with(&["acc-x"], Some(true)), None).await.unwrap();
+            assert_eq!(ids(&r), ["1", "2"]);
+            let searches = || m.requests().into_iter().filter(|x| x.target.starts_with("/rest/api/3/search/jql")).collect::<Vec<_>>();
+            assert!(jql_of(&searches()[0]).contains("worklogAuthor in (\"acc-x\",\"acc-me\")"));
+            let none = svc.worklogs(&q_with(&[], Some(true)), None).await.unwrap();
+            assert_eq!(ids(&none), ["1"]);
+            assert!(jql_of(searches().last().unwrap()).contains("worklogAuthor = currentUser()"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그_include_me_는_내_id_가_jql_에_못_들어가면_current_user_와_or_로_묶는다() {
+            let _g = Guard;
+            let inner = worklog_handler(site(false, vec![fi("DC-1", vec![wl("1", "kim min gyu", T), wl("2", "alice", T)])]));
+            let m = Mock::start(move |n, r| if r.target.contains("/myself") { ok(json!({"name": "kim min gyu", "displayName": "나"})) } else { inner(n, r) });
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let r = svc.worklogs(&q_with(&["alice"], Some(true)), None).await.unwrap();
+            assert_eq!(ids(&r), ["1", "2"]);
+            let search = m.requests().into_iter().find(|x| x.target.starts_with("/rest/api/2/search")).unwrap();
+            assert!(jql_of(&search).contains("(worklogAuthor = currentUser() OR worklogAuthor in (\"alice\")) AND"));
+            assert_eq!(ids(&svc.worklogs(&q(), None).await.unwrap()), ["1"]);
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_검색_페이지가_겹쳐도_이슈를_키로_한_번만_센다() {
+            let _g = Guard;
+            for cloud in [true, false] {
+                let author = if cloud { "acc-me" } else { "me" };
+                let a = fi("ABC-1", vec![wl("1", author, T)]);
+                let mut issues = vec![a.clone()];
+                issues.extend((0..24).map(|i| fi(&format!("F-{i}"), vec![])));
+                issues.push(a);
+                let (svc, _m) = connected(site(cloud, issues)).await;
+                assert_eq!(ids(&svc.worklogs(&q(), None).await.unwrap()), ["1"]);
+            }
+        }
+
+        fn slow(n: usize) -> Vec<Fi> {
+            (0..n)
+                .map(|i| {
+                    let mut f = fi(&format!("ABC-{}", i + 1), vec![wl(&format!("w{i}"), "acc-me", T)]);
+                    f.embed = Some(0);
+                    f
+                })
+                .collect()
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_이슈_worklog_가_404_403_이면_그_이슈만_건너뛰고_truncated() {
+            let _g = Guard;
+            let mut issues = slow(3);
+            issues[0].status = Some(404);
+            issues[2].status = Some(403);
+            let (svc, _m) = connected(site(true, issues)).await;
+            let r = svc.worklogs(&q(), None).await.unwrap();
+            assert_eq!(ids(&r), ["w1"]);
+            assert_eq!(j(&r)["truncated"], json!(true));
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_이슈_worklog_응답이_20mb_를_넘으면_그_이슈만_건너뛰고_truncated() {
+            let _g = Guard;
+            let mut issues = slow(2);
+            issues[1].huge = true;
+            let (svc, _m) = connected(site(true, issues)).await;
+            let r = svc.worklogs(&q(), None).await.unwrap();
+            assert_eq!(ids(&r), ["w0"]);
+            assert_eq!(j(&r)["truncated"], json!(true));
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_이슈_worklog_가_인증_오류면_전체_실패하고_남은_이슈는_요청하지_않는다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let mut issues = slow(10);
+            for i in &mut issues {
+                i.gate = Some(gate.clone());
+            }
+            issues[0].status = Some(401);
+            issues[0].gate = None;
+            let (svc, m) = connected(site(true, issues)).await;
+            // 나머지 이슈의 응답은 문에 막혀 있다 — 401 이 확정되면 그것을 기다리지 않고 바로 실패한다
+            assert_eq!(failure(within(svc.worklogs(&q(), None)).await).code, "JIRA_AUTH");
+            // 돌아온 시점에 요청 스트림은 이미 버려졌다 — 동시 3개를 넘는 요청은 시작되지 않았다
+            assert!(worklog_reqs(&m).len() <= 3, "{}", worklog_reqs(&m).len());
+            gate.open();
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_받는_도중_2만건_상한에서_멈추고_넘는_것은_담지_않고_truncated() {
+            let _g = Guard;
+            // 이슈 둘이 각각 10,005건(내장은 비워 이슈별로 다시 받게 한다) — 맞는 항목이 2만 10건이다
+            let issues: Vec<Fi> = (0..2)
+                .map(|n| {
+                    let mut f = fi(&format!("ABC-{}", n + 1), (0..10_005).map(|i| wl(&format!("w{n}-{i}"), "acc-me", T)).collect());
+                    f.embed = Some(0);
+                    f
+                })
+                .collect();
+            let (svc, m) = connected(site(true, issues)).await;
+            let r = svc.worklogs(&q(), None).await.unwrap();
+            let v = j(&r);
+            assert_eq!((v["worklogs"].as_array().unwrap().len(), v["truncated"].clone()), (20_000, json!(true)));
+            // 받는 것은 끝까지 받는다(TS 와 같다) — 페이지는 이슈마다 1000건씩 11번
+            assert_eq!(worklog_reqs(&m).len(), 22);
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_없는_팀원_400_을_한_명씩_확인해_빼고_invalid_users_로_알린다() {
+            let _g = Guard;
+            let mut s = site(true, vec![fi("ABC-1", vec![wl("1", "acc-x", T), wl("2", "ghost", T)])]);
+            s.bad_users = vec!["ghost".into()];
+            let (svc, m) = connected(s).await;
+            let r = svc.worklogs(&q_with(&["acc-x", "ghost"], None), None).await.unwrap();
+            assert_eq!(j(&r)["invalidUsers"], json!(["ghost"]));
+            assert_eq!(ids(&r), ["1"]);
+            let probes: Vec<String> = m.requests().iter().filter(|x| ["worklogAuthor = \"ghost\"", "worklogAuthor = \"acc-x\""].contains(&jql_of(x).as_str())).map(|x| qp(x, "maxResults").unwrap()).collect();
+            assert_eq!(probes, ["1", "1"]);
+            // 남은 사용자가 없으면 빈 결과(includeMe 면 나만 조회)
+            let empty = j(&svc.worklogs(&q_with(&["ghost"], None), None).await.unwrap());
+            assert_eq!((empty["worklogs"].clone(), empty["truncated"].clone(), empty["invalidUsers"].clone()), (json!([]), json!(false), json!(["ghost"])));
+            let me = j(&svc.worklogs(&q_with(&["ghost"], Some(true)), None).await.unwrap());
+            assert_eq!(me["invalidUsers"], json!(["ghost"]));
+        }
+
+        #[tokio::test]
+        async fn 서비스_사용자_검색은_표시_이름을_200자로_자른다() {
+            let _g = Guard;
+            let mut s = site(false, vec![]);
+            s.users = json!([{"name": "alice", "displayName": "가".repeat(300)}]);
+            let (svc, _m) = connected(s).await;
+            assert_eq!(j(&svc.user_search(&json!("al"), None).await.unwrap())[0]["name"].as_str().unwrap().chars().count(), 200);
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_요청_id_로_취소하면_aborted_이다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if r.target.contains("/myself") { ok(json!({"accountId": "acc-me", "displayName": "x"})) } else { ok(json!({})).delay(Duration::from_secs(2)) });
+            let svc = service();
+            connect_cloud(&svc, &m).await;
+            let s2 = svc.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                s2.cancel("wl-1");
+            });
+            assert_eq!(failure(svc.worklogs(&q(), Some("wl-1")).await).code, "ABORTED");
+        }
+
+        #[tokio::test]
+        async fn 서비스_워크로그는_내_id_를_읽을_수_없으면_ts_와_같은_문구로_거부한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"displayName": "x"})));
+            let svc = service();
+            connect_cloud(&svc, &m).await;
+            let e = failure(svc.worklogs(&q(), None).await);
+            assert_eq!((e.code, e.message.as_str()), ("ERROR", "Jira 계정 정보를 읽을 수 없습니다"));
+        }
+
+        #[tokio::test]
+        async fn 서비스_사용자_검색은_cloud_는_사람_계정만_server_는_name_이_id() {
+            let _g = Guard;
+            let mut s = site(true, vec![]);
+            s.users = json!([
+                {"accountId": "712020:aaaa-bbbb", "accountType": "atlassian", "displayName": "홍길동"},
+                {"accountId": "app1", "accountType": "app", "displayName": "봇"},
+                {"accountId": "cust1", "accountType": "customer", "displayName": "고객"}
+            ]);
+            let (svc, m) = connected(s).await;
+            assert_eq!(j(&svc.user_search(&json!(" 홍 "), None).await.unwrap()), json!([{"id": "712020:aaaa-bbbb", "name": "홍길동"}]));
+            let r = m.requests().into_iter().find(|x| x.target.starts_with("/rest/api/3/user/search")).unwrap();
+            assert_eq!((qp(&r, "query").as_deref(), qp(&r, "maxResults").as_deref()), (Some("홍"), Some("20")));
+            let mut s2 = site(false, vec![]);
+            s2.users = json!([{"name": "alice", "key": "JIRAUSER2", "displayName": "Alice"}]);
+            let (svc2, m2) = connected(s2).await;
+            assert_eq!(j(&svc2.user_search(&json!("al"), None).await.unwrap()), json!([{"id": "alice", "name": "Alice"}]));
+            assert!(m2.requests().iter().any(|x| x.target.starts_with("/rest/api/2/user/search?username=al&maxResults=20")));
+        }
+
+        // ── 프로필 사진 ─────────────────────────────────────────────────────
+
+        fn image_handler(_n: usize, r: &Req) -> Resp {
+            let path = path_of(r);
+            if path.ends_with("/myself") {
+                return ok(json!({"displayName": "홍길동", "name": "hong"}));
+            }
+            if path.ends_with("/secure/useravatar") {
+                return Resp::new(200).header("Content-Type", "image/png").body(PNG);
+            }
+            status(404, json!({"errorMessages": ["nf"]}))
+        }
+
+        #[tokio::test]
+        async fn 서비스_사진은_data_url_로_돌려주고_같은_주소는_다시_받지_않으며_연결을_끊으면_캐시를_비운다() {
+            let _g = Guard;
+            let m = Mock::start(image_handler);
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let url = json!(format!("{}/secure/useravatar?avatarId=7", m.base()));
+            let (a, b) = tokio::join!(svc.avatar(&url), svc.avatar(&url));
+            let want = format!("data:image/png;base64,{}", STANDARD.encode(PNG));
+            assert_eq!((a.as_deref(), b.as_deref()), (Some(want.as_str()), Some(want.as_str())));
+            assert_eq!(svc.avatar(&url).await.as_deref(), Some(want.as_str()));
+            let hits = || count(&m, |r| r.target.starts_with("/secure/useravatar"));
+            assert_eq!(hits(), 1);
+            assert!(!svc.disconnect().await.unwrap().connected);
+            assert_eq!(svc.avatar(&url).await, None);
+            connect_server(&svc, &m).await;
+            assert_eq!(svc.avatar(&url).await.as_deref(), Some(want.as_str()));
+            assert_eq!(hits(), 2);
+        }
+
+        #[tokio::test]
+        async fn 서비스_사진은_받을_수_없으면_짧게_캐시하고_주입한_시계로_만료된다() {
+            let _g = Guard;
+            let m = Mock::start(image_handler);
+            let clock = FakeClock::at(1_000);
+            let svc = service_on(new_vault(), clock.clone(), 4000);
+            connect_server(&svc, &m).await;
+            let url = json!(format!("{}/missing", m.base()));
+            let hits = || count(&m, |r| r.target.starts_with("/missing"));
+            assert_eq!(svc.avatar(&url).await, None);
+            assert_eq!(svc.avatar(&url).await, None);
+            assert_eq!(hits(), 1, "받지 못한 주소도 10분은 다시 묻지 않는다");
+            clock.set(1_000 + 10 * 60_000 + 1);
+            assert_eq!(svc.avatar(&url).await, None);
+            assert_eq!(hits(), 2);
+        }
+
+        #[tokio::test]
+        async fn 서비스_사진은_문자열이_아니거나_너무_긴_주소는_요청하지_않고_null() {
+            let _g = Guard;
+            let m = Mock::start(image_handler);
+            let svc = service();
+            connect_server(&svc, &m).await;
+            let before = m.requests().len();
+            assert_eq!(svc.avatar(&json!(42)).await, None);
+            assert_eq!(svc.avatar(&json!(format!("{}/secure/useravatar?x={}", m.base(), "a".repeat(3000)))).await, None);
+            assert_eq!(m.requests().len(), before);
+        }
+    }
 }
 
 // ── 토큰 보관(PR 4): 메모리 구현만으로 돈다(실제 자격 증명 관리자는 src/secret/keyring.rs 의 #[ignore] 수동 시험) ─────────────────

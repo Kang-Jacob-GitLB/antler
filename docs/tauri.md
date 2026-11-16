@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소) 완료, 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소)·PR 5(Jira 서비스) 완료, 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -596,6 +596,32 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
   (파일 끝의 `#[cfg(test)]` 모듈은 제외 — 수동 시험이 `eprintln!` 으로 실측값을 낸다). 테스트는 메모리 구현만 쓴다. 대응표 `N/A: PR 4` 5개 중 4개를 Rust 테스트에 연결했고, 하나(Linux `basic_text`)는 해당 분기가 없어 N/A 사유로 바꿨다.
 - 의존성: `keyring-core 1`·`windows-native-keyring-store 1.1`(windows 대상), `zeroize 1`(전이 의존이던 판). `windows-sys 0.61.2` 를 기존 트리와 공유해 중복 판이 없다(`cargo tree -d`).
 - **미연결**: 앱·IPC 에서 부르지 않는다. 연결(`ANTLER_RUST_API`·키체인 읽기)은 PR 9 이며 Electron 판 토큰은 옮기지 않는다(다시 로그인).
+
+### PR 5 — Jira 서비스(`src-tauri/src/jira/service.rs`, 앱에 연결하지 않는다)
+
+`JiraService`(`Clone`, 내부는 `Arc`)가 TS `JiraService` 의 상태와 `api.ts` 의 호출부를 옮긴 것이다. `jira:*` 채널마다 메서드가 하나씩 있다:
+`auth`·`connect`·`disconnect`·`issue`·`transitions`·`transition`·`comments`·`dev_info`·`search`·`worklogs`·`user_search`·`avatar`·`external_url`(`jira:openExternal` 의 주소 검증만 — 여는 일은 PR 6)·`cancel`(`req:cancel`)·`dispose`.
+인자는 IPC 값(`serde_json::Value`)을 그대로 받아 `validate` 로 검증하고(검증 실패는 요청 없이 `ERROR`), 결과는 키 순서를 지키는 `Json` 이다. 상태(`JiraAuthState`)만 `serde` 로 직렬화하며 토큰 필드가 없다(테스트가 키 목록과 직렬화 문자열을 단언한다).
+
+- **세대(epoch)**: `connect`·`disconnect` 가 `CancellationToken` 을 취소하고 새로 만든다. 모든 요청은 세대 토큰의 **자식 토큰**으로 돌므로 진행 중인 요청이 `ABORTED` 로 끝나고, 내 id·날짜 필드·사진 캐시가 비워진다.
+  느린 작업(날짜 필드·사진)이 끝났을 때 세대가 바뀌었으면 결과를 캐시에 넣지 않는다. `requestId` 는 자식 토큰을 취소하며, 같은 id 의 재등록을 번호로 구분해 지운다.
+- **날짜 필드**: 공유 `/field` 작업은 `tokio::spawn` 으로 돌고(대기자가 모두 떠나도 끝나서 캐시된다) `Shared` 로 동시 호출이 나눠 쓴다. 이슈 조회의 대기 상한은 `Sleeper`(운영 4초), 쿨다운(5분)은 `Clock` 이다.
+  응답이 너무 크면(`JIRA_TOO_BIG`) 이 연결 동안 빈 결과를 캐시하고, 그 밖의 실패는 캐시하지 않고 쿨다운을 건다.
+- **프로필 사진**: 캐시 300개(최근 사용 순)·성공 24시간·실패 10분(`Clock`), 동시 4장(`Semaphore`), 같은 주소의 동시 요청은 한 번만 받는다.
+- **`jira:transition`**: `requestId` 를 받지 않아 취소되지 않는다(연결이 바뀔 때만 중단). POST 는 클라이언트가 재시도하지 않는다(429 도 한 번).
+- **오류 envelope**: `JiraError{code, status, message}` — 취소 `ABORTED`, API 오류 `JIRA_*`, 그 밖(검증·저장·해석 실패)은 `ERROR`(`handlers.ts` 와 같다). 문구는 `data()` 경계에서 마지막으로 `redact_secrets` 를 거친다.
+- **이전 리뷰가 넘긴 항목**: ① `disconnect` 는 키체인 삭제가 실패해도 연결은 끊고, 그 오류를 `Err` 로 돌려준다(문구: "연결은 끊었지만 안전 저장소에서 토큰을 지우지 못했습니다: …"). ② `storage_unavailable` 은 Jira 계정 것(`Vault::jira_storage_unavailable`)만 본다.
+  ③ 서버 본문 메시지는 PR 3 에서 이미 가린 뒤 자른다. ④ `search` 의 잘못된 표지는 `잘못된 페이지 표지입니다`, `getMyId` 가 id 를 못 읽으면 `Jira 계정 정보를 읽을 수 없습니다`(둘 다 TS 와 같은 문구, 코드 `ERROR`).
+- **`Vault::load_jira_with(SiteOptions)`** 를 더했다. 서비스가 복원할 때 연결 때와 같은 사이트 옵션으로 재검증해야 루프백 http 로 만든 시험 연결이 복원된다(`load_jira` 는 운영 옵션 그대로).
+- **소스 검사**: 서비스는 `*_for_test` 를 부르지 않는다 — 시험이 만든 `JiraClient`·`SiteOptions` 를 `JiraService::with_parts` 로 받는다. 시험 전용 접근자 `date_fields_retry_at` 는 `test-hooks` 뒤에 있다.
+- **시험**: `tests/net.rs` 의 `live::service`(루프백 목 서버·메모리 보관소, `start_paused` 없음). 시계를 주입하는 시험(쿨다운, 실패 사진 캐시 만료)은 소켓 없이(닫힌 포트) 또는 가짜 시계로 만든다. 대응표 `N/A: PR 5` 52개를 모두 Rust 테스트에 연결했다.
+
+**TS 와 다른 점(PR 5)**
+- `connect` 는 저장이 실패하면(너무 긴 값) 세대를 바꾸기 전에 오류를 낸다(기존 연결 유지). TS 는 세대를 먼저 바꾼다.
+- 워크로그는 이슈마다 받는 즉시 `worklog_result` 로 거르고 변환한다. 20,000건 상한은 이슈 순서로 마지막에 자르며(TS 는 도착 순서로 세다가 넘으면 버린다) 건너뛴 이슈의 개수를 되돌리는 보정이 필요 없다.
+- 전체 실패가 확정되면 TS 는 워커에 취소 신호를 보내고 Rust 는 진행 중인 요청을 버린다(연결이 닫힌다). 새 요청은 시작하지 않는 점은 같다.
+- `RangeError`(dev-status 의 범위 밖 시각·워크로그 날짜)는 문구 `Invalid time value`·코드 `ERROR` 로 낸다.
+- 날짜 필드 공유 작업은 호출자가 없어져도 계속 돈다(TS 의 Promise 와 같다). 서비스를 `dispose` 하거나 연결이 바뀌면 취소된다.
 
 ## Phase 0 에서 확인한 것
 

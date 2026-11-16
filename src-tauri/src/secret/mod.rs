@@ -215,10 +215,10 @@ fn decode_github(bytes: &[u8]) -> Option<StoredGithub> {
     out
 }
 
-fn decode_jira(bytes: &[u8]) -> Option<StoredJira> {
+fn decode_jira(bytes: &[u8], opts: SiteOptions) -> Option<StoredJira> {
     let mut v: Value = serde_json::from_slice(bytes).ok()?;
     // 저장된 값도 다시 검증한다(옛 버전이 쓴 값이거나 바뀐 값일 수 있다) — `jira:connect` 와 같은 검증이다
-    let out = parse_connect_input(&v, SiteOptions::default()).ok().map(|input| {
+    let out = parse_connect_input(&v, opts).ok().map(|input| {
         let display_name = str_field(&v, "displayName").unwrap_or_default().to_string();
         StoredJira { input, display_name }
     });
@@ -346,8 +346,13 @@ impl Vault {
 
     /// 저장된(또는 메모리의) Jira 연결. 없거나 깨졌거나 검증을 통과하지 못하면 None(깨진 항목은 지운다)
     pub fn load_jira(&self) -> Option<StoredJira> {
+        self.load_jira_with(SiteOptions::default())
+    }
+
+    /// [`Vault::load_jira`] 와 같되 사이트 주소 검증 옵션을 받는다(서비스가 연결할 때 쓴 것과 같은 옵션으로 다시 검증한다)
+    pub fn load_jira_with(&self, opts: SiteOptions) -> Option<StoredJira> {
         let bytes = self.read(JIRA_ACCOUNT)?;
-        let out = decode_jira(&bytes);
+        let out = decode_jira(&bytes, opts);
         if out.is_none() {
             let _ = self.remove(JIRA_ACCOUNT);
         }
