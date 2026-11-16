@@ -387,7 +387,7 @@ pub async fn file_blame(exec: &GitExecutor, repo_path: &str, req: &BlameRequest,
         return Ok(result(false, true, false, size, None));
     }
 
-    let run_opts = RunOpts { cancel: Some(cancel.clone()), max_buffer: Some(BLAME_MAX_BUFFER) };
+    let run_opts = RunOpts { cancel: Some(cancel.clone()), max_buffer: Some(BLAME_MAX_BUFFER), ..RunOpts::default() };
     let mut args = blame_args(&rev, &req.path, false);
     let mut r = exec.run(repo_path, &args, &run_opts).await?;
     // blame.ignoreRevsFile 이 없는 파일을 가리키면 git 이 blame 자체를 거부한다 — 이번 실행에서만 설정된 목록을 비운다.

@@ -670,6 +670,10 @@ pub fn hooks_path_with(local: bool, no_hooks_dir: Option<&str>, platform_win32: 
                 return Err(format!("훅 차단용 디렉터리가 없거나 비어 있지 않아 fetch 하지 않습니다: {dir}"));
             }
             let path = dir.replace('\\', "/");
+            // `\\?\C:\…`(canonicalize 가 Windows 에서 만드는 모양)·`\\host\share`·`\??\…` 는 UNC·NT 네임스페이스다 — `//` 로 시작하거나 `/??/` 가 있으면 거부한다
+            if path.starts_with("//") || has_nt_namespace(&path) {
+                return Err(format!("훅 차단용 디렉터리가 UNC·NT 네임스페이스 경로라 fetch 하지 않습니다: {dir}"));
+            }
             if !is_absolute_path(&path) {
                 return Err(format!("훅 차단용 디렉터리가 절대 경로가 아니라 fetch 하지 않습니다: {dir}"));
             }

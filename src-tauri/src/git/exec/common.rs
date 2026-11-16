@@ -1,8 +1,11 @@
 //! 모든 git 호출에 공통인 전역 인자·환경변수(`src/main/executors/GitExecutor.ts`)와 실행 옵션.
-//! 이 두 상수는 **이 모듈에만** 있고, 호출자는 환경변수를 바꿀 수 없다(`RunOpts` 에 env 필드가 없다).
+//! 이 두 상수는 **이 모듈에만** 있고, 호출자는 환경변수를 마음대로 바꿀 수 없다(`RunOpts` 에 일반 env 필드가 없다 —
+//! fetch 가 덮어쓰는 여섯 개는 닫힌 타입 [`FetchEnv`] 로만 준다).
 //! 값과 순서는 `tests/golden/exec/env.json`(TS 가 만든 골든)과 같아야 한다.
 
 use tokio_util::sync::CancellationToken;
+
+use crate::git::fetch::guard::fetch_env;
 
 /// 모든 git 호출에 붙는 전역 옵션.
 /// `core.fsmonitor=false`: 저장소 설정의 fsmonitor 명령은 index 를 읽는 명령에서 실행된다(악성 저장소 RCE 경로).
@@ -52,18 +55,46 @@ pub fn build_git_args<S: AsRef<str>>(repo_path: &str, args: &[S]) -> Vec<String>
     v
 }
 
-/// 호출 옵션. **env 필드가 없다** — 호출자가 방어용 환경변수를 덮어쓰지 못하게 한다.
+/// fetch 가 [`GIT_ENV`] 위에 덮어쓰는 환경변수. **일반 env 가 아니라 닫힌 타입이다** — 키는 [`fetch_env`] 의 상수이고 자유 문자열은
+/// `GIT_SSH_COMMAND` 의 값뿐이라, 호출자가 방어용 환경변수(`GIT_ALLOW_PROTOCOL` 등)를 임의로 바꿀 수 없다.
+/// TS 의 `RunOpts.env`(자유 객체)에 대응하지만, 여기서는 fetch 용 여섯 개만 표현할 수 있다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchEnv {
+    /// `GIT_ALLOW_PROTOCOL` 에 file 을 넣는다(수동 fetch + CVE-2024-32004 가 고쳐진 git 에서만)
+    pub allow_file: bool,
+    /// `GIT_SSH_COMMAND` 값
+    pub ssh_command: String,
+}
+
+/// [`GIT_ENV`] 에 fetch 환경을 덮어쓴 목록. JS `{ ...GIT_ENV, ...fetchEnv }` 의 순서와 같다 — 이미 있는 키는 제자리에서 값만 바뀌고,
+/// 새 키는 fetch 환경의 순서대로 뒤에 붙는다(WSL argv 의 `env K=V…` 순서가 이것이다)
+pub fn merged_env(fetch: Option<&FetchEnv>) -> Vec<(String, String)> {
+    let mut env: Vec<(String, String)> = GIT_ENV.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+    if let Some(f) = fetch {
+        for (k, v) in fetch_env(&f.ssh_command, f.allow_file) {
+            match env.iter_mut().find(|(ek, _)| ek == k) {
+                Some(slot) => slot.1 = v,
+                None => env.push((k.to_string(), v)),
+            }
+        }
+    }
+    env
+}
+
+/// 호출 옵션. 환경변수는 **닫힌 [`FetchEnv`] 로만** 바꿀 수 있다(`run` 에서만 쓰이고 `stream` 은 무시한다).
 #[derive(Debug, Clone, Default)]
 pub struct RunOpts {
     /// 취소되면 프로세스 트리를 죽이고 `Aborted` 로 끝난다
     pub cancel: Option<CancellationToken>,
     /// 이 바이트 수를 넘으면 실패시킨다(`run` 만, 기본 [`DEFAULT_MAX_BUFFER`])
     pub max_buffer: Option<usize>,
+    /// fetch 전용 환경(`run` 만)
+    pub fetch_env: Option<FetchEnv>,
 }
 
 impl RunOpts {
     pub fn with_cancel(cancel: CancellationToken) -> Self {
-        RunOpts { cancel: Some(cancel), max_buffer: None }
+        RunOpts { cancel: Some(cancel), ..RunOpts::default() }
     }
 }
 

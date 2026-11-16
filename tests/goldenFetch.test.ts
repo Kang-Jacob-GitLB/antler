@@ -2,7 +2,10 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AbortError, type GitExecutor } from '../src/main/executors/GitExecutor'
-import { display, formatItem, MAX_CONFIRM_ITEMS, quoteForDisplay } from '../src/main/ipc/confirmText'
+import { display, fetchConfirmOptions, formatItem, MAX_CONFIRM_ITEMS, quoteForDisplay } from '../src/main/ipc/confirmText'
+import { itKeys } from './fixtures/itTitles'
+import { bindHost, dialog, resolveHost } from '../src/sidecar/electronShim'
+import type { FromSidecar, MessageBoxArg } from '../src/sidecar/protocol'
 import {
   ALLOWED_KEYS,
   ALLOWED_VALUES,
@@ -63,6 +66,8 @@ import {
 // 오류 문구를 UTF-16 으로 자르다 생긴 반쪽은 U+FFFD 로 바꿔 적는다(toWellFormed — Rust 의 from_utf16_lossy 와 같다).
 
 const GOLDEN_DIR = join(__dirname, 'golden', 'fetch')
+/** tests/fetch.test.ts 의 각 it 이 Rust 의 어느 테스트로 옮겨졌는지(또는 왜 N/A 인지) 적은 손글씨 표. 골든이 아니다 */
+const TEST_MAP = 'test-map.json'
 const UPDATE = process.env.UPDATE_GOLDEN === '1'
 
 // ── 골든 직렬화 ───────────────────────────────────────────────────────────
@@ -1062,8 +1067,91 @@ function listsGolden(): Record<string, unknown> {
   }
 }
 
+// ── 확인 창 인자 ──────────────────────────────────────────────────────────
+// 사이드카 shim(src/sidecar/electronShim.ts)이 Rust 에 넘기는 MessageBoxArg 를 shim 을 실제로 불러 얻는다(변환을 여기서 다시 쓰지 않는다).
+// Rust(confirm_text.rs 의 fetch_confirm_box)가 같은 인자를 만드는지 본다. options 는 shim 에 들어가기 전의 Electron 옵션(defaultId 포함)이다.
+
+type BoxCase = { name: string; items: { key: string; value: string }[] }
+
+function boxCases(): BoxCase[] {
+  const item = (i: number): { key: string; value: string } => ({ key: `core.key${i}`, value: `v${i}` })
+  const many = (n: number): { key: string; value: string }[] => Array.from({ length: n }, (_, i) => item(i))
+  return [
+    { name: 'repo', items: [{ key: 'core.sshcommand', value: 'ssh -F x' }] },
+    { name: '내 저장소', items: [{ key: 'credential.helper', value: '!echo "hi"' }, { key: 'protocol.ext.allow', value: 'never' }] },
+    { name: 'a\nb', items: [{ key: 'k‮e', value: 'v​w' }] },
+    { name: 'x'.repeat(100), items: [{ key: 'trace2.eventtarget', value: `${'a'.repeat(47)}😀${'b'.repeat(80)}` }] },
+    { name: 'e', items: [] },
+    { name: 'twelve', items: many(MAX_CONFIRM_ITEMS) },
+    { name: 'thirteen', items: many(MAX_CONFIRM_ITEMS + 1) },
+    { name: 'fifty', items: many(50) },
+    { name: 'q"uote', items: [{ key: 'a', value: `x${'”'} = ${'“'}safe` }, { key: '', value: '' }] }
+  ]
+}
+
+/**
+ * 분리 전 handlers.ts 의 confirmDangerousConfig 본문(`show` 에 넘기던 옵션과 반환 판정)을 그대로 옮긴 원본.
+ * fetchConfirmOptions 로 뽑아낸 것이 이것과 같은 옵션을 만드는지 보는 데만 쓴다 — 고치지 않는다.
+ */
+async function legacyConfirmDangerousConfig(
+  name: string,
+  items: { key: string; value: string }[],
+  show: (opts: unknown) => Promise<{ response: number }>
+): Promise<boolean | 'always'> {
+  const title = `${display(name)} 저장소의 설정에 fetch 때 외부 프로그램을 실행하거나 연결을 가로챌 수 있는 항목이 있습니다.`
+  if (items.length > MAX_CONFIRM_ITEMS) {
+    await show({
+      type: 'warning',
+      buttons: ['닫기'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'fetch 차단',
+      message: title,
+      detail: `항목이 ${items.length}개로 너무 많아 모두 확인할 수 없어 fetch 하지 않습니다. 저장소의 .git/config 를 직접 확인하세요.\n\n${items
+        .slice(0, MAX_CONFIRM_ITEMS)
+        .map((i) => formatItem(i.key, i.value))
+        .join('\n')}\n… 외 ${items.length - MAX_CONFIRM_ITEMS}개`
+    })
+    return false
+  }
+  const res = await show({
+    type: 'warning',
+    buttons: ['이번만 fetch', '이 저장소에서 항상 허용', '취소'],
+    defaultId: 2,
+    cancelId: 2,
+    title: 'fetch 확인',
+    message: title,
+    detail: `${items.map((i) => formatItem(i.key, i.value)).join('\n')}\n\n직접 만든 설정이거나 신뢰하는 저장소일 때만 허용하세요. "이번만"은 이번 실행 동안, "항상"은 앱을 다시 켜도 적용되며, 어느 쪽이든 위 키·값이 바뀌면 다시 묻습니다. 값이 가리키는 스크립트·파일의 내용이 바뀌는 것은 확인하지 않습니다.`
+  })
+  return res.response === 0 ? true : res.response === 1 ? 'always' : false
+}
+
+async function messageBoxArg(options: unknown): Promise<MessageBoxArg> {
+  let sent: FromSidecar | null = null
+  bindHost((m) => {
+    sent = m
+  })
+  const pending = dialog.showMessageBox(options)
+  const msg = sent as FromSidecar | null
+  if (!msg || msg.t !== 'host' || msg.op !== 'messageBox') throw new Error('shim 이 messageBox 를 보내지 않았다')
+  resolveHost(msg.id, true, { response: 0 })
+  await pending
+  return msg.arg as MessageBoxArg
+}
+
+async function confirmBoxGolden(): Promise<Record<string, unknown>> {
+  const cases = await Promise.all(
+    boxCases().map(async (c) => {
+      const { tooMany, options } = fetchConfirmOptions(c.name, c.items)
+      return { name: c.name, items: c.items, tooMany, options, arg: await messageBoxArg(options) }
+    })
+  )
+  return { cases }
+}
+
 async function buildAll(): Promise<Record<string, string>> {
   return {
+    'confirmBox.json': render(await confirmBoxGolden()),
     'lists.json': render(listsGolden()),
     'allowed.json': render(allowedGolden()),
     'urls.json': render(urlsGolden()),
@@ -1088,6 +1176,51 @@ describe('fetch 가드 골든', () => {
     for (const good of ['^a\\.b$', '^a\\..+\\.(b|c-d)$', '^a\\.(.+\\.)?(b|c)$', '^(a)?$']) expect(grammarError(good), good).toBeNull()
   })
 
+  it('fetchConfirmOptions 는 분리 전 handlers.ts 의 인라인 옵션과 같다(동작 불변)', async () => {
+    for (const c of boxCases()) {
+      const shown: unknown[] = []
+      const answer = await legacyConfirmDangerousConfig(c.name, c.items, async (opts) => {
+        shown.push(opts)
+        return { response: 1 }
+      })
+      const { tooMany, options } = fetchConfirmOptions(c.name, c.items)
+      expect(shown, c.name).toEqual([options])
+      // 호출부(handlers.ts)의 판정: tooMany 면 어떤 응답이어도 false, 아니면 0 → true, 1 → 'always', 그 밖 → false
+      expect(answer, c.name).toBe(tooMany ? false : 'always')
+    }
+  })
+
+  it('MessageBoxArg 의 본문은 message·detail 을 빈 줄로 잇고 취소를 기본 선택으로 둔다', async () => {
+    for (const c of boxCases()) {
+      const { options } = fetchConfirmOptions(c.name, c.items)
+      const arg = await messageBoxArg(options)
+      expect(arg.message).toBe([options.message, options.detail].filter(Boolean).join('\n\n'))
+      expect(options.defaultId).toBe(options.cancelId)
+      expect(arg.cancelId).toBe(options.cancelId)
+    }
+  })
+
+  it('fetch.test.ts 이식 대응표(test-map.json)가 원본의 모든 it 을 덮고 가리키는 Rust 테스트가 있다', () => {
+    const map = JSON.parse(readFileSync(join(GOLDEN_DIR, TEST_MAP), 'utf8')) as Record<string, string>
+    const keys = itKeys(readFileSync(join(__dirname, 'fetch.test.ts'), 'utf8'))
+    expect(new Set(keys).size, 'describe > it 제목이 겹치면 대응표 키가 모호해진다').toBe(keys.length)
+    expect(keys.filter((k) => !(k in map)), '대응표에 없는 it (fetch.test.ts 에 테스트를 더했으면 test-map.json 에도 적는다)').toEqual([])
+    expect(Object.keys(map).filter((k) => !keys.includes(k)), '원본에 없는 대응표 항목').toEqual([])
+    const rustSources = Object.fromEntries(
+      ['fetch.rs', 'fetch_guard.rs', 'exec.rs'].map((f) => [f, readFileSync(join(__dirname, '..', 'src-tauri', 'tests', f), 'utf8')])
+    )
+    for (const [title, value] of Object.entries(map)) {
+      if (value.startsWith('N/A: ')) {
+        expect(value.length, `${title}: N/A 사유가 비어 있다`).toBeGreaterThan(8)
+        continue
+      }
+      const m = /^(fetch\.rs|fetch_guard\.rs|exec\.rs)::(\S+)/.exec(value)
+      expect(m, `${title}: 'N/A: 사유' 또는 '<파일>.rs::<테스트 이름>' 이어야 한다 → ${value}`).not.toBeNull()
+      const [, file, name] = m!
+      expect(new RegExp(String.raw`\bfn ${name}\(`).test(rustSources[file!]!), `${title}: ${file} 에 fn ${name} 이 없다`).toBe(true)
+    }
+  })
+
   it('골든 파일이 TS 의 현재 출력과 같다', async () => {
     const built = await buildAll()
     if (UPDATE) {
@@ -1095,7 +1228,8 @@ describe('fetch 가드 골든', () => {
       for (const [name, text] of Object.entries(built)) writeFileSync(join(GOLDEN_DIR, name), text)
       return
     }
-    const onDisk = readdirSync(GOLDEN_DIR).filter((n) => n.endsWith('.json')).sort()
+    // test-map.json 은 손으로 쓰는 이식 대응표라 골든이 아니다(아래 'fetch.test.ts 이식 대응표')
+    const onDisk = readdirSync(GOLDEN_DIR).filter((n) => n.endsWith('.json') && n !== TEST_MAP).sort()
     expect(onDisk, 'UPDATE_GOLDEN=1 npx vitest run tests/goldenFetch.test.ts 로 골든을 만든다').toEqual(Object.keys(built).sort())
     for (const [name, text] of Object.entries(built)) {
       expect(existsSync(join(GOLDEN_DIR, name))).toBe(true)

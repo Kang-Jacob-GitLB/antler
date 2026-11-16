@@ -6,7 +6,7 @@
 //!
 //! 취소: Job Object 종료가 wsl.exe 를 죽이면 리눅스 쪽 git 도 끝나는지는 `tests/exec.rs` 의 WSL 통합 테스트에서 실측한다.
 
-use super::common::{build_git_args, to_strings, RunOpts, RunResult, Spec, GIT_ENV};
+use super::common::{build_git_args, merged_env, to_strings, FetchEnv, RunOpts, RunResult, Spec};
 use super::error::ExecError;
 use super::process::{run_process, stream_process, GitStream};
 use crate::git::parsers::js_trim;
@@ -18,8 +18,13 @@ pub const WSL_SPAWN_ENV: [(&str, &str); 1] = [("WSL_UTF8", "1")];
 
 /// wsl.exe 에 넘길 argv: `-d <distro> --cd ~ --exec env K=V… git -C <repo> <전역 인자> <args…>`
 pub fn wsl_argv<S: AsRef<str>>(distro: &str, repo_path: &str, args: &[S]) -> Vec<String> {
+    wsl_argv_with(distro, repo_path, args, None)
+}
+
+/// [`wsl_argv`] 에 fetch 환경을 얹은 것. `env K=V…` 순서는 JS `{ ...GIT_ENV, ...fetchEnv }` 와 같다([`merged_env`])
+pub fn wsl_argv_with<S: AsRef<str>>(distro: &str, repo_path: &str, args: &[S], fetch: Option<&FetchEnv>) -> Vec<String> {
     let mut v: Vec<String> = ["-d", distro, "--cd", "~", "--exec", "env"].iter().map(|s| (*s).to_string()).collect();
-    v.extend(GIT_ENV.iter().map(|(k, val)| format!("{k}={val}")));
+    v.extend(merged_env(fetch).into_iter().map(|(k, val)| format!("{k}={val}")));
     v.push("git".to_string());
     v.extend(build_git_args(repo_path, args));
     v
@@ -73,10 +78,15 @@ impl WslExecutor {
         WslExecutor { distro: distro.into() }
     }
 
-    fn spec<S: AsRef<str>>(&self, repo_path: &str, args: &[S]) -> Spec {
+    /// 배포판 이름(캐시 키)
+    pub fn distro(&self) -> &str {
+        &self.distro
+    }
+
+    fn spec<S: AsRef<str>>(&self, repo_path: &str, args: &[S], fetch: Option<&FetchEnv>) -> Spec {
         Spec {
             program: "wsl.exe".to_string(),
-            argv: wsl_argv(&self.distro, repo_path, args),
+            argv: wsl_argv_with(&self.distro, repo_path, args, fetch),
             env: WSL_SPAWN_ENV.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),
             git_args: to_strings(args),
             wsl: true,
@@ -84,7 +94,7 @@ impl WslExecutor {
     }
 
     pub async fn run<S: AsRef<str>>(&self, repo_path: &str, args: &[S], opts: &RunOpts) -> Result<RunResult, ExecError> {
-        let r = run_process(&self.spec(repo_path, args), opts).await?;
+        let r = run_process(&self.spec(repo_path, args, opts.fetch_env.as_ref()), opts).await?;
         // wsl.exe 자체가 실패하면 메시지를 stdout 으로 내고 stderr 는 비어 있다
         if is_wsl_failure(r.code) && js_trim(&r.stderr).is_empty() {
             let msg = wsl_message(&r.stdout);
@@ -94,7 +104,7 @@ impl WslExecutor {
     }
 
     pub fn stream<S: AsRef<str>>(&self, repo_path: &str, args: &[S], opts: &RunOpts) -> Result<GitStream, ExecError> {
-        stream_process(&self.spec(repo_path, args), opts)
+        stream_process(&self.spec(repo_path, args, None), opts)
     }
 }
 
@@ -115,6 +125,32 @@ mod tests {
         let git_at = argv.iter().position(|a| a == "git").unwrap();
         assert_eq!(&argv[git_at..git_at + 3], ["git", "-C", "/home/me/내 repo"]);
         assert_eq!(&argv[argv.len() - 2..], ["log", "-z"]);
+    }
+
+    #[test]
+    fn fetch_환경의_env_순서는_기존_키_제자리_교체_새_키_뒤() {
+        let f = FetchEnv { allow_file: false, ssh_command: "ssh x".into() };
+        let argv = wsl_argv_with("U", "r", &["fetch"], Some(&f));
+        let end = argv.iter().position(|a| a == "git").unwrap();
+        let envs = &argv[6..end];
+        assert_eq!(
+            envs,
+            [
+                "GIT_OPTIONAL_LOCKS=0",
+                "GIT_TERMINAL_PROMPT=0",
+                "GIT_LITERAL_PATHSPECS=1",
+                "GIT_NO_LAZY_FETCH=1",
+                "GIT_NO_REPLACE_OBJECTS=1",
+                "GIT_ALLOW_PROTOCOL=https:http:ssh:git",
+                "GIT_PAGER=cat",
+                "LANG=C.UTF-8",
+                "LC_ALL=C.UTF-8",
+                "GIT_ASKPASS=",
+                "SSH_ASKPASS_REQUIRE=never",
+                "GCM_INTERACTIVE=never",
+                "GIT_SSH_COMMAND=ssh x",
+            ]
+        );
     }
 
     #[test]

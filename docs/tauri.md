@@ -22,7 +22,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
-| 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 진행 중 — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"). git 실행·상태 기계·라우팅은 남음 |
+| 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 진행 중 — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"). 상태 기계·라우팅은 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
@@ -120,7 +120,9 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 
 `src/main/executors` 의 Local·WSL 실행기·`ProcessQueue`·`wslPaths` 를 옮겼다(SSH 는 Phase 5). 앱에서는 라우터(아래 "라우터")가 등록된 채널에서만 부른다.
 
-- `common.rs` 의 `GIT_GLOBAL_ARGS`·`GIT_ENV` 가 유일한 정의이고 `RunOpts` 에는 env 필드가 없다(호출자가 방어 환경변수를 덮어쓸 수 없다. TS 의 `RunOpts.env`·`envFor`·WSL `extraEnv` 는 GitHub 원격 전용 저장소용이라 옮기지 않았다).
+- `common.rs` 의 `GIT_GLOBAL_ARGS`·`GIT_ENV` 가 유일한 정의이고 `RunOpts` 에는 **일반 env 필드가 없다**(호출자가 방어 환경변수를 덮어쓸 수 없다. TS 의 `RunOpts.env`·`envFor`·WSL `extraEnv` 는 GitHub 원격 전용 저장소용이라 옮기지 않았다).
+  예외는 fetch 용 닫힌 타입 `FetchEnv { allow_file, ssh_command }` 하나뿐이다(`RunOpts.fetch_env`, **`run` 에서만**, `stream` 은 무시). 키는 `fetch_env()` 의 상수 여섯 개이고 자유 문자열은 `GIT_SSH_COMMAND` 의 값뿐이다
+  (아래 "fetch 실행").
 - `run`(stdout 64MB 상한, stderr 는 앞 4MB 만 담고 파이프는 끝까지 비움) / `stream`(`GitStream`: `AsyncRead`. **읽을 때만** 파이프에서 가져가므로 소비자가 안 읽으면 git 이 멈춘다.
   EOF 뒤 `finish()` 로 종료 코드를 확인하고, 버리면 트리를 죽인다). 취소는 `CancellationToken`.
 - **앱에 연결하기 전 필수(보안 리뷰)**: 실행기는 호출자 `args` 를 전역 옵션 바로 뒤에 붙인다 — renderer 값이 그 자리에 오면
@@ -293,7 +295,7 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
 ## fetch 가드 판정 로직(Phase 3, `src-tauri/src/git/fetch/`)
 
 fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목록·URL 판정·확인 창 표시·오류 분류)를 **1:1 로** 옮긴다 — 더 엄격하게도, 느슨하게도 바꾸지 않는다(바꾸려면 TS 에 먼저 고친다).
-이 단계는 git 을 실행하지 않고 앱에도 연결하지 않았다. 실행(`git config`·`remote`·`fetch`)·상태 기계(진행·큐·백오프·승인 저장)·라우팅은 뒤 단계다.
+판정 로직(이 절)은 git 을 실행하지 않는다. 실행(`git config`·`remote`·`fetch`)은 바로 아래 "fetch 실행"이고, 둘 다 앱에는 아직 연결하지 않았다. 상태 기계(진행·큐·백오프·승인 저장)·라우팅은 뒤 단계다.
 
 - **파일**: `guard.rs`(`fetch.ts` 의 순수 함수), `confirm_text.rs`(`confirmText.ts`), `pattern.rs`(허용 목록 매처), `special_table.rs`·`lowercase_table.rs`(생성 파일).
 - **허용 목록은 regex 크레이트 없이** TS 정규식 소스 문자열(`ALLOWED_KEY_SOURCES`)을 그대로 두고 `pattern.rs` 의 작은 매처가 해석한다.
@@ -318,6 +320,28 @@ fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목�
   TS 보다 엄격한 유일한 지점이다(TS 는 빈 값·상대 경로를 거부하지 않는다). 훅 경로는 앱이 정하는 값이라 정상 경로에는 영향이 없고,
   "Rust 가 TS 보다 넓게 허용하지 않는다"는 원칙에 맞다. 그래서 `fetchConfigArgs` 골든 중 `hooksPath: ""` 9건은 값 비교 대신 빈 값 거부를 따로 확인한다.
 - 알려진 차이: TS `ALLOWED_VALUES[key]` 는 일반 객체 조회라 키가 `constructor`·`__proto__` 면 `TypeError` 를 던진다(git 키는 점이 있어야 해 실제로는 오지 않는다). Rust 는 허용 목록에 없는 키로 본다.
+
+### fetch 실행(`run.rs`, 앱에는 아직 연결하지 않음)
+
+`inspectConfig`(`config --list --show-scope --includes -z` → `--show-scope` 를 모르면 `ScopeWalk` 로 범위별 읽기 → `remote` / `remote get-url --all -- <n>`)와 `runFetch` 의 이식이다.
+git 은 `GitRunner` 트레이트로만 부른다(실제는 `GitExecutor`, 테스트는 옛 git 을 흉내 내는 래퍼를 끼운다 — 프로세스를 띄우는 길은 늘지 않는다).
+local·WSL 저장소만 다룬다. ssh·github fetch 와 `filter`·`FollowRedirects::False`·임의 env 는 이 API 에 없다(사이드카 몫).
+
+- **env 는 닫힌 타입으로만**: local 은 `GIT_ENV` 위에 덮어쓰고, WSL 은 `env K=V…` 순서를 JS `{...GIT_ENV, ...fetchEnv}` 와 같게(이미 있는 키는 제자리에서 값 교체, 새 키는 fetch 환경 순서로 뒤에) 만든다 —
+  `tests/golden/exec/env.json` 의 `fetch` 가 TS `runFetch` 가 실제로 spawn 에 준 argv·환경(local)과 wsl.exe argv 를 담고 `tests/exec.rs` 가 비교한다.
+- **훅 경로는 run.rs 가 실행기 종류로 만든다**(호출자가 `HooksPath` 를 넘길 수 없다): local 은 앱 소유 빈 디렉터리(드라이브 문자 경로, Windows 에서 없으면 거부), WSL 은 `/dev/null` — Windows 경로가 WSL 로 갈 수 없다.
+  경로는 `canonicalize` 하지 않는다(Windows 에서 `\\?\` 가 붙는다). `hooks_path_for` 는 `//` 로 시작하거나 `/??/` 가 든 경로(UNC·NT 네임스페이스)를 거부한다(TS 보다 엄격한 두 번째 지점. 앱이 정하는 값이라 정상 경로에는 영향이 없다).
+- **인자 순서**: 모든 `-c` 는 `fetch` 앞, `--refmap=`(빈 값) 필수, 같은 `-c` 키 중복 없음, remote 이름은 `--` 뒤와 refspec 안에만. 옛 git 이 `--no-write-fetch-head` 를 모르면 그 옵션 없이 한 번 더 한다.
+- **`GIT_ASKPASS=''` 는 실제 git 에 빈 값으로 도착한다**(local·WSL 실측: 환경에 `GIT_ASKPASS=` 가 보이고, 저장소 설정의 `core.askpass` 스크립트가 실행되지 않는다 — fetch 환경이 없는 대조군에서는 실행된다).
+  git 은 `GIT_ASKPASS` 가 비어 있으면 `core.askpass` 로 물러서지 않는다. 확인은 `tests/fetch.rs` 의 `위험9_…`(alias 셸이 본 자식 환경과 효과 둘 다 — git.exe 자신의 `getenv` 를 직접 읽은 것은 아니다).
+- **ssh 명령**: 사용자(시스템·전역) `core.sshCommand` > (**local 만**) 환경 `GIT_SSH_COMMAND` > `GIT_SSH` > BatchMode 기본. 환경은 `std::env::var` 로 이름을 정해 읽는다(Windows 는 대소문자 무시 — `vars()` 로 맵을 채우면 `Git_Ssh_Command` 를 놓친다).
+  Windows 에서 부모가 `Git_Pager` 처럼 다른 철자로 갖고 있으면 자식 환경의 이름이 그 철자로 남지만 값은 실행기 것이다(git.exe 는 대소문자를 구분하지 않아 문제없고, MSYS 셸 자식만 이름을 철자대로 본다).
+- git 버전은 실행기별(`cache_key`: local 은 실행 파일, WSL 은 배포판)로 한 번만 읽고 실패도 기억한다(`GitVersions`).
+- **확인 창 인자**: TS `fetchConfirmOptions(name, items)`(순수 함수, `confirmText.ts`; `handlers.ts` 는 이것을 부르기만 한다 — 동작 불변은 `goldenFetch.test.ts` 가 분리 전 인라인 코드의 사본과 비교해 증명)와
+  Rust `fetch_confirm_box` 가 같은 인자를 만든다. 사이드카 shim 이 만드는 `MessageBoxArg`(본문 = message + 빈 줄 + detail, `defaultId` 는 가지 않는다)는 shim 을 실제로 불러 얻은 `confirmBox.json` 골든으로 고정한다.
+- **테스트**: `src-tauri/tests/fetch.rs`(실제 git, 127.0.0.1 가짜 서버만). TS `tests/fetch.test.ts` 의 모든 `it` 이 `tests/golden/fetch/test-map.json` 에 있어야 하고(vitest 가 강제),
+  각 항목은 Rust 테스트 이름이거나 `N/A: 사유`다. `fetcher.fetch(...)` 를 거치는 시나리오는 검사·실행 부분만 옮겼고 상태 기계(진행 합치기·확인→재검사 TOCTOU·승인 저장·백오프·authPaused)는 다음 단계(PR C)다.
+  전역 git 설정 파일(커밋된 `tests/gitconfig`)은 고치지 않는다 — 전역 값이 필요한 시나리오는 가짜 실행기의 `--global` 응답으로 준다. WSL 의 git 은 격리를 받지 않으므로 `/tmp` 저장소로만 돌린다.
 
 ## Phase 0 에서 확인한 것
 

@@ -51,7 +51,7 @@ fn bit(v: &Value) -> bool {
 }
 
 /// 처리하는 골든 파일. 목록에 없는 파일이 디렉터리에 있으면 `골든_파일마다_처리기가_있다` 가 실패한다
-const HANDLED: [&str; 8] = ["lists.json", "allowed.json", "urls.json", "config.json", "inspect.json", "confirm.json", "misc.json", "fuzz.json"];
+const HANDLED: [&str; 9] = ["lists.json", "allowed.json", "urls.json", "config.json", "inspect.json", "confirm.json", "confirmBox.json", "misc.json", "fuzz.json"];
 
 /// 어긋난 항목을 모았다가 한 번에 보고한다(앞 몇 개만)
 #[derive(Default)]
@@ -86,7 +86,8 @@ fn 골든_파일마다_처리기가_있다() {
     let mut found: Vec<String> = fs::read_dir(golden_dir())
         .expect("tests/golden/fetch")
         .map(|e| e.expect("항목").file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with(".json"))
+        // test-map.json 은 TS fetch.test.ts → Rust 테스트 이식 대응표(손글씨)라 골든이 아니다. 검사는 tests/fetch.rs 가 한다
+        .filter(|n| n.ends_with(".json") && n != "test-map.json")
         .collect();
     found.sort();
     let mut handled: Vec<String> = HANDLED.iter().map(ToString::to_string).collect();
@@ -326,6 +327,37 @@ fn 확인_창_표시가_ts_와_같고_특수_문자_표가_골든과_같다() {
     for b in arr(&g["boundaries"], "boundaries") {
         assert_eq!(is_special(b[0].as_u64().expect("cp") as u32), bit(&b[1]), "U+{:X}", b[0].as_u64().unwrap());
     }
+}
+
+/// 확인 창 인자: TS `fetchConfirmOptions` 의 옵션과, 사이드카 shim 이 그것으로 만든 MessageBoxArg(본문 = message + 빈 줄 + detail)
+#[test]
+fn 확인_창_인자가_ts_shim_이_만든_것과_같다() {
+    use antler_lib::git::fetch::confirm_text::fetch_confirm_box;
+
+    let g = golden("confirmBox.json");
+    let cases = arr(&g["cases"], "cases");
+    assert!(cases.iter().any(|c| c["tooMany"] == json!(true)) && cases.iter().any(|c| c["tooMany"] == json!(false)), "한도 안·밖 표본이 모두 있어야 한다");
+    for c in cases {
+        let items: Vec<(&str, &str)> = arr_or_empty_ref(&c["items"]).iter().map(|i| (s(&i["key"]), s(&i["value"]))).collect();
+        let (too_many, b) = fetch_confirm_box(s(&c["name"]), &items);
+        let o = &c["options"];
+        assert_eq!(too_many, c["tooMany"].as_bool().expect("tooMany"), "{}", c["name"]);
+        assert_eq!(o["type"], "warning");
+        assert_eq!(json!(b.buttons), o["buttons"], "{}", c["name"]);
+        assert_eq!(b.default_id as u64, o["defaultId"].as_u64().unwrap(), "{}", c["name"]);
+        assert_eq!(b.cancel_id as u64, o["cancelId"].as_u64().unwrap(), "{}", c["name"]);
+        assert_eq!(b.title, s(&o["title"]), "{}", c["name"]);
+        assert_eq!(b.message, s(&o["message"]), "{}", c["name"]);
+        assert_eq!(b.detail, s(&o["detail"]), "{}", c["name"]);
+        assert_eq!(b.to_message_box_arg(), c["arg"], "MessageBoxArg {}", c["name"]);
+        // 취소가 기본 선택이다 — 어느 쪽 창이든 Enter 가 허용이 되면 안 된다
+        assert_eq!(b.default_id, b.cancel_id);
+        assert_eq!(b.buttons.get(b.cancel_id).map(String::as_str), Some(if too_many { "닫기" } else { "취소" }));
+    }
+}
+
+fn arr_or_empty_ref(v: &Value) -> &[Value] {
+    v.as_array().map_or(&[], Vec::as_slice)
 }
 
 // ── 그 밖(버전·오류 분류·인자·환경·stderr 판정) ───────────────────────────

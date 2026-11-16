@@ -15,6 +15,7 @@ pub mod confirm_text;
 pub mod guard;
 pub mod lowercase_table;
 pub mod pattern;
+pub mod run;
 pub mod special_table;
 
 use lowercase_table::{CASED_RANGES, CASE_IGNORABLE_RANGES, LOWERCASE_MAP};

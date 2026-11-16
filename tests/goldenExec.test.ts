@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildGitArgs, GIT_ENV, GIT_GLOBAL_ARGS } from '../src/main/executors/GitExecutor'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
 import { WslExecutor, wslArgv } from '../src/main/executors/WslExecutor'
+import { fetchEnv, inspectEntries, parseConfigList, runFetch } from '../src/main/git/fetch'
 
 // 실행기의 공통 인자·환경변수·WSL argv 를 골든 JSON 으로 고정한다. Rust 이식(src-tauri/tests/exec.rs)이 같은 값을 쓰는지 본다.
 // 골든은 TS 가 기준이다: `UPDATE_GOLDEN=1 npx vitest run tests/goldenExec.test.ts` 로 다시 쓴다.
@@ -58,6 +59,40 @@ function stable(value: unknown): string {
   return `${emit(value, '')}\n`
 }
 
+// fetch: runFetch 가 실제로 spawn 에 주는 argv·환경(로컬)과 wsl.exe argv(WSL). Rust 의 fetch_args·FetchEnv·wsl_argv_with 가 같은 값을 만드는지 본다.
+// ssh 명령이 process.env 에 기대지 않도록 사용자 core.sshCommand 를 주거나(로컬) WSL 로만 본다(WSL 은 Windows 환경변수를 읽지 않는다)
+const FETCH_SAMPLES: { kind: 'local' | 'wsl'; remotes: string[]; hooksPath: string; allowFile: boolean; credentialHelpers: boolean; userSsh: string | null }[] = [
+  { kind: 'local', remotes: ['origin'], hooksPath: 'C:/Users/me/no-hooks', allowFile: false, credentialHelpers: false, userSsh: 'ssh -F x' },
+  { kind: 'local', remotes: ['origin', 'up stream', '-x', 'a:b', '한글'], hooksPath: '/tmp/no-hooks', allowFile: true, credentialHelpers: true, userSsh: 'ssh -i "k k"' },
+  { kind: 'wsl', remotes: ['origin'], hooksPath: '/dev/null', allowFile: false, credentialHelpers: false, userSsh: null },
+  { kind: 'wsl', remotes: ['origin', '--upload-pack=evil', 'x y'], hooksPath: '/dev/null', allowFile: true, credentialHelpers: true, userSsh: 'ssh -J h' }
+]
+
+async function captureFetch(): Promise<unknown[]> {
+  const out: unknown[] = []
+  for (const s of FETCH_SAMPLES) {
+    spawned.length = 0
+    const ins = {
+      ...inspectEntries(s.userSsh ? parseConfigList(`global\0core.sshcommand\n${s.userSsh}\0`) : []),
+      remoteNames: s.remotes
+    }
+    const exec = s.kind === 'local' ? new LocalExecutor() : new WslExecutor('Ubuntu')
+    await runFetch(exec, '/home/me/repo', ins, { hooksPath: s.hooksPath, allowFile: s.allowFile, credentialHelpers: s.credentialHelpers })
+    const keys = [...new Set([...Object.keys(GIT_ENV), ...Object.keys(fetchEnv({ sshCommand: '', allowFile: false }))])]
+    out.push({
+      ...s,
+      calls: spawned.map((c) => ({
+        command: c.command,
+        argv: c.argv,
+        // 로컬만 의미가 있다(WSL 은 argv 의 env K=V 가 리눅스 쪽 환경이다). 값이 없으면 '<없음>', 빈 값은 ''
+        env: s.kind === 'local' ? keys.map((k) => [k, c.env[k] ?? '<없음>']) : []
+      }))
+    })
+  }
+  spawned.length = 0
+  return out
+}
+
 async function capture(): Promise<unknown> {
   spawned.length = 0
   await new LocalExecutor().run('/r', ['log'])
@@ -65,7 +100,9 @@ async function capture(): Promise<unknown> {
   const [local, wsl] = spawned
   // 부모 환경에 덧씌워진 값만 본다 — GIT_ENV 의 키는 spawn 환경에서 읽는다
   const pick = (env: Record<string, string | undefined>): string[][] => Object.keys(GIT_ENV).map((k) => [k, env[k] ?? '<없음>'])
+  const fetch = await captureFetch()
   return {
+    fetch,
     globalArgs: GIT_GLOBAL_ARGS,
     // 순서가 WSL argv 의 `env K=V…` 순서를 정한다
     env: Object.entries(GIT_ENV),
