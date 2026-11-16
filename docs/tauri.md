@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든) 완료, 둘 다 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트) 완료, 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -435,7 +435,7 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 - **HTTP**: reqwest 0.13(`default-features=false`, `native-tls`), 클라이언트 생성은 한 곳(`net/http.rs`)에 모으고 `Client::new` 등은 clippy 로 막는다. `https_only`·`no_proxy`·15초·UA `Antler`,
   Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
   `reqwest::Error` 의 Display 는 쓰지 않는다. 비밀은 `SecretString`(Display·Serialize 없음, Debug `***`)이고 오류 문구는 마지막에 `redact_secrets` 를 거친다.
-- **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버) → 4 SecretStore(키링·메모리) → 5 Jira 서비스 →
+- **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버, 완료) → 4 SecretStore(키링·메모리) → 5 Jira 서비스 →
   6 Jira 연결(채널·`openExternal`) → 7 GitHub 서비스 → 8 gh CLI → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
 
 ### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
@@ -483,7 +483,7 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 **대응표**(`tests/golden/net/test-map.json`): 대상 테스트 15개(`avatars`·`ghAccessibleRepos`·`ghApi`·`ghChecks`·`ghClient`·`ghCliImport`·`ghDevice`·`ghService`·`jiraAdf`·`jiraAvatar`·`jiraClient`·`jiraHardening`·`jiraService`·`launchpadQuery`·`launchpadService`)의
 모든 `it`(271개)이 `net.rs::<테스트>`, `N/A: PR n`(뒤 PR 이 채운다) 또는 `N/A: 사유` 다. **기준**: TS `it` 이 순수 함수(검증·`ghEnv`·`authHeader`·`parseRetryAfter`·매퍼)를 **직접** 부를 때만 `net.rs::` 이고,
 client·service·DeviceFlow 를 가짜 서버로 구동하는 `it` 은 Rust 가 순수 판정만 옮겼어도 `N/A: PR n`(그 계층을 옮기는 PR 이 실제 테스트로 바꾼다)이다. PR 2 이후 `net.rs::` 는 46개(테스트 10개),
-`N/A: PR n` 은 211개(3→41, 4→5, 5→52, 7→95, 8→18), `N/A: 사유` 는 14개(ConfigStore·renderer 의 `sanitizeHtml`·`extractIssueKeys`·`remoteUrl` 은 Rust 로 옮기지 않고, getter 예외 대체 경로는 JSON 값으로 도달할 수 없다).
+`N/A: PR n` 은 211개(3→41, 4→5, 5→52, 7→95, 8→18)였고 **PR 3 이 3→41 을 모두 채워 지금은 `net.rs::` 87개(테스트 39개), `N/A: PR n` 170개(4→5, 5→52, 7→95, 8→18)다**, `N/A: 사유` 는 14개(ConfigStore·renderer 의 `sanitizeHtml`·`extractIssueKeys`·`remoteUrl` 은 Rust 로 옮기지 않고, getter 예외 대체 경로는 JSON 값으로 도달할 수 없다).
 `net.rs` 의 나머지 테스트(요청 URL·사진 홉·Device Flow·오류 분류 등)는 표에 묶이지 않은 추가 패리티 검사다.
 PR 2 가 `N/A: PR 2`(72개)를 채웠다 — 매퍼를 직접 부르는 `it` 21개는 `net.rs::`, 가짜 `GitHubClient`/Jira 서버로 쪽 읽기·보강·캐시를 도는 `it` 은 그 계층의 PR(GitHub 서비스 7, Jira 서비스 5)로 옮겼다.
 vitest 가 누락·낡은 항목·존재하지 않는 Rust 테스트를 막는다(`N/A: PR [2-9]` 형식은 따로 허용). 계획에는 "15파일 ~268 it" 만 있고 목록이 없어, `src/main/{github,jira}` 를 import 하는 테스트 중 GitHub 원격 URL 해석(`ghRemote`)·`launchpadMerge`(병합 로직)를 뺀 15개로 골랐다(it 271개).
@@ -530,6 +530,38 @@ TS 의 허용 태그·속성을 넓히지 않았다(링크 주소는 PR 1 의 `p
   워크로그가 2만 건을 넘으면 TS 는 이슈 병렬 수집의 도착 순서에 따라 자르는 지점이 달라질 수 있고, Rust 는 이슈 순서대로 앞에서 자른다(`truncated` 는 같다).
 - 퍼즈·성능: Jira 매퍼도 모두 이상한 입력 시험에 들어 있고(`fuzz_jira`), 표시 20만 개·PR/커밋/리뷰어/워크로그 각 10만 개 입력이 디버그 빌드에서 수 초 안에 끝나는지 `큰_입력은_제곱_시간이_아니다` 가 본다(ADF 표시 감싸기·dev-status 중복 제거·리뷰 판정은 제곱 시간이 되기 쉬워 색인·누적으로 구현했다).
 - Jira `search` 의 Data Center 쪽 표지는 `Number(cursor)` 를 `js_number` 로 해석한다(`0x10`·`1e1`·` 5 ` 도 TS 와 같고, 정수·0..=200 이 아니면 오류).
+
+### PR 3 — HTTP 코어와 Jira·GitHub 클라이언트(앱에 연결하지 않는다)
+
+| 모듈 | 원본(TS) | 내용 |
+|---|---|---|
+| `net/http.rs` | — | reqwest 클라이언트를 만드는 **유일한 곳**(`#[allow(clippy::disallowed_methods)]` 한 군데). `https_only`·`no_proxy`·요청당 15초(본문 포함)·UA `Antler`·`native-tls`. 리다이렉트는 `Redirects::None` 또는 `SameOrigin`(origin 이 정확히 같고 5홉 이하). `read_capped`(Content-Length 선검사 + chunk 누계), `or_abort`(취소), `classify`(`is_timeout`→`is_connect`→`is_body`), `NetError`(`Api`·`InvalidPath`·`Aborted`, `sealed` 가 `redact_secrets` 를 건다) |
+| `jira/client.rs` | `jira/client.ts` | GET·POST·`image`. 3xx 는 `JIRA_REDIRECT`, 본문 5MB(엔드포인트별 `max_bytes`)·사진 256KB, GET 429 + Retry-After ≤ 3초면 한 번 재시도(재시도 경로의 본문도 상한), POST 는 재시도 없이 `X-Atlassian-Token: no-check`. 사진은 PR 1 의 `ImageWalk` 가 홉을 정한다 |
+| `github/client.rs` | `github/client.ts` | `get`(ETag LRU 500개·32MB, 키 `sha256(토큰)[..16]\0URL\0Accept`, 비로그인 3분 캐시, core 한도 추적)·`graphql`. 본문 32MB 상한. 리다이렉트는 origin 이 정확히 `https://api.github.com` 인 5홉까지 |
+
+**clippy**: `clippy.toml` 의 `disallowed-methods` 에 `reqwest::Client::new`·`Client::builder`·`ClientBuilder::new`·`reqwest::get`·`ClientBuilder::danger_accept_invalid_certs`·`danger_accept_invalid_hostnames` 를 넣었다
+(허용 없이 돌리면 `Client::builder` 에서 경고가 나는 것을 확인했다). 소스 검사 테스트(`운영_코드에는_테스트_전용_주입_호출과_클라이언트_생성이_없다`)가 `net/http.rs` 밖의 `Client`·`ClientBuilder` 이름과
+`new_for_test`·`insecure_loopback_for_test` 호출을 막는다(`SiteOptions::allow_insecure_loopback` 필드는 비공개다).
+
+**테스트**(`src-tauri/tests/net.rs` 의 `mod live`, 외부 접속 없음, `start_paused` 안 씀): 127.0.0.1 `TcpListener` 목 서버(요청 기록·지연·chunked 무한 본문·도중 끊기·헤더만 보내고 멈춤·3xx),
+**프록시 덫**(`ctor` 가 테스트 시작 전에 `HTTP(S)_PROXY`·`ALL_PROXY` 를 덫 리스너로 돌리고 소켓 테스트마다 끝에서 덫 연결 0 을 확인, 덫이 살아 있는지 대조 테스트 포함), TLS 음성 둘(운영 클라이언트가 http 루프백에 연결 0,
+https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization 미유출), 리다이렉트(Jira 302·같은 호스트 301 은 대상 연결 0, GitHub 같은 origin 은 따라가고 5홉 넘으면 멈춤·다른 포트·호스트·스킴은 요청 0),
+상한 초과(Jira 5MB chunked·Content-Length 선검사·`max_bytes`, 사진 256KB, GitHub 32MB), 모든 오류 봉투(서버가 `Authorization` 과 base64 를 본문 메시지로 되돌려 줘도)에 토큰·base64 형태 없음.
+공개 사진 호스트(gravatar·wp.com) 테스트는 테스트 전용 주소 치환(`Rewrite`)으로 판정은 원래 주소로 하고 연결만 목 서버로 보낸다. TS 테스트 41개를 Rust 로 옮겼다(대응표 `N/A: PR 3` → `net.rs::…`).
+
+**TS 와 다르게 동작하는 곳**:
+
+- **TLS 신뢰 저장소**: Electron(Node/Chromium)은 번들된 CA 를 쓰지만 Rust 는 `native-tls` 라 Windows 인증서 저장소(SChannel)를 쓴다 — 사내 CA 가 저장소에 있으면 Rust 만 연결된다(반대로 번들에만 있는 CA 는 Rust 가 못 받는다).
+- **GitHub 본문 상한 32MB**: TS 는 상한이 없다. 넘으면 `GH_HTTP`("GitHub 응답이 너무 큽니다").
+- **GitHub 리다이렉트**: TS(`fetch` 기본)는 전부 따라가지만 Rust 는 origin 이 정확히 `https://api.github.com` 인 주소로 5번까지만 따라간다. 그 밖은 3xx 가 그대로 돌아와 `GH_HTTP`("GitHub API 오류(301)")다.
+- **오류 문구**: 연결 실패 문구에 원인 문자열을 붙이지 않는다(`reqwest::Error` 의 Display 는 요청 주소를 담을 수 있다). 분류(`시간 초과`·`연결 실패`·`읽는 중 끊김`)별 고정 문구다. 사용자에게 보이는 문구는 TS 와 같다(원인 괄호 부분만 없다).
+- **취소**: `AbortSignal` 대신 `CancellationToken`, `AbortError` 대신 `NetError::Aborted`. 취소하면 요청 future 를 버려 연결이 닫힌다.
+- **GitHub 한도 해제 시각**: ko-KR 로컬 시각은 시간대 크레이트 없이는 만들 수 없어 `GitHubClient::with_format_time` 주입이다(기본은 UTC `HH:MM(UTC)`). 서비스 계층(PR 7)이 실제 표시 함수를 넣는다.
+- **자격 증명·토큰은 호출마다 받는다**: Jira 는 `JiraCredential` 인자, GitHub 는 `TokenProvider`(+`TokenChoice`). TS 의 `credProvider` 대응은 서비스 계층(PR 5·7)이 맡는다. 비로그인 3분 캐시 시간·재시도 대기 단위는 생성자에서만 바꿀 수 있다(`new_for_test`).
+- **Jira 사진 요청 오류**: 사진은 연결·시간 초과·상한 초과·잘못된 응답 모두 `None`(TS 와 같다), 취소만 오류다.
+
+**알려진 한계**: 공개 사진 호스트의 실제 TLS 연결(gravatar·wp.com)은 시험하지 못했다(외부 접속 금지 — 주소 치환으로 홉 규칙만 확인). 서버 본문 메시지는 200 단위로 자른 뒤 비밀을 가리므로
+토큰이 자르는 경계에 걸리면 앞부분 일부가 남을 수 있다(TS 와 같은 순서다 — 필요하면 가린 뒤 자르도록 서비스 계층 전에 바꾼다). 소스 검사는 `git/fetch` 의 기존 `*_for_test` 함수(운영 코드가 부르는 순수 함수)를 대상으로 삼지 않는다.
 
 ## Phase 0 에서 확인한 것
 

@@ -12,4 +12,11 @@ disallowed-methods = [
   { path = "windows::Win32::System::Threading::CreateProcessWithLogonW", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
   { path = "windows::Win32::System::Threading::CreateProcessWithTokenW", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
   { path = "windows::Win32::System::Threading::WinExec", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
+  # HTTP 클라이언트는 net::http 한 곳에서만 만든다 — https 전용·프록시 무시·15초·리다이렉트 정책을 빠뜨린 클라이언트가 생기지 않게 한다
+  { path = "reqwest::Client::new", reason = "HTTP 클라이언트는 net::http 에서만 만든다" },
+  { path = "reqwest::Client::builder", reason = "HTTP 클라이언트는 net::http 에서만 만든다" },
+  { path = "reqwest::ClientBuilder::new", reason = "HTTP 클라이언트는 net::http 에서만 만든다" },
+  { path = "reqwest::get", reason = "HTTP 클라이언트는 net::http 에서만 만든다" },
+  { path = "reqwest::ClientBuilder::danger_accept_invalid_certs", reason = "인증서 검증을 끄지 않는다" },
+  { path = "reqwest::ClientBuilder::danger_accept_invalid_hostnames", reason = "호스트 이름 검증을 끄지 않는다" },
 ]

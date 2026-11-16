@@ -1,5 +1,7 @@
-//! GitHub·Jira 클라이언트가 공유하는 순수 로직(PR 1). 네트워크·reqwest·키체인은 없다 — HTTP 코어는 뒤 PR 의 몫이다.
+//! GitHub·Jira 클라이언트가 공유하는 순수 로직(PR 1)과 HTTP 코어(PR 3). 키체인은 없다(뒤 PR).
 //!
+//! - [`http`]: reqwest 클라이언트를 만드는 **유일한 곳**(https 전용·프록시 무시·15초·리다이렉트 정책), 본문 상한 읽기, 취소, 오류 분류, 오류 봉투(`NetError`)
+//! - 아래 나머지는 순수 로직이다(네트워크 없음).
 //! - [`json`]: JS `JSON.parse` 와 같은 관대한 해석(짝 없는 서로게이트·삽입 순서·중복 키)과 JS 값 의미(`Number(문자열)`·숫자 문자열화)
 //! - [`url_rules`]: WHATWG URL 판정(사이트 안 주소·공개 사진 호스트·요청 URL 조립)
 //! - [`http_error`]: 응답 헤더·본문 해석(Retry-After·rate limit·Link·오류 본문 메시지·오류 분류)
@@ -11,6 +13,7 @@
 //!
 //! 이식 규칙은 `git::fetch` 와 같다: 공백은 [`crate::git::scope::is_js_space`], 길이는 UTF-16 단위, 소문자화는 Node 표(`js_to_lowercase`).
 //! "Rust 가 허용하면 TS 도 허용한다"가 깨지지 않는 방향으로만 다르게 만든다(다른 곳은 각 함수에 적었다).
+pub mod http;
 pub mod http_error;
 pub mod js_date;
 pub mod js_value;
