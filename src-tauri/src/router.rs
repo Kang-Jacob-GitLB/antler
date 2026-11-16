@@ -8,6 +8,10 @@
 //! `ANTLER_RUST_FETCH_KINDS=local,wsl` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
 //! 스위치가 꺼져 있으면 env 도 서비스도 없다 — 사이드카가 전부 맡는다(이중 fetch 없음).
 //!
+//! `jira:*`([`API_CHANNELS`])는 별개의 스위치다: `ANTLER_RUST_API` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이어도 꺼진다) 서비스가 주입돼 있으면 **미러와 무관하게**
+//! Rust 가 처리한다([`api_host`]). 꺼져 있으면 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
+//! env `ANTLER_RUST_API=1` 로 띄워 jira 를 소유하지 않음을 알린다(라우터가 가로채므로 닿지 않는다 — 방어).
+//!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
 //! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
@@ -25,6 +29,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
+use crate::api_host::{self, JiraHost};
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
 use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, WSL_LIMIT};
 use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, WslExecutor};
@@ -40,12 +45,36 @@ use crate::mirror::{RepoMirror, Resolved, Target};
 /// (`tests/channels.rs` 가 `tests/golden/exec/channels.json` 으로 강제한다)
 pub const RUST_CHANNELS: &[&str] = &["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame", "git:fetch"];
 
+/// Rust 가 처리하는 `jira:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
+/// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 하고 `IPC_CHANNELS` 의 `jira:` 채널과 정확히 같아야 한다(`tests/api_route.rs` 가 강제한다)
+pub const API_CHANNELS: &[&str] = &[
+    "jira:auth",
+    "jira:connect",
+    "jira:disconnect",
+    "jira:issue",
+    "jira:transitions",
+    "jira:transition",
+    "jira:comments",
+    "jira:search",
+    "jira:dev",
+    "jira:worklogs",
+    "jira:userSearch",
+    "jira:avatar",
+    "jira:openExternal",
+];
+
 /// Rust 가 fetch 를 맡는 소스 종류(사이드카 env `ANTLER_RUST_FETCH_KINDS` 의 값. `src/sidecar/fetchOwns.ts` 가 읽는다)
 pub const RUST_FETCH_KINDS: &str = "local,wsl";
 
 /// 사이드카를 띄울 때 넣을 `ANTLER_RUST_FETCH_KINDS` 값. 라우터가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 없다 — 사이드카가 fetch 를 전부 맡는다
 pub fn sidecar_fetch_kinds(router_enabled: bool) -> Option<&'static str> {
     router_enabled.then_some(RUST_FETCH_KINDS)
+}
+
+/// `ANTLER_RUST_API`(`0` 이면 끔)와 `ANTLER_RUST_GIT`(`0` 이면 함께 끔)으로 [`API_CHANNELS`] 를 Rust 가 처리할지 정한다.
+/// 이 스위치는 미러·저장소와 무관하다 — 켜져 있으면(서비스가 만들어졌으면) 항상 Rust 가 처리한다
+pub fn rust_api_enabled(api_var: Option<&str>, git_var: Option<&str>) -> bool {
+    api_var != Some("0") && rust_git_enabled(git_var)
 }
 
 /// 주어진 tokio 런타임 안에서 `f` 를 부른다. 서비스의 예약·fetch 시작은 태스크를 만들어서 런타임 밖 스레드(사이드카 읽기 스레드·창 이벤트)에서는 패닉한다 —
@@ -155,7 +184,7 @@ impl RegInner {
 /// 넘거나 비면 requestId 없음으로 취급한다 — tombstone 이 renderer 가 정한 큰 문자열을 붙잡아 두지 않게(보안 리뷰 L1)
 const MAX_REQUEST_ID: usize = 128;
 
-fn is_request_id(id: &str) -> bool {
+pub(crate) fn is_request_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= MAX_REQUEST_ID
 }
 
@@ -231,12 +260,18 @@ pub struct Router {
     fetch: Mutex<Option<Arc<dyn FetchControl>>>,
     /// 서비스가 주입되기 전에 도착한 fetchPrefs(마지막 것만). 주입될 때 적용한다
     pending_prefs: Mutex<Option<FetchPrefs>>,
+    /// `ANTLER_RUST_API` 스위치(`ANTLER_RUST_GIT=0` 이어도 꺼진다). 꺼져 있으면 `jira:*` 는 서비스 없이 사이드카로 간다
+    api_enabled: bool,
+    /// Jira 서비스(앱이 스위치가 켜져 있을 때만 주입한다). 없으면 `jira:*` 는 사이드카가 처리한다
+    jira: Mutex<Option<JiraHost>>,
 }
 
 impl Router {
     pub fn new(enabled: bool, log: bool, mirror: RepoMirror) -> Self {
         Router {
             enabled,
+            api_enabled: enabled,
+            jira: Mutex::default(),
             log,
             mirror: mirror.clone(),
             cancels: Arc::default(),
@@ -254,6 +289,33 @@ impl Router {
     /// 스위치가 켜져 있는가(`ANTLER_RUST_GIT` 이 0 이 아니다)
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// `jira:*` 스위치를 정한다(만든 직후에만). 기본은 git 스위치와 같다
+    pub fn with_api(mut self, enabled: bool) -> Self {
+        self.api_enabled = enabled;
+        self
+    }
+
+    /// `ANTLER_RUST_API` 스위치가 켜져 있는가(서비스가 만들어졌는지와는 별개 — 만들기 전에 이 값으로 정한다)
+    pub fn api_enabled(&self) -> bool {
+        self.api_enabled
+    }
+
+    /// Rust 가 `jira:*` 를 처리하는가: 스위치가 켜져 있고 서비스가 주입됐다. 사이드카를 `ANTLER_RUST_API=1` 로 띄울지는 이 값이 정한다
+    pub fn api_active(&self) -> bool {
+        self.api_enabled && self.jira_port().is_some()
+    }
+
+    fn jira_port(&self) -> Option<JiraHost> {
+        self.jira.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Jira 서비스를 주입한다. 스위치가 꺼져 있으면 주입하지 않는다(서비스·키체인이 없어야 한다)
+    pub fn set_jira(&self, host: JiraHost) {
+        if self.api_enabled {
+            *self.jira.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
+        }
     }
 
     fn fetch_port(&self) -> Option<Arc<dyn FetchControl>> {
@@ -295,8 +357,9 @@ impl Router {
     /// `ANTLER_ROUTE_LOG=1` 이면 [`RUST_CHANNELS`] 채널이 어디로 갔는지 stderr 에 한 줄씩 남긴다(확인용 — 기본은 조용하다)
     pub fn from_env(mirror: RepoMirror) -> Self {
         let enabled = rust_git_enabled(std::env::var("ANTLER_RUST_GIT").ok().as_deref());
+        let api = rust_api_enabled(std::env::var("ANTLER_RUST_API").ok().as_deref(), std::env::var("ANTLER_RUST_GIT").ok().as_deref());
         let log = std::env::var("ANTLER_ROUTE_LOG").as_deref() == Ok("1");
-        Router::new(enabled, log, mirror)
+        Router::new(enabled, log, mirror).with_api(api)
     }
 
     /// 로그 커서의 유휴 시간·훑는 주기를 바꾼다(테스트용 — 프로세스 목록을 읽는 테스트가 느려도 커서가 먼저 닫히지 않게). 만든 직후에만 부른다
@@ -345,12 +408,23 @@ impl Router {
 
     /// 채널 하나를 라우팅한다. `args` 는 renderer 가 보낸 인자 배열 그대로다(표식 포함)
     pub async fn route(&self, channel: &str, args: &Value) -> Routed {
+        // jira:* 는 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아닌 인자(토큰 포함 가능)가 사이드카 stdin 으로 가지 않게.
+        // 배열이 아니면 빈 인자로 넘겨 서비스 검증이 거부한다(보안 리뷰)
+        if API_CHANNELS.contains(&channel) {
+            let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            return self.jira_channel(channel, raw).await;
+        }
         let Some(raw) = args.as_array() else { return Routed::Sidecar };
         if channel == "req:cancel" {
             // Rust 레지스트리를 먼저 취소하고, 요청이 어디서 돌든(사이드카 포함) 항상 사이드카에도 전달한다
             if let Some(Value::String(id)) = raw.first() {
                 if is_request_id(id) {
                     self.cancels.cancel(id);
+                }
+                // Jira 서비스도 자기 요청 표(TS `JiraService.cancel` 과 같다)에서 같은 id 를 찾아 끊는다. 없는 id 는 무시한다
+                // (레지스트리의 `is_request_id` 상한과 무관하다 — 서비스는 상한 없이 등록하므로 TS 와 같게 빈 id 가 아니면 부른다)
+                if let Some(host) = self.jira_port() {
+                    host.service.cancel(id);
                 }
             }
             return Routed::Sidecar;
@@ -386,6 +460,18 @@ impl Router {
             "git:fetch" => self.git_fetch(&args).await,
             _ => Routed::Sidecar,
         }
+    }
+
+    /// `jira:*` 한 채널. 서비스가 없으면(스위치 꺼짐·만들지 못함) 사이드카다
+    async fn jira_channel(&self, channel: &str, raw: &[Value]) -> Routed {
+        let Some(host) = self.jira_port().filter(|_| self.api_enabled) else {
+            self.note(channel, "sidecar(ANTLER_RUST_API=0)");
+            return Routed::Sidecar;
+        };
+        self.note(channel, "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
+        Routed::Done(api_host::jira_envelope(host, self.cancels.clone(), channel.to_string(), args).await)
     }
 
     fn note(&self, channel: &str, to: &str) {

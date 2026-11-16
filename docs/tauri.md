@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소)·PR 5(Jira 서비스) 완료, 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소)·PR 5(Jira 서비스)·PR 6(Jira 연결: `jira:*` 를 Rust 가 처리, `ANTLER_RUST_API`) 완료, GitHub 는 아직 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -73,9 +73,11 @@ pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 �
 UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts   # TS 파서 출력으로 골든(tests/golden/parsers) 다시 쓰기
 npx vitest run tests/golden.test.ts                   # TS 파서가 골든과 같은지
 cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 같은 골든과 같은지(건너뛴 수 출력)
-cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route   # CI 와 같은 전체(라우터·채널 패리티·로그 커서 포함)
+cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net   # CI 와 같은 전체(라우터·채널 패리티·로그 커서 포함)
 UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts   # 채널 골든(tests/golden/channels, exec/channels.json) 다시 쓰기
 ANTLER_RUST_GIT=0 <exe>                               # 라우터를 끄고 모든 채널을 사이드카로(되돌리기 스위치)
+ANTLER_RUST_API=0 <exe>                               # jira:* 만 사이드카로(서비스·키체인 없음). ANTLER_RUST_GIT=0 이어도 함께 꺼진다
+UPDATE_GOLDEN=1 npx vitest run tests/goldenJiraChannels.test.ts   # jira:* 채널 골든(tests/golden/channels/jira.json) 다시 쓰기
 ```
 
 요구 사항: Rust(stable, MSVC), WebView2 런타임, PATH 의 node(또는 `ANTLER_NODE`). 환경 변수 `ANTLER_USER_DATA` 로 userData 를,
@@ -435,8 +437,8 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 - **HTTP**: reqwest 0.13(`default-features=false`, `native-tls`), 클라이언트 생성은 한 곳(`net/http.rs`)에 모으고 `Client::new` 등은 clippy 로 막는다. `https_only`·`no_proxy`·15초·UA `Antler`,
   Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
   `reqwest::Error` 의 Display 는 쓰지 않는다. 비밀은 `SecretString`(Display·Serialize 없음, Debug `***`)이고 오류 문구는 마지막에 `redact_secrets` 를 거친다.
-- **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버, 완료) → 4 SecretStore(키링·메모리, 완료) → 5 Jira 서비스 →
-  6 Jira 연결(채널·`openExternal`) → 7 GitHub 서비스 → 8 gh CLI → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
+- **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버, 완료) → 4 SecretStore(키링·메모리, 완료) → 5 Jira 서비스(완료) →
+  6 Jira 연결(채널·`openExternal`, 완료) → 7 GitHub 서비스 → 8 gh CLI → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
 
 ### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
 
@@ -595,9 +597,9 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
 - **소스 검사**(`tests/net.rs` 의 `mod secret_store`): `keyring_core`·`windows_native_keyring_store` 는 `secret/` 밖에서 쓰지 않고(Cargo.toml 에서도 windows 대상 의존성뿐), `secret/` 에는 `println`·`eprintln`·`dbg`·`log` 가 없다
   (파일 끝의 `#[cfg(test)]` 모듈은 제외 — 수동 시험이 `eprintln!` 으로 실측값을 낸다). 테스트는 메모리 구현만 쓴다. 대응표 `N/A: PR 4` 5개 중 4개를 Rust 테스트에 연결했고, 하나(Linux `basic_text`)는 해당 분기가 없어 N/A 사유로 바꿨다.
 - 의존성: `keyring-core 1`·`windows-native-keyring-store 1.1`(windows 대상), `zeroize 1`(전이 의존이던 판). `windows-sys 0.61.2` 를 기존 트리와 공유해 중복 판이 없다(`cargo tree -d`).
-- **미연결**: 앱·IPC 에서 부르지 않는다. 연결(`ANTLER_RUST_API`·키체인 읽기)은 PR 9 이며 Electron 판 토큰은 옮기지 않는다(다시 로그인).
+- **연결**: Jira 는 PR 6(`ANTLER_RUST_API`·키체인 읽기), GitHub 는 PR 9 이다. Electron 판 토큰은 옮기지 않는다(다시 로그인).
 
-### PR 5 — Jira 서비스(`src-tauri/src/jira/service.rs`, 앱에 연결하지 않는다)
+### PR 5 — Jira 서비스(`src-tauri/src/jira/service.rs`; 앱에 연결한 것은 PR 6)
 
 `JiraService`(`Clone`, 내부는 `Arc`)가 TS `JiraService` 의 상태와 `api.ts` 의 호출부를 옮긴 것이다. `jira:*` 채널마다 메서드가 하나씩 있다:
 `auth`·`connect`·`disconnect`·`issue`·`transitions`·`transition`·`comments`·`dev_info`·`search`·`worklogs`·`user_search`·`avatar`·`external_url`(`jira:openExternal` 의 주소 검증만 — 여는 일은 PR 6)·`cancel`(`req:cancel`)·`dispose`.
@@ -622,6 +624,35 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
 - 전체 실패가 확정되면 TS 는 워커에 취소 신호를 보내고 Rust 는 진행 중인 요청을 버린다(연결이 닫힌다). 새 요청은 시작하지 않는 점은 같다.
 - `RangeError`(dev-status 의 범위 밖 시각·워크로그 날짜)는 문구 `Invalid time value`·코드 `ERROR` 로 낸다.
 - 날짜 필드 공유 작업은 호출자가 없어져도 계속 돈다(TS 의 Promise 와 같다). 서비스를 `dispose` 하거나 연결이 바뀌면 취소된다.
+
+### PR 6 — Jira 연결(`src-tauri/src/api_host.rs`, 라우터·`lib.rs`·사이드카)
+
+Tauri 판에서 `jira:*` 13개 채널을 Rust 가 처리한다(`API_CHANNELS`). 이 PR 부터 앱이 Jira 토큰을 Windows 자격 증명 관리자에 두고 읽는다(GitHub 는 PR 9 까지 사이드카·메모리).
+
+- **스위치 `ANTLER_RUST_API`**: `0` 이면 끈다. `ANTLER_RUST_GIT=0` 이어도 함께 꺼진다(`router::rust_api_enabled`). 끄면 앱은 **Jira 서비스도 보관소(키체인)도 만들지 않고**(키체인을 읽지 않는다)
+  `jira:*` 는 사이드카가 지금처럼 처리한다. 켜면 `setup` 에서 `secret::open_store`(`ANTLER_USER_DATA` 가 있으면 메모리) → `Vault` → `JiraService::new`(저장된 연결을 여기서 복원) 순으로 만들어 라우터에 주입한다.
+  서비스를 만들지 못하면(HTTP 클라이언트 초기화 실패) 로그만 남기고 사이드카가 처리한다. 확인용 `ANTLER_ROUTE_LOG=1` 이면 `[route] jira:auth -> rust`(꺼져 있으면 `-> sidecar(ANTLER_RUST_API=0)`).
+- **라우팅**: `API_CHANNELS` 는 `RUST_CHANNELS`·미러와 무관하다 — 스위치가 켜져 있고 서비스가 있으면 항상 Rust 다(저장소 id 가 없다). `req:cancel` 은 Rust 의 `CancelRegistry`(등록보다 먼저 온 cancel 은 tombstone)와 서비스의 요청표를 취소하고 **계속 사이드카에도 전달**한다.
+- **사이드카**: 서비스가 실제로 만들어졌을 때만 `ANTLER_RUST_API=1` 로 띄운다(아니면 부모 환경의 값도 지운다 — `ANTLER_RUST_FETCH_KINDS` 와 같은 방식). 사이드카(`src/sidecar/apiOwns.ts`)는 이 값이 있으면 `jira:` 채널을 처리하지 않고 오류로 돌려준다
+  (라우터가 가로채므로 닿지 않아야 하는 방어). Jira 토큰은 사이드카로 넘기지 않는다.
+- **봉투**(`api_host::jira_envelope`): `handlers.ts` 의 `handle()` 과 같은 순서(`ABORTED` → `JIRA_*` → `ERROR`), void 채널(`jira:transition`·`jira:openExternal`)은 `data` 가 없다(사이드카의 JSON 직렬화와 같다). 인자 검증은 서비스(PR 5, TS `validate.ts` 와 같은 규칙·같은 code).
+  requestId 는 `typeof === 'string'` 만 쓴다(빈 문자열은 없는 것). 취소는 서비스 호출 future 를 버려 요청을 끊는다. `jira:transition` 은 requestId 를 받지 않는다.
+- **`jira:openExternal`**: 서비스의 `external_url`(연결한 사이트의 주소만)을 통과한 주소만 `lib.rs` 의 `open_https`(https 가 아니면 거부)로 `tauri_plugin_opener::open_url` 한다. 소스 검사가 호출 순서를 강제한다.
+- **`Send` 증명(rustc)**: 서비스 future 가 tauri command(`antler_invoke`)의 `Send` 검사를 통과하려면 `jira/service.rs` 의 워크로그 스트림 클로저가 `&usize` 가 아니라 값을 받아야 했다
+  (`todo.iter().copied().map(|idx| …)` — 안 그러면 "implementation of `FnOnce` is not general enough" 로 시작해 다른 메서드까지 "Send is not general enough" 로 번진다). 동작 변화는 없다.
+- **시험**: `tests/channels.rs` 의 `jira_채널_시나리오가_ts_골든과_같다`(`test-hooks`) — 127.0.0.1 목 서버 + 메모리 보관소로 `tests/fixtures/net/jira.scenarios.json`(`{routes, steps}`, 연결·조회·전환·검색·워크로그·사진·열기·취소·재시작 복원·오류 401·403·404·429·네트워크)을
+  Rust 라우터로 돌려 TS(`tests/goldenJiraChannels.test.ts`: 실제 `ipc/jira.ts` 핸들러 + `JiraService`)가 만든 `tests/golden/channels/jira.json` 과 비교한다(봉투는 오류면 code 만, 요청은 method·path·정렬한 query·Authorization 종류·본문).
+  `tests/api_route.rs`: 스위치별 라우팅, 꺼졌을 때 서비스·키체인 없음(소스 검사), `API_CHANNELS` = `IPC_CHANNELS` 의 `jira:*`, 사이드카 env, 운영 코드에 `_for_test` 없음. 골든 갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenJiraChannels.test.ts`.
+
+**TS 와 다른 점(PR 6)**
+- 연결하지 않은 서비스에 requestId 를 붙여 부르기 전에 같은 id 의 `req:cancel` 이 먼저 와 있으면 Rust 는 `ABORTED`, TS 는 `JIRA_AUTH` 다(Rust 는 연결 확인보다 취소 등록을 먼저 한다 — 어차피 취소된 요청이다).
+- 연결·해제의 직렬화·저장 실패 시 기존 연결 유지는 PR 5 의 차이 그대로다. 오류 문구는 비교하지 않는다(code 만).
+
+**사람 확인 필요(PR 6)** — 자동 시험은 루프백 목 서버뿐이다
+- 실제 Jira Cloud(이메일 + API 토큰)와 Data Center(PAT)에 연결해 이슈·댓글·검색·워크로그·상태 전환·프로필 사진·"Jira 에서 열기"가 Electron 판과 같은지.
+- 연결한 뒤 앱을 완전히 끄고 다시 켜면 연결이 복원되는지(키체인 읽기). 설정 → 연결 해제 뒤에는 복원되지 않는지.
+- Windows **자격 증명 관리자**(제어판 → 자격 증명 관리자 → Windows 자격 증명)에 `jira-token` 항목 **하나**가 생기고(디버그 빌드는 `com.antler.app.dev`, 릴리스는 `com.antler.app`), 연결 해제 시 사라지는지. Electron 판의 토큰은 옮기지 않는다 — Tauri 판에서는 다시 로그인한다.
+- `ANTLER_RUST_API=0` 으로 실행하면 키체인을 읽지 않고 사이드카가 이전처럼 동작하는지.
 
 ## Phase 0 에서 확인한 것
 

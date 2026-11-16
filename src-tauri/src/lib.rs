@@ -1,14 +1,17 @@
+// jira:* 채널 처리(Phase 4 PR 6). 통합 테스트(tests/channels.rs·api_route.rs)가 별도 크레이트라 pub 이다
+pub mod api_host;
 mod commands;
 mod dialogs;
 mod fetch_host;
 pub mod git;
-// Phase 4 의 순수 로직(PR 1)·응답 매퍼(PR 2)·HTTP 클라이언트(PR 3) — 앱 경로에서는 아직 부르지 않는다. 통합 테스트(tests/net.rs)가 별도 크레이트라 pub 이다
+// Phase 4 의 순수 로직(PR 1)·응답 매퍼(PR 2)·HTTP 클라이언트(PR 3). GitHub 는 아직 앱 경로에서 부르지 않고(PR 7·9), Jira 는 PR 6 부터 api_host 가 부른다.
+// 통합 테스트(tests/net.rs)가 별도 크레이트라 pub 이다
 pub mod github;
 pub mod jira;
 pub mod mirror;
 pub mod net;
 pub mod router;
-// 토큰 보관(Phase 4 PR 4) — 앱에는 아직 연결하지 않는다
+// 토큰 보관(Phase 4 PR 4) — PR 6 에서 Jira 서비스가 쓴다(GitHub 는 PR 9)
 pub mod secret;
 mod sidecar;
 mod snap;
@@ -61,6 +64,14 @@ fn is_github_link(url: &tauri::Url) -> bool {
         && url.password().is_none()
 }
 
+/// `jira:openExternal` 이 검증한 주소를 기본 브라우저로 연다. 서비스의 검증(연결한 사이트의 주소)에 더해 https 만 통과시킨다
+fn open_https(url: &str) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("https 주소만 열 수 있습니다".to_string());
+    }
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|_| "주소를 열지 못했습니다".to_string())
+}
+
 pub fn run() {
     commands::mark_start();
     let mut builder = tauri::Builder::default()
@@ -109,7 +120,18 @@ pub fn run() {
                 };
                 router.set_fetch(std::sync::Arc::new(FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir))));
             }
+            // Jira 서비스(PR 6). 스위치가 꺼져 있으면(ANTLER_RUST_API=0·ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다.
+            // 켜져 있으면 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결은 여기서 복원한다
+            if router.api_enabled() {
+                let vault = std::sync::Arc::new(secret::Vault::new(secret::open_store(std::env::var_os("ANTLER_USER_DATA").as_deref())));
+                match jira::service::JiraService::new(vault) {
+                    Ok(service) => router.set_jira(api_host::JiraHost { service, opener: std::sync::Arc::new(open_https) }),
+                    Err(e) => eprintln!("[api] Jira 서비스를 만들지 못했다({e}) — 사이드카가 처리한다"),
+                }
+            }
             let fetch_kinds = router::sidecar_fetch_kinds(router.enabled());
+            // 사이드카에 jira 를 소유하지 않음을 알리는 값. 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
+            let rust_api = router.api_active();
             app.manage(router);
             // fetchPrefs 를 받는 곳은 **사이드카를 띄우기 전에** 등록한다 — 첫 fetchPrefs 는 ready 전에 한 번만 오고 같은 내용이면 다시 오지 않는다.
             // 사이드카 읽기 스레드에서 불리므로 앱 런타임에 들어가서 라우터를 부른다(예약이 태스크를 만든다)
@@ -119,7 +141,7 @@ pub fn run() {
                     router::in_runtime_of(tauri::async_runtime::handle().inner(), || r.apply_fetch_prefs(prefs));
                 }
             })));
-            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, fetch_kinds)?);
+            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, fetch_kinds, rust_api)?);
 
             let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Antler")

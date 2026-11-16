@@ -16,6 +16,7 @@ import { RepoService } from '../main/services/RepoService'
 import { RepoWatcher } from '../main/services/RepoWatcher'
 import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
+import { rustOwnsApi, sidecarSkips } from './apiOwns'
 import { handleFetchApprove } from './fetchApprove'
 import { fetchOwner, parseRustFetchKinds } from './fetchOwns'
 import { FetchPrefsSender } from './fetchPrefs'
@@ -124,10 +125,14 @@ function decodeArgs(args: unknown[]): unknown[] {
   )
 }
 
+// Rust 가 jira:* 를 소유한다(env ANTLER_RUST_API=1). 라우터가 가로채므로 여기까지 오지 않아야 한다 — 오면 처리하지 않는다
+const rustApi = rustOwnsApi(process.env['ANTLER_RUST_API'])
+
 async function onRequest(id: number, ch: string, rawArgs: unknown[]): Promise<void> {
   const args = decodeArgs(rawArgs)
-  const pending = allowedChannels.has(ch) ? invokeHandler(ch, args) : undefined
-  const env = pending ? await pending : { ok: false, error: `알 수 없는 채널: ${ch}`, code: 'ERROR' }
+  const owned = sidecarSkips(ch, rustApi)
+  const pending = allowedChannels.has(ch) && !owned ? invokeHandler(ch, args) : undefined
+  const env = pending ? await pending : { ok: false, error: owned ? `Rust 가 처리하는 채널입니다: ${ch}` : `알 수 없는 채널: ${ch}`, code: 'ERROR' }
   out({ t: 'res', id, env: env as Extract<FromSidecar, { t: 'res' }>['env'] })
 }
 
