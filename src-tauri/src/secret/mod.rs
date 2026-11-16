@@ -7,6 +7,9 @@
 //!   - 읽은 값이 깨졌으면(JSON 실패·검증 실패) 그 항목을 지우고 `None`. Jira 는 `jira::validate::parse_connect_input` 으로 다시 검증한다.
 //!   - 쓰기에 실패하거나 저장소가 남지 않는 종류(Windows 아님·`ANTLER_USER_DATA`)면 메모리에만 두고 `storage_unavailable` 이다(tokenStore.ts 와 같다).
 //!   - 한 덩어리는 [`MAX_BLOB`] 바이트(Windows 자격 증명 blob 상한, 실측은 keyring.rs 의 수동 시험)를 넘지 못한다. Jira 표시 이름은 먼저 200자로 자른다.
+//!   - 직렬화는 용량 [`MAX_BLOB`] 로 미리 잡은 버퍼에 재할당 없이 쓴다(넘으면 `TooLarge`). 재할당되면 토큰이 든 옛 버퍼가 0 으로 덮이지 않은 채 해제되기 때문이다.
+//!   - GitHub 토큰은 `usable_token` 을 통과해야 저장한다(`InvalidToken`). 메모리로 떨어진 상태(`storage_unavailable`)는 GitHub·Jira 가 따로다.
+//!   - `clear_*` 는 키체인 삭제 실패를 `Err` 로 돌려준다 — 호출부가 사용자에게 보여 줘야 한다.
 //! - 값이 든 버퍼는 [`zeroize::Zeroizing`]·[`SecretString`] 이 버릴 때 0 으로 덮는다. 오류에는 값을 싣지 않는다.
 //! - 이 모듈은 로그를 남기지 않는다(소스 검사가 `println!`·`eprintln!`·`dbg!`·`log` 를 막는다).
 use std::collections::HashMap;
@@ -39,6 +42,8 @@ pub const JIRA_ACCOUNT: &str = "jira-token";
 pub enum SecretError {
     /// 저장할 덩어리가 [`MAX_BLOB`] 를 넘는다
     TooLarge,
+    /// 쓸 수 없는 토큰(빈 값·공백이나 NUL 이 든 값·너무 긴 값)이라 저장하지 않았다
+    InvalidToken,
     /// 저장소가 값을 읽거나 쓰지 못했다
     Backend,
 }
@@ -47,6 +52,7 @@ impl std::fmt::Display for SecretError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::TooLarge => "자격 증명이 너무 길어 안전 저장소에 저장할 수 없습니다(사이트 주소·이메일·토큰 길이를 확인하세요)",
+            Self::InvalidToken => "쓸 수 없는 토큰이라 저장하지 않았습니다(공백이 있거나 비어 있는지 확인하세요)",
             Self::Backend => "안전 저장소에 접근하지 못했습니다",
         })
     }
@@ -153,14 +159,34 @@ struct JiraWire<'a> {
     display_name: &'a str,
 }
 
-/// 직렬화 결과를 재할당 없이(복사본이 남지 않게) 담는다
-fn to_json<T: Serialize>(v: &T) -> Zeroizing<Vec<u8>> {
-    let mut buf = Zeroizing::new(Vec::with_capacity(MAX_BLOB + 512));
-    // 필드가 문자열뿐인 구조체라 직렬화는 실패하지 않는다. 실패하면 빈 값이 되어 아래 검사(빈 값은 저장하지 않음)가 걸러 낸다
-    if serde_json::to_writer(&mut *buf, v).is_err() {
-        buf.clear();
+/// [`MAX_BLOB`] 를 넘는 쓰기를 io 오류로 바꾸는 writer. `Vec` 가 재할당되면 토큰이 든 옛 버퍼가 0 으로 덮이지 않은 채 해제되므로,
+/// 미리 잡은 용량 안에서만 쓰게 막는다
+struct Capped<'a>(&'a mut Vec<u8>);
+
+impl std::io::Write for Capped<'_> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        if self.0.len() + data.len() > MAX_BLOB {
+            return Err(std::io::Error::other("blob too large"));
+        }
+        self.0.extend_from_slice(data);
+        Ok(data.len())
     }
-    buf
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// `buf`(용량 [`MAX_BLOB`] 이상으로 미리 잡은 것)에 재할당 없이 직렬화한다. 넘치면 `TooLarge`(내용은 호출부가 버릴 때 0 으로 덮는다)
+fn serialize_capped<T: Serialize>(v: &T, buf: &mut Vec<u8>) -> Result<(), SecretError> {
+    serde_json::to_writer(Capped(buf), v).map_err(|_| SecretError::TooLarge)
+}
+
+/// 직렬화 결과를 재할당 없이(복사본이 남지 않게) 담는다. [`MAX_BLOB`] 를 넘으면 `TooLarge`
+fn to_json<T: Serialize>(v: &T) -> Result<Zeroizing<Vec<u8>>, SecretError> {
+    let mut buf = Zeroizing::new(Vec::with_capacity(MAX_BLOB));
+    serialize_capped(v, &mut buf)?;
+    Ok(buf)
 }
 
 /// 파싱한 JSON 의 문자열 값을 0 으로 덮는다(최상위 필드만 — 저장 형식이 평평하다)
@@ -205,18 +231,32 @@ pub struct Vault {
     store: Arc<dyn SecretStore>,
     /// 키체인에 쓰지 못할 때만 쓰는 메모리 보관분(앱을 끄면 다시 로그인)
     memory: Mutex<HashMap<&'static str, Zeroizing<Vec<u8>>>>,
-    /// 마지막 쓰기가 실패해 메모리에만 있는가
-    degraded: AtomicBool,
+    /// 계정별로, 마지막 쓰기가 실패해 메모리에만 있는가(한쪽 실패가 다른 쪽 상태를 바꾸지 않는다)
+    degraded_github: AtomicBool,
+    degraded_jira: AtomicBool,
 }
 
 impl Vault {
     pub fn new(store: Arc<dyn SecretStore>) -> Self {
-        Self { store, memory: Mutex::default(), degraded: AtomicBool::new(false) }
+        Self { store, memory: Mutex::default(), degraded_github: AtomicBool::new(false), degraded_jira: AtomicBool::new(false) }
     }
 
-    /// 지금 토큰이 디스크(키체인)에 남지 않는 상태인가 — 저장소가 남지 않는 종류거나 마지막 쓰기가 실패했다
-    pub fn storage_unavailable(&self) -> bool {
-        !self.store.persistent() || self.degraded.load(Ordering::SeqCst)
+    fn degraded(&self, account: &str) -> &AtomicBool {
+        if account == GITHUB_ACCOUNT {
+            &self.degraded_github
+        } else {
+            &self.degraded_jira
+        }
+    }
+
+    /// 지금 GitHub 토큰이 디스크(키체인)에 남지 않는 상태인가 — 저장소가 남지 않는 종류거나 GitHub 마지막 쓰기가 실패했다
+    pub fn github_storage_unavailable(&self) -> bool {
+        !self.store.persistent() || self.degraded_github.load(Ordering::SeqCst)
+    }
+
+    /// 지금 Jira 토큰이 디스크(키체인)에 남지 않는 상태인가 — 저장소가 남지 않는 종류거나 Jira 마지막 쓰기가 실패했다
+    pub fn jira_storage_unavailable(&self) -> bool {
+        !self.store.persistent() || self.degraded_jira.load(Ordering::SeqCst)
     }
 
     fn mem(&self) -> std::sync::MutexGuard<'_, HashMap<&'static str, Zeroizing<Vec<u8>>>> {
@@ -253,12 +293,12 @@ impl Vault {
         match self.store.set(account, bytes) {
             Ok(()) => {
                 self.mem().remove(account);
-                self.degraded.store(false, Ordering::SeqCst);
+                self.degraded(account).store(false, Ordering::SeqCst);
                 Ok(true)
             }
             Err(_) => {
                 keep_in_memory(self);
-                self.degraded.store(true, Ordering::SeqCst);
+                self.degraded(account).store(true, Ordering::SeqCst);
                 Ok(false)
             }
         }
@@ -286,12 +326,18 @@ impl Vault {
         out
     }
 
-    /// 저장한다. 키체인에 남겼으면 `Ok(true)`, 메모리에만 뒀으면 `Ok(false)`
+    /// 저장한다. 키체인에 남겼으면 `Ok(true)`, 메모리에만 뒀으면 `Ok(false)`.
+    /// 쓸 수 없는 토큰(`usable_token` 실패)은 저장하지 않고 `Err(InvalidToken)` 이다 — 읽을 때 걸러질 값을 두지 않는다
     pub fn save_github(&self, token: &SecretString, method: GithubMethod) -> Result<bool, SecretError> {
-        let json = to_json(&GithubWire { method: method.as_str(), token: token.expose() });
+        if !usable_token(token.expose()) {
+            return Err(SecretError::InvalidToken);
+        }
+        let json = to_json(&GithubWire { method: method.as_str(), token: token.expose() })?;
         self.write(GITHUB_ACCOUNT, &json)
     }
 
+    /// 메모리 사본은 항상 비우고, 키체인 삭제가 실패하면 그 `Err` 를 그대로 돌려준다.
+    /// 호출부는 이 오류를 삼키지 말고 사용자에게 보여 줘야 한다(로그아웃했는데 토큰이 키체인에 남아 있을 수 있다)
     pub fn clear_github(&self) -> Result<(), SecretError> {
         self.remove(GITHUB_ACCOUNT)
     }
@@ -315,11 +361,42 @@ impl Vault {
             JiraKind::Cloud => "cloud",
             JiraKind::Server => "server",
         };
-        let json = to_json(&JiraWire { kind, site_url: &input.site_url, email: &input.email, token: input.token.expose(), display_name: &name });
+        let json = to_json(&JiraWire { kind, site_url: &input.site_url, email: &input.email, token: input.token.expose(), display_name: &name })?;
         self.write(JIRA_ACCOUNT, &json)
     }
 
+    /// 메모리 사본은 항상 비우고, 키체인 삭제가 실패하면 그 `Err` 를 그대로 돌려준다.
+    /// 호출부는 이 오류를 삼키지 말고 사용자에게 보여 줘야 한다(연결을 끊었는데 토큰이 키체인에 남아 있을 수 있다)
     pub fn clear_jira(&self) -> Result<(), SecretError> {
         self.remove(JIRA_ACCOUNT)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 직렬화는_재할당하지_않고_넘치면_too_large_이다() {
+        // 경계: 정확히 MAX_BLOB 바이트(`{"method":"pat","token":"…"}`)는 담기고 버퍼의 포인터·용량이 그대로다
+        let overhead = r#"{"method":"pat","token":""}"#.len();
+        let fit = "a".repeat(MAX_BLOB - overhead);
+        let mut buf: Vec<u8> = Vec::with_capacity(MAX_BLOB);
+        let (ptr, cap) = (buf.as_ptr(), buf.capacity());
+        assert!(serialize_capped(&GithubWire { method: "pat", token: &fit }, &mut buf).is_ok());
+        assert_eq!(buf.len(), MAX_BLOB);
+        assert_eq!((buf.as_ptr(), buf.capacity()), (ptr, cap), "재할당되면 옛 버퍼가 0 으로 덮이지 않은 채 해제된다");
+
+        // 1바이트 넘치면 오류이고 역시 재할당하지 않는다(쓰다 만 내용은 호출부가 버릴 때 덮는다)
+        let over = "a".repeat(MAX_BLOB - overhead + 1);
+        let mut buf: Vec<u8> = Vec::with_capacity(MAX_BLOB);
+        let (ptr, cap) = (buf.as_ptr(), buf.capacity());
+        assert_eq!(serialize_capped(&GithubWire { method: "pat", token: &over }, &mut buf), Err(SecretError::TooLarge));
+        assert_eq!((buf.as_ptr(), buf.capacity()), (ptr, cap));
+        assert!(buf.len() <= MAX_BLOB);
+
+        // to_json 도 같은 결과다
+        assert_eq!(to_json(&GithubWire { method: "pat", token: &fit }).unwrap().len(), MAX_BLOB);
+        assert_eq!(to_json(&GithubWire { method: "pat", token: &over }).err(), Some(SecretError::TooLarge));
     }
 }

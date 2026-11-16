@@ -587,6 +587,9 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
 - **크기 예산**: 한 덩어리 2560바이트(`MAX_BLOB`). Jira `displayName` 을 200자로 먼저 자르고 그래도 넘으면 `SecretError::TooLarge`(연결하지 않는다 — 기존 값은 그대로). 메모리 저장소도 같은 한도다.
 - **실측**(`keyring.rs` 의 `#[ignore]` 시험, `cargo test --lib -- --ignored secret::keyring`, 고유 서비스 이름 `com.antler.test.<pid>-<시각>` 을 쓰고 끝나면 지운다): blob 2560바이트 저장 성공·2561바이트 실패(실패해도 기존 값 유지),
   `set_secret` 은 바이트를 **그대로** 저장(UTF-8 "가나" 6바이트 → 6바이트), `set_password` 는 UTF-16LE 로 바꿔 한도가 1280자다.
+- **보존 방식(Windows 자격 증명 지속성)**: `persistence=Local` 로 만든다(`windows-native-keyring-store 1.1` 의 항목 수정자, 대소문자 무시 `Session|Local|Enterprise` — 크레이트 소스 `lib.rs`·`store.rs` 로 확인).
+  크레이트 기본값은 Enterprise 이며 Electron 판은 로밍 경로였다. 토큰은 이 PC 에서만 쓰면 되고 도메인 로밍으로 다른 PC 에 복제되지 않는 편이 안전해 Local 을 골랐다.
+  수정자는 값을 쓸 때만 적용되고 읽기에는 영향이 없다. 실제 자격 증명 관리자에서의 동작(이미 Enterprise 인 항목을 덮어쓸 때 바뀌는지 포함)은 수동 시험으로 확인하지 않았다.
 - **비밀 다루기**: `SecretString` 은 `Debug` `***`·`Display`/`Serialize` 없음을 유지하고 버릴 때 0 으로 덮는다(`Drop`). 저장 JSON 버퍼와 읽은 바이트는 `Zeroizing`, 해석한 `Value` 의 문자열은 `scrub` 이 덮는다
   (serde 가 이스케이프를 풀어 만든 중간 복사까지는 보장하지 못한다 — "가능하면").
 - **소스 검사**(`tests/net.rs` 의 `mod secret_store`): `keyring_core`·`windows_native_keyring_store` 는 `secret/` 밖에서 쓰지 않고(Cargo.toml 에서도 windows 대상 의존성뿐), `secret/` 에는 `println`·`eprintln`·`dbg`·`log` 가 없다

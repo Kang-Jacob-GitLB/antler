@@ -950,12 +950,40 @@ macro_rules! assert_not_impl_any {
 assert_not_impl_any!(SecretString: std::fmt::Display, serde::Serialize, serde::de::DeserializeOwned);
 assert_not_impl_any!(&'static SecretString: std::fmt::Display, serde::Serialize);
 
+/// 운영 코드의 끝(바이트 위치) — 들여쓰기 없는 `#[cfg(test)]` 바로 다음 줄이 `mod ` 인 곳(파일 끝의 시험 모듈)이다.
+/// 메서드 앞의 `#[cfg(test)] fn ...` 같은 시험 전용 항목에서는 멈추지 않는다(그 뒤의 운영 코드가 검사에서 빠진다)
+fn prod_end(text: &str) -> usize {
+    let mut off = 0;
+    let mut lines = text.split_inclusive('\n').peekable();
+    while let Some(l) = lines.next() {
+        if l.trim_end_matches(['\r', '\n']) == "#[cfg(test)]" && lines.peek().is_some_and(|n| n.starts_with("mod ")) {
+            return off;
+        }
+        off += l.len();
+    }
+    text.len()
+}
+
+#[test]
+fn 운영_코드_끝_검출기는_시험_전용_항목에서_멈추지_않는다() {
+    // 들여쓰기 있는 `#[cfg(test)] fn` 뒤의 운영 코드도 운영 구간이다
+    let src = "impl A {\n    #[cfg(test)]\n    fn count(&self) {}\n    fn prod(&self) { PROD }\n}\n#[cfg(test)]\nmod tests { TEST }\n";
+    let body = &src[..prod_end(src)];
+    assert!(body.contains("PROD") && !body.contains("TEST"));
+    // 들여쓰기 없는 `#[cfg(test)]` 라도 다음 줄이 `mod ` 가 아니면 멈추지 않는다
+    let src = "#[cfg(test)]\nfn only_test() {}\nfn prod() { PROD }\n#[cfg(test)]\r\nmod tests { TEST }\n";
+    let body = &src[..prod_end(src)];
+    assert!(body.contains("PROD") && !body.contains("TEST"));
+    // 시험 모듈이 없으면 전부다
+    assert_eq!(prod_end("fn a() {}\n"), 10);
+}
+
 /// `SecretString` 은 `Display`·`Serialize` 를 구현하지 않는다 — 위 타입 단언이 컴파일 시점에 보장하고, 아래는 소스 문자열 검사(보조)와 `Debug` 가 `***` 인지 본다
 #[test]
 fn secret_string_은_display_와_serialize_가_없다() {
     let src = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("net").join("redact.rs")).unwrap();
     // 비교 대상은 테스트 모듈 앞까지(테스트 안의 설명 문자열은 제외)
-    let body = src.split("#[cfg(test)]").next().unwrap();
+    let body = &src[..prod_end(&src)];
     for banned in ["Display for SecretString", "Serialize for SecretString", "Deserialize for SecretString", "derive(Serialize", "derive(Deserialize", "derive(Debug"] {
         assert!(!body.contains(banned), "SecretString 에 {banned} 를 더하면 안 된다");
     }
@@ -3392,7 +3420,7 @@ mod secret_store {
         let (store, v) = vault();
         assert!(v.load_github().is_none());
         assert_eq!(v.save_github(&SecretString::new("ghp_abc"), GithubMethod::Device), Ok(true));
-        assert!(!v.storage_unavailable());
+        assert!(!v.github_storage_unavailable());
         assert_eq!(raw(&store, GITHUB_ACCOUNT).unwrap(), r#"{"method":"device","token":"ghp_abc"}"#);
         let got = v.load_github().unwrap();
         assert_eq!((got.token.expose(), got.method), ("ghp_abc", GithubMethod::Device));
@@ -3471,7 +3499,7 @@ mod secret_store {
     fn 남지_않는_저장소는_메모리에만_두고_storage_unavailable_이다() {
         let store = Arc::new(MemoryStore::new());
         let v = Vault::new(store.clone());
-        assert!(v.storage_unavailable());
+        assert!(v.github_storage_unavailable() && v.jira_storage_unavailable());
         assert_eq!(v.save_github(&SecretString::new("ghp_mem"), GithubMethod::Pat), Ok(false));
         assert_eq!(v.save_jira(&jira_input("j"), "n"), Ok(false));
         assert!(!has(&store, GITHUB_ACCOUNT) && !has(&store, JIRA_ACCOUNT), "저장소에는 쓰지 않는다");
@@ -3485,11 +3513,13 @@ mod secret_store {
     #[test]
     fn 쓰기에_실패하면_메모리에_두고_성공할_때까지_storage_unavailable_이다() {
         let v = Vault::new(Arc::new(Failing));
-        assert!(!v.storage_unavailable());
+        assert!(!v.github_storage_unavailable() && !v.jira_storage_unavailable());
         assert_eq!(v.save_github(&SecretString::new("ghp_x"), GithubMethod::Device), Ok(false));
-        assert!(v.storage_unavailable());
+        // 실패는 그 계정만 표시한다
+        assert!(v.github_storage_unavailable() && !v.jira_storage_unavailable());
         assert_eq!(v.load_github().unwrap().token.expose(), "ghp_x");
         assert_eq!(v.save_jira(&jira_input("jt"), "이름"), Ok(false));
+        assert!(v.jira_storage_unavailable());
         assert_eq!(v.load_jira().unwrap().input.token.expose(), "jt");
         // 지우기가 저장소에서 실패해도 메모리 사본은 비운다
         assert_eq!(v.clear_github(), Err(SecretError::Backend));
@@ -3498,7 +3528,51 @@ mod secret_store {
         // 성공하는 저장소에서는 키체인으로 가고 메모리 사본은 없다
         let (store, v) = vault();
         v.save_github(&SecretString::new("a"), GithubMethod::Pat).unwrap();
-        assert!(has(&store, GITHUB_ACCOUNT) && !v.storage_unavailable());
+        assert!(has(&store, GITHUB_ACCOUNT) && !v.github_storage_unavailable());
+    }
+
+    /// 한쪽 계정의 쓰기 실패가 다른 쪽의 상태를 바꾸지 않고, 그 계정이 다시 성공하면 풀린다
+    #[test]
+    fn 저장_실패_표시는_계정별이다() {
+        struct FailOnly(Arc<MemoryStore>, &'static str);
+        impl SecretStore for FailOnly {
+            fn get(&self, a: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+                self.0.get(a)
+            }
+            fn set(&self, a: &str, v: &[u8]) -> Result<(), SecretError> {
+                if a == self.1 {
+                    Err(SecretError::Backend)
+                } else {
+                    self.0.set(a, v)
+                }
+            }
+            fn delete(&self, a: &str) -> Result<(), SecretError> {
+                self.0.delete(a)
+            }
+            fn persistent(&self) -> bool {
+                true
+            }
+        }
+        let v = Vault::new(Arc::new(FailOnly(Arc::new(MemoryStore::standing_in_for_keychain()), JIRA_ACCOUNT)));
+        assert_eq!(v.save_github(&SecretString::new("ghp_ok"), GithubMethod::Pat), Ok(true));
+        assert_eq!(v.save_jira(&jira_input("jt"), "n"), Ok(false));
+        assert!(v.jira_storage_unavailable() && !v.github_storage_unavailable());
+        // GitHub 쓰기가 성공해도 Jira 표시는 풀리지 않는다
+        assert_eq!(v.save_github(&SecretString::new("ghp_ok2"), GithubMethod::Pat), Ok(true));
+        assert!(v.jira_storage_unavailable());
+    }
+
+    #[test]
+    fn 쓸_수_없는_github_토큰은_저장하지_않고_오류다() {
+        let (store, v) = vault();
+        v.save_github(&SecretString::new("ghp_keep"), GithubMethod::Pat).unwrap();
+        for bad in ["", "a b", "a\tb", " ", "a\0b", &"a".repeat(4097)] {
+            assert_eq!(v.save_github(&SecretString::new(bad), GithubMethod::Pat), Err(SecretError::InvalidToken), "{bad:?}");
+        }
+        // 기존 값은 그대로다
+        assert_eq!(v.load_github().unwrap().token.expose(), "ghp_keep");
+        assert!(raw(&store, GITHUB_ACCOUNT).unwrap().contains("ghp_keep"));
+        assert!(!SecretError::InvalidToken.to_string().contains("ghp"));
     }
 
     #[test]
@@ -3582,14 +3656,11 @@ mod secret_store {
         }
     }
 
-    /// 주석 줄과 `#[cfg(test)]` 이후(파일 끝의 시험 모듈)를 뺀 코드 줄
+    /// 주석 줄과 파일 끝의 시험 모듈(`#[cfg(test)]` + `mod `)을 뺀 코드 줄
     fn code_lines(text: &str) -> Vec<(usize, &str)> {
         let mut out = Vec::new();
-        for (i, line) in text.lines().enumerate() {
+        for (i, line) in text[..super::prod_end(text)].lines().enumerate() {
             let t = line.trim_start();
-            if t.starts_with("#[cfg(test)]") {
-                break;
-            }
             if !t.starts_with("//") {
                 out.push((i + 1, t));
             }
@@ -3633,6 +3704,8 @@ mod secret_store {
         assert!(violations("secret/mod.rs", "let login = 1; let blog = 2;").is_empty());
         // 파일 끝의 시험 모듈은 보지 않는다
         assert!(violations("secret/keyring.rs", "fn a() {}\n#[cfg(test)]\nmod t { fn b() { eprintln!(\"x\"); } }").is_empty());
+        // 메서드 앞의 `#[cfg(test)]`(시험 전용 항목) 뒤의 운영 코드는 본다
+        assert_eq!(violations("secret/mod.rs", "impl A {\n    #[cfg(test)]\n    fn c(&self) {}\n    fn p(&self) { eprintln!(\"x\"); }\n}\n").len(), 1);
     }
 
     #[test]

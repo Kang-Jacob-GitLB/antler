@@ -3,6 +3,7 @@
 //! 값은 `set_secret`/`get_secret` 으로 **바이트 그대로** 둔다(`set_password` 는 UTF-16 으로 바꿔 한도가 반으로 줄어든다).
 //! 항목 하나는 일반 자격 증명이고 대상 이름은 `<계정>.<서비스>` 다. 서비스 이름은 [`super::service_name`] 이 운영·디버그를 가른다.
 //! keyring 의 오류는 문구에 값(`BadEncoding` 의 바이트)이 들 수 있어 어디에도 싣지 않고 [`SecretError`] 로만 바꾼다.
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use keyring_core::{CredentialStore, Error as KeyError};
@@ -28,7 +29,10 @@ impl KeyringStore {
     }
 
     fn entry(&self, account: &str) -> Result<keyring_core::Entry, SecretError> {
-        self.store.build(&self.service, account, None).map_err(|_| SecretError::Backend)
+        // 보존 방식은 Local(이 PC 의 이 사용자 로그온에만 남고 도메인 로밍을 타지 않는다). 기본값 Enterprise 는 로밍된다.
+        // 값을 쓸 때만 적용되며 이미 있는 항목을 읽는 데는 영향이 없다
+        let mods = HashMap::from([("persistence", "Local")]);
+        self.store.build(&self.service, account, Some(&mods)).map_err(|_| SecretError::Backend)
     }
 }
 
