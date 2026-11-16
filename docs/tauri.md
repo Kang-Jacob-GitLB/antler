@@ -295,18 +295,26 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
 fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목록·URL 판정·확인 창 표시·오류 분류)를 **1:1 로** 옮긴다 — 더 엄격하게도, 느슨하게도 바꾸지 않는다(바꾸려면 TS 에 먼저 고친다).
 이 단계는 git 을 실행하지 않고 앱에도 연결하지 않았다. 실행(`git config`·`remote`·`fetch`)·상태 기계(진행·큐·백오프·승인 저장)·라우팅은 뒤 단계다.
 
-- **파일**: `guard.rs`(`fetch.ts` 의 순수 함수), `confirm_text.rs`(`confirmText.ts`), `pattern.rs`(허용 목록 매처), `special_table.rs`(생성 파일).
+- **파일**: `guard.rs`(`fetch.ts` 의 순수 함수), `confirm_text.rs`(`confirmText.ts`), `pattern.rs`(허용 목록 매처), `special_table.rs`·`lowercase_table.rs`(생성 파일).
 - **허용 목록은 regex 크레이트 없이** TS 정규식 소스 문자열(`ALLOWED_KEY_SOURCES`)을 그대로 두고 `pattern.rs` 의 작은 매처가 해석한다.
   아는 문법은 `^…$`, `\.`, `.+`, 리터럴, `(a|b)`, `(…)?` 뿐이고(`.` 는 `\n`·`\r`·U+2028·U+2029 를 맞추지 않는다), 그 밖의 토큰이 소스에 들어오면
   TS(`tests/goldenFetch.test.ts` 의 문법 검사)와 Rust(컴파일 단위 테스트) 양쪽이 실패한다 — 그 정규식은 새로 옮긴다.
 - **골든** `tests/golden/fetch/*.json`(TS 가 기준: `UPDATE_GOLDEN=1 npx vitest run tests/goldenFetch.test.ts`, 이어서 `node scripts/gen-fetch-special.mjs`):
   `lists`(소스·값 표·손으로 옮긴 정규식 소스), `allowed`(접두×가운데×접미 그리드·값 근접 오답·refspec), `urls`, `config`, `inspect`(가짜 실행기로 돌린 `inspectConfig`·지문),
-  `confirm`(표시·`SPECIAL` 범위), `misc`(오류 분류·백오프·버전·`-c` 인자·환경·stderr 판정). `src-tauri/tests/fetch_guard.rs` 가 전부 읽어 비교하고, 처리기 없는 골든이 있으면 실패한다.
+  `confirm`(표시·`SPECIAL` 범위), `misc`(오류 분류·백오프·버전·`-c` 인자·환경·stderr 판정), `fuzz`(TS 가 결정적 LCG 로 만든 **입력 문자열 자체**와 `isAllowedConfig`·`fetchRefspecOk`·`unsafeRemoteUrl`·키 소문자화 결과 — Rust 는 생성 규칙을 따라 하지 않고 적힌 문자열을 읽는다).
+  `src-tauri/tests/fetch_guard.rs` 가 전부 읽어 비교하고, 처리기 없는 골든이 있으면 실패한다.
   입력 표는 `tests/fixtures/fetchGuardCases.ts` 를 `tests/fetch.test.ts` 와 골든 생성기가 함께 쓴다.
 - **안전 방향**: 판정 그리드 전체에서 "Rust 허용 ⇒ TS 허용"을 따로 센다.
 - **JS 와 다른 곳**(각각 `위험N_…` 테스트가 있다): `trim`·`\s` 는 U+FEFF 를 공백으로 보고 U+0085 는 아니다 / `$` 는 맨 끝만 / `i` 플래그는 ASCII 만 접는다(`ſ`·`K` 는 `s`·`k` 가 아니다) /
   길이·자르기는 UTF-16 단위(이모지 경계에서 짝이 쪼개지면 TS 는 `\ud83d` 로 드러내고, Rust 안쪽은 `&[u16]` 로 같게 처리한다) / `toLowerCase` 로 길이가 바뀌는 문자(`İ`)가 있는 refspec 의 어긋남까지 그대로 / NT 네임스페이스(`\??\`)는 URL 어디에 있어도 거부.
-- `special_table.rs` 와 `toLowerCase` 골든은 Node 의 **Unicode 판**(`lists.json` 의 `runtime.unicode`)에 묶인다. CI 의 Node 판이 달라 골든이 어긋나면 골든과 표를 함께 다시 만든다.
+- **Unicode 판은 Node 에 고정한다**: 소문자화(`js_to_lowercase` — Node 변환표 + 최종 시그마용 Cased·Case_Ignorable 범위)와 `SPECIAL` 은 모두 Node 에서 뽑은 생성 표(`lowercase_table.rs`·`special_table.rs`)만 쓰고, Rust std 의 `to_lowercase` 는 쓰지 않는다
+  (std 는 Node 가 모르는 대소문자 쌍 48개 — U+A7CE→A7CF 등 — 을 바꿔 `remote."꟎".fetch` 가 TS 는 "알 수 없는 설정", Rust 는 허용으로 갈렸다). 표는 `lists.json` 의 `runtime.unicode` 판에 묶인다.
+  CI 의 Node 판이 달라 골든이 어긋나면 골든과 표를 함께 다시 만든다(`node scripts/gen-fetch-special.mjs`).
+- **매처 메모리**: `pattern.rs` 는 입력을 `Vec<char>` 로 풀지 않고 바이트 오프셋 비트셋으로 판정한다(악성 설정의 수천만 자 키에서도 입력 크기의 1/8 짜리 집합 몇 개뿐).
+- **뒤 단계가 따를 API 계약**(`guard.rs`): 범위별 설정 읽기는 `ScopeWalk::start()` → `scope()` 실행 → `feed(…)` 가 다음 `WalkStep::Read` 나 `Done` 을 돌려주는 값 이동 방식이라 순서를 어길 수 없고,
+  `http.followRedirects` 는 `FollowRedirects` 열거형, `core.hooksPath` 는 `hooks_path_for` 가 만드는 `HooksPath`(빈 값·상대 경로 불가, 로컬은 존재하는 빈 디렉터리 — 테스트용 `hooks_path_with` 는 `doc(hidden)`)다.
+  TS 보다 엄격한 유일한 지점이다(TS 는 빈 값·상대 경로를 거부하지 않는다). 훅 경로는 앱이 정하는 값이라 정상 경로에는 영향이 없고,
+  "Rust 가 TS 보다 넓게 허용하지 않는다"는 원칙에 맞다. 그래서 `fetchConfigArgs` 골든 중 `hooksPath: ""` 9건은 값 비교 대신 빈 값 거부를 따로 확인한다.
 - 알려진 차이: TS `ALLOWED_VALUES[key]` 는 일반 객체 조회라 키가 `constructor`·`__proto__` 면 `TypeError` 를 던진다(git 키는 점이 있어야 해 실제로는 오지 않는다). Rust 는 허용 목록에 없는 키로 본다.
 
 ## Phase 0 에서 확인한 것

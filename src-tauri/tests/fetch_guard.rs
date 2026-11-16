@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 
 use antler_lib::git::fetch::confirm_text::{display_units, format_item_units, is_special, quote_units, MAX_CONFIRM_ITEMS};
 use antler_lib::git::fetch::guard::*;
+use antler_lib::git::fetch::lowercase_table::{CASED_RANGES, CASE_IGNORABLE_RANGES, LOWERCASE_MAP};
 use antler_lib::git::fetch::special_table::{SPECIAL_RANGES, UNICODE_VERSION};
-use antler_lib::git::fetch::{js_trim, slice_utf16_lossy};
+use antler_lib::git::fetch::{js_to_lowercase, js_trim, slice_utf16_lossy};
 use serde_json::{json, Value};
 
 fn golden_dir() -> PathBuf {
@@ -50,7 +51,7 @@ fn bit(v: &Value) -> bool {
 }
 
 /// 처리하는 골든 파일. 목록에 없는 파일이 디렉터리에 있으면 `골든_파일마다_처리기가_있다` 가 실패한다
-const HANDLED: [&str; 7] = ["lists.json", "allowed.json", "urls.json", "config.json", "inspect.json", "confirm.json", "misc.json"];
+const HANDLED: [&str; 8] = ["lists.json", "allowed.json", "urls.json", "config.json", "inspect.json", "confirm.json", "misc.json", "fuzz.json"];
 
 /// 어긋난 항목을 모았다가 한 번에 보고한다(앞 몇 개만)
 #[derive(Default)]
@@ -196,30 +197,49 @@ fn 설정_목록_파싱과_키_소문자화가_ts_와_같다() {
     for c in arr(&g["scoped"], "scoped") {
         assert_eq!(serde_json::to_value(parse_scoped_config_list(s(&c["out"]), s(&c["scope"]))).expect("직렬화"), c["entries"], "{:?}", c["out"]);
     }
-    // 코드 포인트 하나씩의 소문자화: TS 가 바꾸는 것은 전부 같게 바뀌고, 바꾸지 않는 것은 Rust 도 그대로 둔다
+    // 코드 포인트 하나씩의 소문자화: std 가 아니라 Node 표(생성 파일)만 쓰므로 예외 없이 **완전히** 같아야 한다
     let map: HashMap<u32, &str> = arr(&g["lowercaseMap"], "lowercaseMap").iter().map(|e| (e[0].as_u64().expect("cp") as u32, s(&e[1]))).collect();
-    // 예외: Rust std 의 Unicode 판이 Node 보다 새로우면 Node 가 아직 모르는 신규 대소문자 쌍을 Rust 만 바꾼다(실제로 Node 16.0 대비 48개).
-    // 그런 글자는 허용 목록 키(모두 ASCII)와 무관하고 ASCII 로 바뀌지도 않으므로(표시·지문에만 영향) 허용하되, 그 밖의 어긋남은 실패다.
-    let (mut rust_only, mut bad) = (0, Vec::new());
+    let mut bad = Vec::new();
     for cp in (0..=0x10ffffu32).filter(|cp| !(0xd800..=0xdfff).contains(cp)) {
         let ch = char::from_u32(cp).expect("서로게이트 제외");
         let want = map.get(&cp).map_or_else(|| ch.to_string(), |l| (*l).to_string());
-        let got: String = ch.to_lowercase().collect();
-        if got == want {
-            continue;
-        }
-        if !map.contains_key(&cp) && got.chars().all(|c| !c.is_ascii()) {
-            rust_only += 1;
-        } else {
+        let got = js_to_lowercase(&ch.to_string());
+        if got != want {
             bad.push(format!("U+{cp:X}: Rust {got:?}, TS {want:?}"));
         }
     }
     assert!(bad.is_empty(), "소문자화가 Node 와 다른 코드 포인트 {}개: {:?}", bad.len(), &bad[..bad.len().min(10)]);
-    println!("Rust std 만 아는 소문자 쌍: {rust_only}개 (Node Unicode {UNICODE_VERSION})");
+    // 생성 표가 골든과 같다(골든을 다시 만들었으면 node scripts/gen-fetch-special.mjs)
+    let table: Vec<(u32, &str)> = LOWERCASE_MAP.to_vec();
+    let golden_map: Vec<(u32, &str)> = arr(&g["lowercaseMap"], "lowercaseMap").iter().map(|e| (e[0].as_u64().expect("cp") as u32, s(&e[1]))).collect();
+    assert_eq!(table, golden_map, "lowercase_table.rs 가 골든과 다르다 — node scripts/gen-fetch-special.mjs");
+    let ranges = |v: &Value| -> Vec<(u32, u32)> { arr(v, "범위").iter().map(|r| (r[0].as_u64().expect("lo") as u32, r[1].as_u64().expect("hi") as u32)).collect() };
+    assert_eq!(ranges(&g["cased"]), CASED_RANGES, "cased 범위");
+    assert_eq!(ranges(&g["caseIgnorable"]), CASE_IGNORABLE_RANGES, "caseIgnorable 범위");
     for c in arr(&g["lowercase"], "lowercase") {
         let entries = parse_config_list(&format!("x\0{}\n\0", s(&c["input"])));
         assert_eq!(entries[0].key, s(&c["key"]), "{:?}", c["input"]);
+        assert_eq!(js_to_lowercase(s(&c["input"])), s(&c["key"]), "{:?}", c["input"]);
     }
+}
+
+#[test]
+fn 유니코드_판_차이_std_소문자화만_아는_대문자는_ts_처럼_그대로_둔다() {
+    // Node(Unicode 16.0)는 U+A7CE→A7CF 를 모른다 — std 의 to_lowercase 를 쓰면 `remote."꟎".fetch` 가 Rust 에서만 허용된다
+    assert_eq!(js_to_lowercase("\u{a7ce}"), "\u{a7ce}");
+    assert_eq!(js_to_lowercase("\u{16ea0}\u{1df40}"), "\u{16ea0}\u{1df40}");
+    let out = "local\0remote.\u{a7ce}.fetch\n+refs/heads/*:refs/remotes/\u{a7cf}/*\0";
+    let ins = inspect_entries(&parse_config_list(out));
+    assert_eq!(ins.dangerous.len(), 1, "알 수 없는 설정이어야 한다: {:?}", ins.dangerous);
+    // 같은 이름을 쓰는 refspec 은 TS 도 허용한다
+    let same = inspect_entries(&parse_config_list("local\0remote.\u{a7ce}.fetch\n+refs/heads/*:refs/remotes/\u{a7ce}/*\0"));
+    assert!(same.dangerous.is_empty());
+    // 최종 시그마: 단어 끝만 ς
+    assert_eq!(js_to_lowercase("ΑΣ"), "ας");
+    assert_eq!(js_to_lowercase("ΑΣ ΑΣ"), "ας ας");
+    assert_eq!(js_to_lowercase("ΣΑ"), "σα");
+    assert_eq!(js_to_lowercase("Σ"), "σ");
+    assert_eq!(js_to_lowercase("Α.Σ"), "α.ς");
 }
 
 /// 가짜 git 응답으로 TS `inspectConfig` 가 한 일을 순수 함수로 다시 한다(실행기는 뒤 단계). 설정을 읽은 순서(calls)까지 맞아야 한다
@@ -232,15 +252,17 @@ fn replay(sc: &Value) -> Value {
         ShowScopeOutcome::Parsed => parse_config_list(&stdout),
         ShowScopeOutcome::Error(message) => return json!({ "calls": calls, "error": message }),
         ShowScopeOutcome::Fallback => {
-            let mut walk = ScopeWalk::new();
-            while let Some(scope) = walk.next_scope() {
+            let mut walk = ScopeWalk::start();
+            loop {
+                let scope = walk.scope();
                 calls.push(scope);
                 let (code, stdout, stderr) = sc["byScope"].get(scope).map_or_else(not_found, out_of);
-                if let Err(message) = walk.feed(scope, code, &stdout, &stderr) {
-                    return json!({ "calls": calls, "error": message });
+                match walk.feed(code, &stdout, &stderr) {
+                    Err(message) => return json!({ "calls": calls, "error": message }),
+                    Ok(WalkStep::Read(next)) => walk = next,
+                    Ok(WalkStep::Done(entries)) => break entries,
                 }
             }
-            walk.into_entries()
         }
     };
     let mut ins = inspect_entries(&entries);
@@ -337,11 +359,49 @@ fn 버전_분류_백오프_인자_환경이_ts_와_같다() {
         let min = version_of(&c["min"]).expect("min");
         assert_eq!(version_at_least(version_of(&c["v"]), min), c["ok"].as_bool().expect("ok"), "{c}");
     }
+    let mut built = 0;
     for c in arr(&g["fetchConfigArgs"], "fetchConfigArgs") {
-        let opts = ConfigArgsOpts { credential_helpers: c["opts"]["credentialHelpers"].as_bool().unwrap_or(false), follow_redirects: opt_s(&c["opts"]["followRedirects"]) };
+        let follow_redirects = match opt_s(&c["opts"]["followRedirects"]) {
+            None | Some("initial") => FollowRedirects::Initial,
+            Some("false") => FollowRedirects::False,
+            Some(other) => panic!("{other}"),
+        };
+        let opts = ConfigArgsOpts { credential_helpers: c["opts"]["credentialHelpers"].as_bool().unwrap_or(false), follow_redirects };
         let want: Vec<&str> = arr(&c["args"], "args").iter().map(s).collect();
-        assert_eq!(fetch_config_args(s(&c["hooksPath"]), opts), want, "{c}");
+        // hooksPath 는 hooks_path_for 로만 만든다: `/dev/null` 은 로컬이 아닌 원본, 나머지는 로컬의 앱 소유 디렉터리(검사는 주입). 빈 값은 만들 수 없어 건너뛴다
+        let hooks = match s(&c["hooksPath"]) {
+            "" => {
+                assert!(hooks_path_with(true, Some(""), true, |_| true).is_err(), "빈 값은 Windows 에서 디렉터리가 없는 것과 같다");
+                assert_eq!(hooks_path_with(true, Some(""), false, |_| true).expect("POSIX").as_str(), "/dev/null");
+                continue;
+            }
+            "/dev/null" => hooks_path_for(false, None, true).expect("원격은 /dev/null"),
+            dir => hooks_path_with(true, Some(dir), true, |_| true).expect("앱 소유 디렉터리"),
+        };
+        assert_eq!(hooks.as_str(), s(&c["hooksPath"]));
+        assert_eq!(fetch_config_args(&hooks, opts), want, "{c}");
+        built += 1;
     }
+    assert!(built > 0);
+    // 훅 경로: 상대 경로·비어 있지 않은 디렉터리·Windows 인데 디렉터리 없음은 거부, 역슬래시는 슬래시로
+    for rel in ["nohooks", "./h", "../h", "C:h"] {
+        assert!(hooks_path_with(true, Some(rel), true, |_| true).is_err(), "{rel}");
+    }
+    assert!(hooks_path_with(true, Some("C:/h"), true, |_| false).is_err());
+    assert!(hooks_path_with(true, None, true, |_| true).is_err());
+    assert_eq!(hooks_path_with(true, None, false, |_| true).expect("POSIX").as_str(), "/dev/null");
+    assert_eq!(hooks_path_with(true, Some("C:\\Users\\me\\nohooks"), true, |_| true).expect("절대").as_str(), "C:/Users/me/nohooks");
+    assert_eq!(hooks_path_with(false, Some("relative"), true, |_| false).expect("원격은 무시").as_str(), "/dev/null");
+    // 실제 파일 시스템 검사: 없는 디렉터리·비어 있지 않은 디렉터리는 거부, 빈 디렉터리는 통과
+    let dir = std::env::temp_dir().join(format!("antler-hooks-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let path = dir.to_string_lossy().into_owned();
+    assert!(hooks_path_for(true, Some(&path), true).is_err(), "없는 디렉터리");
+    fs::create_dir_all(&dir).expect("임시 디렉터리");
+    assert!(hooks_path_for(true, Some(&path), true).is_ok(), "빈 디렉터리");
+    fs::write(dir.join("x"), "").expect("파일");
+    assert!(hooks_path_for(true, Some(&path), true).is_err(), "비어 있지 않은 디렉터리");
+    fs::remove_dir_all(&dir).expect("정리");
     let fetch_args: Vec<&str> = arr(&g["fetchArgs"], "fetchArgs").iter().map(s).collect();
     assert_eq!(fetch_args, FETCH_ARGS);
     for c in arr(&g["ssh"], "ssh") {
@@ -379,22 +439,72 @@ fn stderr_판정이_ts_와_같다() {
         let stderr = s(&c["stderr"]);
         assert_eq!(worktree_config_absent(stderr), c["regex"].as_bool().expect("regex"), "{stderr:?}");
         // 범위별 읽기에서 worktree 실패가 "없음"으로 취급되는가(던지지 않는가)
-        assert_eq!(ScopeWalk::new().feed("worktree", 1, "", stderr).is_ok(), c["absent"].as_bool().expect("absent"), "{stderr:?}");
+        let worktree = walk_to_worktree();
+        assert_eq!(worktree.feed(1, "", stderr).is_ok(), c["absent"].as_bool().expect("absent"), "{stderr:?}");
     }
     for c in arr(&g["worktreeOn"], "worktreeOn") {
-        let mut walk = ScopeWalk::new();
         let local = match opt_s(&c["value"]) {
             None => "extensions.worktreeconfig\0".to_string(),
             Some(v) => format!("extensions.worktreeconfig\n{v}\0"),
         };
+        let mut walk = ScopeWalk::start();
         let mut asked = false;
-        while let Some(scope) = walk.next_scope() {
-            asked |= scope == "worktree";
-            let stdout = if scope == "local" { local.as_str() } else { "" };
-            walk.feed(scope, 0, stdout, "").expect("읽기 성공");
+        loop {
+            asked |= walk.scope() == "worktree";
+            let stdout = if walk.scope() == "local" { local.as_str() } else { "" };
+            match walk.feed(0, stdout, "").expect("읽기 성공") {
+                WalkStep::Read(next) => walk = next,
+                WalkStep::Done(_) => break,
+            }
         }
         assert_eq!(asked, c["asked"].as_bool().expect("asked"), "{:?}", c["value"]);
     }
+}
+
+/// system → global → local(worktreeconfig 켬)을 읽고 worktree 차례가 된 상태
+fn walk_to_worktree() -> ScopeWalk {
+    let mut walk = ScopeWalk::start();
+    let mut order = Vec::new();
+    while walk.scope() != "worktree" {
+        order.push(walk.scope());
+        let stdout = if walk.scope() == "local" { "extensions.worktreeconfig\ntrue\0" } else { "" };
+        match walk.feed(0, stdout, "").expect("읽기 성공") {
+            WalkStep::Read(next) => walk = next,
+            WalkStep::Done(_) => panic!("worktree 차례가 오지 않았다"),
+        }
+    }
+    assert_eq!(order, ["system", "global", "local"]);
+    walk
+}
+
+#[test]
+fn 범위별_읽기는_순서를_타입으로_강제하고_실패를_구분한다() {
+    // system·global 은 실패해도 계속, local 실패는 중단, worktree 는 "없음"만 계속
+    let mut walk = ScopeWalk::start();
+    assert_eq!(walk.scope(), "system");
+    for scope in ["system", "global"] {
+        assert_eq!(walk.scope(), scope);
+        walk = match walk.feed(1, "", "fatal: unable to read config file").expect("계속") {
+            WalkStep::Read(next) => next,
+            WalkStep::Done(_) => panic!("{scope}"),
+        };
+    }
+    assert_eq!(walk.scope(), "local");
+    assert!(walk.feed(1, "", "fatal: bad config").is_err());
+    // worktreeconfig 가 꺼져 있으면 worktree 는 건너뛴다
+    let mut walk = ScopeWalk::start();
+    let entries = loop {
+        let stdout = if walk.scope() == "local" { "a.b\nc\0" } else { "" };
+        match walk.feed(0, stdout, "").expect("읽기 성공") {
+            WalkStep::Read(next) => {
+                assert_ne!(next.scope(), "worktree");
+                walk = next;
+            }
+            WalkStep::Done(entries) => break entries,
+        }
+    };
+    assert_eq!(entries.len(), 1);
+    assert_eq!((entries[0].scope.as_str(), entries[0].key.as_str()), ("local", "a.b"));
 }
 
 // ── 위험 목록(이식 우회 위험)에 대응하는 테스트 ────────────────────────────
@@ -503,6 +613,69 @@ fn 위험14_nt_네임스페이스_경로는_거부한다() {
     for ok in ["file:///C:/repos/x.git", "C:\\repos\\x.git", "/tmp/r.git"] {
         assert_eq!(unsafe_remote_url(ok), None, "{ok}");
     }
+}
+
+/// 퍼즈 코퍼스: TS 가 만든 입력 문자열(생성 규칙은 따라 하지 않는다)에 대한 판정이 같다. 알파벳에 Node 에 없고 Rust std 에는 있는 대문자가 들어 있다
+#[test]
+fn 퍼즈_코퍼스의_판정이_ts_와_같다() {
+    let g = golden("fuzz.json");
+    let (mut allowed, mut refspec, mut parsed) = (Diffs::default(), Diffs::default(), Diffs::default());
+    let (mut allowed_true, mut refspec_true) = (0, 0);
+    for c in arr(&g["config"], "config") {
+        let (key, value) = (s(&c[0]), opt_s(&c[1]));
+        allowed_true += usize::from(bit(&c[2]));
+        refspec_true += usize::from(bit(&c[3]));
+        allowed.check(|| format!("{key:?} = {value:?}"), is_allowed_config(key, value), bit(&c[2]));
+        refspec.check(|| format!("{key:?} = {value:?}"), fetch_refspec_ok(key, value), bit(&c[3]));
+        // 설정 출력으로 파싱(키 소문자화)한 뒤의 판정: 실제 검사가 가는 길
+        let out = match value {
+            None => format!("local\0{key}\0"),
+            Some(v) => format!("local\0{key}\n{v}\0"),
+        };
+        let entries = parse_config_list(&out);
+        parsed.check(|| format!("{out:?}"), is_allowed_config(&entries[0].key, entries[0].value.as_deref()), bit(&c[4]));
+    }
+    assert!(allowed_true >= 20 && refspec_true >= 20, "코퍼스가 허용 쪽을 충분히 건드리지 않는다: {allowed_true} {refspec_true}");
+    allowed.finish("퍼즈 isAllowedConfig");
+    refspec.finish("퍼즈 fetchRefspecOk");
+    parsed.finish("퍼즈 파싱 뒤 isAllowedConfig");
+
+    let mut bad = Vec::new();
+    let urls = arr(&g["urls"], "urls");
+    for c in urls {
+        let (url, expected) = (s(&c[0]), opt_s(&c[1]));
+        let got = unsafe_remote_url(url);
+        if got.as_deref() != expected {
+            bad.push(format!("{url:?}: Rust {got:?}, TS {expected:?}"));
+        }
+    }
+    assert!(urls.iter().any(|c| c[1].is_null()) && urls.iter().any(|c| !c[1].is_null()), "코퍼스가 한쪽 판정뿐이다");
+    assert!(bad.is_empty(), "unsafeRemoteUrl 이 다른 항목 {}건, 예: {:?}", bad.len(), &bad[..bad.len().min(5)]);
+
+    let mut bad = Vec::new();
+    for c in arr(&g["lower"], "lower") {
+        let entries = parse_config_list(&format!("x\0{}\n\0", s(&c[0])));
+        if entries[0].key != s(&c[1]) {
+            bad.push(format!("{:?}: Rust {:?}, TS {:?}", c[0], entries[0].key, c[1]));
+        }
+    }
+    assert!(bad.is_empty(), "키 소문자화가 다른 항목 {}건, 예: {:?}", bad.len(), &bad[..bad.len().min(5)]);
+}
+
+/// 악성 설정의 아주 긴 키·값에서도 메모리·시간이 입력에 선형이다(수천만 자 측정은 `ANTLER_BIG_PATTERN=<글자 수>` 로, 기본은 CI 용 수백만 자)
+#[test]
+fn 아주_긴_키에서도_매처가_빠르고_메모리를_아낀다() {
+    let n: usize = std::env::var("ANTLER_BIG_PATTERN").ok().and_then(|v| v.parse().ok()).unwrap_or(3_000_000);
+    let big = "한x".repeat(n / 2);
+    let t = std::time::Instant::now();
+    assert!(is_allowed_config(&format!("remote.{big}.url"), Some("x")));
+    assert!(is_allowed_config(&format!("submodule.{big}.url"), Some("x")));
+    assert!(!is_allowed_config(&format!("remote.{big}.urlx"), Some("x")));
+    assert!(!is_allowed_config(&format!("branch.{big}\n.merge"), Some("x")));
+    assert!(unsafe_remote_url(&format!("{big}\\??\\x")).is_some());
+    let ms = t.elapsed().as_millis();
+    println!("긴 키 {n} 글자: {ms} ms");
+    assert!(ms < 20_000 * (n as u128 / 3_000_000).max(1), "{ms} ms (선형이어야 한다)");
 }
 
 /// 입력이 무엇이든 패닉하지 않는다(결정적 난수로 이모지·서로게이트 반쪽 대용 문자·줄 구분자·점 등을 섞은 문자열)

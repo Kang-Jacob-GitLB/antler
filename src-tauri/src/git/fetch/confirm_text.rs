@@ -56,7 +56,8 @@ fn escape_char(cp: u32, out: &mut String) {
         Some('"') => out.push_str("\\\""),
         Some('\\') => out.push_str("\\\\"),
         Some(c) => out.push(c),
-        None => unreachable!("짝 없는 서로게이트는 특수 문자다"),
+        // 짝 없는 서로게이트는 특수 문자라 위에서 걸린다. 표가 어긋나도 패닉하지 않고 드러내는 쪽으로 간다
+        None => out.push_str(&format!("\\u{cp:04x}")),
     }
 }
 

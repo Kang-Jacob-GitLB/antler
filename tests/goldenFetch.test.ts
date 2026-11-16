@@ -55,7 +55,7 @@ import {
 // fetch 가드(허용 목록·URL 판정·설정 파싱·확인 창 표시·오류 분류 …)의 순수 함수를 골든 JSON 으로 고정한다.
 // Rust 이식(src-tauri/src/git/fetch, 검사: src-tauri/tests/fetch_guard.rs)이 같은 골든을 읽어 같은 결과를 내는지 본다.
 // 골든은 TS 가 기준이다: `UPDATE_GOLDEN=1 npx vitest run tests/goldenFetch.test.ts` 로 다시 쓰고,
-// special_table.rs 는 이어서 `node scripts/gen-fetch-special.mjs` 로 만든다(골든의 confirm.json 을 읽는다).
+// special_table.rs·lowercase_table.rs 는 이어서 `node scripts/gen-fetch-special.mjs` 로 만든다(골든의 confirm.json·config.json 을 읽는다).
 // 이 테스트는 git 을 실행하지 않는다(실행기는 가짜). 입력 표는 tests/fixtures/fetchGuardCases.ts 를 tests/fetch.test.ts 와 함께 쓴다.
 //
 // 골든이 기대는 것: 정규식·toLowerCase·\p{…} 결과는 Node 의 Unicode 판에 따라 달라진다(lists.json 의 runtime 에 적는다).
@@ -615,6 +615,37 @@ function urlsGolden(): Record<string, unknown> {
   return { cases }
 }
 
+let lowercaseMapCache: [number, string][] | null = null
+
+/** toLowerCase 가 코드 포인트 하나를 바꾸는 전부(Node 의 Unicode 판 기준). 문맥이 필요한 최종 시그마는 따로 본다 */
+function lowercaseMap(): [number, string][] {
+  if (lowercaseMapCache) return lowercaseMapCache
+  const map: [number, string][] = []
+  for (let cp = 0; cp <= 0x10ffff; cp++) {
+    if (cp >= 0xd800 && cp <= 0xdfff) continue
+    const ch = String.fromCodePoint(cp)
+    const lower = ch.toLowerCase()
+    if (lower !== ch) map.push([cp, lower])
+  }
+  lowercaseMapCache = map
+  return map
+}
+
+/** 정규식(속성 이스케이프)이 맞추는 코드 포인트의 닫힌 구간 목록(서로게이트는 제외, 오름차순) */
+function rangesOf(re: RegExp): [number, number][] {
+  const out: [number, number][] = []
+  let lo = -1
+  for (let cp = 0; cp <= 0x110000; cp++) {
+    const hit = cp <= 0x10ffff && !(cp >= 0xd800 && cp <= 0xdfff) && re.test(String.fromCodePoint(cp))
+    if (hit && lo < 0) lo = cp
+    if (!hit && lo >= 0) {
+      out.push([lo, cp - 1])
+      lo = -1
+    }
+  }
+  return out
+}
+
 function configGolden(): Record<string, unknown> {
   const outs = [
     CONFIG_LIST_OUT,
@@ -642,16 +673,11 @@ function configGolden(): Record<string, unknown> {
     ['İ.İ\nİ\0ΑΣ\0', 'local'],
     ['nonul', 'local']
   ]
-  // toLowerCase 가 코드 포인트 하나를 바꾸는 전부(Rust std 의 Unicode 판이 Node 와 달라 키·지문이 어긋나는지 본다). 문맥이 필요한 최종 시그마는 위 표본이 본다
-  const lowercaseMap: [number, string][] = []
-  for (let cp = 0; cp <= 0x10ffff; cp++) {
-    if (cp >= 0xd800 && cp <= 0xdfff) continue
-    const ch = String.fromCodePoint(cp)
-    const lower = ch.toLowerCase()
-    if (lower !== ch) lowercaseMap.push([cp, lower])
-  }
   return {
-    lowercaseMap,
+    // Rust 는 std 의 소문자화를 쓰지 않고 이 표(lowercase_table.rs 의 원본)만 쓴다. 최종 시그마(Σ)의 문맥은 cased·caseIgnorable 로 판정한다
+    lowercaseMap: lowercaseMap(),
+    cased: rangesOf(/^\p{Cased}$/u),
+    caseIgnorable: rangesOf(/^\p{Case_Ignorable}$/u),
     list: outs.map((out) => ({ out, entries: parseConfigList(out) })),
     scoped: scoped.map(([out, scope]) => ({ out: out!, scope: scope!, entries: parseScopedConfigList(out!, scope!) })),
     // 키 소문자화(JS toLowerCase: 최종 시그마·İ·Kelvin 기호)
@@ -672,7 +698,12 @@ function inspectEntriesGolden(): Record<string, unknown> {
     'local\0core.bare\ntrue\0local\0core.bare\0local\0core.fsmonitor\nwatchman\0',
     'local\0remote.o.url\n\0local\0remote.o.pushurl\0',
     'local\0include.path\n../x\0local\0includeif.gitdir:~/w/.path\ny\0local\0include.evil\nz\0',
-    'local\0Weird.KEY\nv\0local\0Ünï.CÖDE\nv\0'
+    'local\0Weird.KEY\nv\0local\0Ünï.CÖDE\nv\0',
+    // Unicode 판 회귀: Rust std 는 아는데 Node(Unicode 16.0)는 모르는 대문자(U+A7CE→A7CF)를 이름에 쓴 refspec. TS 는 접두가 어긋나 "알 수 없는 설정"이어야 한다
+    'local\0remote.꟎.fetch\n+refs/heads/*:refs/remotes/꟏/*\0',
+    'local\0remote.꟎.fetch\n+refs/heads/*:refs/remotes/꟎/*\0',
+    'local\0remote.꟏.fetch\n+refs/heads/*:refs/remotes/꟏/*\0',
+    'local\0remote.\u{16ea0}.fetch\n+refs/heads/x:refs/remotes/\u{16ea0}/x\0'
   ]
   const items: { key: string; value: string; raw?: string }[][] = [
     [],
@@ -949,6 +980,75 @@ async function writeFetchHeadRetries(stderr: string): Promise<boolean> {
   return runs === 2
 }
 
+/**
+ * 퍼즈 코퍼스. 결정적 LCG 로 만든 **입력 문자열 자체**를 골든에 적는다 — Rust 는 생성 규칙을 따라 하지 않고 적힌 문자열을 읽어 같은 판정을 하는지만 본다
+ * (생성기까지 양쪽에 두면 구현 차이가 입력 차이로 가려진다). 알파벳은 JS 와 Rust 가 갈리기 쉬운 문자(줄 끝 문자·BOM·U+0085·İ·K·ſ·Σ·이모지)와
+ * Node 의 소문자화 표 경계, **Node(Unicode 16.0)에는 대소문자 쌍이 없고 Rust std 에는 있는 대문자**를 섞는다.
+ */
+function fuzzGolden(): Record<string, unknown> {
+  let seed = 0x2545f491
+  const next = (): number => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+    return seed >>> 8
+  }
+  const pick = <T>(xs: readonly T[]): T => xs[next() % xs.length]!
+  const cp = (...c: number[]): string => String.fromCodePoint(...c)
+  const map = lowercaseMap()
+  const boundary: string[] = []
+  for (let i = 0; i < map.length; i += 37) {
+    const c = map[i]![0]
+    boundary.push(cp(c), cp(c + 1), map[i]![1])
+  }
+  const last = map[map.length - 1]![0]
+  boundary.push(cp(map[0]![0] - 1), cp(map[0]![0]), cp(last), cp(last + 1))
+  // Rust std 만 소문자 쌍을 아는 대문자(rustc 1.100 대 Node 22 의 Unicode 16.0)와 그 소문자 짝
+  const rustOnly = [0xa7ce, 0xa7d2, 0xa7d4, 0xa7dd, 0xa7e2, 0xab6c, 0xab6d, 0x16ea0, 0x16eb8, 0x1df40, 0x1df48, 0x1df7e].flatMap((c) => [cp(c), cp(c + 1)])
+  const alphabet: string[] = [
+    ...['a', 'b', 'k', 's', 'x', 'A', 'K', 'S', 'I', 'i', '0', '.', '.', ':', '*', '+', '-', '/', '\\', '?', '@', '#', "'", '~', '^', '[', ' ', '\t'],
+    ...['\n', '\r', '\u2028', '\u2029', '\ufeff', '\u0085', '\u00a0', '\u180e', '\u200b', '😀', '한', 'é', 'İ', 'ı', '\u212a', '\u212b', 'ſ', 'Σ', 'σ', 'ς', 'ΑΣ', '\u0345', 'ǅ', 'ẞ', 'ß', 'ﬁ'],
+    ...['refs/heads/', 'refs/remotes/', 'remote.', '.url', '.fetch', '.pushurl', 'branch.', '.merge', 'submodule.', 'core.', 'user.name', 'file:', 'https://', 'http://', 'ssh://', 'ext::', '??', '\\??\\', '::', '..'],
+    ...boundary,
+    ...rustOnly
+  ]
+  const rstr = (maxLen: number): string => Array.from({ length: next() % (maxLen + 1) }, () => pick(alphabet)).join('')
+  const nameLike = (): string => Array.from({ length: next() % 5 }, () => pick(next() % 3 === 0 ? alphabet : ['o', 'p', 'İ', 'Σ', ...rustOnly, ...boundary.slice(0, 40)])).join('')
+
+  const config: [string, string | null, string, string, string][] = []
+  const addConfig = (key: string, value: string | null): void => {
+    const parsed = parseConfigList(value === null ? `local\0${key}\0` : `local\0${key}\n${value}\0`)[0]!
+    config.push([key, value, bit(isAllowedConfig(key, value)), bit(fetchRefspecOk(key, value)), bit(isAllowedConfig(parsed.key, parsed.value))])
+  }
+  for (let n = 0; n < 2200; n++) {
+    const shape = next() % 5
+    if (shape === 0) {
+      addConfig(rstr(14), next() % 6 === 0 ? null : rstr(14))
+    } else if (shape <= 2) {
+      // refspec: 이름·소문자화·접두가 맞거나 한 글자 어긋나는 것
+      const name = nameLike()
+      const dstName = pick([name, name, name.toLowerCase(), name.toUpperCase(), rstr(3)])
+      const src = next() % 3 === 0 ? '*' : rstr(5)
+      const dst = next() % 4 === 0 ? '*' : next() % 3 === 0 ? rstr(5) : src
+      addConfig(`${pick(['remote.', 'remote.', 'Remote.'])}${name}.fetch`, `${pick(['', '+', '+'])}refs/heads/${src}:refs/remotes/${dstName}/${dst}`)
+    } else if (shape === 3) {
+      addConfig(`${pick(['remote', 'branch', 'submodule', 'REMOTE', 'includeIf', 'core', 'user', 'extensions'])}.${nameLike()}.${pick(['url', 'pushurl', 'merge', 'active', 'path', 'name', 'worktreeconfig', 'hookspath', 'URL'])}${pick(['', '', '', '\n', ' ', '\u2028'])}`, pick(['x', null, '', rstr(6)]))
+    } else {
+      addConfig(`${pick(['core', 'user', 'push', 'pull', 'filter.lfs', 'init', 'fetch', 'lfs'])}.${pick(['', pick(['bare', 'fsmonitor', 'name', 'default', 'clean', 'prune', 'ff', 'rebase', 'required']), rstr(5)])}`, pick(['true', 'false', 'git-lfs clean -- %f', rstr(8), null]))
+    }
+  }
+
+  const urls: [string, string | null][] = []
+  const heads = ['', '', ' ', '\ufeff', '\u2028', '\u00a0', '-', '--', '\\\\', '//', '/\\', 'file:', 'FILE:', 'fi\u212a:', 'https://', 'HTTPS://', 'ssh://', 'ext::', 'a+b::', 'A.B-c::', 'git@', 'C:\\', '../']
+  for (let n = 0; n < 2200; n++) urls.push([`${pick(heads)}${next() % 3 === 0 ? pick(heads) : ''}${rstr(10)}${pick(['', '', ' ', '\ufeff', '@-', '/'])}`, null])
+  for (const u of urls) u[1] = unsafeRemoteUrl(u[0])
+
+  const lower: [string, string][] = []
+  for (let n = 0; n < 2200; n++) {
+    const text = rstr(9).replace(/\0/g, '')
+    lower.push([text, parseConfigList(`x\0${text}\n\0`)[0]!.key])
+  }
+  return { generator: 'LCG(1664525, 1013904223) seed 0x2545f491 — Rust 는 이 생성 규칙을 쓰지 않고 아래 입력 문자열만 읽는다', config, urls, lower }
+}
+
 function listsGolden(): Record<string, unknown> {
   const rx = (r: RegExp): { source: string; flags: string } => ({ source: r.source, flags: r.flags })
   return {
@@ -970,7 +1070,8 @@ async function buildAll(): Promise<Record<string, string>> {
     'config.json': render(configGolden()),
     'inspect.json': render(await inspectGolden()),
     'confirm.json': render(confirmGolden()),
-    'misc.json': render(await miscGolden())
+    'misc.json': render(await miscGolden()),
+    'fuzz.json': render(fuzzGolden())
   }
 }
 

@@ -9,7 +9,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use super::pattern::Pattern;
-use super::{is_line_terminator, js_trim, slice_utf16_lossy};
+use super::{is_line_terminator, js_to_lowercase, js_trim, slice_utf16_lossy};
 use crate::git::scope::is_js_space;
 
 // ── 허용 목록 ─────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ pub fn fetch_refspec_ok(key: &str, value: Option<&str>) -> bool {
     let Some(src_rest) = src.strip_prefix("refs/heads/") else {
         return false;
     };
-    let lowered = utf16(&dst.to_lowercase());
+    let lowered = utf16(&js_to_lowercase(dst));
     if lowered[..prefix.len().min(lowered.len())] != prefix[..] {
         return false;
     }
@@ -130,8 +130,8 @@ fn is_sep(c: char) -> bool {
 
 /// `NT_NAMESPACE` = `/[\\/]\?\?[\\/]/` — `\??\`, `/??/` 등이 어디에 있어도
 pub fn has_nt_namespace(s: &str) -> bool {
-    let c: Vec<char> = s.chars().collect();
-    c.windows(4).any(|w| is_sep(w[0]) && w[1] == '?' && w[2] == '?' && is_sep(w[3]))
+    // 구분자·`?` 는 모두 ASCII 라 UTF-8 바이트 창으로 봐도 같다(여러 바이트 글자 안에는 ASCII 바이트가 없다). 글자 배열을 만들지 않는다
+    s.as_bytes().windows(4).any(|w| matches!(w[0], b'\\' | b'/') && w[1] == b'?' && w[2] == b'?' && matches!(w[3], b'\\' | b'/'))
 }
 
 /// TS `unsafeRemoteUrl`: 거부할 remote URL 이면 사유, 괜찮으면 None
@@ -222,7 +222,7 @@ fn parse_record(scope: &str, rec: &str) -> ConfigEntry {
         Some(nl) => (&rec[..nl], Some(rec[nl + 1..].to_string())),
         None => (rec, None),
     };
-    ConfigEntry { scope: scope.to_string(), key: key.to_lowercase(), value }
+    ConfigEntry { scope: scope.to_string(), key: js_to_lowercase(key), value }
 }
 
 /// `git config --list --show-scope -z` 출력 파싱. 항목은 `scope\0key\nvalue\0`(값 없는 키는 `scope\0key\0`) 두 토큰씩
@@ -464,48 +464,56 @@ fn worktree_config_on(entries: &[ConfigEntry]) -> bool {
     })
 }
 
-/// 옛 git(`--show-scope` 없음)의 범위별 읽기: system → global → local → worktree 순서(git 이 적용하는 순서).
-/// 호출자가 `next_scope` 로 읽을 범위를 받아 실행하고 결과를 `feed` 로 넣는다(TS `readConfigByScope`).
-#[derive(Debug, Default)]
+/// 옛 git(`--show-scope` 없음)의 범위별 읽기: system → global → local → worktree 순서(git 이 적용하는 순서, TS `readConfigByScope`).
+/// **지금 읽어야 할 범위 하나**를 값으로 든다. 호출자는 [`ScopeWalk::start`] 로 시작해 `scope()` 를 실행하고 결과를 [`ScopeWalk::feed`] 에 넣는다.
+/// `feed` 는 자신을 소비하고 다음 범위([`WalkStep::Read`])나 끝([`WalkStep::Done`])을 돌려주므로, 범위를 건너뛰거나 순서를 바꾸거나
+/// 엉뚱한 범위의 결과를 넣을 수 없다(`worktree` 는 `extensions.worktreeconfig` 가 켜져 있을 때만 차례가 온다).
+#[derive(Debug)]
+#[must_use = "범위를 읽고 feed 로 결과를 넣어야 한다"]
 pub struct ScopeWalk {
+    scope: &'static str,
+    /// 앞 범위들에서 읽은 항목
     entries: Vec<ConfigEntry>,
-    next: usize,
 }
 
 const SCOPES: [&str; 4] = ["system", "global", "local", "worktree"];
 
+/// [`ScopeWalk::feed`] 의 결과
+#[derive(Debug)]
+#[must_use]
+pub enum WalkStep {
+    /// 다음 범위를 읽는다
+    Read(ScopeWalk),
+    /// 모두 읽었다(범위 순서대로 쌓인 항목)
+    Done(Vec<ConfigEntry>),
+}
+
 impl ScopeWalk {
-    pub fn new() -> Self {
-        Self::default()
+    /// 첫 범위(system)부터 시작한다
+    pub fn start() -> Self {
+        Self { scope: SCOPES[0], entries: Vec::new() }
     }
 
-    /// 다음에 읽을 범위. worktree 는 `extensions.worktreeconfig` 가 켜져 있을 때만(꺼져 있으면 `--worktree` 가 .git/config 를 다시 돌려줘 local 과 겹친다)
-    pub fn next_scope(&mut self) -> Option<&'static str> {
-        while let Some(&scope) = SCOPES.get(self.next) {
-            self.next += 1;
-            if scope == "worktree" && !worktree_config_on(&self.entries) {
-                continue;
-            }
-            return Some(scope);
-        }
-        None
+    /// 지금 읽을 범위(`git config --<scope> --list --includes -z`)
+    pub fn scope(&self) -> &'static str {
+        self.scope
     }
 
-    /// 한 범위의 `git config --<scope> --list --includes -z` 결과. system·global 은 파일이 없으면 실패하므로 비어 있는 것으로 보고,
-    /// local 은 반드시 읽혀야 하며, worktree 는 "옵션을 모름·파일 없음"만 비어 있는 것으로 본다. 그 밖의 실패는 Err(메시지)
-    pub fn feed(&mut self, scope: &str, code: i32, stdout: &str, stderr: &str) -> Result<(), String> {
+    /// `scope()` 의 실행 결과. system·global 은 파일이 없으면 실패하므로 비어 있는 것으로 보고, local 은 반드시 읽혀야 하며,
+    /// worktree 는 "옵션을 모름·파일 없음"만 비어 있는 것으로 본다. 그 밖의 실패는 Err(메시지).
+    /// worktree 는 `extensions.worktreeconfig` 가 켜져 있을 때만 읽는다(꺼져 있으면 `--worktree` 가 .git/config 를 다시 돌려줘 local 과 겹친다)
+    pub fn feed(mut self, code: i32, stdout: &str, stderr: &str) -> Result<WalkStep, String> {
         if code == 0 {
-            self.entries.extend(parse_scoped_config_list(stdout, scope));
-            Ok(())
-        } else if scope == "local" || (scope == "worktree" && !worktree_config_absent(stderr)) {
-            Err(config_read_error_message(stderr))
-        } else {
-            Ok(())
+            self.entries.extend(parse_scoped_config_list(stdout, self.scope));
+        } else if self.scope == "local" || (self.scope == "worktree" && !worktree_config_absent(stderr)) {
+            return Err(config_read_error_message(stderr));
         }
-    }
-
-    pub fn into_entries(self) -> Vec<ConfigEntry> {
-        self.entries
+        let at = SCOPES.iter().position(|&s| s == self.scope).expect("범위는 SCOPES 안에 있다");
+        let next = SCOPES[at + 1..].iter().find(|&&s| s != "worktree" || worktree_config_on(&self.entries));
+        Ok(match next {
+            Some(&scope) => WalkStep::Read(ScopeWalk { scope, entries: self.entries }),
+            None => WalkStep::Done(self.entries),
+        })
     }
 }
 
@@ -603,15 +611,83 @@ pub fn next_delay_ms(minutes: f64, failures: u32) -> f64 {
 
 pub const FETCH_ARGS: [&str; 4] = ["fetch", "--prune", "--no-prune-tags", "--no-recurse-submodules"];
 
+/// `http.followRedirects` 값. TS 의 `'initial' | 'false'` — 다른 값은 만들 수 없다
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FollowRedirects {
+    /// 첫 요청의 리다이렉트만 따른다(git 의 기본값, TS 의 생략 시 값)
+    #[default]
+    Initial,
+    /// 따르지 않는다(GitHub 원격 전용 저장소: Authorization 헤더가 리다이렉트 너머로 가지 않게)
+    False,
+}
+
+impl FollowRedirects {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Initial => "initial",
+            Self::False => "false",
+        }
+    }
+}
+
+/// `core.hooksPath` 로 줄 훅 차단용 경로. [`hooks_path_for`] 만 만든다 — 빈 값이나 상대 경로(저장소 안의 훅 디렉터리로 풀릴 수 있다)는 담지 못한다
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HooksPath(String);
+
+impl HooksPath {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// `/…` 또는 `X:/…`(슬래시로 바꾼 뒤)로 시작하는 절대 경로인가
+fn is_absolute_path(p: &str) -> bool {
+    let b = p.as_bytes();
+    b.first() == Some(&b'/') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/')
+}
+
+/// 훅 차단용 디렉터리가 존재하고 비어 있는가
+fn is_empty_dir(dir: &str) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_none())
+}
+
+/// TS `hooksPathFor`. Windows 의 로컬 git.exe 는 `/dev/null` 을 `<저장소 드라이브>:\dev\null\` 로 풀어 쓰므로(그 경로에 훅을 심을 수 있다)
+/// 로컬은 앱이 소유한 절대 경로의 **빈** 디렉터리를 쓴다. 그 밖(WSL·SSH)은 `/dev/null`, 로컬이라도 Windows 가 아니면 디렉터리가 없을 때 `/dev/null`.
+/// `no_hooks_dir` 가 None 이거나 빈 문자열이면 없는 것이다. 절대 경로가 아니거나(TS 와 달리 거부한다) 비어 있지 않은 디렉터리면 Err.
+pub fn hooks_path_for(local: bool, no_hooks_dir: Option<&str>, platform_win32: bool) -> Result<HooksPath, String> {
+    hooks_path_with(local, no_hooks_dir, platform_win32, is_empty_dir)
+}
+
+/// [`hooks_path_for`] 에 디렉터리 검사를 주입하는 형태. **테스트 전용**이다 — 앱 코드는 `hooks_path_for` 만 부른다(검사를 건너뛰는 주입을 쓰지 않는다)
+#[doc(hidden)]
+pub fn hooks_path_with(local: bool, no_hooks_dir: Option<&str>, platform_win32: bool, check_empty: impl FnOnce(&str) -> bool) -> Result<HooksPath, String> {
+    if !local {
+        return Ok(HooksPath("/dev/null".into()));
+    }
+    match no_hooks_dir.filter(|d| !d.is_empty()) {
+        Some(dir) => {
+            if !check_empty(dir) {
+                return Err(format!("훅 차단용 디렉터리가 없거나 비어 있지 않아 fetch 하지 않습니다: {dir}"));
+            }
+            let path = dir.replace('\\', "/");
+            if !is_absolute_path(&path) {
+                return Err(format!("훅 차단용 디렉터리가 절대 경로가 아니라 fetch 하지 않습니다: {dir}"));
+            }
+            Ok(HooksPath(path))
+        }
+        None if platform_win32 => Err("훅 차단용 빈 디렉터리가 없어 fetch 하지 않습니다".into()),
+        None => Ok(HooksPath("/dev/null".into())),
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ConfigArgsOpts<'a> {
+pub struct ConfigArgsOpts {
     pub credential_helpers: bool,
-    /// `http.followRedirects` 값. None 이면 `initial`
-    pub follow_redirects: Option<&'a str>,
+    pub follow_redirects: FollowRedirects,
 }
 
 /// TS `fetchConfigArgs`: fetch 에만 쓰는 -c 설정(저장소 설정·훅이 fetch 중에 코드를 실행하지 못하게 덮어쓴다). 순서까지 TS 와 같다
-pub fn fetch_config_args(hooks_path: &str, opts: ConfigArgsOpts<'_>) -> Vec<String> {
+pub fn fetch_config_args(hooks_path: &HooksPath, opts: ConfigArgsOpts) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     // 값이 빈 credential.helper 는 도우미 목록을 비운다
     if !opts.credential_helpers {
@@ -621,10 +697,10 @@ pub fn fetch_config_args(hooks_path: &str, opts: ConfigArgsOpts<'_>) -> Vec<Stri
         "maintenance.auto=false".to_string(),
         "gc.auto=0".to_string(),
         "fetch.writeCommitGraph=false".to_string(),
-        format!("core.hooksPath={hooks_path}"),
+        format!("core.hooksPath={}", hooks_path.as_str()),
         "fetch.bundleURI=".to_string(),
         "transfer.bundleURI=false".to_string(),
-        format!("http.followRedirects={}", opts.follow_redirects.unwrap_or("initial")),
+        format!("http.followRedirects={}", opts.follow_redirects.as_str()),
         "http.emptyAuth=false".to_string(),
         "http.allowNTLMAuth=false".to_string(),
         "http.delegation=none".to_string(),
