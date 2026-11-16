@@ -18,7 +18,16 @@
   {"name":"DATE_RE","file":"src/main/jira/validate.ts","snippet":"/^(\\d{4})-(\\d{2})-(\\d{2})$/"},
   {"name":"JIRA_BODY_SPACES","file":"src/main/jira/client.ts","snippet":"/[\\s\\u0000-\\u001f\\u007f]+/g"},
   {"name":"USABLE_TOKEN","file":"src/main/git/githubCache.ts","snippet":"/[\\s\\0]/"},
-  {"name":"TRAILING_SLASH","file":"src/main/jira/validate.ts","snippet":"/\\/+$/"}
+  {"name":"TRAILING_SLASH","file":"src/main/jira/validate.ts","snippet":"/\\/+$/"},
+  {"name":"REPOSITORY_URL","file":"src/main/github/launchpad.ts","snippet":"/^https:\\/\\/api\\.github\\.com\\/repos\\/([^/]+)\\/([^/]+)$/"},
+  {"name":"CUSTOM_FIELD_RE","file":"src/main/jira/api.ts","snippet":"/^customfield_\\d+$/"},
+  {"name":"DATE_ONLY_RE","file":"src/main/jira/api.ts","snippet":"/^\\d{4}-\\d{2}-\\d{2}/"},
+  {"name":"DEV_INSTANCE_RE","file":"src/main/jira/api.ts","snippet":"/^[A-Za-z0-9_.-]{1,40}$/"},
+  {"name":"DEV_HTTPS_URL","file":"src/main/jira/api.ts","snippet":"/^https:\\/\\/[^\\s]+$/"},
+  {"name":"DEV_COMMIT_SHA","file":"src/main/jira/api.ts","snippet":"/^[0-9a-f]{7,64}$/i"},
+  {"name":"DEV_ISSUE_ID","file":"src/main/jira/api.ts","snippet":"/^\\d{1,18}$/"},
+  {"name":"AVATAR_SCHEME","file":"src/main/jira/api.ts","snippet":"/^https?:\\/\\//i"},
+  {"name":"CONTROL_RE(jira api)","file":"src/main/jira/api.ts","snippet":"/[\\u0000-\\u001f\\u007f]/"}
  ],
  "consts": {
   "PAGE_SIZE": 25,

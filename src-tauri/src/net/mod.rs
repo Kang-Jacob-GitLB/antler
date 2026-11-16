@@ -4,6 +4,7 @@
 //! - [`url_rules`]: WHATWG URL 판정(사이트 안 주소·공개 사진 호스트·요청 URL 조립)
 //! - [`http_error`]: 응답 헤더·본문 해석(Retry-After·rate limit·Link·오류 본문 메시지·오류 분류)
 //! - [`redact`]: [`redact::SecretString`] 과 오류 문구에서 비밀을 가리는 함수
+//! - [`js_value`]·[`js_date`]: 응답 매퍼(PR 2)가 쓰는 JS 값 의미(`??`·`Number()`·`MapError`·`JSON.stringify` 꼴 직렬화)와 `Date.parse`·`toISOString`
 //!
 //! 원본은 `src/main/github/{client,validate,deviceFlow,ghCli}.ts`·`src/main/jira/{client,validate}.ts`·`src/main/git/githubCache.ts` 다.
 //! 골든(`tests/golden/net/*.json`, TS 가 기준)과 `tests/net.rs` 가 같은 결과를 내는지 본다.
@@ -11,6 +12,8 @@
 //! 이식 규칙은 `git::fetch` 와 같다: 공백은 [`crate::git::scope::is_js_space`], 길이는 UTF-16 단위, 소문자화는 Node 표(`js_to_lowercase`).
 //! "Rust 가 허용하면 TS 도 허용한다"가 깨지지 않는 방향으로만 다르게 만든다(다른 곳은 각 함수에 적었다).
 pub mod http_error;
+pub mod js_date;
+pub mod js_value;
 pub mod json;
 pub mod redact;
 pub mod url_rules;
@@ -34,4 +37,13 @@ pub const HAND_WRITTEN: &[(&str, &str)] = &[
     ("JIRA_BODY_SPACES", r"/[\s\u0000-\u001f\u007f]+/g"),
     ("USABLE_TOKEN", r"/[\s\0]/"),
     ("TRAILING_SLASH", r"/\/+$/"),
+    ("REPOSITORY_URL", r"/^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)$/"),
+    ("CUSTOM_FIELD_RE", r"/^customfield_\d+$/"),
+    ("DATE_ONLY_RE", r"/^\d{4}-\d{2}-\d{2}/"),
+    ("DEV_INSTANCE_RE", r"/^[A-Za-z0-9_.-]{1,40}$/"),
+    ("DEV_HTTPS_URL", r"/^https:\/\/[^\s]+$/"),
+    ("DEV_COMMIT_SHA", r"/^[0-9a-f]{7,64}$/i"),
+    ("DEV_ISSUE_ID", r"/^\d{1,18}$/"),
+    ("AVATAR_SCHEME", r"/^https?:\/\//i"),
+    ("CONTROL_RE(jira api)", r"/[\u0000-\u001f\u007f]/"),
 ];

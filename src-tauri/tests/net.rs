@@ -7,14 +7,17 @@ use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use antler_lib::github::{accessible_repos, api_map, checks_map, launchpad_map};
 use antler_lib::github::device_rules::{interpret_start, DeviceError, PollState, PollStep, EXPIRED_MESSAGE};
 use antler_lib::github::gh_env::gh_env;
 use antler_lib::github::validate as gh;
 use antler_lib::jira::validate::{self as jira, SiteOptions};
-use antler_lib::jira::{auth_header, JiraKind};
+use antler_lib::jira::{adf, api_map as jira_map, auth_header, JiraKind};
 use antler_lib::net::http_error::{
     github_body_message, github_http_error, has_next_link, jira_body_message, jira_http_error, parse_http_date, parse_rate, parse_retry_after, RateHeaders,
 };
+use antler_lib::net::js_date::{iso_string, parse_date_ms, to_epoch};
+use antler_lib::net::js_value::{field, must_arr, obj, stringify, truthy, MapError, MapResult};
 use antler_lib::net::json::{self, js_number, js_number_string, Json, MAX_DEPTH};
 use antler_lib::net::redact::{redact_token, usable_token, SecretString};
 use antler_lib::net::url_rules::{self, in_site, is_public_avatar_host, parse_url, ImageStep, ImageWalk};
@@ -143,7 +146,7 @@ fn res<T: Into<Value>>(r: Result<T, String>) -> Value {
     }
 }
 
-const HANDLED: [&str; 5] = ["validate.json", "urls.json", "http.json", "device.json", "env.json"];
+const HANDLED: [&str; 7] = ["validate.json", "urls.json", "http.json", "device.json", "env.json", "ghmap.json", "jiramap.json"];
 
 #[test]
 fn 골든_파일마다_처리기가_있다() {
@@ -903,6 +906,632 @@ fn secret_string_은_display_와_serialize_가_없다() {
         token: SecretString,
     }
     assert_eq!(format!("{:?}", Holder { token: SecretString::new("ghp_secret") }), "Holder { token: *** }");
+}
+
+// ── 응답 매퍼(PR 2) ───────────────────────────────────────────────────────
+
+/// 골든을 `Json`(키 순서 보존)으로 읽는다 — 매퍼 출력의 키 순서까지 비교하려는 것이다
+fn golden_json(name: &str) -> Json {
+    let path = golden_dir().join(name);
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    json::parse(&text).unwrap_or_else(|e| panic!("{name}: {e:?}"))
+}
+
+fn jget<'a>(j: &'a Json, k: &str) -> &'a Json {
+    j.get(k).unwrap_or_else(|| panic!("키 {k} 가 없다"))
+}
+
+fn jarr<'a>(j: &'a Json, what: &str) -> &'a [Json] {
+    match j {
+        Json::Arr(a) if !a.is_empty() => a,
+        _ => panic!("{what} 가 비었거나 배열이 아니다(골든을 건너뛴 것과 같다)"),
+    }
+}
+
+fn jarr_or_empty(j: &Json) -> &[Json] {
+    match j {
+        Json::Arr(a) => a,
+        _ => &[],
+    }
+}
+
+fn jstr(j: &Json) -> &str {
+    j.as_str().unwrap_or_else(|| panic!("문자열이 아니다: {j:?}"))
+}
+
+fn input(c: &Json) -> Vec<Json> {
+    jarr_or_empty(jget(c, "in")).iter().map(|t| json::parse(jstr(t)).unwrap_or_else(|e| panic!("입력 {}: {e:?}", jstr(t)))).collect()
+}
+
+fn st(v: &str) -> Json {
+    Json::Str(v.to_string())
+}
+
+/// `getPull`·`listPulls` 의 체크 보강: 헤드 sha 가 있을 때만 묻고, 변환이 던지면(TS `soft`) 없는 것으로 본다
+fn soft_checks(summary: &Json, runs: &Json, status: &Json) -> Option<Vec<Json>> {
+    truthy(summary.get("headSha")).then(|| api_map::check_runs_of(runs, status).ok()).flatten()
+}
+
+fn sha_n(k: usize) -> String {
+    format!("{k:040x}")
+}
+
+/// 원격 목록(`{저장소 ID: [{owner, repo}]}`) → 소문자 `owner/repo` → 저장소 ID(등록 순서)
+fn by_key_of(remotes: &Json) -> HashMap<String, Vec<String>> {
+    let mut by_key: HashMap<String, Vec<String>> = HashMap::new();
+    for (id, list) in remotes.entries_js_order() {
+        for slug in jarr_or_empty(list) {
+            let key = launchpad_map::slug_key(jstr(jget(slug, "owner")), jstr(jget(slug, "repo")));
+            by_key.entry(key).or_default().push(id.to_string());
+        }
+    }
+    by_key
+}
+
+/// TS 구동기(tests/goldenMaps.ts)의 `fn` 마다 같은 조립을 Rust 매퍼로 한다
+fn run_gh_case(f: &str, a: &[Json]) -> MapResult<Json> {
+    let null = Json::Null;
+    let one = |i: usize| a.get(i).unwrap_or(&null);
+    let list = |v: MapResult<Vec<Json>>| v.map(Json::Arr);
+    match f {
+        "mapPull" => api_map::map_pull(one(0)),
+        "mapSearchPull" => api_map::map_search_pull(one(0)),
+        "mapIssue" => api_map::map_issue(one(0)),
+        "getIssue" => api_map::issue_detail(one(0)),
+        "mapUser" => Ok(api_map::map_user(Some(one(0)))),
+        "aggregateReviews" => api_map::aggregate_reviews(must_arr(Some(one(0)))?, one(1).as_f64().expect("개수")).map(st),
+        "checkRunState" => Ok(st(api_map::check_run_state(field(Some(one(0)), "status"), field(Some(one(0)), "conclusion")))),
+        "commitStatusState" => Ok(st(api_map::commit_status_state(Some(one(0))))),
+        "aggregateChecks" => {
+            let states: Vec<&str> = must_arr(Some(one(0)))?.iter().map(jstr).collect();
+            Ok(st(api_map::aggregate_checks(&states)))
+        }
+        "rollupState" => Ok(st(checks_map::rollup_state(Some(one(0))))),
+        "rollupQuery" => Ok(st(&checks_map::rollup_query(one(0).as_f64().expect("n") as usize))),
+        "getPull" => {
+            let reviews = must_arr(Some(one(1)))?;
+            let summary = api_map::map_pull(one(0))?;
+            let runs = soft_checks(&summary, one(2), one(3));
+            api_map::pull_detail(one(0), reviews, runs.as_deref())
+        }
+        "listPulls" => {
+            let mut out = Vec::new();
+            for raw in must_arr(Some(one(0)))? {
+                let mut item = api_map::map_pull(raw)?;
+                let reviews = match one(1) {
+                    Json::Arr(r) => Some(r.as_slice()),
+                    _ => None,
+                };
+                let checks = soft_checks(&item, one(2), one(3));
+                api_map::enrich_list_item(raw, &mut item, reviews, checks.as_deref())?;
+                out.push(item);
+            }
+            Ok(Json::Arr(out))
+        }
+        "listPullsAnon" => list(api_map::pulls_page(one(0))),
+        "listPullsFiltered" => list(api_map::filtered_pull_items(one(0))),
+        "listIssues" => list(api_map::issue_items(one(0))),
+        "searchPullsByKey" => list(api_map::search_pulls(one(0))),
+        "getPullFiles" => list(api_map::pull_files(one(0))),
+        "getPullCommits" => list(api_map::pull_commits(one(0)).map(api_map::limit_commits)),
+        "getComments" => list(api_map::comments_page(one(0))),
+        "getFilters" => api_map::filters(one(0), one(1)),
+        "fetchCheckDetails" => list(checks_map::check_details(one(0), one(1))),
+        "listRuns" => list(checks_map::runs_page(one(0))),
+        "listJobs" => list(checks_map::jobs(one(0))),
+        "mapRun" => checks_map::map_run(one(0)),
+        "fetchCommitChecks" => {
+            let n = one(1).as_f64().expect("n") as usize;
+            let states = checks_map::rollup_states(one(0), n)?;
+            Ok(Json::Arr(states.map_or_else(Vec::new, |v| v.iter().enumerate().map(|(k, x)| Json::Arr(vec![st(&sha_n(k + 1)), st(x)])).collect())))
+        }
+        "mapAccessibleRepo" => Ok(accessible_repos::map_accessible_repo(one(0)).unwrap_or(Json::Null)),
+        "accessibleRepos" => {
+            let pages: Vec<&Json> = if a.len() == 1 && !matches!(a[0], Json::Arr(_)) { vec![&a[0]] } else { a.iter().collect() };
+            let mut repos: Vec<Json> = pages.iter().flat_map(|p| accessible_repos::accessible_page(p)).collect();
+            accessible_repos::sort_accessible(&mut repos);
+            Ok(obj(vec![("repos", Json::Arr(repos)), ("truncated", Json::Bool(false))]))
+        }
+        "slugFromRepositoryUrl" => Ok(launchpad_map::slug_from_repository_url(Some(one(0))).map_or(Json::Null, |(o, r)| obj(vec![("owner", st(&o)), ("repo", st(&r))]))),
+        "sections" => Ok(Json::Arr(launchpad_map::SECTIONS.iter().map(|d| obj(vec![("section", st(d.section)), ("kind", st(d.kind)), ("q", st(d.q))])).collect())),
+        "fetchLaunchpad" => {
+            let by_key = by_key_of(one(1));
+            let hits = |k: &str| field(Some(one(0)), k).map_or(&[][..], |v| must_arr(Some(v)).expect("배열"));
+            let sections: Vec<launchpad_map::SectionHits<'_>> = launchpad_map::SECTIONS
+                .iter()
+                .zip(["authored", "review", "issues"])
+                .map(|(d, k)| launchpad_map::SectionHits { def: *d, items: hits(k) })
+                .collect();
+            launchpad_map::merge_launchpad(&sections, &by_key).map(Json::Arr)
+        }
+        "searchPage" => {
+            let (items, incomplete) = launchpad_map::search_page(one(0))?;
+            let by_key = HashMap::from([("octo/hello".to_string(), vec!["r".to_string()])]);
+            let sections: Vec<launchpad_map::SectionHits<'_>> = launchpad_map::SECTIONS.iter().map(|d| launchpad_map::SectionHits { def: *d, items }).collect();
+            let n = launchpad_map::merge_launchpad(&sections, &by_key)?.len();
+            Ok(obj(vec![("n", Json::Num(n as f64)), ("incomplete", Json::Bool(incomplete))]))
+        }
+        other => panic!("처리기가 없는 fn: {other}"),
+    }
+}
+
+#[test]
+fn github_응답_매퍼가_ts_와_같다() {
+    let g = golden_json("ghmap.json");
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let (mut ok, mut err) = (0, 0);
+    let mut bad: Vec<String> = Vec::new();
+    for c in jarr(jget(&g, "cases"), "cases") {
+        let f = jstr(jget(c, "fn")).to_string();
+        seen.insert(f.clone());
+        let got = run_gh_case(&f, &input(c));
+        match (c.get("err").is_some(), got) {
+            (true, Err(_)) => err += 1,
+            (false, Ok(v)) if &v == jget(c, "out") => ok += 1,
+            (expect_err, got) => bad.push(format!(
+                "{f}({:.200}) → Rust {}, TS {}",
+                jarr_or_empty(jget(c, "in")).first().map_or("", jstr),
+                got.map_or_else(|_| "오류".to_string(), |v| stringify(&v)),
+                if expect_err { "오류".to_string() } else { stringify(jget(c, "out")) }
+            )),
+        }
+    }
+    assert!(bad.is_empty(), "TS 와 다른 결과 {}건, 예: {:#?}", bad.len(), &bad[..bad.len().min(12)]);
+    assert!(ok > 150 && err > 30, "확인한 사례가 적다: 정상 {ok}, 오류 {err}");
+    assert!(seen.len() >= 30, "fn 종류가 적다: {seen:?}");
+}
+
+/// 알려진 차이: 우리는 ISO 8601(시간대 있는 시각·날짜만)만 받는다 — TS 가 받는 그 외 꼴(소문자 구분자·공백·확장 연도…)은 0 이다
+const DATE_STRICTER: &[&str] = &["2026-01-01 00:00:00Z", "2026-01-01t00:00:00z", "Mon, 01 Jan 2026 00:00:00 GMT"];
+
+#[test]
+fn 날짜_해석이_date_parse_와_같다_더_엄격한_것은_목록이다() {
+    let g = golden_json("ghmap.json");
+    let mut stricter: BTreeSet<String> = BTreeSet::new();
+    let mut matched = 0;
+    for c in jarr(jget(&g, "dates"), "dates") {
+        let raw = jstr(jget(c, "in"));
+        let got = parse_date_ms(raw);
+        match (jget(c, "out"), got) {
+            (Json::Num(t), Some(g)) if *t == g => matched += 1,
+            (Json::Num(_), None) => {
+                stricter.insert(raw.to_string());
+            }
+            // 시간대마다 값이 다른 입력은 Rust 가 받지 않는다(받으면 값이 머신마다 달라진다)
+            (Json::Str(t), None) if t == "NaN" || t == "tz" => matched += 1,
+            (want, got) => panic!("Date.parse({raw:?}) → Rust {got:?}, TS {want:?}"),
+        }
+    }
+    let known: BTreeSet<String> = DATE_STRICTER.iter().map(ToString::to_string).collect();
+    assert_eq!(stricter, known, "TS 만 받는 날짜 꼴의 목록이 달라졌다");
+    assert!(matched > 120, "맞춘 날짜가 적다: {matched}");
+}
+
+#[test]
+fn iso_문자열이_to_iso_string_과_같다() {
+    let g = golden_json("ghmap.json");
+    for c in jarr(jget(&g, "iso"), "iso") {
+        let ms = match jget(c, "in") {
+            Json::Num(n) => *n,
+            Json::Str(t) if t == "-0" => -0.0,
+            other => panic!("{other:?}"),
+        };
+        let got = iso_string(ms);
+        match c.get("err") {
+            Some(_) => assert_eq!(got, None, "{ms}"),
+            None => assert_eq!(got.as_deref(), Some(jstr(jget(c, "out"))), "{ms}"),
+        }
+    }
+}
+
+/// 이상한 값이 어디에 들어와도 패닉하지 않는다(퍼즈성): 타입이 틀린 필드·null·깊은 중첩·거대 배열·제어 문자
+#[test]
+fn 매퍼는_이상한_입력에도_패닉하지_않는다() {
+    let mut nest = Json::Str("\u{0}\u{1f}\u{7f}\u{feff}😀\u{fffd}".into());
+    for _ in 0..json::MAX_DEPTH {
+        nest = Json::Arr(vec![nest]);
+    }
+    let deep_obj = (0..json::MAX_DEPTH).fold(Json::Null, |acc, _| Json::Obj(vec![("x".into(), acc)]));
+    let big: Json = Json::Arr((0..100_000).map(|i| Json::Num(f64::from(i))).collect());
+    let big_objs: Json = Json::Arr((0..20_000).map(|_| Json::Obj(vec![("number".into(), Json::Num(1.0))])).collect());
+    let weird = [
+        Json::Null,
+        Json::Bool(true),
+        Json::Num(f64::INFINITY),
+        Json::Num(-0.0),
+        Json::Num(1e308),
+        st(""),
+        st("\u{0}\u{1}\u{1f}\u{7f}\"\\</script>"),
+        st("2026-01-01T00:00:00Z\u{0}"),
+        Json::Arr(vec![]),
+        Json::Obj(vec![]),
+        nest,
+        deep_obj,
+        big,
+        big_objs,
+    ];
+    let keys = [
+        "number", "title", "state", "draft", "merged_at", "user", "labels", "assignees", "head", "base", "updated_at", "created_at", "comments", "html_url", "pull_request", "requested_reviewers",
+        "requested_teams", "submitted_at", "login", "avatar_url", "name", "color", "items", "check_runs", "statuses", "workflow_runs", "jobs", "conclusion", "status", "repository", "repository_url",
+        "owner", "pushed_at", "filename", "commit", "author", "total_count", "incomplete_results",
+    ];
+    let mut calls = 0usize;
+    for w in &weird {
+        // 값 자체, 모든 키에 그 값을 넣은 객체, 그것을 한 번 더 감싼 배열
+        let all = Json::Obj(keys.iter().map(|k| ((*k).to_string(), w.clone())).collect());
+        let wrapped = Json::Arr(vec![all.clone(), w.clone()]);
+        for v in [w, &all, &wrapped] {
+            let _ = (
+                api_map::map_pull(v),
+                api_map::map_search_pull(v),
+                api_map::map_issue(v),
+                api_map::issue_detail(v),
+                api_map::pulls_page(v),
+                api_map::filtered_pull_items(v),
+                api_map::issue_items(v),
+                api_map::search_pulls(v),
+                api_map::pull_files(v),
+                api_map::pull_commits(v),
+                api_map::comments_page(v),
+                api_map::filters(v, v),
+                api_map::check_runs_of(v, v),
+                api_map::pull_detail(v, jarr_or_empty(v), None),
+                api_map::aggregate_reviews(jarr_or_empty(v), 1.0),
+                checks_map::check_details(v, v),
+                checks_map::map_run(v),
+                checks_map::runs_page(v),
+                checks_map::jobs(v),
+                checks_map::rollup_states(v, 3),
+                accessible_repos::map_accessible_repo(v),
+                launchpad_map::search_page(v).map(|(i, c)| (i.len(), c)),
+                launchpad_map::slug_from_repository_url(Some(v)),
+                to_epoch(Some(v)),
+            );
+            fuzz_jira(v);
+            let mut repos = accessible_repos::accessible_page(v);
+            accessible_repos::sort_accessible(&mut repos);
+            let by_key = HashMap::from([("a/b".to_string(), vec!["id".to_string()])]);
+            let sections = [launchpad_map::SectionHits { def: launchpad_map::SECTIONS[0], items: jarr_or_empty(v) }];
+            let _ = launchpad_map::merge_launchpad(&sections, &by_key);
+            calls += 1;
+        }
+    }
+    assert!(calls >= 40);
+}
+
+/// Jira 매퍼에 같은 이상한 값을 먹인다(Cloud·Data Center 둘 다)
+fn fuzz_jira(v: &Json) {
+    let _ = (
+        adf::adf_to_html(v),
+        jira_map::map_summary(v),
+        jira_map::avatar_of(Some(v)),
+        jira_map::transitions(v),
+        jira_map::dev_issue_id(v),
+        jira_map::dev_instances(v, "pullrequest"),
+        jira_map::dev_info(jarr_or_empty(v), jarr_or_empty(v)),
+        jira_map::pick_date_fields(v),
+        jira_map::comment_text(Some(v)),
+        jira_map::myself_name(v),
+        jira_map::server_comments_start_at(v),
+    );
+    let dates = jira_map::DateFieldIds { start: vec!["customfield_1".into()], end: vec!["customfield_2".into()] };
+    for kind in [JiraKind::Cloud, JiraKind::Server] {
+        let _ = (
+            jira_map::issue_detail(kind, "https://x.example.net", "K-1", &dates, v),
+            jira_map::comments(kind, v),
+            jira_map::search_result(kind, v, Some("5"), 1),
+            jira_map::search_result(kind, v, None, 8),
+            jira_map::my_id(kind, v),
+            jira_map::search_users(kind, v),
+            jira_map::body_html(kind, Some(v), Some(v)),
+        );
+        let issue = jira_map::worklog_issue(v);
+        let (issues, _) = jira_map::worklog_issues(&[v]);
+        let users = vec!["a".to_string()];
+        let q = jira_map::WorklogQuery { from: "2026-01-01", to: "2026-01-02", users: &users, include_me: true };
+        let mut pairs: Vec<(&jira_map::WorklogIssue, Vec<&Json>)> = issues.iter().map(|i| (i, i.embedded.iter().collect())).collect();
+        pairs.push((&issue, jira_map::dedupe_worklogs(jarr_or_empty(v))));
+        let _ = jira_map::worklog_result(kind, &q, v, &pairs, false);
+    }
+}
+
+/// 큰 입력도 선형에 가까운 시간에 끝난다(표시 20만 개·서로 다른 PR/커밋/사용자 10만 개). 제곱 시간이면 디버그 빌드에서도 이 상한을 넘는다
+#[test]
+fn 큰_입력은_제곱_시간이_아니다() {
+    use std::time::{Duration, Instant};
+    let timed = |label: &str, f: &dyn Fn()| {
+        let t0 = Instant::now();
+        f();
+        let d = t0.elapsed();
+        eprintln!("[큰 입력] {label}: {d:?}");
+        assert!(d < Duration::from_secs(20), "{label} 이 {d:?} 걸렸다(제곱 시간 의심)");
+    };
+    let n = 100_000usize;
+    let marks = Json::Arr((0..200_000).map(|i| obj(vec![("type", st(["strong", "em", "code", "strike", "underline"][i % 5]))])).collect());
+    let big_text = obj(vec![("type", st("text")), ("text", st("x")), ("marks", marks)]);
+    timed("ADF 표시 20만 개", &|| {
+        let html = adf::adf_to_html(&adf_doc(vec![obj(vec![("type", st("paragraph")), ("content", Json::Arr(vec![big_text.clone()]))])]));
+        assert!(html.starts_with("<p>"));
+    });
+    let pulls: Vec<Json> = (0..n).map(|i| obj(vec![("name", st(&format!("p{i}"))), ("url", st(&format!("https://x/{i}"))), ("lastUpdate", Json::Num(1_700_000_000_000.0 + i as f64))])).collect();
+    let commits: Vec<Json> = (0..n).map(|i| obj(vec![("id", st(&format!("{:x}", 0x100_0000 + i))), ("message", st("m")), ("authorTimestamp", Json::Num(1_700_000_000_000.0 + i as f64))])).collect();
+    let pull_detail = [obj(vec![("pullRequests", Json::Arr(pulls))])];
+    let repo_detail = [obj(vec![("repositories", Json::Arr(vec![obj(vec![("name", st("r")), ("commits", Json::Arr(commits))])]))])];
+    timed("dev-status PR·커밋 각 10만", &|| {
+        let out = jira_map::dev_info(&pull_detail, &repo_detail).unwrap();
+        assert_eq!(jarr_or_empty(jget(&out, "pulls")).len(), 30);
+    });
+    let reviews: Vec<Json> = (0..n)
+        .map(|i| obj(vec![("user", obj(vec![("login", st(&format!("u{i}")))])), ("state", st(if i % 3 == 0 { "APPROVED" } else { "COMMENTED" })), ("submitted_at", st("2026-01-01T00:00:00Z"))]))
+        .collect();
+    timed("리뷰 10만(서로 다른 사용자)", &|| {
+        assert_eq!(api_map::aggregate_reviews(&reviews, 0.0), Ok("approved"));
+    });
+    let issues: Vec<Json> = (0..n)
+        .map(|i| obj(vec![("number", Json::Num(i as f64)), ("title", st("t")), ("repository_url", st("https://api.github.com/repos/o/r")), ("updated_at", st("2026-01-01T00:00:00Z"))]))
+        .collect();
+    timed("Launchpad 10만", &|| {
+        let by_key = HashMap::from([("o/r".to_string(), vec!["id".to_string()])]);
+        let sections = [launchpad_map::SectionHits { def: launchpad_map::SECTIONS[0], items: &issues }];
+        assert_eq!(launchpad_map::merge_launchpad(&sections, &by_key).unwrap().len(), n);
+    });
+    let fields: Vec<Json> = (0..n).map(|i| obj(vec![("id", st(&format!("customfield_{i}"))), ("name", st("Start date"))])).collect();
+    timed("날짜 필드 10만", &|| {
+        assert_eq!(jira_map::pick_date_fields(&Json::Arr(fields.clone())).start.len(), 8);
+    });
+    let worklogs: Vec<Json> = (0..n).map(|i| obj(vec![("id", st(&i.to_string())), ("author", obj(vec![("accountId", st("a"))])), ("started", st("2026-01-01T00:00:00.000+0000"))])).collect();
+    timed("워크로그 10만", &|| {
+        let issue = jira_map::WorklogIssue { key: "K-1".into(), summary: "s".into(), issue_type: "t".into(), embedded: vec![], complete: true };
+        let users = vec![];
+        let q = jira_map::WorklogQuery { from: "2026-01-01", to: "2026-01-02", users: &users, include_me: false };
+        let me = obj(vec![("id", st("a")), ("name", st("a"))]);
+        let pairs = vec![(&issue, jira_map::dedupe_worklogs(&worklogs))];
+        let out = jira_map::worklog_result(JiraKind::Cloud, &q, &me, &pairs, false).unwrap();
+        // 2만 건 상한(WORKLOG_MAX)에서 자르고 truncated 로 알린다
+        assert_eq!(jarr_or_empty(jget(&out, "worklogs")).len(), 20_000);
+        assert_eq!(jget(&out, "truncated"), &Json::Bool(true));
+    });
+    let repos: Vec<Json> = (0..n).map(|i| obj(vec![("name", st("r")), ("owner", obj(vec![("login", st("o"))])), ("html_url", st("https://example.com/o/r")), ("pushed_at", st(&format!("2026-01-01T00:00:{:02}Z", i % 60)))])).collect();
+    timed("접근 가능한 저장소 10만", &|| {
+        let mut v = accessible_repos::accessible_page(&Json::Arr(repos.clone()));
+        accessible_repos::sort_accessible(&mut v);
+        assert_eq!(v.len(), n);
+    });
+}
+
+#[test]
+fn 날짜_문자열의_제어_문자와_거대_입력도_패닉하지_않는다() {
+    for t in ["\u{0}", "2026\u{0}", "２０２６-01-01", &"9".repeat(100_000), &format!("2026-01-01T00:00:00.{}Z", "9".repeat(50_000)), "2026-01-01T00:00:00+\u{0}", "-", "+", "T", "2026-01-01T"] {
+        let _ = parse_date_ms(t);
+    }
+    assert_eq!(parse_date_ms("2026-01-01T00:00:00.9999999999Z"), parse_date_ms("2026-01-01T00:00:00.999Z"));
+}
+
+#[test]
+fn 차이_check_runs_가_문자열이면_rust_는_오류다() {
+    // TS 는 `for (const run of "abc")` 가 글자마다 돌아 항목이 생긴다. 응답 모양이 아니라 Rust 는 오류로 본다
+    let runs = json::parse(r#"{"check_runs":"abc"}"#).unwrap();
+    let status = json::parse("{}").unwrap();
+    assert!(api_map::check_runs_of(&runs, &status).is_err());
+}
+
+fn kind_of(j: &Json) -> JiraKind {
+    match jstr(j) {
+        "cloud" => JiraKind::Cloud,
+        "server" => JiraKind::Server,
+        other => panic!("종류: {other}"),
+    }
+}
+
+const SITE: &str = "https://x.example.net";
+
+/// `Json` 로 쓴 일반 문자열 값
+fn jnum(j: &Json) -> f64 {
+    j.as_f64().unwrap_or_else(|| panic!("숫자가 아니다: {j:?}"))
+}
+
+/// 입력 JSON 대신 코드로 만든 ADF(JSON 깊이 상한 때문에 텍스트로 쓸 수 없는 크기)
+fn adf_text_para(text: &str) -> Json {
+    obj(vec![("type", st("paragraph")), ("content", Json::Arr(vec![obj(vec![("type", st("text")), ("text", st(text))])]))])
+}
+
+fn adf_doc(content: Vec<Json>) -> Json {
+    obj(vec![("type", st("doc")), ("content", Json::Arr(content))])
+}
+
+/// UTF-16 마지막 `n` 단위(짝 없는 서로게이트는 U+FFFD — `toWellFormed`)
+fn tail16(s: &str, n: usize) -> String {
+    let u: Vec<u16> = s.encode_utf16().collect();
+    String::from_utf16_lossy(&u[u.len().saturating_sub(n)..])
+}
+
+fn head16(s: &str, n: usize) -> String {
+    let u: Vec<u16> = s.encode_utf16().take(n).collect();
+    String::from_utf16_lossy(&u)
+}
+
+fn html_stats(html: &str) -> Json {
+    obj(vec![("len", Json::Num(html.encode_utf16().count() as f64)), ("head", st(&head16(html, 20))), ("tail", st(&tail16(html, 20)))])
+}
+
+fn dates_of(j: &Json) -> jira_map::DateFieldIds {
+    let list = |k: &str| jarr_or_empty(jget(j, k)).iter().map(|t| jstr(t).to_string()).collect();
+    jira_map::DateFieldIds { start: list("start"), end: list("end") }
+}
+
+fn run_jira_case(f: &str, a: &[Json]) -> MapResult<Json> {
+    let null = Json::Null;
+    let one = |i: usize| a.get(i).unwrap_or(&null);
+    let list = |v: Vec<Json>| Ok(Json::Arr(v));
+    match f {
+        "adfToHtml" => Ok(st(&adf::adf_to_html(one(0)))),
+        "adfDeep" => {
+            let mut inner = adf_text_para("끝");
+            for _ in 0..jnum(one(0)) as usize {
+                inner = obj(vec![("type", st("blockquote")), ("content", Json::Arr(vec![inner]))]);
+            }
+            let html = adf::adf_to_html(&adf_doc(vec![inner]));
+            Ok(obj(vec![("len", Json::Num(html.encode_utf16().count() as f64)), ("bq", Json::Num(html.matches("<blockquote>").count() as f64)), ("text", Json::Bool(html.contains('끝')))]))
+        }
+        "adfBig" => {
+            let paras = (0..jnum(one(0)) as usize).map(|_| adf_text_para(&"a".repeat(jnum(one(1)) as usize))).collect();
+            Ok(html_stats(&adf::adf_to_html(&adf_doc(paras))))
+        }
+        "adfBigEmoji" => Ok(html_stats(&adf::adf_to_html(&adf_doc(vec![adf_text_para(&"😀".repeat(jnum(one(0)) as usize))])))),
+        "avatarOf" => Ok(st(&jira_map::avatar_of(Some(one(0))))),
+        "mapSummary" => Ok(jira_map::map_summary(one(0))),
+        "myself" => Ok(st(&jira_map::myself_name(one(1)))),
+        "getMyId" => jira_map::my_id(kind_of(one(0)), one(1)),
+        "searchUsers" => list(jira_map::search_users(kind_of(one(0)), one(1))),
+        "getTransitions" => list(jira_map::transitions(one(1))),
+        "getIssue" => Ok(jira_map::issue_detail(kind_of(one(0)), SITE, jstr(one(1)), &dates_of(one(2)), one(3))),
+        "getComments" => {
+            let kind = kind_of(one(0));
+            let first = one(1);
+            let last = match (kind, jira_map::server_comments_start_at(first)) {
+                (JiraKind::Server, Some(_)) => a.get(2).unwrap_or(first),
+                _ => first,
+            };
+            list(jira_map::comments(kind, last))
+        }
+        "getDevInfo" => {
+            if jira_map::dev_issue_id(one(1)).is_none() {
+                return Ok(jira_map::no_dev_info());
+            }
+            let details = |part: &str, data: &Json| -> Vec<Json> {
+                let n = jira_map::dev_instances(one(2), part).len();
+                (0..n).flat_map(|_| jarr_or_empty(field(Some(data), "detail").unwrap_or(&Json::Null)).to_vec()).collect()
+            };
+            jira_map::dev_info(&details("pullrequest", one(3)), &details("repository", one(4)))
+        }
+        "search" => {
+            let cursor = match one(2) {
+                Json::Str(t) => Some(t.as_str()),
+                _ => None,
+            };
+            jira_map::search_result(kind_of(one(0)), one(1), cursor, jnum(one(3)) as u32)
+        }
+        "pickDateFields" => Ok(jira_map::pick_date_fields(one(0)).to_json()),
+        "getWorklogs" => {
+            let kind = kind_of(one(0));
+            let q = one(1);
+            let users: Vec<String> = jarr_or_empty(jget(q, "users")).iter().map(|t| jstr(t).to_string()).collect();
+            let query = jira_map::WorklogQuery { from: jstr(jget(q, "from")), to: jstr(jget(q, "to")), users: &users, include_me: matches!(q.get("includeMe"), Some(Json::Bool(true))) };
+            let (issues, truncated) = jira_map::worklog_issues(&[one(3)]);
+            let fetched = one(4);
+            let mut pairs: Vec<(&jira_map::WorklogIssue, Vec<&Json>)> = Vec::new();
+            for issue in &issues {
+                let entries: Vec<&Json> = if issue.complete {
+                    issue.embedded.iter().collect()
+                } else {
+                    // 이슈별로 다시 받은 응답(없으면 TS 는 그 경로의 요청 오류를 던진다)
+                    let hit = fetched.get(&issue.key).ok_or(MapError)?;
+                    jira_map::dedupe_worklogs(jarr_or_empty(jget(hit, "worklogs")))
+                };
+                pairs.push((issue, entries));
+            }
+            jira_map::worklog_result(kind, &query, one(2), &pairs, truncated)
+        }
+        other => panic!("처리기가 없는 fn: {other}"),
+    }
+}
+
+#[test]
+fn jira_응답_매퍼가_ts_와_같다() {
+    let g = golden_json("jiramap.json");
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let (mut ok, mut err) = (0, 0);
+    let mut bad: Vec<String> = Vec::new();
+    for c in jarr(jget(&g, "cases"), "cases") {
+        let f = jstr(jget(c, "fn")).to_string();
+        seen.insert(f.clone());
+        let got = run_jira_case(&f, &input(c));
+        match (c.get("err").is_some(), got) {
+            (true, Err(_)) => err += 1,
+            (false, Ok(v)) if &v == jget(c, "out") => ok += 1,
+            (expect_err, got) => bad.push(format!(
+                "{f}({:.300}) → Rust {:.600}, TS {:.600}",
+                jarr_or_empty(jget(c, "in")).iter().map(|t| jstr(t).to_string()).collect::<Vec<_>>().join(" , "),
+                got.map_or_else(|_| "오류".to_string(), |v| stringify(&v)),
+                if expect_err { "오류".to_string() } else { stringify(jget(c, "out")) }
+            )),
+        }
+    }
+    assert!(bad.is_empty(), "TS 와 다른 결과 {}건, 예: {:#?}", bad.len(), &bad[..bad.len().min(8)]);
+    assert!(ok > 150 && err > 10, "확인한 사례가 적다: 정상 {ok}, 오류 {err}");
+    assert!(seen.len() >= 15, "fn 종류가 적다: {seen:?}");
+}
+
+/// 렌더러로 가는 HTML 의 안전성: 어떤 문자열 자리에 공격 문자열을 넣어도 태그는 고정 목록뿐이고 `href` 는 http(s) 뿐이며 이스케이프하지 않은 `<`·따옴표가 속성 안에 없다
+#[test]
+fn adf_출력은_허용_태그와_http_링크뿐이다() {
+    let attack = ["<script>alert(1)</script>", "\"><img src=x onerror=alert(1)>", "' onmouseover='x", "javascript:alert(1)", "https://x.example/\"><script>", "&lt;&amp;", "\u{0}</p><iframe>"];
+    let allowed = ["p", "br", "strong", "em", "code", "s", "u", "sub", "sup", "a", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "pre", "hr", "table", "tbody", "tr", "th", "td", "details", "summary", "mark"];
+    for atk in attack {
+        let a = st(atk);
+        let doc = adf_doc(vec![
+            obj(vec![("type", st("heading")), ("attrs", obj(vec![("level", a.clone())])), ("content", Json::Arr(vec![obj(vec![("type", st("text")), ("text", a.clone()), ("marks", Json::Arr(vec![obj(vec![("type", st("link")), ("attrs", obj(vec![("href", a.clone())]))]), obj(vec![("type", a.clone())])]))])]))]),
+            obj(vec![("type", st("paragraph")), ("content", Json::Arr(vec![
+                obj(vec![("type", st("mention")), ("attrs", obj(vec![("text", a.clone())]))]),
+                obj(vec![("type", st("emoji")), ("attrs", obj(vec![("text", a.clone()), ("shortName", a.clone())]))]),
+                obj(vec![("type", st("status")), ("attrs", obj(vec![("text", a.clone())]))]),
+                obj(vec![("type", st("inlineCard")), ("attrs", obj(vec![("url", a.clone())]))]),
+                obj(vec![("type", st("date")), ("attrs", obj(vec![("timestamp", a.clone())]))]),
+            ]))]),
+            obj(vec![("type", st("expand")), ("attrs", obj(vec![("title", a.clone())])), ("content", Json::Arr(vec![]))]),
+            obj(vec![("type", st("codeBlock")), ("content", Json::Arr(vec![obj(vec![("text", a.clone())])]))]),
+            obj(vec![("type", st("orderedList")), ("attrs", obj(vec![("order", a.clone())])), ("content", Json::Arr(vec![]))]),
+        ]);
+        let html = adf::adf_to_html(&doc);
+        assert!(!html.contains("<script") && !html.contains("<img") && !html.contains("<iframe"), "{atk}: {html}");
+        let mut rest = html.as_str();
+        while let Some(i) = rest.find('<') {
+            let tag = &rest[i + 1..];
+            let end = tag.find('>').unwrap_or_else(|| panic!("닫히지 않은 태그: {html}"));
+            let inner = &tag[..end];
+            let name = inner.trim_start_matches('/').split([' ', '/']).next().unwrap_or("");
+            assert!(allowed.contains(&name), "허용 밖 태그 {name}: {html}");
+            if let Some(h) = inner.strip_prefix("a href=\"") {
+                let v = h.strip_suffix('"').unwrap_or_else(|| panic!("href 가 닫히지 않았다: {inner}"));
+                assert!(v.starts_with("http://") || v.starts_with("https://"), "http(s) 가 아닌 링크: {v}");
+                assert!(!v.contains(['<', '>', '"', '\'']), "href 에 이스케이프하지 않은 문자: {v}");
+            } else {
+                assert!(!inner.contains(' ') || name == "ol", "속성이 있는 태그: {inner}");
+            }
+            rest = &tag[end + 1..];
+        }
+    }
+}
+
+#[test]
+fn adf_깊이_상한_50_과_출력_상한은_코드로_만든_입력에서도_지킨다() {
+    // JSON 텍스트로는 깊이 64 를 못 넘지만 코드로 만든 값은 넘을 수 있다 — 60 겹이어도 50 에서 멈춘다
+    let mut inner = adf_text_para("끝");
+    for _ in 0..60 {
+        inner = obj(vec![("type", st("blockquote")), ("content", Json::Arr(vec![inner]))]);
+    }
+    let html = adf::adf_to_html(&adf_doc(vec![inner]));
+    assert_eq!(html.matches("<blockquote>").count(), 50);
+    assert!(!html.contains('끝'));
+}
+
+#[test]
+fn 차이_시간대_없는_워크로그_시각은_범위_밖으로_본다() {
+    let me = json::parse(r#"{"id":"a","name":"a"}"#).unwrap();
+    let issue = json::parse(r#"{"key":"K-1","fields":{"summary":"s","issuetype":{"name":"t"},"worklog":{"worklogs":[{"id":"1","author":{"accountId":"a"},"started":"2026-01-11T00:00:00"},{"id":"2","author":{"accountId":"a"},"started":"2026-01-11T00:00:00Z"}]}}}"#).unwrap();
+    let (issues, _) = jira_map::worklog_issues(&[&json::parse(&format!(r#"{{"issues":[{}]}}"#, stringify(&issue))).unwrap()]);
+    let users: Vec<String> = vec![];
+    let q = jira_map::WorklogQuery { from: "2026-01-10", to: "2026-01-12", users: &users, include_me: false };
+    let pairs: Vec<(&jira_map::WorklogIssue, Vec<&Json>)> = issues.iter().map(|i| (i, i.embedded.iter().collect())).collect();
+    let out = jira_map::worklog_result(JiraKind::Cloud, &q, &me, &pairs, false).unwrap();
+    // TS 는 로컬 시간으로 풀어 첫 항목도 받는다(시간대마다 범위 경계가 달라질 뿐 이 날짜는 항상 안이다). Rust 는 UTC 표기가 있는 것만 받는다
+    assert_eq!(jarr_or_empty(jget(&out, "worklogs")).len(), 1);
+}
+
+#[test]
+fn 차이_dev_status_의_숫자_시각이_범위_밖이면_ts_처럼_오류다() {
+    let d = json::parse(r#"{"pullRequests":[{"name":"p","url":"https://x/1","lastUpdate":1e300}]}"#).unwrap();
+    assert!(jira_map::dev_info(&[d], &[]).is_err());
 }
 
 // ── 대응표 ────────────────────────────────────────────────────────────────

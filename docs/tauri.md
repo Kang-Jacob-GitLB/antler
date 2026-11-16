@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든, 앱에 연결 안 됨) 완료. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든) 완료, 둘 다 앱에 연결 안 됨. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -435,7 +435,7 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 - **HTTP**: reqwest 0.13(`default-features=false`, `native-tls`), 클라이언트 생성은 한 곳(`net/http.rs`)에 모으고 `Client::new` 등은 clippy 로 막는다. `https_only`·`no_proxy`·15초·UA `Antler`,
   Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
   `reqwest::Error` 의 Display 는 쓰지 않는다. 비밀은 `SecretString`(Display·Serialize 없음, Debug `***`)이고 오류 문구는 마지막에 `redact_secrets` 를 거친다.
-- **PR 순서**: 1 순수 로직·골든(이 PR) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf) → 3 HTTP 코어·두 클라이언트(루프백 목 서버) → 4 SecretStore(키링·메모리) → 5 Jira 서비스 →
+- **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버) → 4 SecretStore(키링·메모리) → 5 Jira 서비스 →
   6 Jira 연결(채널·`openExternal`) → 7 GitHub 서비스 → 8 gh CLI → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
 
 ### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
@@ -481,11 +481,54 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 - Jira `httpError` 는 코드 외에 문구까지 옮겼다(골든이 글자 단위로 비교한다). 토큰이 든 값(`authHeader` 결과·PAT·Jira 토큰)은 `SecretString` 으로 돌려준다.
 
 **대응표**(`tests/golden/net/test-map.json`): 대상 테스트 15개(`avatars`·`ghAccessibleRepos`·`ghApi`·`ghChecks`·`ghClient`·`ghCliImport`·`ghDevice`·`ghService`·`jiraAdf`·`jiraAvatar`·`jiraClient`·`jiraHardening`·`jiraService`·`launchpadQuery`·`launchpadService`)의
-모든 `it`(271개)이 `net.rs::<테스트>`, `N/A: PR n`(뒤 PR 이 채운다) 또는 `N/A: 사유` 다. **기준**: TS `it` 이 순수 함수(검증·`ghEnv`·`authHeader`·`parseRetryAfter`)를 **직접** 부를 때만 `net.rs::` 이고(25개 → 테스트 5개),
-client·service·DeviceFlow 를 가짜 서버로 구동하는 `it` 은 Rust 가 순수 판정만 옮겼어도 `N/A: PR n`(그 계층을 옮기는 PR 이 실제 테스트로 바꾼다)이다. 지금 `N/A: PR n` 은 241개(2→72, 3→41, 4→5, 5→49, 7→56, 8→18),
-`N/A: 사유` 는 5개(ConfigStore 는 사이드카에 남는다). `net.rs` 의 나머지 테스트(요청 URL·사진 홉·Device Flow·오류 분류 등)는 표에 묶이지 않은 추가 패리티 검사다.
+모든 `it`(271개)이 `net.rs::<테스트>`, `N/A: PR n`(뒤 PR 이 채운다) 또는 `N/A: 사유` 다. **기준**: TS `it` 이 순수 함수(검증·`ghEnv`·`authHeader`·`parseRetryAfter`·매퍼)를 **직접** 부를 때만 `net.rs::` 이고,
+client·service·DeviceFlow 를 가짜 서버로 구동하는 `it` 은 Rust 가 순수 판정만 옮겼어도 `N/A: PR n`(그 계층을 옮기는 PR 이 실제 테스트로 바꾼다)이다. PR 2 이후 `net.rs::` 는 46개(테스트 10개),
+`N/A: PR n` 은 211개(3→41, 4→5, 5→52, 7→95, 8→18), `N/A: 사유` 는 14개(ConfigStore·renderer 의 `sanitizeHtml`·`extractIssueKeys`·`remoteUrl` 은 Rust 로 옮기지 않고, getter 예외 대체 경로는 JSON 값으로 도달할 수 없다).
+`net.rs` 의 나머지 테스트(요청 URL·사진 홉·Device Flow·오류 분류 등)는 표에 묶이지 않은 추가 패리티 검사다.
+PR 2 가 `N/A: PR 2`(72개)를 채웠다 — 매퍼를 직접 부르는 `it` 21개는 `net.rs::`, 가짜 `GitHubClient`/Jira 서버로 쪽 읽기·보강·캐시를 도는 `it` 은 그 계층의 PR(GitHub 서비스 7, Jira 서비스 5)로 옮겼다.
 vitest 가 누락·낡은 항목·존재하지 않는 Rust 테스트를 막는다(`N/A: PR [2-9]` 형식은 따로 허용). 계획에는 "15파일 ~268 it" 만 있고 목록이 없어, `src/main/{github,jira}` 를 import 하는 테스트 중 GitHub 원격 URL 해석(`ghRemote`)·`launchpadMerge`(병합 로직)를 뺀 15개로 골랐다(it 271개).
 파일별 PR 번호도 추정이다. 목록이 다르면 `TARGET_TESTS`(`tests/goldenNet.test.ts`)와 표를 고친다.
+
+### PR 2 — 응답 매퍼와 골든(앱에 연결하지 않는다)
+
+API 응답 JSON → 공유 타입(IPC 반환 값)으로 바꾸는 **순수 함수**만 옮겼다. 입력은 `net/json.rs` 의 `Json`(응답 원문을 자체 해석기로 읽은 값), 출력도 `Json` 이라 TS 와 같은 키 순서로 직렬화된다(`js_value::stringify`).
+요청·쪽 읽기·재시도·캐시·`Date.now()` 는 뒤 PR(서비스 계층)의 몫이다. `src/main` 은 바꾸지 않았다(골든 구동기 `tests/goldenMaps.ts` 가 가짜 client 로 실제 TS 함수를 돌린다).
+
+| 모듈 | 원본(TS) | 내용 |
+|---|---|---|
+| `net/js_date.rs` | — | `Date.parse`(ISO 8601 만)·`toISOString`·`toEpoch`. 일(day)이 달력을 넘으면 V8 처럼 다음 달로 밀리고, 확장 연도 `±YYYYYY`·`+0900` 꼴 오프셋을 받는다 |
+| `net/js_value.rs` | — | `MapError`(TS 라면 `TypeError`), `??`·truthiness·`Number()`·`encodeURIComponent` 헬퍼, `JSON.stringify` 꼴 직렬화 |
+| `github/api_map.rs` | `api.ts` | `mapPull`·`mapSearchPull`·`mapIssue`·`mapUser`, 리뷰·체크 집계, `getPull` 상세 조립, 파일·커밋·댓글·필터·이슈 목록 변환, 목록 보강 |
+| `github/checks_map.rs` | `checks.ts` | `rollupState`·`rollupQuery`·일괄 조회 응답 해석, 체크 상세·워크플로 실행·잡 변환 |
+| `github/launchpad_map.rs` | `launchpad.ts` | 섹션 검색어, `slugFromRepositoryUrl`(엄격한 `decodeURIComponent`), 검색 한 쪽 해석, 항목 변환·병합(중복 제거·최신순) |
+| `github/accessible_repos.rs` | `accessibleRepos.ts` | `mapAccessibleRepo`·쪽 변환·`pushedAt` 정렬 |
+| `jira/adf.rs` | `adf.ts` | ADF → HTML(깊이 50·출력 1,000,000 UTF-16 단위 상한) |
+| `jira/api_map.rs` | `api.ts` | `avatarOf`·`mapSummary`·`getIssue`·전환·댓글(Cloud/Data Center)·개발 정보(dev-status)·검색 결과·`getMyId`·사용자 검색·`pickDateFields`·워크로그 조립 |
+
+**골든**: `tests/fixtures/mapCases.ts`(응답 원문 표본 — `ghApi`·`ghChecks`·`ghAccessibleRepos`·`jiraAdf`·`jiraHardening`·`jiraService` 의 픽스처와 경계 사례) → `tests/goldenMaps.ts` 가 TS 로 `tests/golden/net/{ghmap,jiramap}.json` 을 만든다
+(`UPDATE_GOLDEN=1 npx vitest run tests/goldenNet.test.ts`). `src-tauri/tests/net.rs` 가 `Json`(키 순서 보존)으로 읽어 **순서까지 같은지** 비교한다 — `github_응답_매퍼가_ts_와_같다`(318건)·`jira_응답_매퍼가_ts_와_같다`(260건),
+날짜는 `Date.parse` 격자(172개)·`toISOString` 대조. TS 가 던진 사례(`{"err":true}`)는 Rust 도 `MapError` 여야 한다. 시간대에 따라 달라지는 날짜는 `"tz"` 로 적고 Rust 는 받지 않아야 한다(`TZ=UTC`·`America/New_York`·`Asia/Kolkata` 모두 통과 확인).
+퍼즈성 사례(타입이 틀린 필드·null·깊이 64 중첩·10만 개 배열·제어 문자·모든 키에 같은 값)는 `매퍼는_이상한_입력에도_패닉하지_않는다` 가 모든 매퍼에 먹인다.
+**HTML 안전**: `adf_출력은_허용_태그와_http_링크뿐이다` 가 모든 문자열 자리에 공격 문자열을 넣어도 태그가 고정 목록 안이고 `href` 가 http(s) 뿐이며 속성에 이스케이프하지 않은 문자가 없음을 본다.
+TS 의 허용 태그·속성을 넓히지 않았다(링크 주소는 PR 1 의 `parse_url` 로 해석해 오히려 더 엄격하다).
+
+**TS 와 다르게 동작하는 곳**(대부분 Rust 가 더 엄격하다. 각각 목록 단언이나 `차이_…` 테스트가 고정한다):
+
+- **`Date.parse`**: ISO 8601 만 받는다(`YYYY`·`YYYY-MM`·`YYYY-MM-DD`·`THH:MM[:SS[.fff]]` + `Z`/`±HH:MM`/`±HHMM`, 확장 연도). TS 가 받는 그 밖의 꼴은 Rust 가 `None` → 날짜 필드 0·`''`·"범위 밖"이다:
+  시간대 없는 시각(TS 는 로컬 시간이라 머신마다 값이 다르다)·공백 구분(`2026-01-01 00:00:00Z`)·소문자 `t`/`z`·RFC 2822(`Mon, 01 Jan 2026 …`)·`2026-1-1`. **다른 값**: 문자열이 아닌 입력(숫자 `12345`)을 TS 는 문자열로 바꿔 해석하지만(연도 12345) Rust 는 0 이다.
+  영향: GitHub 의 `updated_at`·`created_at`(항상 `Z`)·Jira 의 `started`(`+0900` 꼴)는 같고, dev-status 의 시각 문자열이 시간대 없는 꼴이면 Rust 는 `''`·정렬 0 이다.
+- **배열 자리에 문자열**: TS 는 `for…of`·스프레드가 문자열을 글자 단위로 돌아 항목을 만든다(`check_runs: "abc"`, 검색 `items: "x"`, 커밋 목록 `"x"`). Rust 는 `MapError` 다. `.map` 을 부르는 자리(`labels: "x"`)는 TS 도 던진다.
+- **타입이 틀린 스칼라**(`title: 5`)는 TS 처럼 그대로 흘린다. `.toUpperCase()` 를 부르는 자리(리뷰 `state`)에 문자열이 아닌 값이 오면 TS·Rust 모두 오류다.
+- **짝 없는 서로게이트**는 U+FFFD 다(PR 1 과 같다). ADF 출력을 UTF-16 1,000,000 단위에서 자를 때 쌍이 쪼개져도 U+FFFD 다(TS 는 반쪽을 그대로 둔다 — 골든은 `toWellFormed` 한 꼬리를 비교한다).
+- **ADF**: JSON 깊이 상한(64)이 있어 텍스트로 읽은 ADF 는 약 30겹까지다. 깊이 50 상한은 코드로 만든 값으로 시험한다. 예외 시 평문 한 문단으로 대체하는 TS 경로는 옮기지 않았다(JSON 값만으로는 던질 수 없다).
+  `safeHref` 는 `new URL` 대신 `parse_url`(IDN·`blob:` 를 더 엄격하게 거른다)을 쓴다. `Number(attrs.x)` 는 `null`·불리언·문자열·배열(`[2]`)·객체까지 JS 와 같게 바꾼다.
+- **`getPull`/`listPulls` 조립**: 체크 변환이 던지면 TS 는 `soft()` 로 삼켜 `checks` 키를 빼고, 리뷰 목록이 배열이 아니면 `listPulls` 는 `review` 키를 뺀다. 조립은 서비스 계층이 하므로 매퍼는 `Result` 를 그대로 돌려주고, 골든 구동(`run_gh_case`)이 같은 규칙을 적용한다.
+- **리뷰 판정의 사용자 키**는 `login` 값 그대로다(숫자 5 와 문자열 `"5"` 는 다른 사용자). `toUpperCase` 는 Rust 표준 라이브러리의 유니코드 표다(Node 와 새 문자만 다를 수 있다).
+- **오류 문구**: TS 가 던지는 `Error`(`잘못된 페이지 표지입니다`·`Jira 계정 정보를 읽을 수 없습니다`)는 `MapError` 하나로 합쳤고 골든도 "던졌다"만 비교한다(PR 1 의 `httpError` 와 달리 문구를 비교하지 않는다) — 사용자에게 보이는 문구는 서비스 계층(Jira 5)이 정한다.
+- **그대로 흘리는 객체 값**: TS 는 `title`·`number` 같은 필드가 객체여도 그대로 돌려주고 Rust 도 같다. 단 JS 객체의 정수형 키 선행 정렬은 Rust 의 `Json::Obj`(삽입 순서)가 출력 시점에 하지 않는다(필드가 객체일 때만 보이는 차이).
+  워크로그가 2만 건을 넘으면 TS 는 이슈 병렬 수집의 도착 순서에 따라 자르는 지점이 달라질 수 있고, Rust 는 이슈 순서대로 앞에서 자른다(`truncated` 는 같다).
+- 퍼즈·성능: Jira 매퍼도 모두 이상한 입력 시험에 들어 있고(`fuzz_jira`), 표시 20만 개·PR/커밋/리뷰어/워크로그 각 10만 개 입력이 디버그 빌드에서 수 초 안에 끝나는지 `큰_입력은_제곱_시간이_아니다` 가 본다(ADF 표시 감싸기·dev-status 중복 제거·리뷰 판정은 제곱 시간이 되기 쉬워 색인·누적으로 구현했다).
+- Jira `search` 의 Data Center 쪽 표지는 `Number(cursor)` 를 `js_number` 로 해석한다(`0x10`·`1e1`·` 5 ` 도 TS 와 같고, 정수·0..=200 이 아니면 오류).
 
 ## Phase 0 에서 확인한 것
 
