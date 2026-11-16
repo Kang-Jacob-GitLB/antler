@@ -135,9 +135,53 @@ impl ConfirmBox {
 
 const CONFIRM_FOOTER: &str = "직접 만든 설정이거나 신뢰하는 저장소일 때만 허용하세요. \"이번만\"은 이번 실행 동안, \"항상\"은 앱을 다시 켜도 적용되며, 어느 쪽이든 위 키·값이 바뀌면 다시 묻습니다. 값이 가리키는 스크립트·파일의 내용이 바뀌는 것은 확인하지 않습니다.";
 
-/// TS `fetchConfirmOptions`: 알 수 없는 저장소 설정이 있을 때 수동 fetch 전에 띄우는 확인 창. 앞 값은 `tooMany`(전부 보여 줄 수 없어 허용을 묻지 않고 닫기만 있는 차단 창).
+/// 확인 창에서 사용자가 내린 결정
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    /// 이번 실행 동안만 허용
+    Once,
+    /// 같은 설정이 유지되는 한 이 저장소에서 계속 허용(설정 파일에 지문을 남긴다)
+    Always,
+    Deny,
+}
+
+/// TS `fetchConfirmOptions` 의 결과. 어떤 창인지와 그 창의 응답 해석을 한 타입에 묶는다 — 응답 번호를 호출자가 따로 해석하면
+/// 차단 창("닫기" 응답 0)이 허용 응답(0 = 이번만)으로 읽힐 수 있다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfirmPlan {
+    /// 항목이 너무 많아 전부 보여 줄 수 없다 — 허용을 묻지 않고 닫기만 있는 창. 응답이 무엇이든 거부다
+    Blocked(ConfirmBox),
+    /// 허용 여부를 묻는 창(이번만 · 항상 · 취소)
+    Ask(ConfirmBox),
+}
+
+impl ConfirmPlan {
+    pub fn confirm_box(&self) -> &ConfirmBox {
+        match self {
+            ConfirmPlan::Blocked(b) | ConfirmPlan::Ask(b) => b,
+        }
+    }
+
+    /// TS `fetchConfirmOptions` 의 `tooMany`
+    pub fn too_many(&self) -> bool {
+        matches!(self, ConfirmPlan::Blocked(_))
+    }
+
+    /// 눌린 버튼 번호(대화상자가 실패했으면 None)를 결정으로 바꾼다. `handlers.ts` 의 `confirmDangerousConfig` 와 같다:
+    /// 차단 창은 무엇이든 거부, 확인 창은 0 → 이번만, 1 → 항상, 그 밖(취소·닫기·실패)은 거부
+    pub fn decide(&self, response: Option<i64>) -> Decision {
+        match (self, response) {
+            (ConfirmPlan::Ask(_), Some(0)) => Decision::Once,
+            (ConfirmPlan::Ask(_), Some(1)) => Decision::Always,
+            _ => Decision::Deny,
+        }
+    }
+}
+
+/// TS `fetchConfirmOptions`: 알 수 없는 저장소 설정이 있을 때 수동 fetch 전에 띄우는 확인 창. 항목이 [`MAX_CONFIRM_ITEMS`] 를 넘으면 전부 보여 줄 수 없어
+/// 허용을 묻지 않고 닫기만 있는 차단 창([`ConfirmPlan::Blocked`])이다.
 /// 기본 선택은 어느 쪽이든 취소(닫기)다. 저장소가 정한 문자열(이름·키·값)은 모두 [`display`] 로 드러낸다
-pub fn fetch_confirm_box(name: &str, items: &[(&str, &str)]) -> (bool, ConfirmBox) {
+pub fn fetch_confirm_plan(name: &str, items: &[(&str, &str)]) -> ConfirmPlan {
     let title = format!("{} 저장소의 설정에 fetch 때 외부 프로그램을 실행하거나 연결을 가로챌 수 있는 항목이 있습니다.", display(name));
     let shown = |list: &[(&str, &str)]| list.iter().map(|(k, v)| format_item(k, v)).collect::<Vec<_>>().join("\n");
     if items.len() > MAX_CONFIRM_ITEMS {
@@ -147,18 +191,40 @@ pub fn fetch_confirm_box(name: &str, items: &[(&str, &str)]) -> (bool, ConfirmBo
             shown(&items[..MAX_CONFIRM_ITEMS]),
             items.len() - MAX_CONFIRM_ITEMS
         );
-        return (true, ConfirmBox { buttons: vec!["닫기".into()], default_id: 0, cancel_id: 0, title: "fetch 차단".into(), message: title, detail });
+        return ConfirmPlan::Blocked(ConfirmBox { buttons: vec!["닫기".into()], default_id: 0, cancel_id: 0, title: "fetch 차단".into(), message: title, detail });
     }
     let detail = format!("{}\n\n{CONFIRM_FOOTER}", shown(items));
-    (
-        false,
-        ConfirmBox {
-            buttons: vec!["이번만 fetch".into(), "이 저장소에서 항상 허용".into(), "취소".into()],
-            default_id: 2,
-            cancel_id: 2,
-            title: "fetch 확인".into(),
-            message: title,
-            detail,
-        },
-    )
+    ConfirmPlan::Ask(ConfirmBox {
+        buttons: vec!["이번만 fetch".into(), "이 저장소에서 항상 허용".into(), "취소".into()],
+        default_id: 2,
+        cancel_id: 2,
+        title: "fetch 확인".into(),
+        message: title,
+        detail,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 응답_해석은_창_종류에_묶인다() {
+        let ask = fetch_confirm_plan("r", &[("a.b", "c")]);
+        assert!(matches!(ask, ConfirmPlan::Ask(_)) && !ask.too_many());
+        assert_eq!(ask.decide(Some(0)), Decision::Once);
+        assert_eq!(ask.decide(Some(1)), Decision::Always);
+        for r in [Some(2), Some(3), Some(-1), Some(i64::MAX), None] {
+            assert_eq!(ask.decide(r), Decision::Deny, "{r:?}");
+        }
+        // 차단 창의 "닫기"는 응답 0 이다 — 허용(이번만)으로 읽히면 안 된다
+        let many: Vec<(String, String)> = (0..=MAX_CONFIRM_ITEMS).map(|i| (format!("k.{i}"), "v".into())).collect();
+        let refs: Vec<(&str, &str)> = many.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let blocked = fetch_confirm_plan("r", &refs);
+        assert!(matches!(blocked, ConfirmPlan::Blocked(_)) && blocked.too_many());
+        assert_eq!(blocked.confirm_box().buttons, ["닫기"]);
+        for r in [Some(0), Some(1), Some(2), None] {
+            assert_eq!(blocked.decide(r), Decision::Deny, "{r:?}");
+        }
+    }
 }

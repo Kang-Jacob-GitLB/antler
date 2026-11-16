@@ -332,14 +332,15 @@ fn 확인_창_표시가_ts_와_같고_특수_문자_표가_골든과_같다() {
 /// 확인 창 인자: TS `fetchConfirmOptions` 의 옵션과, 사이드카 shim 이 그것으로 만든 MessageBoxArg(본문 = message + 빈 줄 + detail)
 #[test]
 fn 확인_창_인자가_ts_shim_이_만든_것과_같다() {
-    use antler_lib::git::fetch::confirm_text::fetch_confirm_box;
+    use antler_lib::git::fetch::confirm_text::fetch_confirm_plan;
 
     let g = golden("confirmBox.json");
     let cases = arr(&g["cases"], "cases");
     assert!(cases.iter().any(|c| c["tooMany"] == json!(true)) && cases.iter().any(|c| c["tooMany"] == json!(false)), "한도 안·밖 표본이 모두 있어야 한다");
     for c in cases {
         let items: Vec<(&str, &str)> = arr_or_empty_ref(&c["items"]).iter().map(|i| (s(&i["key"]), s(&i["value"]))).collect();
-        let (too_many, b) = fetch_confirm_box(s(&c["name"]), &items);
+        let plan = fetch_confirm_plan(s(&c["name"]), &items);
+        let (too_many, b) = (plan.too_many(), plan.confirm_box());
         let o = &c["options"];
         assert_eq!(too_many, c["tooMany"].as_bool().expect("tooMany"), "{}", c["name"]);
         assert_eq!(o["type"], "warning");
@@ -353,6 +354,12 @@ fn 확인_창_인자가_ts_shim_이_만든_것과_같다() {
         // 취소가 기본 선택이다 — 어느 쪽 창이든 Enter 가 허용이 되면 안 된다
         assert_eq!(b.default_id, b.cancel_id);
         assert_eq!(b.buttons.get(b.cancel_id).map(String::as_str), Some(if too_many { "닫기" } else { "취소" }));
+        // 응답 해석(TS handlers.ts): 차단 창은 어떤 응답도 거부, 확인 창은 0 → 이번만·1 → 항상·그 밖은 거부. 기본 선택(취소/닫기 자리)은 어느 쪽에서도 허용이 아니다
+        use antler_lib::git::fetch::confirm_text::Decision;
+        assert_eq!(plan.decide(Some(0)), if too_many { Decision::Deny } else { Decision::Once });
+        assert_eq!(plan.decide(Some(1)), if too_many { Decision::Deny } else { Decision::Always });
+        assert_eq!(plan.decide(Some(b.default_id as i64)), Decision::Deny);
+        assert_eq!(plan.decide(None), Decision::Deny);
     }
 }
 
@@ -403,12 +410,12 @@ fn 버전_분류_백오프_인자_환경이_ts_와_같다() {
         // hooksPath 는 hooks_path_for 로만 만든다: `/dev/null` 은 로컬이 아닌 원본, 나머지는 로컬의 앱 소유 디렉터리(검사는 주입). 빈 값은 만들 수 없어 건너뛴다
         let hooks = match s(&c["hooksPath"]) {
             "" => {
-                assert!(hooks_path_with(true, Some(""), true, |_| true).is_err(), "빈 값은 Windows 에서 디렉터리가 없는 것과 같다");
-                assert_eq!(hooks_path_with(true, Some(""), false, |_| true).expect("POSIX").as_str(), "/dev/null");
+                assert!(hooks_path_for_test(true, Some(""), true, |_| true).is_err(), "빈 값은 Windows 에서 디렉터리가 없는 것과 같다");
+                assert_eq!(hooks_path_for_test(true, Some(""), false, |_| true).expect("POSIX").as_str(), "/dev/null");
                 continue;
             }
-            "/dev/null" => hooks_path_for(false, None, true).expect("원격은 /dev/null"),
-            dir => hooks_path_with(true, Some(dir), true, |_| true).expect("앱 소유 디렉터리"),
+            "/dev/null" => hooks_path_for(false, None).expect("원격은 /dev/null"),
+            dir => hooks_path_for_test(true, Some(dir), true, |_| true).expect("앱 소유 디렉터리"),
         };
         assert_eq!(hooks.as_str(), s(&c["hooksPath"]));
         assert_eq!(fetch_config_args(&hooks, opts), want, "{c}");
@@ -417,22 +424,22 @@ fn 버전_분류_백오프_인자_환경이_ts_와_같다() {
     assert!(built > 0);
     // 훅 경로: 상대 경로·비어 있지 않은 디렉터리·Windows 인데 디렉터리 없음은 거부, 역슬래시는 슬래시로
     for rel in ["nohooks", "./h", "../h", "C:h"] {
-        assert!(hooks_path_with(true, Some(rel), true, |_| true).is_err(), "{rel}");
+        assert!(hooks_path_for_test(true, Some(rel), true, |_| true).is_err(), "{rel}");
     }
-    assert!(hooks_path_with(true, Some("C:/h"), true, |_| false).is_err());
-    assert!(hooks_path_with(true, None, true, |_| true).is_err());
-    assert_eq!(hooks_path_with(true, None, false, |_| true).expect("POSIX").as_str(), "/dev/null");
-    assert_eq!(hooks_path_with(true, Some("C:\\Users\\me\\nohooks"), true, |_| true).expect("절대").as_str(), "C:/Users/me/nohooks");
-    assert_eq!(hooks_path_with(false, Some("relative"), true, |_| false).expect("원격은 무시").as_str(), "/dev/null");
+    assert!(hooks_path_for_test(true, Some("C:/h"), true, |_| false).is_err());
+    assert!(hooks_path_for_test(true, None, true, |_| true).is_err());
+    assert_eq!(hooks_path_for_test(true, None, false, |_| true).expect("POSIX").as_str(), "/dev/null");
+    assert_eq!(hooks_path_for_test(true, Some("C:\\Users\\me\\nohooks"), true, |_| true).expect("절대").as_str(), "C:/Users/me/nohooks");
+    assert_eq!(hooks_path_for_test(false, Some("relative"), true, |_| false).expect("원격은 무시").as_str(), "/dev/null");
     // 실제 파일 시스템 검사: 없는 디렉터리·비어 있지 않은 디렉터리는 거부, 빈 디렉터리는 통과
     let dir = std::env::temp_dir().join(format!("antler-hooks-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     let path = dir.to_string_lossy().into_owned();
-    assert!(hooks_path_for(true, Some(&path), true).is_err(), "없는 디렉터리");
+    assert!(hooks_path_for(true, Some(&path)).is_err(), "없는 디렉터리");
     fs::create_dir_all(&dir).expect("임시 디렉터리");
-    assert!(hooks_path_for(true, Some(&path), true).is_ok(), "빈 디렉터리");
+    assert!(hooks_path_for(true, Some(&path)).is_ok(), "빈 디렉터리");
     fs::write(dir.join("x"), "").expect("파일");
-    assert!(hooks_path_for(true, Some(&path), true).is_err(), "비어 있지 않은 디렉터리");
+    assert!(hooks_path_for(true, Some(&path)).is_err(), "비어 있지 않은 디렉터리");
     fs::remove_dir_all(&dir).expect("정리");
     let fetch_args: Vec<&str> = arr(&g["fetchArgs"], "fetchArgs").iter().map(s).collect();
     assert_eq!(fetch_args, FETCH_ARGS);

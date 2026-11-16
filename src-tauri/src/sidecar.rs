@@ -14,6 +14,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::oneshot;
 
 use crate::dialogs;
+use crate::git::fetch::service::{approve_message, ApprovalKind, FetchPrefs, FetchPrefsSink};
 use crate::git::log_service::NoteOp;
 use crate::mirror::RepoMirror;
 use crate::router::Router;
@@ -107,6 +108,13 @@ impl Sidecar {
         let _ = self.write(&json!({ "t": "note", "op": op.as_str(), "repoId": repo_id }));
     }
 
+    /// fetch 승인을 설정 파일에 남겨 달라고 사이드카에 부탁한다(`{t:"fetchApprove"}`). `FetchHost::approve` 의 구현이 부르는 유일한 길이다 —
+    /// 서비스가 두 지점(수동 fetch 성공 뒤, "항상 허용" 응답 뒤)에서만 호출하고, 사이드카는 이 메시지가 아니면 승인을 받지 않는다. 앱 연결은 PR D 다
+    #[allow(dead_code)]
+    pub fn approve(&self, kind: ApprovalKind, repo_id: &str, fingerprint: &str) {
+        let _ = self.write(&approve_message(kind, repo_id, fingerprint));
+    }
+
     pub fn set_focus(&self, focused: bool) {
         let _ = self.write(&json!({ "t": "focus", "focused": focused }));
     }
@@ -144,6 +152,15 @@ fn handle_message(app: &AppHandle, stdin: &Arc<Mutex<ChildStdin>>, pending: &Pen
                 eprintln!("[sidecar] repos 메시지를 적용하지 않았다(모양이 틀렸거나 오래된 gen)");
             }
         }
+        // fetch 설정(자동 주기·승인 지문). 미러와 따로 보낸다 — 미러의 중복 제거·on_mirror_changed 와 무관하다
+        Some("fetchPrefs") => match FetchPrefs::from_message(&msg) {
+            Some(prefs) => {
+                if let Some(sink) = app.try_state::<FetchPrefsSink>() {
+                    (sink.0)(prefs);
+                }
+            }
+            None => eprintln!("[sidecar] fetchPrefs 메시지를 적용하지 않았다(모양이 틀렸다)"),
+        },
         Some("res") => {
             let id = msg.get("id").and_then(Value::as_u64);
             let tx = id.and_then(|id| pending.lock().unwrap().remove(&id));

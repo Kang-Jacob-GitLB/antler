@@ -640,27 +640,35 @@ impl HooksPath {
     }
 }
 
-/// `/…` 또는 `X:/…`(슬래시로 바꾼 뒤)로 시작하는 절대 경로인가
-fn is_absolute_path(p: &str) -> bool {
+/// 훅 차단 디렉터리로 쓸 수 있는 절대 경로인가(슬래시로 바꾼 뒤).
+/// Windows 는 드라이브 문자(`X:/…`)만 인정한다 — `/tmp/…` 같은 루트 상대 경로는 git.exe 가 현재 드라이브 기준으로 풀어 저장소 드라이브의 경로가 된다(`/dev/null` 문제와 같다).
+/// 그 밖의 플랫폼은 `/…` 만 인정한다(`C:/…` 는 상대 경로다)
+fn is_absolute_path(p: &str, platform_win32: bool) -> bool {
     let b = p.as_bytes();
-    b.first() == Some(&b'/') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/')
+    if platform_win32 {
+        b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/'
+    } else {
+        b.first() == Some(&b'/')
+    }
 }
 
 /// 훅 차단용 디렉터리가 존재하고 비어 있는가
-fn is_empty_dir(dir: &str) -> bool {
+pub(super) fn is_empty_dir(dir: &str) -> bool {
     std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_none())
 }
 
 /// TS `hooksPathFor`. Windows 의 로컬 git.exe 는 `/dev/null` 을 `<저장소 드라이브>:\dev\null\` 로 풀어 쓰므로(그 경로에 훅을 심을 수 있다)
 /// 로컬은 앱이 소유한 절대 경로의 **빈** 디렉터리를 쓴다. 그 밖(WSL·SSH)은 `/dev/null`, 로컬이라도 Windows 가 아니면 디렉터리가 없을 때 `/dev/null`.
 /// `no_hooks_dir` 가 None 이거나 빈 문자열이면 없는 것이다. 절대 경로가 아니거나(TS 와 달리 거부한다) 비어 있지 않은 디렉터리면 Err.
-pub fn hooks_path_for(local: bool, no_hooks_dir: Option<&str>, platform_win32: bool) -> Result<HooksPath, String> {
-    hooks_path_with(local, no_hooks_dir, platform_win32, is_empty_dir)
+/// 플랫폼은 항상 실제 플랫폼(`cfg!(windows)`)이다 — 호출자가 정하지 못한다
+pub fn hooks_path_for(local: bool, no_hooks_dir: Option<&str>) -> Result<HooksPath, String> {
+    hooks_path_for_test(local, no_hooks_dir, cfg!(windows), is_empty_dir)
 }
 
-/// [`hooks_path_for`] 에 디렉터리 검사를 주입하는 형태. **테스트 전용**이다 — 앱 코드는 `hooks_path_for` 만 부른다(검사를 건너뛰는 주입을 쓰지 않는다)
+/// [`hooks_path_for`] 에 플랫폼과 디렉터리 검사를 주입하는 형태. **테스트 전용**이다 — 앱 코드는 `hooks_path_for` 만 부른다
+/// (플랫폼을 속이거나 검사를 건너뛰는 주입을 쓰지 않는다. 운영 코드에 이 이름이 없음은 `tests/fetch_service.rs` 가 소스로 강제한다)
 #[doc(hidden)]
-pub fn hooks_path_with(local: bool, no_hooks_dir: Option<&str>, platform_win32: bool, check_empty: impl FnOnce(&str) -> bool) -> Result<HooksPath, String> {
+pub fn hooks_path_for_test(local: bool, no_hooks_dir: Option<&str>, platform_win32: bool, check_empty: impl FnOnce(&str) -> bool) -> Result<HooksPath, String> {
     if !local {
         return Ok(HooksPath("/dev/null".into()));
     }
@@ -674,7 +682,7 @@ pub fn hooks_path_with(local: bool, no_hooks_dir: Option<&str>, platform_win32: 
             if path.starts_with("//") || has_nt_namespace(&path) {
                 return Err(format!("훅 차단용 디렉터리가 UNC·NT 네임스페이스 경로라 fetch 하지 않습니다: {dir}"));
             }
-            if !is_absolute_path(&path) {
+            if !is_absolute_path(&path, platform_win32) {
                 return Err(format!("훅 차단용 디렉터리가 절대 경로가 아니라 fetch 하지 않습니다: {dir}"));
             }
             Ok(HooksPath(path))

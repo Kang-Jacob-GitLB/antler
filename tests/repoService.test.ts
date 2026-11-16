@@ -133,6 +133,16 @@ describe('RepoService 첫 페이지 문', { timeout: 30_000 }, () => {
     expect((await svc.activity(repoId, undefined)).total).toBe(before + 1)
   })
 
+  it('noteLog(fetchChanged)는 Rust 의 fetch 가 ref 를 바꿨을 때 기억한 시그니처를 버린다', async () => {
+    const { svc, repoId } = setup()
+    await svc.signature(repoId)
+    const before = (await svc.activity(repoId, undefined)).total
+    execFileSync('git', ['-C', repoPath, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'note-fetch-changed'])
+    svc.noteLog('fetchChanged', repoId)
+    expect((await svc.activity(repoId, undefined)).total).toBe(before + 1)
+    expect(() => svc.noteLog('fetchChanged', 'nope')).not.toThrow()
+  })
+
   it('감시가 계산한 ref 시그니처를 활동 조회가 다시 계산하지 않고 쓴다', async () => {
     const { svc, repoId } = setup()
     const first = await svc.signature(repoId)

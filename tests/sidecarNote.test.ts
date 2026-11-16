@@ -20,6 +20,13 @@ describe('사이드카 note 메시지', () => {
     ])
   })
 
+  it('fetchChanged(Rust 의 fetch 가 ref 를 바꿨다)도 허용 목록의 op 다', () => {
+    const { target, calls } = recorder()
+    expect(NOTE_OPS).toContain('fetchChanged')
+    expect(handleNote(target, { op: 'fetchChanged', repoId: 'a' })).toBe(true)
+    expect(calls).toEqual([['fetchChanged', 'a']])
+  })
+
   it('모르는 op·문자열이 아닌 repoId·빈 메시지는 버린다', () => {
     const { target, calls } = recorder()
     for (const m of [
@@ -40,7 +47,7 @@ describe('사이드카 note 메시지', () => {
 
   it('Rust 가 보내는 op 문자열이 프로토콜의 목록과 같다', () => {
     const src = readFileSync(join(__dirname, '..', 'src-tauri', 'src', 'git', 'log_service.rs'), 'utf8')
-    const sent = [...src.matchAll(/=> "(log[A-Za-z]+)"/g)].map((m) => m[1])
+    const sent = [...src.matchAll(/=> "((?:log[A-Za-z]+)|fetchChanged)"/g)].map((m) => m[1])
     expect(sent.sort()).toEqual([...NOTE_OPS].sort())
   })
 

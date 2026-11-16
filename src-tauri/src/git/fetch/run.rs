@@ -18,9 +18,9 @@ use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use super::guard::{
-    apply_remote_list, apply_remote_urls, fetch_config_args, finish_remote_urls, hooks_path_for, inspect_entries, parse_config_list, parse_git_version,
-    resolve_ssh_command, show_scope_outcome, unknown_write_fetch_head, ConfigArgsOpts, ConfigEntry, ConfigInspection, FollowRedirects, GitOut, GitVersion,
-    ScopeWalk, ShowScopeOutcome, WalkStep, FETCH_ARGS,
+    apply_remote_list, apply_remote_urls, fetch_config_args, finish_remote_urls, hooks_path_for_test, inspect_entries, is_empty_dir, parse_config_list,
+    parse_git_version, resolve_ssh_command, show_scope_outcome, unknown_write_fetch_head, ConfigArgsOpts, ConfigEntry, ConfigInspection, FollowRedirects, GitOut,
+    GitVersion, ScopeWalk, ShowScopeOutcome, WalkStep, FETCH_ARGS,
 };
 use super::js_trim;
 use crate::git::exec::{ExecError, FetchEnv, GitExecutor, RunOpts, RunResult};
@@ -163,14 +163,26 @@ pub fn process_ssh_env() -> HashMap<String, String> {
     ssh_env(|k| std::env::var(k).ok())
 }
 
-/// 이 fetch 의 환경. ssh 명령은 항상 명시한다(저장소 안의 core.sshCommand 가 적용되지 않게)
-pub fn fetch_env_for(ins: &ConfigInspection, kind: &str, env: &HashMap<String, String>, platform_win32: bool, allow_file: bool) -> FetchEnv {
+/// 이 fetch 의 환경. ssh 명령은 항상 명시한다(저장소 안의 core.sshCommand 가 적용되지 않게). 플랫폼은 실제 플랫폼이다
+pub fn fetch_env_for(ins: &ConfigInspection, kind: &str, env: &HashMap<String, String>, allow_file: bool) -> FetchEnv {
+    fetch_env_for_test(ins, kind, env, cfg!(windows), allow_file)
+}
+
+/// [`fetch_env_for`] 에 플랫폼을 주입한다. **테스트 전용** — 운영 코드는 부르지 않는다(`tests/fetch_service.rs` 가 소스로 강제한다)
+#[doc(hidden)]
+pub fn fetch_env_for_test(ins: &ConfigInspection, kind: &str, env: &HashMap<String, String>, platform_win32: bool, allow_file: bool) -> FetchEnv {
     FetchEnv { allow_file, ssh_command: resolve_ssh_command(ins.user_ssh_command.as_deref(), kind, env, platform_win32) }
 }
 
-/// fetch 에만 쓰는 `-c` 인자. 훅 차단 경로는 실행기 종류와 `no_hooks_dir` 로 여기서 정한다([`hooks_path_for`])
-pub fn fetch_config_for(kind: &str, no_hooks_dir: Option<&str>, platform_win32: bool, credential_helpers: bool) -> Result<Vec<String>, String> {
-    let hooks = hooks_path_for(kind == "local", no_hooks_dir, platform_win32)?;
+/// fetch 에만 쓰는 `-c` 인자. 훅 차단 경로는 실행기 종류와 `no_hooks_dir` 로 여기서 정한다([`hooks_path_for`]). 플랫폼은 실제 플랫폼이다
+pub fn fetch_config_for(kind: &str, no_hooks_dir: Option<&str>, credential_helpers: bool) -> Result<Vec<String>, String> {
+    fetch_config_for_test(kind, no_hooks_dir, cfg!(windows), credential_helpers)
+}
+
+/// [`fetch_config_for`] 에 플랫폼을 주입한다. **테스트 전용** — 운영 코드는 부르지 않는다
+#[doc(hidden)]
+pub fn fetch_config_for_test(kind: &str, no_hooks_dir: Option<&str>, platform_win32: bool, credential_helpers: bool) -> Result<Vec<String>, String> {
+    let hooks = hooks_path_for_test(kind == "local", no_hooks_dir, platform_win32, is_empty_dir)?;
     Ok(fetch_config_args(&hooks, ConfigArgsOpts { credential_helpers, follow_redirects: FollowRedirects::Initial }))
 }
 
@@ -200,11 +212,13 @@ pub struct FetchRunOpts<'a> {
 /// 없으면 git 이 설정된 refspec 으로 기회적 원격 추적 갱신을 해 명령줄 refspec 을 줘도 설정이 고른 목적지에 쓴다.
 /// 옛 git 이 `--no-write-fetch-head` 를 모르면 그 옵션 없이 한 번 더 한다. 한 remote 가 실패해도 나머지는 계속하고 첫 오류를 돌려준다.
 pub async fn run_fetch<R: GitRunner>(r: &R, repo_path: &str, ins: &ConfigInspection, o: &FetchRunOpts<'_>) -> Result<(), ExecError> {
-    run_fetch_with(r, repo_path, ins, o, &process_ssh_env(), cfg!(windows)).await
+    run_fetch_for_test(r, repo_path, ins, o, &process_ssh_env(), cfg!(windows)).await
 }
 
-/// [`run_fetch`] 에 ssh 환경과 플랫폼을 주입한다(테스트용으로 열어 둔다 — 보안에 쓰이는 값이 아니라 판정 입력이다)
-pub async fn run_fetch_with<R: GitRunner>(
+/// [`run_fetch`] 에 ssh 환경과 플랫폼을 주입한다. **테스트 전용** — 플랫폼을 호출자가 정하면 훅 경로 판정이 달라진다.
+/// 운영 코드는 [`run_fetch`] 만 부른다(`tests/fetch_service.rs` 가 service.rs 소스에 이 이름이 없음을 강제한다)
+#[doc(hidden)]
+pub async fn run_fetch_for_test<R: GitRunner>(
     r: &R,
     repo_path: &str,
     ins: &ConfigInspection,
@@ -212,8 +226,8 @@ pub async fn run_fetch_with<R: GitRunner>(
     env: &HashMap<String, String>,
     platform_win32: bool,
 ) -> Result<(), ExecError> {
-    let cfg = fetch_config_for(r.kind(), o.no_hooks_dir, platform_win32, o.credential_helpers).map_err(|message| ExecError::Other { message })?;
-    let run_opts = RunOpts { cancel: o.cancel.clone(), fetch_env: Some(fetch_env_for(ins, r.kind(), env, platform_win32, o.allow_file)), ..RunOpts::default() };
+    let cfg = fetch_config_for_test(r.kind(), o.no_hooks_dir, platform_win32, o.credential_helpers).map_err(|message| ExecError::Other { message })?;
+    let run_opts = RunOpts { cancel: o.cancel.clone(), fetch_env: Some(fetch_env_for_test(ins, r.kind(), env, platform_win32, o.allow_file)), ..RunOpts::default() };
     let mut first_error: Option<ExecError> = None;
     for name in &ins.remote_names {
         let mut out = r.run(repo_path, &fetch_args(&cfg, name, false), &run_opts).await?;
@@ -235,7 +249,7 @@ mod tests {
 
     #[test]
     fn fetch_args_는_c_가_모두_fetch_앞이고_이름은_구분자_뒤다() {
-        let cfg = fetch_config_for("wsl", None, true, false).unwrap();
+        let cfg = fetch_config_for_test("wsl", None, true, false).unwrap();
         let v = fetch_args(&cfg, "-x", false);
         let fetch_at = v.iter().position(|a| a == "fetch").unwrap();
         assert!(v.iter().enumerate().filter(|(_, a)| *a == "-c").all(|(i, _)| i < fetch_at));
