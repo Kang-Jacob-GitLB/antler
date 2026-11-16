@@ -63,7 +63,7 @@ export const defaultSleep: SleepFn = (ms, signal) =>
 const IMAGE_MAX_BYTES = 256 * 1024
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 /** 사이트 밖에서 받아도 되는 사진 호스트: Cloud avatarUrls 의 gravatar·Atlassian 사진 저장소, gravatar 가 기본 사진을 넘겨주는 wp.com 프록시 */
-const PUBLIC_AVATAR_HOST_RE = /^(?:secure\.gravatar\.com|i[0-3]\.wp\.com|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.atl-paas\.net)$/
+export const PUBLIC_AVATAR_HOST_RE =/^(?:secure\.gravatar\.com|i[0-3]\.wp\.com|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.atl-paas\.net)$/
 const IMAGE_REDIRECTS = 3
 
 export interface JiraImage {
@@ -76,7 +76,7 @@ export interface JiraImage {
  * 주소가 연결한 사이트 안(같은 origin, 사이트 경로 아래)인가. 인코딩된 '/'·'\'·'.' 이 든 경로는 앞단 프록시가 풀어
  * 사이트 경로 밖으로 보낼 수 있어 사이트 안으로 보지 않는다
  */
-function inSite(url: URL, siteUrl: string): boolean {
+export function inSite(url: URL, siteUrl: string): boolean {
   const site = new URL(siteUrl)
   const base = site.pathname.replace(/\/+$/, '')
   if (/%(?:2f|5c|2e)/i.test(url.pathname)) return false
@@ -296,7 +296,7 @@ export function parseRetryAfter(v: string | null, now = Date.now()): number | nu
 }
 
 /** Jira 오류 본문의 errorMessages[0] 또는 message, 없으면 필드별 오류(errors)의 값들(있다면). 길이는 제한한다 */
-function bodyMessage(text: string): string {
+export function bodyMessage(text: string): string {
   try {
     const b = JSON.parse(text) as { errorMessages?: unknown; errors?: unknown; message?: unknown }
     let m: unknown = Array.isArray(b.errorMessages) && typeof b.errorMessages[0] === 'string' ? b.errorMessages[0] : b.message
@@ -311,7 +311,7 @@ function bodyMessage(text: string): string {
   }
 }
 
-function httpError(res: Response, text: string, kind: JiraCredential['kind'], notFound?: string): JiraApiError {
+export function httpError(res: Response, text: string, kind: JiraCredential['kind'], notFound?: string): JiraApiError {
   const s = res.status
   if (s === 401) {
     const how = kind === 'cloud' ? '이메일·API 토큰을 확인하고' : 'Personal Access Token 을 확인하고'

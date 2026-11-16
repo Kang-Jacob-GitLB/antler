@@ -202,7 +202,7 @@ async function readText(res: Response, signal: AbortSignal | undefined, timeout:
   }
 }
 
-function parseRate(h: Headers): RateInfo | null {
+export function parseRate(h: Headers): RateInfo | null {
   const remaining = Number(h.get('x-ratelimit-remaining'))
   const limit = Number(h.get('x-ratelimit-limit'))
   const reset = Number(h.get('x-ratelimit-reset'))
@@ -220,7 +220,7 @@ function formatTime(epochSec: number): string {
 }
 
 /** 응답 본문의 message(있다면). 비밀이 아니지만 길이는 제한한다 */
-function bodyMessage(text: string): string {
+export function bodyMessage(text: string): string {
   try {
     const m = (JSON.parse(text) as { message?: unknown }).message
     return typeof m === 'string' ? m.slice(0, 200) : ''
@@ -229,7 +229,7 @@ function bodyMessage(text: string): string {
   }
 }
 
-function httpError(res: Response, text: string, signedIn: boolean): GitHubApiError {
+export function httpError(res: Response, text: string, signedIn: boolean): GitHubApiError {
   const s = res.status
   if (s === 401) return new GitHubApiError('GitHub 인증이 만료되었거나 잘못되었습니다. 다시 로그인하세요', 'GH_AUTH', s)
   if (s === 403 || s === 429) {
