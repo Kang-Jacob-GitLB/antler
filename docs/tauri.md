@@ -474,8 +474,9 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 - **`parseRetryAfter`**: 날짜는 IMF-fixdate·RFC 850·asctime 만 받는다(TS `Date.parse` 는 ISO 8601·`Mon, 31 Apr`·초 60 같은 것도 받는다 — Rust 는 `null`). 받는 것은 TS 와 같은 값이다(두 자리 연도: 0–49 → 2000년대, 50–99 → 1900년대, V8 과 같다).
   **다른 값**: asctime 은 시간대 표기가 없어 TS 는 로컬 시간, Rust 는 UTC(HTTP 규격)로 푼다 — 골든 값 비교에서 빼고 Rust 단독으로 단언한다. 숫자(초)는 `Number()` 와 같다(`0x10`·` 5 `·`1e3`·`""` 포함).
 - **JSON(`net/json.rs`)**: **다른 값**: 짝 없는 서로게이트는 U+FFFD 로 받는다(TS 는 그대로 둔다. 서버가 보낸 `device_code`·`access_token`·메시지에 있으면 Rust 는 다른 문자열이 된다. 응답 문구를 UTF-16 200 단위로 자르다 쌍이 쪼개져도 U+FFFD).
-  중첩 깊이 상한 512(배열 513겹까지 — 넘으면 오류, TS 는 스택이 다할 때까지 받는다). `serde_json` 은 거부하는 짝 없는 서로게이트 이스케이프와 삽입 순서(정수형 키 먼저)를 위해 쓰지 않는다.
+  중첩 깊이 상한 64(배열 65겹까지 — 넘으면 오류, TS 는 스택이 다할 때까지 받는다. 재귀 한 겹이 스택을 1.4KB 안팎 써서 512 는 약 700KB 였다. 256KB 스택 스레드에서도 넘치지 않는지 테스트가 본다). `serde_json` 은 거부하는 짝 없는 서로게이트 이스케이프와 삽입 순서(정수형 키 먼저)를 위해 쓰지 않는다.
 - **Device Flow**: 필드 타입이 틀린 응답(문자열이 아닌 `access_token`·`device_code`, 문자열 `interval`)을 TS 는 truthiness·형 변환으로 받지만 Rust 는 없는 것으로 본다. 본문이 `null` 이면 TS 는 `TypeError` 를 던지고 Rust 는 `DeviceError::TypeError` 다.
+  **다른 값**: Rust 는 `interval` 을 1..=60초, `expires_in` 을 0..=3600초로 묶고 `slow_down` 의 새 간격은 유한하고 현재보다 큰 값만 받아 60초를 넘기지 않는다(`+5초`도 60초 상한). TS 는 `1e999`(Infinity)·아주 큰 값을 그대로 써 사실상 영원히 기다린다. 정상 응답(5초·900초)은 같다.
 - **`inSite`**: 사이트 주소가 URL 이 아니면 TS 는 던지고 Rust 는 `false`. GitHub `httpError` 의 시각 문자열은 호출자가 넣는다(TS 는 ko-KR 로컬 시각).
 - Jira `httpError` 는 코드 외에 문구까지 옮겼다(골든이 글자 단위로 비교한다). 토큰이 든 값(`authHeader` 결과·PAT·Jira 토큰)은 `SecretString` 으로 돌려준다.
 

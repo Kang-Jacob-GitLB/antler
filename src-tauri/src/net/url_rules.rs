@@ -219,6 +219,76 @@ pub fn image_hop(url: &Url, site_url: &str, hop: usize) -> ImageHop {
     }
 }
 
+/// 프로필 사진 리다이렉트를 따라갈 최대 횟수(첫 요청 뒤 최대 3번 더 요청한다 — TS `IMAGE_REDIRECTS`)
+pub const IMAGE_REDIRECTS: usize = 3;
+
+/// [`ImageWalk::step`] 의 결과
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImageStep {
+    /// 이 주소를 GET 한다(`redirect: manual` 로). `with_auth` 일 때만 `Authorization` 을 싣는다 — 첫 홉이 사이트 안일 때뿐이다
+    Fetch { url: Url, with_auth: bool },
+    /// 더 요청하지 않는다(거부·홉 소진·리다이렉트를 따라갈 수 없음) — 결과는 `None`(사진 없음)
+    Done,
+}
+
+/// TS `JiraClient.image` 의 홉 루프를 요청과 분리한 순수 상태 기계. **HTTP 를 붙이는 쪽(다음 PR)은 이 규칙을 다시 쓰지 말고 이것을 그대로 쓴다**:
+///
+/// ```text
+/// let mut walk = ImageWalk::new(site_url, href);
+/// while let ImageStep::Fetch { url, with_auth } = walk.step() {
+///     let res = get(url, with_auth /* 리다이렉트는 따라가지 않는다 */);
+///     if 3xx { walk.on_redirect(res.location) } else { /* 상태·형식 검사 후 본문을 읽고 끝 */ break }
+/// }
+/// ```
+///
+/// 규칙: 자격 증명이 든 주소는 거부, 사이트 안의 주소(첫 홉)는 인증을 붙이고 리다이렉트를 따라가지 않으며, 그 밖은 공개 사진 호스트(https)만 인증 없이 받고
+/// 그 호스트들 사이의 리다이렉트를 최대 [`IMAGE_REDIRECTS`] 번 따라간다
+#[derive(Clone, Debug)]
+pub struct ImageWalk {
+    site_url: String,
+    /// 다음에 요청할 주소(없으면 끝)
+    url: Option<Url>,
+    hop: usize,
+    /// 직전에 요청한 홉이 사이트 안(인증 붙임)이었나
+    last_own: bool,
+}
+
+impl ImageWalk {
+    /// `href` 가 URL 이 아니면 곧바로 [`ImageStep::Done`]
+    pub fn new(site_url: &str, href: &str) -> Self {
+        Self { site_url: site_url.to_string(), url: parse_url(href), hop: 0, last_own: false }
+    }
+
+    /// 다음에 보낼 요청. 같은 상태에서 거듭 불러도 같은 결과다(요청을 보내고 [`Self::on_redirect`] 로 넘어가야 전진한다)
+    pub fn step(&mut self) -> ImageStep {
+        let Some(url) = self.url.clone() else { return ImageStep::Done };
+        if self.hop > IMAGE_REDIRECTS {
+            self.url = None;
+            return ImageStep::Done;
+        }
+        match image_hop(&url, &self.site_url, self.hop) {
+            ImageHop::Reject => {
+                self.url = None;
+                ImageStep::Done
+            }
+            hop => {
+                self.last_own = hop == ImageHop::Own;
+                ImageStep::Fetch { url, with_auth: self.last_own }
+            }
+        }
+    }
+
+    /// 직전 요청이 3xx 였다. `location` 은 `Location` 헤더(없으면 `None`). 사이트 안의 리다이렉트(대개 로그인 화면)·`Location` 없음/빈 값·풀 수 없는 주소는 끝낸다
+    pub fn on_redirect(&mut self, location: Option<&str>) {
+        let next = match (&self.url, location) {
+            (Some(url), Some(l)) if !self.last_own && !l.is_empty() => resolve_location(url, l),
+            _ => None,
+        };
+        self.url = next;
+        self.hop += 1;
+    }
+}
+
 /// 리다이렉트 `Location` 을 현재 주소 기준으로 푼다(`new URL(loc, url)`). `Location` 이 호스트를 바꾸면(절대 주소·`//호스트`) [`parse_url`] 과 같은 호스트 검사를 거친다
 pub fn resolve_location(base: &Url, loc: &str) -> Option<Url> {
     let joined = base.join(loc).ok()?;

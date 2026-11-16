@@ -3,6 +3,9 @@
 //!
 //! TS 와 다른 곳(Rust 가 더 엄격하다): 필드 타입이 틀린 응답(문자열이 아닌 `access_token`·`device_code`, 숫자가 아닌 `interval`·`expires_in`)을 TS 는 JS 의 truthiness·형 변환으로
 //! 받아들이기도 하지만 Rust 는 없는 것으로 본다(`device_code` 등이 없으면 시작 실패, `interval`·`expires_in` 은 기본값). GitHub 가 보내는 형식이 아니다.
+//!
+//! TS 와 다른 곳(Rust 가 상한을 둔다): `interval` 은 1..=60초, `expires_in` 은 0..=3600초로 묶고, `slow_down` 의 새 간격도 유한한 값만 받아 60초를 넘기지 않는다
+//! (TS 는 `1e999`(Infinity)·아주 큰 값을 그대로 써 사실상 영원히 기다린다). 정상 응답(GitHub 는 5초·900초)에는 영향이 없다.
 use crate::net::json::{self, Json};
 use crate::net::redact::SecretString;
 
@@ -41,6 +44,20 @@ fn text<'a>(b: &'a Json, key: &str) -> Option<&'a str> {
     b.get(key).and_then(Json::as_str).filter(|s| !s.is_empty())
 }
 
+/// 간격 상한(초). 서버가 `1e999` 같은 값을 보내도 이보다 길게 기다리지 않는다
+pub const MAX_INTERVAL_S: f64 = 60.0;
+/// 세션 수명 상한(초)
+pub const MAX_EXPIRES_IN_S: f64 = 3600.0;
+
+/// `[lo, hi]` 로 묶는다. NaN 은 `clamp` 가 그대로 돌려주므로 기본값으로 바꾼다(JSON 에는 NaN 이 없지만 호출자가 바뀌어도 안전하게)
+fn clamp_or(v: f64, lo: f64, hi: f64, default: f64) -> f64 {
+    if v.is_nan() {
+        default
+    } else {
+        v.clamp(lo, hi)
+    }
+}
+
 /// `x ?? default`: 숫자면 그 값, 없음·null·그 밖은 기본값
 fn num_or(b: &Json, key: &str, default: f64) -> f64 {
     b.get(key).and_then(Json::as_f64).unwrap_or(default)
@@ -70,8 +87,8 @@ pub fn interpret_start(client_id: &str, status: u16, body: &str) -> Result<Devic
     Ok(DeviceStart {
         user_code: user_code.to_string(),
         verification_uri: verification_uri.to_string(),
-        expires_in: num_or(&b, "expires_in", 900.0),
-        interval: num_or(&b, "interval", 5.0).max(1.0),
+        expires_in: clamp_or(num_or(&b, "expires_in", 900.0), 0.0, MAX_EXPIRES_IN_S, 900.0),
+        interval: clamp_or(num_or(&b, "interval", 5.0), 1.0, MAX_INTERVAL_S, 5.0),
         device_code: SecretString::new(device_code),
     })
 }
@@ -133,9 +150,10 @@ impl PollState {
         match b.get("error").and_then(Json::as_str) {
             Some("authorization_pending") => PollStep::Pending,
             Some("slow_down") => {
+                // 서버가 준 값은 유한하고 현재보다 클 때만 쓴다(1e999 → Infinity 로 영원히 기다리지 않게). 어느 쪽이든 상한을 넘기지 않는다
                 self.interval = match b.get("interval").and_then(Json::as_f64) {
-                    Some(i) if i != 0.0 && i > self.interval => i,
-                    _ => self.interval + SLOW_DOWN_STEP_S,
+                    Some(i) if i.is_finite() && i > self.interval => i.min(MAX_INTERVAL_S),
+                    _ => (self.interval + SLOW_DOWN_STEP_S).min(MAX_INTERVAL_S),
                 };
                 PollStep::SlowDown
             }
@@ -150,5 +168,22 @@ impl PollState {
                 PollStep::Fail(DeviceError::Message(format!("GitHub 로그인에 실패했습니다{tail}")))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nan_과_무한대는_기본값과_상한으로_묶는다() {
+        assert_eq!(clamp_or(f64::NAN, 1.0, 60.0, 5.0), 5.0);
+        assert_eq!(clamp_or(f64::NAN, 0.0, 3600.0, 900.0), 900.0);
+        assert_eq!(clamp_or(f64::INFINITY, 1.0, 60.0, 5.0), 60.0);
+        assert_eq!(clamp_or(f64::NEG_INFINITY, 1.0, 60.0, 5.0), 1.0);
+        // 현재 간격이 NaN 이어도 slow_down 은 상한 안의 값이 된다
+        let mut st = PollState::new(f64::NAN);
+        st.on_response(200, r#"{"error":"slow_down","interval":1e999}"#);
+        assert_eq!(st.interval, 60.0);
     }
 }

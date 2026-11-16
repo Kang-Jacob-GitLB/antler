@@ -747,7 +747,7 @@ export const BODY_TEXTS: string[] = [
   '{"message":"x","nested":' + '['.repeat(30) + ']'.repeat(30) + '}'
 ]
 
-/** 깊게 중첩된 텍스트(골든에는 명세만 적는다): `pre + open×depth + inner + close×depth + post`. Rust 의 JSON 중첩 상한(MAX_DEPTH=512 → 배열 513겹까지)을 넘으면 알려진 차이다 */
+/** 깊게 중첩된 텍스트(골든에는 명세만 적는다): `pre + open×depth + inner + close×depth + post`. Rust 의 JSON 중첩 상한(MAX_DEPTH=64 → 배열 65겹까지)을 넘으면 알려진 차이다 */
 export interface Nest {
   pre: string
   open: string
@@ -758,7 +758,7 @@ export interface Nest {
 }
 export const nestText = (n: Nest): string => n.pre + n.open.repeat(n.depth) + n.inner + n.close.repeat(n.depth) + n.post
 export const NEST_CASES: Nest[] = [
-  ...[1, 100, 512, 513, 514, 600, 1000, 5000, 100000].flatMap((depth): Nest[] => [
+  ...[1, 10, 62, 63, 64, 65, 66, 100, 512, 1000, 5000, 100000].flatMap((depth): Nest[] => [
     { pre: '', open: '[', inner: '', close: ']', post: '', depth },
     { pre: '', open: '{"a":', inner: '1', close: '}', post: '', depth },
     { pre: '{"message":"x","errorMessages":["y"],"n":', open: '[', inner: '', close: ']', post: '}', depth },

@@ -17,7 +17,7 @@ use antler_lib::net::http_error::{
 };
 use antler_lib::net::json::{self, js_number, js_number_string, Json, MAX_DEPTH};
 use antler_lib::net::redact::{redact_token, usable_token, SecretString};
-use antler_lib::net::url_rules::{self, image_hop, in_site, is_public_avatar_host, parse_url, resolve_location, ImageHop};
+use antler_lib::net::url_rules::{self, in_site, is_public_avatar_host, parse_url, ImageStep, ImageWalk};
 use antler_lib::net::HAND_WRITTEN;
 use serde_json::{json, Value};
 
@@ -456,34 +456,20 @@ fn 프로필_사진_홉_판정이_ts_와_같다() {
         let (site, href, script) = (s(&c["site"]), s(&c["href"]), &c["script"]);
         let mut calls: Vec<Value> = Vec::new();
         let mut ok = false;
-        if let Some(mut url) = parse_url(href) {
-            for hop in 0..=3 {
-                let own = match image_hop(&url, site, hop) {
-                    ImageHop::Reject => break,
-                    ImageHop::Own => true,
-                    ImageHop::Public => false,
-                };
-                calls.push(json!([url.to_string(), own]));
-                let (status, loc) = match script.get(url.as_str()) {
-                    Some(e) => (e[0].as_u64().expect("상태"), e[1].as_str().map(str::to_string)),
-                    None => (404, None),
-                };
-                if (300..400).contains(&status) {
-                    // 사이트 안의 리다이렉트는 대개 로그인 화면이다 — 따라가지 않는다
-                    match loc {
-                        Some(l) if !own && !l.is_empty() => match resolve_location(&url, &l) {
-                            Some(next) => {
-                                url = next;
-                                continue;
-                            }
-                            None => break,
-                        },
-                        _ => break,
-                    }
-                }
-                ok = status == 200;
-                break;
+        // 홉 규칙은 제품 코드의 상태 기계(`ImageWalk`)다 — 다음 PR 의 HTTP 코드가 쓰는 것과 같다
+        let mut walk = ImageWalk::new(site, href);
+        while let ImageStep::Fetch { url, with_auth } = walk.step() {
+            calls.push(json!([url.to_string(), with_auth]));
+            let (status, loc) = match script.get(url.as_str()) {
+                Some(e) => (e[0].as_u64().expect("상태"), e[1].as_str().map(str::to_string)),
+                None => (404, None),
+            };
+            if (300..400).contains(&status) {
+                walk.on_redirect(loc.as_deref());
+                continue;
             }
+            ok = status == 200;
+            break;
         }
         // 인증이 붙는 요청(own)은 사이트 안으로 정한 첫 홉뿐이다
         d.eq(|| format!("image({site}, {href})"), &json!({ "calls": calls, "ok": ok }), &json!({ "calls": c["calls"], "ok": c["ok"] }));
@@ -671,7 +657,7 @@ fn json_해석이_ts_와_같다() {
     d.finish("JSON.parse");
 }
 
-/// 중첩 상한(MAX_DEPTH=512): 상한 안은 TS 와 같고, 넘으면 Rust 는 JSON 오류다(TS 는 스택이 다할 때까지 받는다). 알려진 차이
+/// 중첩 상한(MAX_DEPTH=64): 상한 안은 TS 와 같고, 넘으면 Rust 는 JSON 오류다(TS 는 스택이 다할 때까지 받는다). 알려진 차이
 #[test]
 fn 차이_깊은_중첩은_rust_가_더_엄격하다() {
     let g = golden("http.json");
@@ -697,10 +683,40 @@ fn 차이_깊은_중첩은_rust_가_더_엄격하다() {
     }
     eprintln!("[json 깊이] 상한 안 {within}건 일치, TS 만 받는 깊은 입력 {beyond_known}건(더 엄격)");
     assert!(within > 0 && beyond_known > 0);
-    // 정확한 경계: 배열 513겹까지 받고 514겹부터 거부한다
+    // 정확한 경계: 배열 65겹까지 받고 66겹부터 거부한다(최상위 값이 깊이 0 이라 상한 + 1 겹이 마지막이다)
+    assert_eq!(MAX_DEPTH, 64);
     let nest = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
-    assert!(json::parse(&nest(MAX_DEPTH + 1)).is_ok());
-    assert_eq!(json::parse(&nest(MAX_DEPTH + 2)), Err(json::JsonError::TooDeep));
+    assert!(json::parse(&nest(64)).is_ok());
+    assert!(json::parse(&nest(65)).is_ok());
+    assert_eq!(json::parse(&nest(66)), Err(json::JsonError::TooDeep));
+}
+
+/// 깊이 65 는 거부하고 64 는 받는다는 요청의 기준은 "객체·배열 안쪽 값의 깊이"다: 값 한 겹 더 안으로 들어갈 때마다 깊이가 1 늘고 상한은 `depth > 64` 에서 거부한다.
+/// 여기서는 빈 배열이 마지막 값인 입력으로 경계를 못 박는다(`[`×n + `[]` + `]`×n 이면 가장 안쪽 빈 배열이 깊이 n)
+#[test]
+fn 깊이_64_는_받고_65_는_거부한다() {
+    let inner_depth = |n: usize| format!("{}[]{}", "[".repeat(n), "]".repeat(n));
+    assert!(json::parse(&inner_depth(64)).is_ok(), "깊이 64");
+    assert_eq!(json::parse(&inner_depth(65)), Err(json::JsonError::TooDeep), "깊이 65");
+    let obj_depth = |n: usize| format!("{}1{}", r#"{"a":"#.repeat(n), "}".repeat(n));
+    assert!(json::parse(&obj_depth(64)).is_ok());
+    assert_eq!(json::parse(&obj_depth(65)), Err(json::JsonError::TooDeep));
+}
+
+/// 작은 스택(256KB)의 스레드에서 상한을 넘는 깊은 입력을 해석해도 스택이 넘치지 않는다(넘치면 프로세스가 abort 한다)
+#[test]
+fn 작은_스택_스레드에서도_깊은_입력이_넘치지_않는다() {
+    let h = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let deep = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
+            assert_eq!(json::parse(&deep(100_000)), Err(json::JsonError::TooDeep));
+            assert_eq!(json::parse(&format!("{}1{}", r#"{"a":"#.repeat(100_000), "}".repeat(100_000))), Err(json::JsonError::TooDeep));
+            // 상한 안의 가장 깊은 입력은 받는다
+            assert!(json::parse(&deep(MAX_DEPTH + 1)).is_ok());
+        })
+        .unwrap();
+    h.join().expect("256KB 스택에서 해석이 실패했다");
 }
 
 #[test]
@@ -734,9 +750,47 @@ fn device_flow_시작_응답_해석이_ts_와_같다() {
             Err(DeviceError::Message(m)) => json!({ "err": m }),
             Err(DeviceError::TypeError) => json!({ "typeError": true }),
         };
-        d.eq(|| format!("start({}, {}, {:.60})", c["clientId"], c["status"], c["text"]), &got, &c["out"]);
+        // 알려진 차이: Rust 는 interval 을 1..=60초, expires_in 을 0..=3600초로 묶는다(TS 는 그대로 쓴다). 기대값에 같은 상한을 적용해 비교한다
+        let mut want = c["out"].clone();
+        if let Some(ok) = want.get_mut("ok") {
+            let exp = dec(&ok["expiresIn"]).clamp(0.0, 3600.0);
+            ok["expiresIn"] = enc(exp);
+            ok["interval"] = enc(dec(&ok["interval"]).clamp(1.0, 60.0));
+            ok["expiresAt"] = enc(1000.0 + exp * 1000.0);
+        }
+        d.eq(|| format!("start({}, {}, {:.60})", c["clientId"], c["status"], c["text"]), &got, &want);
     }
     d.finish("Device Flow 시작");
+}
+
+#[test]
+fn 차이_device_flow_간격과_수명은_상한이_있다() {
+    let start = |extra: &str| {
+        let body = format!(r#"{{"device_code":"d","user_code":"u","verification_uri":"v",{extra}}}"#);
+        interpret_start("cid", 200, &body).map(|x| (x.interval, x.expires_in)).unwrap()
+    };
+    assert_eq!(start(r#""interval":1e999,"expires_in":1e999"#), (60.0, 3600.0), "Infinity 는 상한으로");
+    assert_eq!(start(r#""interval":-1e999,"expires_in":-1e999"#), (1.0, 0.0), "-Infinity 는 하한으로");
+    assert_eq!(start(r#""interval":61,"expires_in":3601"#), (60.0, 3600.0));
+    assert_eq!(start(r#""interval":60,"expires_in":3600"#), (60.0, 3600.0));
+    assert_eq!(start(r#""interval":0,"expires_in":-5"#), (1.0, 0.0));
+    // slow_down: 유한하고 현재보다 큰 값만 쓰고 60초를 넘기지 않는다. 그 밖은 +5초(역시 60초 상한)
+    for (body, want) in [
+        (r#"{"error":"slow_down","interval":1e999}"#, 10.0),
+        (r#"{"error":"slow_down","interval":-1e999}"#, 10.0),
+        (r#"{"error":"slow_down","interval":1e300}"#, 60.0),
+        (r#"{"error":"slow_down","interval":30}"#, 30.0),
+        (r#"{"error":"slow_down","interval":3}"#, 10.0),
+    ] {
+        let mut st = PollState::new(5.0);
+        assert!(matches!(st.on_response(200, body), PollStep::SlowDown));
+        assert_eq!(st.interval, want, "{body}");
+    }
+    let mut st = PollState::new(58.0);
+    st.on_response(200, r#"{"error":"slow_down"}"#);
+    assert_eq!(st.interval, 60.0, "+5초도 상한을 넘지 않는다");
+    // JSON 에는 NaN 이 없다(NaN 입력은 device_rules 의 단위 테스트가 본다)
+    assert!(json::parse("NaN").is_err());
 }
 
 #[test]
@@ -808,7 +862,30 @@ fn 토큰_사용_가능_판정과_가리기가_ts_와_같다() {
     d.finish("토큰 가리기");
 }
 
-/// `SecretString` 은 `Display`·`Serialize` 를 구현하지 않는다 — 소스에 그 구현이 없고(새로 더하면 실패), `Debug` 는 `***` 다
+/// 타입이 어느 트레이트도 구현하지 않음을 컴파일 시점에 단언한다(`static_assertions::assert_not_impl_any!` 와 같은 모호성 기법 — 네트워크 없이 의존성을 늘리지 않으려고 직접 둔다).
+/// 구현이 하나라도 있으면 `some_item` 의 후보가 둘이 되어 타입 추론이 모호하다는 컴파일 오류가 난다
+macro_rules! assert_not_impl_any {
+    ($x:ty: $($t:path),+ $(,)?) => {
+        const _: fn() = || {
+            trait AmbiguousIfImpl<A> {
+                fn some_item() {}
+            }
+            impl<T: ?Sized> AmbiguousIfImpl<()> for T {}
+            $({
+                #[allow(dead_code)]
+                struct Invalid;
+                impl<T: ?Sized + $t> AmbiguousIfImpl<Invalid> for T {}
+            })+
+            let _ = <$x as AmbiguousIfImpl<_>>::some_item;
+        };
+    };
+}
+
+// 값이 문자열로 새는 길(포맷·직렬화·역직렬화)을 타입 수준에서 막는다. 참조는 `Serialize` 를 `&T: Serialize` 로 물려받으므로 `&'static SecretString` 도 확인한다
+assert_not_impl_any!(SecretString: std::fmt::Display, serde::Serialize, serde::de::DeserializeOwned);
+assert_not_impl_any!(&'static SecretString: std::fmt::Display, serde::Serialize);
+
+/// `SecretString` 은 `Display`·`Serialize` 를 구현하지 않는다 — 위 타입 단언이 컴파일 시점에 보장하고, 아래는 소스 문자열 검사(보조)와 `Debug` 가 `***` 인지 본다
 #[test]
 fn secret_string_은_display_와_serialize_가_없다() {
     let src = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("net").join("redact.rs")).unwrap();

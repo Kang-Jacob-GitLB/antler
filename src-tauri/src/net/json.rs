@@ -11,8 +11,9 @@ use std::collections::HashMap;
 
 use crate::git::fetch::js_trim;
 
-/// 중첩 상한. 넘으면 [`JsonError::TooDeep`]
-pub const MAX_DEPTH: usize = 512;
+/// 중첩 상한. 넘으면 [`JsonError::TooDeep`]. 재귀 한 겹이 스택을 1.4KB 안팎 쓰므로(512 겹이면 약 700KB) 작은 스택의 스레드에서도 안전한 값으로 잡았다.
+/// API 응답의 실제 중첩은 한 자릿수다
+pub const MAX_DEPTH: usize = 64;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Json {
