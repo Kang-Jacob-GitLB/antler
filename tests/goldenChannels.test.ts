@@ -5,11 +5,14 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AbortError, GitError } from '../src/main/executors/GitExecutor'
 import { ConfigStore } from '../src/main/services/ConfigStore'
+import { logArgs } from '../src/main/git/commands'
 import { RepoService, StaleLogError } from '../src/main/services/RepoService'
+import type { LogQuery } from '../src/shared/types'
 import { IPC_CHANNELS } from '../src/shared/ipc'
 
 // 채널 패리티 골든. TS(RepoService)가 기준이고, Rust 라우터(src-tauri/tests/channels.rs)가 같은 fixture·시나리오로 같은 결과를 내는지 본다.
 //  - tests/golden/exec/channels.json: IPC_CHANNELS 목록. Rust 의 RUST_CHANNELS 가 이것의 부분집합인지 Rust 테스트가 강제한다
+//  - tests/golden/channels/log.json: git:log 시나리오(tests/fixtures/repos/log.scenarios.json — 다단계: 페이지·범위·저장소 조작). logArgs.json: logArgs 의 argv(logArgs.cases.json)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 // 골든 갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts`
@@ -126,4 +129,115 @@ describe('git:commit 채널 골든(channels/commit.json)', () => {
     await Promise.all(services.map((s) => s.dispose()))
     check(join(GOLDEN_DIR, 'channels', 'commit.json'), stable({ scenarios: results }))
   }, 60_000)
+})
+
+// ── git:log ────────────────────────────────────────────
+
+type LogStep = { log: unknown; full?: boolean } | { git: string[] }
+interface LogScenario {
+  name: string
+  repo: string
+  pagesEqualFull?: [number, number, number]
+  steps: LogStep[]
+}
+
+/** 시나리오 값의 '@rev:<식>'·$gen·$str 을 푼다(log.scenarios.json 의 _ 설명 참고). Rust 테스트도 같은 규칙이다 */
+function expand(v: unknown, rev: (expr: string) => string): unknown {
+  if (typeof v === 'string') return v.startsWith('@rev:') ? rev(v.slice(5)) : v
+  if (Array.isArray(v)) return v.map((x) => expand(x, rev))
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>
+    const keys = Object.keys(o)
+    if (keys.length === 1 && keys[0] === '$gen') {
+      const [prefix, n] = o['$gen'] as [string, number]
+      return Array.from({ length: n }, (_, i) => `${prefix}${i}`)
+    }
+    if (keys.length === 1 && keys[0] === '$str') {
+      const [prefix, ch, n] = o['$str'] as [string, string, number]
+      return prefix + ch.repeat(n)
+    }
+    return Object.fromEntries(keys.map((k) => [k, expand(o[k], rev)]))
+  }
+  return v
+}
+
+interface PageCommit {
+  hash: string
+  parents: string[]
+  subject: string
+  refs: { kind: string; name: string }[]
+}
+
+/** 한 줄 요약. Rust 테스트(channels.rs 의 `commit_line`)와 같은 모양이다 */
+function commitLine(c: PageCommit): string {
+  return `${c.hash.slice(0, 12)} ${c.parents.map((p) => p.slice(0, 7)).join(',')} ${c.subject} ${c.refs.map((r) => `${r.kind}:${r.name}`).join(',')}`
+}
+
+describe('git:log 채널 골든(channels/log.json)', () => {
+  const scenarios = (JSON.parse(readFileSync(join(FIXTURES, 'log.scenarios.json'), 'utf8')) as { scenarios: LogScenario[] }).scenarios
+  let root: string
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chanlog-'))
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const results: unknown[] = []
+    for (const [si, sc] of scenarios.entries()) {
+      const dir = join(root, `s${si}`)
+      mkdirSync(dir)
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${sc.repo}.fi`)))
+      const config = new ConfigStore(join(root, `s${si}.config.json`))
+      const id = config.addRepo({ sourceId: 'local', path: dir, name: sc.repo }).id
+      const svc = new RepoService(config)
+      const rev = (expr: string): string => git(dir, ['rev-parse', expr])
+      const out: unknown[] = []
+      const pages: PageCommit[][] = []
+      for (const [i, step] of sc.steps.entries()) {
+        if ('git' in step) {
+          git(dir, step.git)
+          out.push({ git: step.git })
+          pages.push([])
+          continue
+        }
+        const query = expand(step.log, rev)
+        let result: Record<string, unknown>
+        let commits: PageCommit[] = []
+        try {
+          const page = JSON.parse(JSON.stringify(await svc.log(id, query as LogQuery, `req-${i}`))) as { commits: PageCommit[]; hasMore: boolean }
+          commits = page.commits
+          result = { ok: true, data: { commits: step.full ? page.commits : page.commits.map(commitLine), hasMore: page.hasMore } }
+        } catch (err) {
+          const code = codeOf(err)
+          result = { ok: false, code, ...(code === 'ERROR' ? { error: (err as Error).message } : {}) }
+        }
+        pages.push(commits)
+        out.push({ log: step.log, result })
+      }
+      if (sc.pagesEqualFull) {
+        const [full, first, last] = sc.pagesEqualFull
+        const joined = pages.slice(first, last + 1).flat().map((c) => c.hash)
+        expect(joined, sc.name).toEqual(pages[full]!.map((c) => c.hash))
+      }
+      await svc.dispose()
+      results.push({ name: sc.name, repo: sc.repo, steps: out })
+    }
+    check(join(GOLDEN_DIR, 'channels', 'log.json'), stable({ scenarios: results }))
+  }, 120_000)
+
+  it('로그 인자(logArgs)가 골든과 같다', () => {
+    const cases = (JSON.parse(readFileSync(join(FIXTURES, 'logArgs.cases.json'), 'utf8')) as { cases: { name: string; scope?: unknown; skip: number }[] }).cases
+    const results = cases.map((c) => {
+      try {
+        return { name: c.name, args: logArgs(c.scope as never, c.skip) }
+      } catch (err) {
+        return { name: c.name, error: (err as Error).message }
+      }
+    })
+    check(join(GOLDEN_DIR, 'channels', 'logArgs.json'), stable({ cases: results }))
+  })
 })

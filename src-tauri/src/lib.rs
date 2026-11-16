@@ -80,7 +80,15 @@ pub fn run() {
             std::fs::create_dir_all(&user_data)?;
             // 라우터와 사이드카가 같은 미러를 본다(사이드카가 채우고 라우터가 읽는다)
             let mirror = mirror::RepoMirror::default();
-            app.manage(router::Router::from_env(mirror.clone()));
+            let router = router::Router::from_env(mirror.clone());
+            // Rust 가 처리한 git:log 가 사이드카에 알리는 일(첫 페이지·이력 변경). 사이드카는 이 뒤에 managed 된다
+            let handle = app.handle().clone();
+            router.set_note_sink(std::sync::Arc::new(move |op, repo_id| {
+                if let Some(s) = handle.try_state::<sidecar::Sidecar>() {
+                    s.note(op, repo_id);
+                }
+            }));
+            app.manage(router);
             app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror)?);
 
             let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
@@ -122,6 +130,12 @@ pub fn run() {
         .expect("Tauri 앱 빌드 실패")
         .run(|app, event| {
             if let RunEvent::Exit = event {
+                // 열려 있는 로그 커서(멈춘 git log)를 먼저 닫는다
+                if let Some(r) = app.try_state::<router::Router>() {
+                    r.shutdown();
+                }
+                // 폴백 taskkill 이 진행 중이면 기다린다(Job 으로 끝나는 보통의 경로에는 없다). 종료 때 CreateProcess 가 끊기면 정지된 고아가 남는다
+                git::exec::shutdown_kills(std::time::Duration::from_secs(2));
                 if let Some(s) = app.try_state::<sidecar::Sidecar>() {
                     s.kill();
                 }

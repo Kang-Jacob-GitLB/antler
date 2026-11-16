@@ -3,6 +3,13 @@
 disallowed-methods = [
   { path = "std::process::Command::new", reason = "git 은 git::exec 의 실행기로만 띄운다(예외는 allow 와 이유 주석)" },
   { path = "tokio::process::Command::new", reason = "git 은 git::exec 의 실행기로만 띄운다(예외는 allow 와 이유 주석)" },
+  # Win32_Security 를 켜서 windows 크레이트의 CreateProcess 가 노출된다 — 같은 규칙을 우회하지 못하게 막는다
+  { path = "windows::Win32::System::Threading::CreateProcessW", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
+  { path = "windows::Win32::System::Threading::CreateProcessA", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
+  # 같은 기능(또는 기능 조건 없이)으로 노출되는 다른 프로세스 생성 함수들
+  { path = "windows::Win32::System::Threading::CreateProcessAsUserW", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
+  { path = "windows::Win32::System::Threading::CreateProcessAsUserA", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
+  { path = "windows::Win32::System::Threading::CreateProcessWithLogonW", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
+  { path = "windows::Win32::System::Threading::CreateProcessWithTokenW", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
+  { path = "windows::Win32::System::Threading::WinExec", reason = "프로세스는 git::exec 의 실행기로만 띄운다" },
 ]
-# windows 크레이트의 CreateProcessW/A 는 지금 켠 기능(Win32_System_Threading)만으로는 노출되지 않아(Win32_Security 필요) 부를 수 없다.
-# 그 기능을 켜게 되면 여기 disallowed-methods 에 두 경로를 추가한다(지금 넣으면 "도달할 수 없는 함수" 경고가 난다).

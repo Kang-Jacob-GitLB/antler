@@ -1,5 +1,5 @@
 //! 채널 패리티 통합 테스트. TS(`tests/goldenChannels.test.ts`)가 같은 fixture(`tests/fixtures/repos/*.fi`)·시나리오로 만든 골든
-//! (`tests/golden/channels/commit.json`)을 Rust 라우터의 Rust 경로(`Router::route`)가 그대로 재현하는지 본다. 오류는 code 만 비교한다.
+//! (`tests/golden/channels/commit.json`·`log.json`·`logArgs.json`)을 Rust 라우터의 Rust 경로(`Router::route`)가 그대로 재현하는지 본다. 오류는 code 만 비교한다.
 //! 골든은 TS 가 기준이다: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts`.
 //!
 //! 격리: `tests/exec.rs` 의 `isolate` 와 같다 — 이 테스트 바이너리가 시작될 때 `GIT_CONFIG_GLOBAL`(커밋된 `src-tauri/tests/gitconfig`)·
@@ -11,6 +11,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use antler_lib::git::scope::{log_args, parse_scope};
 use antler_lib::mirror::{MirrorRepo, RepoMirror};
 use antler_lib::router::{Routed, Router, RUST_CHANNELS};
 use serde_json::{json, Value};
@@ -256,8 +257,155 @@ async fn 사이드카로_가야_하는_요청은_건드리지_않는다() {
     let dir = import(&tmp.0, "basic");
     let router = Router::new(true, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(router.route("git:commit", &json!(["unknown-id", "abcd1234"])).await, Routed::Sidecar));
-    assert!(matches!(router.route("git:log", &json!(["basic", {}])).await, Routed::Sidecar));
+    assert!(matches!(router.route("git:refs", &json!(["basic"])).await, Routed::Sidecar));
     let off = Router::new(false, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(off.route("git:commit", &json!(["basic", "abcd1234"])).await, Routed::Sidecar));
     assert_eq!(router.rust_handled() + off.rust_handled(), 0);
+}
+
+// ── git:log ────────────────────────────────────────────
+
+/// 시나리오 값의 '@rev:<식>'·$gen·$str 을 푼다(`tests/goldenChannels.test.ts` 의 `expand` 와 같은 규칙)
+fn expand(v: &Value, rev: &dyn Fn(&str) -> String) -> Value {
+    match v {
+        Value::String(s) => match s.strip_prefix("@rev:") {
+            Some(expr) => json!(rev(expr)),
+            None => v.clone(),
+        },
+        Value::Array(a) => Value::Array(a.iter().map(|x| expand(x, rev)).collect()),
+        Value::Object(o) if o.len() == 1 && o.contains_key("$gen") => {
+            let a = o["$gen"].as_array().unwrap();
+            let (prefix, n) = (a[0].as_str().unwrap(), a[1].as_u64().unwrap());
+            Value::Array((0..n).map(|i| json!(format!("{prefix}{i}"))).collect())
+        }
+        Value::Object(o) if o.len() == 1 && o.contains_key("$str") => {
+            let a = o["$str"].as_array().unwrap();
+            json!(format!("{}{}", a[0].as_str().unwrap(), a[1].as_str().unwrap().repeat(a[2].as_u64().unwrap() as usize)))
+        }
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), expand(x, rev))).collect()),
+        _ => v.clone(),
+    }
+}
+
+/// 한 줄 요약(`tests/goldenChannels.test.ts` 의 `commitLine` 과 같은 모양)
+fn commit_line(c: &Value) -> String {
+    let parents: Vec<String> = c["parents"].as_array().unwrap().iter().map(|p| p.as_str().unwrap().chars().take(7).collect()).collect();
+    let refs: Vec<String> = c["refs"].as_array().unwrap().iter().map(|r| format!("{}:{}", r["kind"].as_str().unwrap(), r["name"].as_str().unwrap())).collect();
+    let hash: String = c["hash"].as_str().unwrap().chars().take(12).collect();
+    format!("{hash} {} {} {}", parents.join(","), c["subject"].as_str().unwrap(), refs.join(","))
+}
+
+fn log_result(env: &Value, full: bool) -> Value {
+    if env["ok"] == true {
+        let page = &env["data"];
+        let commits = page["commits"].as_array().unwrap();
+        let commits: Vec<Value> = if full { commits.clone() } else { commits.iter().map(|c| json!(commit_line(c))).collect() };
+        json!({ "ok": true, "data": { "commits": commits, "hasMore": page["hasMore"] } })
+    } else if env["code"] == "ERROR" {
+        json!({ "ok": false, "code": "ERROR", "error": env["error"] })
+    } else {
+        json!({ "ok": false, "code": env["code"] })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn git_log_시나리오가_ts_골든과_같다() {
+    let scenarios = read_json("tests/fixtures/repos/log.scenarios.json");
+    let golden = read_json("tests/golden/channels/log.json");
+    let scenarios = scenarios["scenarios"].as_array().expect("scenarios");
+    let golden = golden["scenarios"].as_array().expect("golden scenarios");
+    assert_eq!(scenarios.len(), golden.len(), "시나리오 수가 골든과 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+
+    let tmp = TempDir::new("log");
+    let mut diffs = Vec::new();
+    for (si, (sc, g)) in scenarios.iter().zip(golden).enumerate() {
+        let name = sc["name"].as_str().unwrap();
+        assert_eq!(g["name"], sc["name"], "{name}: 골든의 시나리오 순서가 다르다");
+        // 시나리오마다 새 디렉터리에 import 한다(저장소를 바꾸는 단계가 다른 시나리오에 번지지 않게)
+        let dir = import(&tmp.0.join(format!("s{si}")), sc["repo"].as_str().unwrap());
+        let id = format!("s{si}");
+        let router = Router::new(true, false, mirror_of(&[(id.as_str(), dir.as_path())]));
+        let rev = |expr: &str| rev_parse(&dir, expr);
+        let golden_steps = g["steps"].as_array().unwrap();
+        let steps = sc["steps"].as_array().unwrap();
+        assert_eq!(golden_steps.len(), steps.len(), "{name}: 단계 수가 다르다");
+        let mut pages: Vec<Vec<String>> = Vec::new();
+        for (i, (step, gs)) in steps.iter().zip(golden_steps).enumerate() {
+            if let Some(args) = step.get("git") {
+                let args: Vec<&str> = args.as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+                let ok = raw_git(&dir).args(&args).status().unwrap().success();
+                assert!(ok, "{name}: git {args:?}");
+                pages.push(Vec::new());
+                continue;
+            }
+            let query = expand(&step["log"], &rev);
+            let env = envelope(router.route("git:log", &json!([id, query, format!("req-{si}-{i}")])).await);
+            let hashes = env["data"]["commits"].as_array().map(|c| c.iter().map(|x| x["hash"].as_str().unwrap().to_string()).collect()).unwrap_or_default();
+            pages.push(hashes);
+            let got = json!({ "log": step["log"], "result": log_result(&env, step.get("full") == Some(&json!(true))) });
+            if got != *gs {
+                diffs.push(format!("{name} / 단계 {i}: 골든과 다르다\n  Rust: {}\n  TS  : {}", short(&got), short(gs)));
+            }
+        }
+        if let Some(p) = sc.get("pagesEqualFull") {
+            let (full, first, last) = (p[0].as_u64().unwrap() as usize, p[1].as_u64().unwrap() as usize, p[2].as_u64().unwrap() as usize);
+            let joined: Vec<&String> = pages[first..=last].iter().flatten().collect();
+            let all: Vec<&String> = pages[full].iter().collect();
+            assert_eq!(joined, all, "{name}: 페이지를 이어 붙인 결과가 전체 한 번과 다르다");
+        }
+        // 시나리오 안에서 검증이 거부한 요청이 파일을 만들지 않았다
+        assert!(!dir.join("pwned.txt").exists() && !Path::new("pwned.txt").exists(), "{name}: pwned.txt");
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+}
+
+#[test]
+fn log_인자가_ts_골든과_같다() {
+    let cases = read_json("tests/fixtures/repos/logArgs.cases.json");
+    let golden = read_json("tests/golden/channels/logArgs.json");
+    let cases = cases["cases"].as_array().expect("cases");
+    let golden = golden["cases"].as_array().expect("golden cases");
+    assert_eq!(cases.len(), golden.len(), "케이스 수가 골든과 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+    for (c, g) in cases.iter().zip(golden) {
+        let name = c["name"].as_str().unwrap();
+        let skip = c["skip"].as_u64().unwrap();
+        let got = parse_scope(c.get("scope")).and_then(|s| log_args(s.as_ref(), skip));
+        let got = match got {
+            Ok(args) => json!({ "name": name, "args": args }),
+            Err(m) => json!({ "name": name, "error": m }),
+        };
+        assert_eq!(&got, g, "{name}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 적대적_범위는_git_을_띄우지도_파일을_쓰지도_않는다() {
+    // 저장소 경로가 없다 — 검증이 먼저 걸러야 한다(git 을 띄웠다면 GIT 오류가 난다)
+    let nowhere = Path::new("/nonexistent-antler-log");
+    let router = Router::new(true, false, mirror_of(&[("a", nowhere)]));
+    let hostile: Vec<Value> = vec![
+        json!({ "solo": ["-c"] }),
+        json!({ "solo": ["-calias.x=!echo>pwned.txt"] }),
+        json!({ "solo": ["--output=pwned.txt"] }),
+        json!({ "solo": ["refs/heads/a\n--output=pwned.txt"] }),
+        json!({ "solo": ["refs/heads/\u{feff}a"] }),
+        json!({ "hide": ["--output=pwned.txt"] }),
+        json!({ "hide": ["-c", "refs/heads/a"] }),
+        json!({ "hide": [["refs/heads/a"]] }),
+        json!({ "solo": "-c" }),
+        json!("-c"),
+        json!(null),
+    ];
+    for scope in hostile {
+        let env = envelope(router.route("git:log", &json!(["a", { "skip": 0, "count": 10, "scope": scope }, "r"])).await);
+        assert_eq!((env["ok"].as_bool(), env["code"].as_str()), (Some(false), Some("ERROR")), "{scope}");
+        assert!(env["error"].as_str().unwrap().starts_with("invalid "), "{scope}: {env}");
+    }
+    // count·skip 는 숫자만(문자열이 git 인자 `--skip=…` 에 들어가지 못한다)
+    for q in [json!({ "skip": "0 --output=pwned.txt", "count": 10 }), json!({ "skip": 0, "count": "-c" }), json!({ "skip": [], "count": 10 }), json!(null)] {
+        let env = envelope(router.route("git:log", &json!(["a", q, "r"])).await);
+        assert_eq!((env["code"].as_str(), env["error"].as_str()), (Some("ERROR"), Some("invalid query")), "{q}");
+    }
+    assert_eq!(router.log_cursor_count(), 0);
+    assert!(!Path::new("pwned.txt").exists());
 }

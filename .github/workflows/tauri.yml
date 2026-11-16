@@ -71,7 +71,7 @@ jobs:
       # channels: 라우터의 Rust 경로(git:commit)가 TS 골든과 같은 결과를 내는지(fixture 는 git fast-import 로 만든다)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels --test log
 
       - name: clippy
         if: steps.changes.outputs.run == 'true'

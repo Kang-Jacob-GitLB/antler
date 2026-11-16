@@ -5,6 +5,7 @@ use super::common::{build_git_args, to_strings, RunOpts, RunResult, Spec, GIT_EN
 use super::error::ExecError;
 use super::process::{run_process, stream_process, GitStream};
 
+#[derive(Clone)]
 pub struct LocalExecutor {
     git_binary: String,
 }

@@ -1,0 +1,232 @@
+blob
+mark :1
+data 2
+x
+
+commit refs/heads/main
+mark :10
+author 홍길동 <dev@example.com> 1700003600 +0900
+committer 홍길동 <dev@example.com> 1700003600 +0900
+data 13
+main 1: root
+
+M 100644 :1 a.txt
+
+commit refs/heads/main
+mark :11
+author 홍길동 <dev@example.com> 1700007200 +0900
+committer 홍길동 <dev@example.com> 1700007200 +0900
+data 7
+main 2
+
+from :10
+
+commit refs/heads/main
+mark :12
+author 홍길동 <dev@example.com> 1700010800 +0900
+committer 홍길동 <dev@example.com> 1700010800 +0900
+data 7
+main 3
+
+from :11
+
+commit refs/heads/feature/a
+mark :20
+author 홍길동 <dev@example.com> 1700014400 +0900
+committer 홍길동 <dev@example.com> 1700014400 +0900
+data 12
+feature/a 1
+
+from :11
+
+commit refs/heads/main
+mark :13
+author 홍길동 <dev@example.com> 1700018000 +0900
+committer 홍길동 <dev@example.com> 1700018000 +0900
+data 7
+main 4
+
+from :12
+
+commit refs/heads/feature/a
+mark :21
+author 홍길동 <dev@example.com> 1700021600 +0900
+committer 홍길동 <dev@example.com> 1700021600 +0900
+data 12
+feature/a 2
+
+from :20
+
+commit refs/heads/main
+mark :14
+author 홍길동 <dev@example.com> 1700025200 +0900
+committer 홍길동 <dev@example.com> 1700025200 +0900
+data 25
+Merge branch 'feature/a'
+
+from :13
+merge :21
+
+commit refs/heads/dev
+mark :30
+author 홍길동 <dev@example.com> 1700028800 +0900
+committer 홍길동 <dev@example.com> 1700028800 +0900
+data 6
+dev 1
+
+from :14
+
+commit refs/heads/dev
+mark :31
+author 홍길동 <dev@example.com> 1700032400 +0900
+committer 홍길동 <dev@example.com> 1700032400 +0900
+data 6
+dev 2
+
+from :30
+
+commit refs/heads/main
+mark :15
+author 홍길동 <dev@example.com> 1700036000 +0900
+committer 홍길동 <dev@example.com> 1700036000 +0900
+data 7
+main 5
+
+from :14
+
+commit refs/heads/release/1.0
+mark :40
+author 홍길동 <dev@example.com> 1700039600 +0900
+committer 홍길동 <dev@example.com> 1700039600 +0900
+data 10
+release 1
+
+from :13
+
+commit refs/heads/main
+mark :16
+author 홍길동 <dev@example.com> 1700043200 +0900
+committer 홍길동 <dev@example.com> 1700043200 +0900
+data 7
+main 6
+
+from :15
+
+commit refs/heads/dev
+mark :32
+author 홍길동 <dev@example.com> 1700046800 +0900
+committer 홍길동 <dev@example.com> 1700046800 +0900
+data 6
+dev 3
+
+from :31
+
+commit refs/heads/main
+mark :17
+author 홍길동 <dev@example.com> 1700050400 +0900
+committer 홍길동 <dev@example.com> 1700050400 +0900
+data 19
+Merge branch 'dev'
+
+from :16
+merge :32
+
+commit refs/heads/release/1.0
+mark :41
+author 홍길동 <dev@example.com> 1700054000 +0900
+committer 홍길동 <dev@example.com> 1700054000 +0900
+data 10
+release 2
+
+from :40
+
+commit refs/heads/main
+mark :18
+author 홍길동 <dev@example.com> 1700057600 +0900
+committer 홍길동 <dev@example.com> 1700057600 +0900
+data 7
+main 7
+
+from :17
+
+commit refs/heads/main
+mark :19
+author 홍길동 <dev@example.com> 1700061200 +0900
+committer 홍길동 <dev@example.com> 1700061200 +0900
+data 7
+main 8
+
+from :18
+
+commit refs/heads/main
+mark :50
+author 홍길동 <dev@example.com> 1700064800 +0900
+committer 홍길동 <dev@example.com> 1700064800 +0900
+data 7
+main 9
+
+from :19
+
+commit refs/heads/main
+mark :51
+author 홍길동 <dev@example.com> 1700068400 +0900
+committer 홍길동 <dev@example.com> 1700068400 +0900
+data 8
+main 10
+
+from :50
+
+commit refs/heads/main
+mark :52
+author 홍길동 <dev@example.com> 1700072000 +0900
+committer 홍길동 <dev@example.com> 1700072000 +0900
+data 8
+main 11
+
+from :51
+
+commit refs/heads/topic
+mark :60
+author 홍길동 <dev@example.com> 1700075600 +0900
+committer 홍길동 <dev@example.com> 1700075600 +0900
+data 8
+topic 1
+
+from :52
+
+commit refs/heads/topic
+mark :61
+author 홍길동 <dev@example.com> 1700079200 +0900
+committer 홍길동 <dev@example.com> 1700079200 +0900
+data 8
+topic 2
+
+from :60
+
+commit refs/heads/topic
+mark :62
+author 홍길동 <dev@example.com> 1700082800 +0900
+committer 홍길동 <dev@example.com> 1700082800 +0900
+data 8
+topic 3
+
+from :61
+
+reset refs/tags/v1.0
+from :13
+
+tag v2.0
+from :18
+tagger 홍길동 <dev@example.com> 1700057600 +0900
+data 12
+release 2.0
+
+reset refs/remotes/origin/main
+from :15
+
+reset refs/remotes/origin/dev
+from :31
+
+reset refs/remotes/team/alice/work
+from :21
+

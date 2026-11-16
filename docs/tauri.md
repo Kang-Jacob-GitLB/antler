@@ -21,7 +21,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 |---|---|---|
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
-| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터") — 나머지 채널·LogCursor 스트리밍·RepoWatcher 는 남음 |
+| 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
@@ -73,7 +73,7 @@ pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 �
 UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts   # TS 파서 출력으로 골든(tests/golden/parsers) 다시 쓰기
 npx vitest run tests/golden.test.ts                   # TS 파서가 골든과 같은지
 cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 같은 골든과 같은지(건너뛴 수 출력)
-cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels   # CI 와 같은 전체(라우터·채널 패리티 포함)
+cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden --test exec --test channels --test log   # CI 와 같은 전체(라우터·채널 패리티·로그 커서 포함)
 UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts   # 채널 골든(tests/golden/channels, exec/channels.json) 다시 쓰기
 ANTLER_RUST_GIT=0 <exe>                               # 라우터를 끄고 모든 채널을 사이드카로(되돌리기 스위치)
 ```
@@ -128,12 +128,20 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
   검증 뒤 정해진 위치·`--` 뒤에만 넣고, (2) 저장소 경로·배포판은 renderer 가 아니라 사이드카가 보낸 미러(main 이 저장한 값)에서만 가져오며
   `src/main/ipc/handlers.ts` 의 `checkPath`(UNC·NUL·길이)·배포판 목록 대조를 이식하고, (3) LogCursor 를 버릴 때 `GitStream` 을 drop 한다
   (스트림의 취소 토큰은 다음 읽기 때만 확인된다 — 토큰만 취소하고 구조체를 남기면 git 이 파이프에서 멈춘 채 남는다).
-  (1)·(2)는 라우터 PR 에서 채웠고(아래 "라우터"), (3)은 LogCursor 를 옮기는 PR 의 몫이다.
-  Rust CI(`tauri.yml`)를 main 룰셋의 필수 체크(`Rust · 골든 · clippy`)로 올려야 clippy 의 `disallowed-methods`·주입 거부 테스트가 실패한 PR 이
-  머지되지 않는다. 워크플로는 필수 지정에 맞게 항상 결과를 보고하도록 바꿨다(관련 없는 PR 은 건너뛰고 성공). **룰셋 변경은 저장소 설정이라 사용자 확인 후 한다.**
-- Windows: `CREATE_NO_WINDOW`, 취소·Drop 때 `taskkill /pid N /T /F` 를 **한 번만**, **별도 스레드에서** 띄우고 기다린다. 이미 끝나 수거된 자식에는 보내지 않는다.
-  루트 프로세스 핸들 복제본을 taskkill 이 끝날 때까지 쥐고 있어 그 사이 PID 가 재사용되지 않고, taskkill 이 실패하면 그 핸들로 루트를 `TerminateProcess` 한다.
-  처음 이식은 런타임 스레드에서 taskkill 을 2~3번(명시적 kill + Drop) 띄워, 병렬 테스트 부하에서 취소→반환이 8~22초까지 늘었다(현재 1ms 미만).
+  (1)·(2)는 라우터 PR 에서 채웠고(아래 "라우터"), (3)은 `git:log` PR 에서 채웠다(아래 "git:log").
+  Rust CI(`tauri.yml`)는 main 룰셋의 필수 체크(`Rust · 골든 · clippy`)다(2026-11-16 지정) — clippy 의 `disallowed-methods`·주입 거부 테스트가
+  실패한 PR 은 머지되지 않는다. 워크플로는 모든 PR 에서 항상 결과를 보고한다(관련 없는 PR 은 건너뛰고 성공).
+- Windows: `CREATE_NO_WINDOW`. **트리 종료는 Job Object**(`exec/job.rs`)다. git 을 띄울 때마다 Job 을 만들어 `KILL_ON_JOB_CLOSE` 를 걸고, `CREATE_SUSPENDED` 로 띄운 뒤
+  Job 에 넣고 `NtResumeProcess` 로 재개한다(래퍼 `cmd\git.exe` 가 손자를 띄우기 전에 Job 안에 있어야 손자도 Job 에 든다. 주 스레드 핸들을 std 가 닫아 프로세스 단위로 재개한다 —
+  Toolhelp 스레드 스냅샷으로 재개하는 방법은 호출당 60ms~1.5초가 걸려 버렸다). 취소·Drop 은 동기 `TerminateJobObject` 이고 프로세스를 만들지 않아 **호출이 70µs 안팎**에 돌아온다(실측).
+  Job 핸들은 `ChildGuard` 가 쥐므로 앱이 비정상 종료해도 커널이 트리를 죽인다. 루트가 스스로 끝난 뒤의 Drop 은 `KILL_ON_JOB_CLOSE` 를 풀고 닫는다(남은 자손을 건드리지 않는다 — fetch 의 분리된 `gc --auto` 등).
+  재개가 실패하면 자식을 죽이고 `SpawnFailed`. 남는 창: `CreateProcess` 직후 Job 에 넣기 전(마이크로초)에 앱이 죽으면 정지된 git 이 남는다.
+  **taskkill 폴백**은 Job 생성·할당이 실패할 때만 쓴다(`taskkill /pid N /T /F` 를 한 번만, 이미 끝나 수거된 자식에는 보내지 않는다). **별도 스레드**에서 띄우고 `JoinHandle` 을 모아 두며,
+  앱 종료 때 `shutdown_kills`(lib.rs `RunEvent::Exit`, 라우터 종료 뒤 2초 상한)가 기다린다. 그 뒤 들어온 폴백은 프로세스를 새로 만들지 않고 루트만 `TerminateProcess` 한다.
+  루트 핸들 복제본을 taskkill 이 끝날 때까지 쥐어 그 사이 PID 가 재사용되지 않는다. `tests/exec.rs` 의 수동 테스트가 폴백도 검증한다(`set_jobs_disabled`).
+  이력: 처음 이식은 런타임 스레드에서 taskkill 을 2~3번 띄워 병렬 테스트 부하에서 취소→반환이 8~22초까지 늘었고, 스레드로 옮긴 뒤에도 앱이 끝나는 순간 `ExitProcess` 가 CreateProcess 도중의
+  스레드를 죽여 **일시 정지된 taskkill.exe·conhost.exe 가 재부팅까지 고아로 남았다**(상속된 stdout 핸들을 쥐어 `cargo test | tail` 이 끝나지 않았다). Job Object 로 바꾼 이유다.
+  std 는 Windows 자식을 `bInheritHandles=TRUE` 로 띄워 stdio 를 null 로 줘도 부모의 상속 가능 핸들을 물려주지만, git 은 파이프 stdio 고 taskkill 은 폴백에서만 뜨므로 std 핸들의 상속 플래그는 건드리지 않았다.
 - 오류는 `ExecError`(`Git`·`Aborted`·`SpawnFailed`) → envelope code `GIT`·`ABORTED`·`ERROR`. WSL 은 wsl.exe 자신의 실패(종료 코드 -1, stderr 빔)를 stdout 의 WSL 메시지로 바꾼다.
 - `ProcessQueue`: local 6 / wsl 4 동시성(저장소마다 하나), 같은 키 요청은 `Shared` 로 합치고(키가 있는 요청에는 취소 신호를 걸지 않는다), 기다리는 쪽이 모두 사라지면 프로세스도 정리된다.
 - **git 을 띄우는 `Command::new` 는 `process.rs` 한 곳뿐이다.** `src-tauri/clippy.toml` 의 `disallowed-methods` 가 `std::process::Command::new`·`tokio::process::Command::new` 를 막고,
@@ -151,7 +159,7 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 `antler_invoke` 는 이제 라우터를 거친다. 채널이 Rust 에서 처리할 수 있는 것이면 Rust 가 envelope 를 만들고, 아니면 사이드카에 인자를 **그대로** 넘긴다.
 
 ```
-renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit 하나)
+renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit·git:log)
                                          └ Sidecar → Node 사이드카 → envelope → renderer (그 밖의 모든 것)
 ```
 
@@ -185,8 +193,54 @@ renderer → antler_invoke → Router::route ─ Done(envelope) ─────�
 - `tests/fixtures/repos/*.fi`(`node scripts/make-repo-fixtures.mjs` 로 만든 `git fast-import` 스트림 — 날짜·작성자·내용이 고정이라 해시가 결정적이다. 루트·병합·가지·빈 커밋·이름 변경·바이너리·한글 경로·5001개 파일 포함)와
   `commit.scenarios.json`(시나리오: 해시 풀이, 대문자·약식 해시, 없는 해시, 잘못된 해시 여러 가지)을 TS(`tests/goldenChannels.test.ts` → `RepoService.commit`)와 Rust(`channels.rs` → `Router::route`)가 임시 디렉터리에 import 해 돈다.
   TS 결과가 `tests/golden/channels/commit.json`(오류는 code 만, 파일이 20개를 넘으면 개수·처음·마지막만)이고 Rust 가 같은지 본다.
+- `git:log`: `log.scenarios.json` 은 **다단계 스크립트**다(`steps`: `{log: query}` 와 `{git: [인자…]}`). 시나리오마다 `<repo>.fi` 를 새 디렉터리에 import 해 페이지 이어 붙이기·solo·hide·빈 저장소·orphan HEAD·잘못된 scope·잘못된 query,
+  커서가 닫힌 뒤 앵커로 이어 읽기, `update-ref -d` 뒤 STALE 같은 흐름을 TS(`RepoService.log`)와 Rust(`Router::route`)가 똑같이 돈다(커서 닫기는 테스트 훅 없이 다른 범위의 요청으로 한다 — 두 구현 모두 다른 키의 커서를 닫는다).
+  결과는 커밋을 `해시12 부모7,… 제목 종류:이름,…` 한 줄로 줄여 `tests/golden/channels/log.json` 에 담고(`full` 단계는 전체 필드), 오류는 code 와 ERROR 의 문구(`invalid …`)만 비교한다.
+  query 안의 `@rev:<식>`(해시로)·`{"$gen": [접두, n]}`·`{"$str": [접두, 문자, n]}` 은 두 쪽이 같은 규칙으로 푼다. `pagesEqualFull` 은 페이지를 이어 붙인 결과가 전체 한 번과 같음을 TS·Rust 가 각자 확인한다.
+  `logArgs.cases.json` → `logArgs.json` 은 `logArgs` 의 argv(범위별)와 오류 문구를 고정한다. fixture 는 `branchy.fi`(병합·가지 여럿·가벼운/주석 태그·리모트 추적 ref·어디에도 합쳐지지 않은 최신 가지)와 `empty.fi`(빈 스트림)가 새로 들어갔다.
 - 골든 갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts`. 채널을 `RUST_CHANNELS` 에 추가할 때는 시나리오·골든도 함께 넣는다.
 - Rust 테스트의 git 격리는 `tests/channels.rs` 의 `isolate`(ctor)가 한다(`exec.rs` 와 같다). 단위 테스트(`--lib`)는 git 을 띄우지 않는다.
+
+## git:log(Phase 2, `src-tauri/src/git/log_service.rs`·`scope.rs`)
+
+TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커서 맵·앵커·STALE·유휴 정리를 옮겼다. 응답은 invoke 의 envelope 이다(Channel 이 아니다).
+
+- **커서**: 커서마다 읽기 태스크 하나가 `GitStream` 을 소유하고, 요청은 mpsc 로 받아 보낸 순서대로 처리한다. 요청을 넣는 일(= 시작 위치 예약)이 동기라서
+  "예약 순서 = 읽기 순서"가 보장된다(TS 의 `busy` 사슬과 같은 효과). 버퍼가 count 개보다 많아지면 읽기를 멈추고, 읽지 않는 동안에는 파이프 backpressure 로 git 이 멈춘다.
+  `usable`·`ended`·`reading`·`position`·`next_position`·`last_hash` 와 "끝에서 덜 받으면 예약 위치를 되돌린다"까지 TS 와 같다.
+  커밋 없는 저장소는 EOF 뒤 `finish()` 의 stderr(`does not have any commits`·`bad default revision`·`bad revision 'HEAD'`·`ambiguous argument 'HEAD'`, 대소문자 무시)로 빈 목록이다.
+- **서비스**(`LogService`): 키 `repoId\0범위 키`. 요청마다 ① 다른 키의 커서를 닫고(앵커를 남긴다) ② skip 0 이면 앵커를 지우고 ③ 예약된 다음 위치가 맞고 살아 있고 끝나지 않은 커서만 이어 쓰며
+  ④ 아니면 새로 만든다. 닫힌 커서의 앵커(위치·마지막 해시)가 `skip` 과 맞으면 한 커밋 앞에서 시작해 그 커밋이 같은지 확인한 뒤 이어 읽고, 다르면 `STALE`
+  (code STALE, 문구 `commit history changed while paging`)다. 이 앞부분(커서 선택·요청 넣기)은 await 없이 한 번의 락 안에서 끝난다 — TS 가 첫 await 전에 하는 일이다.
+  확인 읽기와 본 읽기는 한 요청으로 묶어 그 사이에 다른 읽기가 끼지 못하게 했다(TS 는 둘을 따로 예약한다).
+- **유휴 정리**: 5초 안 쓰인 커서는 닫고(2.5초마다 훑는다) 읽는 중인 커서는 건드리지 않는다. 훑는 태스크는 첫 커서를 만들 때 띄우고(`setup` 은 tokio 런타임 밖이다) 커서가 없어지면 스스로 끝난다.
+  앱 종료(`RunEvent::Exit`)·저장소 제거 때는 `Router::shutdown`·`on_mirror_changed` 가 닫는다. 종료 때 닫지 못한 git 은 앱이 어떻게 끝나든 Job 핸들이 닫히며(`KILL_ON_JOB_CLOSE`) 커널이 트리를 죽인다.
+  git 은 **읽기 태스크가 첫 요청 전에**(상태 락 밖, `spawn_blocking`) 띄운다 — 서비스가 락을 쥔 채 동기 CreateProcess 를 부르지 않게. PID 는 태스크가 meta 에 적는다.
+  한 레코드(NUL 사이)가 16MB 를 넘으면 스트림을 오류(`ERROR`)로 끝내 커서를 닫는다(`NulRecordSplitter::push_checked` — `run` 결과를 파싱하는 `split_nul` 에는 상한이 없다).
+  한 페이지를 채우는 동안 읽은 바이트도 64MB(`DEFAULT_MAX_BUFFER`)를 넘으면 오류로 끝낸다 — 큰 메시지의 커밋 1000개(압축돼 저장소는 작다)가
+  페이지 하나에 수 GB 를 쌓지 못하게. 분리기는 새 청크만 훑는다(긴 미완성 조각을 매번 다시 훑으면 시간이 길이의 제곱으로 는다).
+  위치 계산(`skip` 이 u64 끝까지 올 수 있다)은 포화 산술이라 `{"skip":1e300,"count":1}` 도 패닉 없이 git 오류로 끝난다.
+- **스트림 drop(앞의 "앱에 연결하기 전 필수" (3))**: 커서를 닫는 모든 길 — `dispose`(유휴·다른 저장소·요청 취소·STALE·미러 변경·종료), 서비스에서 빠질 때의 `Drop`, 읽기 오류 —
+  이 `GitStream` 을 버린다. `dispose` 는 토큰을 취소하고 읽기 태스크를 `abort` 해 태스크가 쥔 스트림을 버리게 한다(토큰만 취소하면 스트림은 다음 읽기 때만 깬다).
+  `tests/log.rs` 가 4000 커밋 저장소로 git 이 파이프에서 멈춘 상태를 만들고, 닫은 뒤 프로세스 트리가 모두 사라지는지(powershell 스냅샷) 본다.
+  요청 취소(`req:cancel`)는 읽는 도중이면 커서를 버린다(앵커도 남기지 않는다) — TS 와 같다.
+- **`repos:watch`**: 라우터가 사이드카로 넘기기 전에 활성 저장소가 아닌 저장소의 커서를 모두 닫는다(`null`·모양이 틀린 인자면 전부). 응답은 여전히 사이드카의 몫이다.
+  미러에서 사라졌거나 경로·환경이 바뀐 저장소의 커서·앵커는 미러 적용 직후(사이드카 읽기 스레드) 지운다.
+- **사이드카 알림**: Rust 가 `git:log` 를 처리하면 사이드카의 `RepoService` 는 로그 경로를 거치지 않으므로, Rust 가 `{t:"note", op, repoId}` 를 보낸다.
+  `logFirstPage`(skip 0 요청이 끝났을 때 — 성공·실패·취소 모두, 검증에서 거부된 요청은 제외. TS 의 `openFirstPage` 와 같다)와
+  `logStale`(STALE 일 때 — `invalidateSignature`). 사이드카는 `src/sidecar/note.ts` 가 허용 목록의 op 와 문자열 repoId 만 받아 `RepoService.noteLog` 를 부른다
+  (Electron 판 경로는 새 메서드만 추가되고 호출은 바뀌지 않았다). `t` 는 Rust 가 정하며 renderer 의 값은 `req` 의 `args` 안에만 들어간다.
+  라우터는 `Sidecar`·`AppHandle` 에 기대지 않으므로 알림은 주입한 싱크(`Router::set_note_sink`)로 나가고, 앱(`lib.rs`)이 사이드카에 쓰는 클로저를 넣는다.
+- **검증(인자 주입 경계)**: `LogQuery` 는 객체여야 하고 `count`·`skip` 은 유한한 숫자여야 하며(그 밖은 `invalid query`; TS `RepoService.log` 도 같은 PR 에서 같은 규칙을 갖췄다 —
+  renderer 는 늘 숫자를 보내므로 Electron 동작은 그대로다) count 는 1~5000, skip 은 0 이상 정수로 맞춘다. 범위는 `scope.rs` 가 TS `isValidScopeRef`·`isRemoteAll`·`scopeArgs` 를 옮긴 것이다:
+  항목은 `refs/(heads|tags|remotes)/…`(공백·제어 문자·`~^:?*[\` 없음, `..`·`@{`·`//`·끝 `/`·`.lock`·`/.` 거부)·소문자 40/64자 해시·`refs/remotes/<이름>/*` 만 통과하고,
+  한 목록 200개·1024 UTF-16 단위 상한, 해시는 hide 에 못 쓴다. **정규식 크레이트를 쓰지 않고** JS `\s`(U+FEFF 포함·U+0085 제외 — Rust `is_whitespace` 와 반대인 두 문자)를 직접 나열했다.
+  argv 에서 renderer 값은 정해진 자리에만 들어간다: solo 의 rev 는 `--end-of-options` 뒤, 리모트 전체·exclude 는 `--glob=`·`--exclude=` 접두가 붙은 한 인자, 숫자는 `--skip=N`.
+  서브커맨드·옵션은 상수다. `-c…`·`--output=…`·개행·BOM 이 든 값은 git 을 띄우기 전에 `invalid solo|hide|scope|query`(ERROR)로 거부된다(`tests/channels.rs`).
+- **TS 와 같음을 보는 곳**: 채널 골든(아래), `tests/logCursor.test.ts` 의 케이스를 옮긴 `tests/log.rs`, `src/shared/logScope.ts` 의 JS 규칙을 못 박은 `tests/logScope.test.ts`.
+- 앱 확인(`drive.mjs`, `ANTLER_ROUTE_LOG=1` 로 `git:log -> rust` 확인, 10만 커밋 저장소 1회씩이라 **추세만** 본다): Solo `커밋 1,000개+`·diff `f32.txt` 3줄·검색 `1 / 2250` 이 Rust 경로·`ANTLER_RUST_GIT=0`·Electron 에서 모두 같다.
+  콜드 스타트(첫 커밋 행) 7.6초(Rust) / 13.0초(`ANTLER_RUST_GIT=0`) / 16.3초(Electron), 스크롤 p95 26.6 / 26.6 / 26.7ms(스크롤 중 읽은 행 7,000+ / 1,000+ / 6,000+) — 부하가 있는 머신에서 1회씩이라 콜드 스타트 차이는 결론을 내지 않는다.
+- 알려진 차이: 확인 읽기+본 읽기를 한 요청으로 묶는다(위). 앵커는 TS 처럼 키마다 하나씩이지만 Rust 쪽은 **활성 저장소의 것만 남기고 32개를 넘으면 오래된 것부터 버린다**(TS 는 상한이 없다).
 
 ## Phase 0 에서 확인한 것
 

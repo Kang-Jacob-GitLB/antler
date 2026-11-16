@@ -1,0 +1,2907 @@
+{
+  "scenarios": [
+    {
+      "name": "basic 전체 한 번(커밋 필드 전체)",
+      "repo": "basic",
+      "steps": [
+        {
+          "log": {
+            "count": 100,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                {
+                  "authorDate": 1700021600,
+                  "authorEmail": "dev@example.com",
+                  "authorName": "홍길동",
+                  "commitDate": 1700021600,
+                  "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+                  "parents": [
+                    "f79d260c0374825ede572587567c476425efbfe8"
+                  ],
+                  "refs": [
+                    {
+                      "kind": "head",
+                      "name": "main"
+                    },
+                    {
+                      "kind": "local",
+                      "name": "main"
+                    }
+                  ],
+                  "subject": "subject only"
+                },
+                {
+                  "authorDate": 1700018000,
+                  "authorEmail": "dev@example.com",
+                  "authorName": "홍길동",
+                  "commitDate": 1700018000,
+                  "hash": "f79d260c0374825ede572587567c476425efbfe8",
+                  "parents": [
+                    "45c2104daba8df006e2bd1fe3653064bf1ea868b"
+                  ],
+                  "refs": [],
+                  "subject": "chore: 빈 커밋"
+                },
+                {
+                  "authorDate": 1700014400,
+                  "authorEmail": "dev@example.com",
+                  "authorName": "홍길동",
+                  "commitDate": 1700014400,
+                  "hash": "45c2104daba8df006e2bd1fe3653064bf1ea868b",
+                  "parents": [
+                    "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+                    "bfb65e92b68dc84f2b21d6e2749051a9e779b46b"
+                  ],
+                  "refs": [],
+                  "subject": "Merge branch 'feature'"
+                },
+                {
+                  "authorDate": 1700010800,
+                  "authorEmail": "dev@example.com",
+                  "authorName": "홍길동",
+                  "commitDate": 1700010800,
+                  "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+                  "parents": [
+                    "72a68ce72ca0ed3fa09e57227563baf32075ea5c"
+                  ],
+                  "refs": [
+                    {
+                      "kind": "local",
+                      "name": "feature"
+                    }
+                  ],
+                  "subject": "feature: side 파일"
+                },
+                {
+                  "authorDate": 1700007200,
+                  "authorEmail": "dev@example.com",
+                  "authorName": "홍길동",
+                  "commitDate": 1700007200,
+                  "hash": "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+                  "parents": [
+                    "72a68ce72ca0ed3fa09e57227563baf32075ea5c"
+                  ],
+                  "refs": [],
+                  "subject": "feat: 여러 변경"
+                },
+                {
+                  "authorDate": 1700003600,
+                  "authorEmail": "dev@example.com",
+                  "authorName": "홍길동",
+                  "commitDate": 1700003600,
+                  "hash": "72a68ce72ca0ed3fa09e57227563baf32075ea5c",
+                  "parents": [],
+                  "refs": [],
+                  "subject": "init"
+                }
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "branchy 전체 한 번과 페이지 이어 붙이기",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 100,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 7,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 7,
+            "skip": 7
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 7,
+            "skip": 14
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 7,
+            "skip": 21
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "페이지 크기와 전체 개수의 경계(hasMore)",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 23,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 22,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 1,
+            "skip": 22
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 23
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 100
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "커서가 닫힌 뒤 앵커로 이어 읽기",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 5,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 1,
+            "scope": {
+              "solo": [
+                "refs/tags/v1.0"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 5
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "skip": 10
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 7
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "범위를 바꿨다 돌아와도 이어 읽는다",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 5,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 3,
+            "scope": {
+              "solo": [
+                "refs/heads/dev"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 5
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 3,
+            "scope": {
+              "solo": [
+                "refs/heads/dev"
+              ]
+            },
+            "skip": 3
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "페이지 사이에 앞쪽 이력이 바뀌면 STALE",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 5,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 1,
+            "scope": {
+              "solo": [
+                "refs/tags/v1.0"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "git": [
+            "update-ref",
+            "-d",
+            "refs/heads/topic"
+          ]
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 5
+          },
+          "result": {
+            "code": "STALE",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 5
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "count·skip 정규화",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 0,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 2.7,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 3,
+            "skip": -3
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 2,
+            "skip": 1.9
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "skip": 1000
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": -4,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 99999,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "solo: 브랜치·태그·리모트 전체·주석 태그·해시",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/heads/feature/a"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/tags/v1.0"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/tags/v2.0"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/remotes/origin/*"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/remotes/team/alice/*"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/remotes/team/alice/work"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/heads/dev",
+                "refs/tags/v1.0",
+                "refs/remotes/origin/main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "@rev:main~3"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/heads/dev",
+                "refs/heads/dev",
+                "refs/heads/feature/a"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "solo: 없어진 ref 는 건너뛰고 시작점이 하나도 없으면 빈 목록",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/heads/nope"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/heads/nope",
+                "refs/heads/dev"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/remotes/nope/*"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "0000000000000000000000000000000000000000"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "hide: 브랜치·태그·includeHead·리모트 전체",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/main"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic",
+                "refs/heads/dev",
+                "refs/tags/v1.0"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/remotes/origin/*"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/remotes/team/alice/*"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/remotes/origin/main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "hide: 원격 심볼릭 HEAD 가 숨긴 브랜치를 되살리지 않는다",
+      "repo": "branchy",
+      "steps": [
+        {
+          "git": [
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main"
+          ]
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/remotes/origin/main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/remotes/origin/main",
+                "refs/heads/main",
+                "refs/heads/dev"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "hide: 많이 숨겨서 남는 것만 본다(원격 심볼릭 HEAD 포함)",
+      "repo": "branchy",
+      "steps": [
+        {
+          "git": [
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main"
+          ]
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic",
+                "refs/heads/main",
+                "refs/tags/v2.0",
+                "refs/tags/v1.0"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic",
+                "refs/heads/main",
+                "refs/tags/v2.0",
+                "refs/tags/v1.0",
+                "refs/remotes/origin/main"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic",
+                "refs/heads/main",
+                "refs/tags/v2.0",
+                "refs/tags/v1.0",
+                "refs/remotes/origin/*"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic",
+                "refs/heads/main",
+                "refs/heads/dev",
+                "refs/tags/v2.0",
+                "refs/tags/v1.0",
+                "refs/remotes/origin/*",
+                "refs/remotes/team/alice/*"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/topic",
+                "refs/heads/main",
+                "refs/heads/dev",
+                "refs/tags/v2.0",
+                "refs/tags/v1.0",
+                "refs/remotes/origin/*",
+                "refs/remotes/team/alice/*"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 ",
+                "b15e4c7fc886 15c035d main 9 ",
+                "15c035d322ed e0f803d main 8 ",
+                "e0f803df3cac 1338678 main 7 tag:v2.0",
+                "297ae182df6d 76a3f28 release 2 local:release/1.0",
+                "1338678fd47f e163e87,ba561fe Merge branch 'dev' ",
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "e163e87ea6a7 37f5897 main 6 ",
+                "76a3f28d8449 0c1ef4a release 1 ",
+                "37f589776262 66af7e0 main 5 remote:origin/main",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "hide 에 해시는 거부, solo 가 있으면 hide 는 무시",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "@rev:main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid hide",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "@rev:main"
+              ],
+              "solo": [
+                "refs/heads/dev"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "ba561feb51a8 a1f7adb dev 3 local:dev",
+                "a1f7adbbb1ce f22ed37 dev 2 remote:origin/dev",
+                "f22ed378dbd2 66af7e0 dev 1 ",
+                "66af7e0ee5c5 0c1ef4a,400f246 Merge branch 'feature/a' ",
+                "400f246be0a6 67f6a74 feature/a 2 remote:team/alice/work,local:feature/a",
+                "0c1ef4a66813 7fc0562 main 4 tag:v1.0",
+                "67f6a749b520 ef53d19 feature/a 1 ",
+                "7fc0562432ad ef53d19 main 3 ",
+                "ef53d19cf10a 3c7cfe6 main 2 ",
+                "3c7cfe62ba08  main 1: root "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "범위가 비어 있거나 배열이면 기본 보기",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 4,
+            "scope": {},
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 4,
+            "scope": [],
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 4,
+            "scope": {
+              "hide": [],
+              "solo": []
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 4,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main"
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "빈 저장소는 빈 목록(여러 번)",
+      "repo": "empty",
+      "steps": [
+        {
+          "log": {
+            "count": 50,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "skip": 5
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "solo": [
+                "refs/heads/main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "HEAD 가 아직 커밋 없는 orphan 브랜치여도 다른 브랜치를 보여 준다",
+      "repo": "basic",
+      "steps": [
+        {
+          "git": [
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/orphan-x"
+          ]
+        },
+        {
+          "log": {
+            "count": 50,
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "be1e957fb83a f79d260 subject only local:main",
+                "f79d260c0374 45c2104 chore: 빈 커밋 ",
+                "45c2104daba8 d2ed02d,bfb65e9 Merge branch 'feature' ",
+                "bfb65e92b68d 72a68ce feature: side 파일 local:feature",
+                "d2ed02de5d70 72a68ce feat: 여러 변경 ",
+                "72a68ce72ca0  init "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/feature"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "be1e957fb83a f79d260 subject only local:main",
+                "f79d260c0374 45c2104 chore: 빈 커밋 ",
+                "45c2104daba8 d2ed02d,bfb65e9 Merge branch 'feature' ",
+                "bfb65e92b68d 72a68ce feature: side 파일 local:feature",
+                "d2ed02de5d70 72a68ce feat: 여러 변경 ",
+                "72a68ce72ca0  init "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 50,
+            "scope": {
+              "hide": [
+                "refs/heads/feature"
+              ],
+              "includeHead": false
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "be1e957fb83a f79d260 subject only local:main",
+                "f79d260c0374 45c2104 chore: 빈 커밋 ",
+                "45c2104daba8 d2ed02d,bfb65e9 Merge branch 'feature' ",
+                "bfb65e92b68d 72a68ce feature: side 파일 local:feature",
+                "d2ed02de5d70 72a68ce feat: 여러 변경 ",
+                "72a68ce72ca0  init "
+              ],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "scope 형식 오류는 ERROR(git 을 띄우기 전에)",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 5,
+            "scope": null,
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid scope",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": 5,
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid scope",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": "refs/heads/main",
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid scope",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": true,
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid scope",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": "refs/heads/main"
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": null
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "hide": {}
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid hide",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "-c"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "-calias.x=!echo>pwned.txt"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "--output=pwned.txt"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "--end-of-options"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "HEAD"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                5
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                [
+                  "refs/heads/main"
+                ]
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/main\n--output=pwned.txt"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/main\n"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/﻿main"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/ma in"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/main~1"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/a..b"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/remotes/origin/*/"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/*"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "hide": [
+                "--output=pwned.txt"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid hide",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "hide": [
+                "refs/heads/main",
+                "-c"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid hide",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "includeHead": null
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid scope",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "includeHead": "no"
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid scope",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                {
+                  "$str": [
+                    "refs/heads/",
+                    "a",
+                    1013
+                  ]
+                }
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": {
+                "$gen": [
+                  "refs/heads/b",
+                  201
+                ]
+              }
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "hide": {
+                "$gen": [
+                  "refs/tags/t",
+                  101
+                ]
+              },
+              "solo": {
+                "$gen": [
+                  "refs/heads/b",
+                  101
+                ]
+              }
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid scope",
+            "ok": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "scope 경계는 통과(길이 1024·항목 200)",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                {
+                  "$str": [
+                    "refs/heads/",
+                    "a",
+                    1013
+                  ]
+                }
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": {
+                "$gen": [
+                  "refs/heads/b",
+                  200
+                ]
+              }
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "hide": {
+                "$gen": [
+                  "refs/heads/b",
+                  200
+                ]
+              }
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [
+                "50ffab607a49 99dc08d topic 3 local:topic",
+                "99dc08d16eea e0a1f4f topic 2 ",
+                "e0a1f4fc1152 124f175 topic 1 ",
+                "124f17511efb c8b0f1f main 11 head:main,local:main",
+                "c8b0f1fc2a4e b15e4c7 main 10 "
+              ],
+              "hasMore": true
+            },
+            "ok": true
+          }
+        },
+        {
+          "log": {
+            "count": 5,
+            "scope": {
+              "solo": [
+                "refs/heads/ab"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "data": {
+              "commits": [],
+              "hasMore": false
+            },
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "query 형식 오류는 invalid query",
+      "repo": "branchy",
+      "steps": [
+        {
+          "log": null,
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": 5,
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": "x",
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": [],
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {},
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 10
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": "100",
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 100,
+            "skip": "0"
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": null,
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 10,
+            "skip": null
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": true,
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": [
+              10
+            ],
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": {
+              "n": 10
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": "100",
+            "scope": {
+              "solo": [
+                "-c"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid query",
+            "ok": false
+          }
+        },
+        {
+          "log": {
+            "count": 10,
+            "scope": {
+              "solo": [
+                "-c"
+              ]
+            },
+            "skip": 0
+          },
+          "result": {
+            "code": "ERROR",
+            "error": "invalid solo",
+            "ok": false
+          }
+        }
+      ]
+    }
+  ]
+}

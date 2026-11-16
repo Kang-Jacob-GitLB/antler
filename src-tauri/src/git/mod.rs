@@ -2,5 +2,7 @@
 //! 나머지는 Node 사이드카가 처리한다.
 pub mod commit;
 pub mod exec;
+pub mod log_service;
 pub mod lru;
 pub mod parsers;
+pub mod scope;

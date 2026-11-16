@@ -1,0 +1,244 @@
+{
+  "_": "git:log 채널 패리티 시나리오. TS(tests/goldenChannels.test.ts → RepoService.log)와 Rust(src-tauri/tests/channels.rs → Router::route)가 시나리오마다 <repo>.fi 를 새 디렉터리에 import 해 steps 를 순서대로 돈다. 단계: { log: 보낼 query 그대로, full?: true } 또는 { git: [인자…] }(그 저장소에서 날 git 실행 — 저장소를 바꾼다). log 의 결과는 커밋을 '해시12 부모7,… 제목 종류:이름,…' 한 줄로 줄여 골든에 담고(full 이면 전체), 오류는 code 와 ERROR 의 문구만 담는다. query 안의 값 대신 쓸 수 있는 것: '@rev:<식>' 문자열은 git rev-parse 결과 해시로, { '$gen': [접두, n] } 은 접두+번호 문자열 n 개의 배열로, { '$str': [접두, 문자, n] } 은 접두 뒤에 문자를 n 번 붙인 문자열로 바뀐다. pagesEqualFull: [전체 단계, 첫 페이지 단계, 마지막 페이지 단계] 는 페이지를 이어 붙인 결과가 전체 한 번과 같은지 TS·Rust 가 각자 확인한다.",
+  "scenarios": [
+    { "name": "basic 전체 한 번(커밋 필드 전체)", "repo": "basic", "steps": [{ "log": { "skip": 0, "count": 100 }, "full": true }] },
+    {
+      "name": "branchy 전체 한 번과 페이지 이어 붙이기",
+      "repo": "branchy",
+      "pagesEqualFull": [0, 1, 4],
+      "steps": [
+        { "log": { "skip": 0, "count": 100 } },
+        { "log": { "skip": 0, "count": 7 } },
+        { "log": { "skip": 7, "count": 7 } },
+        { "log": { "skip": 14, "count": 7 } },
+        { "log": { "skip": 21, "count": 7 } }
+      ]
+    },
+    {
+      "name": "페이지 크기와 전체 개수의 경계(hasMore)",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 23 } },
+        { "log": { "skip": 0, "count": 22 } },
+        { "log": { "skip": 22, "count": 1 } },
+        { "log": { "skip": 23, "count": 5 } },
+        { "log": { "skip": 100, "count": 5 } }
+      ]
+    },
+    {
+      "name": "커서가 닫힌 뒤 앵커로 이어 읽기",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 5 } },
+        { "log": { "skip": 0, "count": 1, "scope": { "solo": ["refs/tags/v1.0"] } } },
+        { "log": { "skip": 5, "count": 5 } },
+        { "log": { "skip": 10, "count": 50 } },
+        { "log": { "skip": 7, "count": 5 } }
+      ]
+    },
+    {
+      "name": "범위를 바꿨다 돌아와도 이어 읽는다",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 5 } },
+        { "log": { "skip": 0, "count": 3, "scope": { "solo": ["refs/heads/dev"] } } },
+        { "log": { "skip": 5, "count": 5 } },
+        { "log": { "skip": 3, "count": 3, "scope": { "solo": ["refs/heads/dev"] } } }
+      ]
+    },
+    {
+      "name": "페이지 사이에 앞쪽 이력이 바뀌면 STALE",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 5 } },
+        { "log": { "skip": 0, "count": 1, "scope": { "solo": ["refs/tags/v1.0"] } } },
+        { "git": ["update-ref", "-d", "refs/heads/topic"] },
+        { "log": { "skip": 5, "count": 5 } },
+        { "log": { "skip": 0, "count": 5 } },
+        { "log": { "skip": 5, "count": 5 } }
+      ]
+    },
+    {
+      "name": "count·skip 정규화",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 0 } },
+        { "log": { "skip": 0, "count": 2.7 } },
+        { "log": { "skip": -3, "count": 3 } },
+        { "log": { "skip": 1.9, "count": 2 } },
+        { "log": { "skip": 1000, "count": 5 } },
+        { "log": { "skip": 0, "count": -4 } },
+        { "log": { "skip": 0, "count": 99999 } }
+      ]
+    },
+    {
+      "name": "solo: 브랜치·태그·리모트 전체·주석 태그·해시",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/heads/feature/a"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/tags/v1.0"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/tags/v2.0"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/remotes/origin/*"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/remotes/team/alice/*"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/remotes/team/alice/work"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/heads/dev", "refs/tags/v1.0", "refs/remotes/origin/main"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["@rev:main~3"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/heads/dev", "refs/heads/dev", "refs/heads/feature/a"] } } }
+      ]
+    },
+    {
+      "name": "solo: 없어진 ref 는 건너뛰고 시작점이 하나도 없으면 빈 목록",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/heads/nope"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/heads/nope", "refs/heads/dev"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/remotes/nope/*"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["0000000000000000000000000000000000000000"] } } }
+      ]
+    },
+    {
+      "name": "hide: 브랜치·태그·includeHead·리모트 전체",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/main"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/main"], "includeHead": false } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic", "refs/heads/dev", "refs/tags/v1.0"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/remotes/origin/*"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/remotes/team/alice/*"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/remotes/origin/main"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": [], "includeHead": false } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic"], "includeHead": false } } }
+      ]
+    },
+    {
+      "name": "hide: 원격 심볼릭 HEAD 가 숨긴 브랜치를 되살리지 않는다",
+      "repo": "branchy",
+      "steps": [
+        { "git": ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"] },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/remotes/origin/main"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/remotes/origin/main", "refs/heads/main", "refs/heads/dev"], "includeHead": false } } },
+        { "log": { "skip": 0, "count": 50 } }
+      ]
+    },
+    {
+      "name": "hide: 많이 숨겨서 남는 것만 본다(원격 심볼릭 HEAD 포함)",
+      "repo": "branchy",
+      "steps": [
+        { "git": ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"] },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic", "refs/heads/main", "refs/tags/v2.0", "refs/tags/v1.0"], "includeHead": false } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic", "refs/heads/main", "refs/tags/v2.0", "refs/tags/v1.0", "refs/remotes/origin/main"], "includeHead": false } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic", "refs/heads/main", "refs/tags/v2.0", "refs/tags/v1.0", "refs/remotes/origin/*"], "includeHead": false } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic", "refs/heads/main", "refs/heads/dev", "refs/tags/v2.0", "refs/tags/v1.0", "refs/remotes/origin/*", "refs/remotes/team/alice/*"], "includeHead": false } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/topic", "refs/heads/main", "refs/heads/dev", "refs/tags/v2.0", "refs/tags/v1.0", "refs/remotes/origin/*", "refs/remotes/team/alice/*"] } } }
+      ]
+    },
+    {
+      "name": "hide 에 해시는 거부, solo 가 있으면 hide 는 무시",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["@rev:main"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/heads/dev"], "hide": ["@rev:main"] } } }
+      ]
+    },
+    {
+      "name": "범위가 비어 있거나 배열이면 기본 보기",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 4, "scope": {} } },
+        { "log": { "skip": 0, "count": 4, "scope": [] } },
+        { "log": { "skip": 0, "count": 4, "scope": { "solo": [], "hide": [] } } },
+        { "log": { "skip": 0, "count": 4 } }
+      ]
+    },
+    {
+      "name": "빈 저장소는 빈 목록(여러 번)",
+      "repo": "empty",
+      "steps": [
+        { "log": { "skip": 0, "count": 50 } },
+        { "log": { "skip": 0, "count": 50 } },
+        { "log": { "skip": 5, "count": 50 } },
+        { "log": { "skip": 0, "count": 50, "scope": { "solo": ["refs/heads/main"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/main"] } } }
+      ]
+    },
+    {
+      "name": "HEAD 가 아직 커밋 없는 orphan 브랜치여도 다른 브랜치를 보여 준다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["symbolic-ref", "HEAD", "refs/heads/orphan-x"] },
+        { "log": { "skip": 0, "count": 50 } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/feature"] } } },
+        { "log": { "skip": 0, "count": 50, "scope": { "hide": ["refs/heads/feature"], "includeHead": false } } }
+      ]
+    },
+    {
+      "name": "scope 형식 오류는 ERROR(git 을 띄우기 전에)",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 5, "scope": null } },
+        { "log": { "skip": 0, "count": 5, "scope": 5 } },
+        { "log": { "skip": 0, "count": 5, "scope": "refs/heads/main" } },
+        { "log": { "skip": 0, "count": 5, "scope": true } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": "refs/heads/main" } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": null } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "hide": {} } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["-c"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["-calias.x=!echo>pwned.txt"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["--output=pwned.txt"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["--end-of-options"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["main"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["HEAD"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": [5] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": [["refs/heads/main"]] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/main\n--output=pwned.txt"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/main\n"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/﻿main"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/ma in"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/main~1"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/a..b"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/remotes/origin/*/"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/*"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "hide": ["--output=pwned.txt"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "hide": ["refs/heads/main", "-c"] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "includeHead": null } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "includeHead": "no" } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": [{ "$str": ["refs/heads/", "a", 1013] }] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": { "$gen": ["refs/heads/b", 201] } } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": { "$gen": ["refs/heads/b", 101] }, "hide": { "$gen": ["refs/tags/t", 101] } } } }
+      ]
+    },
+    {
+      "name": "scope 경계는 통과(길이 1024·항목 200)",
+      "repo": "branchy",
+      "steps": [
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": [{ "$str": ["refs/heads/", "a", 1013] }] } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": { "$gen": ["refs/heads/b", 200] } } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "hide": { "$gen": ["refs/heads/b", 200] } } } },
+        { "log": { "skip": 0, "count": 5, "scope": { "solo": ["refs/heads/a\u0085b"] } } }
+      ]
+    },
+    {
+      "name": "query 형식 오류는 invalid query",
+      "repo": "branchy",
+      "steps": [
+        { "log": null },
+        { "log": 5 },
+        { "log": "x" },
+        { "log": [] },
+        { "log": {} },
+        { "log": { "count": 10 } },
+        { "log": { "skip": 0 } },
+        { "log": { "skip": 0, "count": "100" } },
+        { "log": { "skip": "0", "count": 100 } },
+        { "log": { "skip": 0, "count": null } },
+        { "log": { "skip": null, "count": 10 } },
+        { "log": { "skip": 0, "count": true } },
+        { "log": { "skip": 0, "count": [10] } },
+        { "log": { "skip": 0, "count": { "n": 10 } } },
+        { "log": { "skip": 0, "count": "100", "scope": { "solo": ["-c"] } } },
+        { "log": { "skip": 0, "count": 10, "scope": { "solo": ["-c"] } } }
+      ]
+    }
+  ]
+}

@@ -142,6 +142,11 @@ export function estimateCompareBytes(d: CompareResult): number {
   return n
 }
 
+/** `LogQuery` 의 count·skip 으로 쓸 수 있는 값인가: 유한한 number. Rust 의 `parse_query`(src-tauri/src/git/log_service.rs)와 같은 규칙이다 */
+function isLogNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v)
+}
+
 /** 이어 읽으려던 위치의 커밋이 바뀌었다 — renderer 는 처음부터 다시 읽어야 한다 */
 export class StaleLogError extends Error {
   constructor() {
@@ -599,6 +604,18 @@ export class RepoService {
     return this.firstPageGates.get(repoId)?.promise ?? Promise.resolve()
   }
 
+  /**
+   * Tauri 판: Rust 가 `git:log` 를 직접 처리할 때 이 서비스는 로그 경로를 거치지 않으므로, Rust 가 알려 주는 것을 같은 효과로 옮긴다
+   * (src/sidecar/note.ts). Electron 판 코드 경로는 부르지 않는다.
+   * - logFirstPage: 첫 로그 페이지가 나갔다 — `log()` 의 skip 0 처리와 같다
+   * - logStale: 이어 읽으려던 위치의 커밋이 바뀌었다 — `log()` 의 StaleLogError 처리와 같다
+   */
+  noteLog(op: 'logFirstPage' | 'logStale', repoId: string): void {
+    if (!this.config.repo(repoId)) return
+    if (op === 'logStale') this.invalidateSignature(repoId)
+    else this.openFirstPage(repoId)
+  }
+
   private openFirstPage(repoId: string): void {
     const gate = this.firstPageGates.get(repoId)
     if (!gate) return
@@ -1012,6 +1029,8 @@ export class RepoService {
    * 커서는 활성 저장소 하나에만 유지한다(다른 저장소의 커서는 이 시점에 닫아 메모리·프로세스를 돌려준다).
    */
   log(repoId: string, query: LogQuery, requestId?: string): Promise<LogPage> {
+    // renderer 는 늘 숫자를 보내지만 main 은 renderer 입력을 믿지 않는다(문자열 count 는 Math.floor 가 NaN 으로 만든다). Rust 판도 같은 규칙이다
+    if (typeof query !== 'object' || query === null || !isLogNumber(query.count) || !isLogNumber(query.skip)) throw new Error('invalid query')
     git.scopeArgs(query.scope)
     const { repo, rt } = this.resolve(repoId)
     const count = Math.min(Math.max(1, Math.floor(query.count)), 5000)

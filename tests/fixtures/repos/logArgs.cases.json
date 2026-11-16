@@ -1,0 +1,30 @@
+{
+  "_": "logArgs(scope, skip) 의 argv 골든 입력. TS(tests/goldenChannels.test.ts)가 만든 tests/golden/channels/logArgs.json 과 Rust(src-tauri/tests/channels.rs 의 parse_scope + log_args)가 같은지 본다. 오류는 문구까지 같다.",
+  "cases": [
+    { "name": "범위 없음", "skip": 0 },
+    { "name": "범위 없음 skip", "skip": 250 },
+    { "name": "빈 객체", "scope": {}, "skip": 0 },
+    { "name": "solo 브랜치 둘", "scope": { "solo": ["refs/heads/b", "refs/heads/a"] }, "skip": 10 },
+    { "name": "solo 태그·리모트", "scope": { "solo": ["refs/tags/v1", "refs/remotes/origin/main"] }, "skip": 0 },
+    { "name": "solo 리모트 전체와 브랜치", "scope": { "solo": ["refs/heads/a", "refs/remotes/origin/*", "refs/remotes/team/x/*"] }, "skip": 0 },
+    { "name": "solo 해시(40)", "scope": { "solo": ["0123456789abcdef0123456789abcdef01234567"] }, "skip": 0 },
+    { "name": "solo 해시(64)", "scope": { "solo": ["0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"] }, "skip": 0 },
+    { "name": "solo 옵션처럼 보이는 이름", "scope": { "solo": ["refs/heads/--output=x"] }, "skip": 0 },
+    { "name": "solo 중복", "scope": { "solo": ["refs/heads/a", "refs/heads/a", "refs/heads/b"] }, "skip": 0 },
+    { "name": "solo 와 hide(solo 우선)", "scope": { "solo": ["refs/heads/a"], "hide": ["0123456789abcdef0123456789abcdef01234567"] }, "skip": 0 },
+    { "name": "hide 브랜치·태그·리모트", "scope": { "hide": ["refs/heads/a", "refs/tags/t", "refs/remotes/origin/main", "refs/remotes/up/*"] }, "skip": 0 },
+    { "name": "hide 리모트 전체만", "scope": { "hide": ["refs/remotes/up/*"] }, "skip": 0 },
+    { "name": "hide includeHead false", "scope": { "hide": ["refs/heads/a"], "includeHead": false }, "skip": 3 },
+    { "name": "hide 비어 있음", "scope": { "hide": [], "includeHead": false }, "skip": 0 },
+    { "name": "hide 해시는 거부", "scope": { "hide": ["0123456789abcdef0123456789abcdef01234567"] }, "skip": 0 },
+    { "name": "범위가 null", "scope": null, "skip": 0 },
+    { "name": "범위가 문자열", "scope": "refs/heads/a", "skip": 0 },
+    { "name": "solo 가 문자열", "scope": { "solo": "refs/heads/a" }, "skip": 0 },
+    { "name": "solo 에 옵션 -c", "scope": { "solo": ["-calias.x=!echo"] }, "skip": 0 },
+    { "name": "hide 에 --output", "scope": { "hide": ["--output=pwned.txt"] }, "skip": 0 },
+    { "name": "solo 개행", "scope": { "solo": ["refs/heads/a\n"] }, "skip": 0 },
+    { "name": "solo BOM", "scope": { "solo": ["refs/heads/﻿a"] }, "skip": 0 },
+    { "name": "solo NEL 은 허용", "scope": { "solo": ["refs/heads/a\u0085b"] }, "skip": 0 },
+    { "name": "includeHead 가 문자열", "scope": { "includeHead": "no" }, "skip": 0 }
+  ]
+}
