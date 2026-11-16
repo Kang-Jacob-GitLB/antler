@@ -40,7 +40,7 @@ export interface ConfigEntry {
  * 그 밖의 http.* · credential.* · protocol.* · url.* · trace2.* · transfer.* · fetch.bundleURI · ssh.* · alias.* · diff/merge/filter.* ·
  * gui/i18n/color.* 는 모두 "알 수 없는 설정"이다.
  */
-const ALLOWED_KEYS: RegExp[] = [
+export const ALLOWED_KEYS: RegExp[] = [
   /^core\.(repositoryformatversion|filemode|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|eol|safecrlf|longpaths|quotepath|checkstat|trustctime|untrackedcache|fscache|preloadindex|commentchar|hidedotfiles|abbrev|whitespace|worktree|sparsecheckout|sparsecheckoutcone|hookspath|excludesfile)$/,
   /^remote\..+\.(url|pushurl|push|tagopt|prune|mirror|skipdefaultupdate|skipfetchall|promisor|partialclonefilter)$/,
   /^branch\..+\.(remote|merge|rebase|pushremote|description|vscode-merge-base|github-pr-owner-number)$/,
@@ -57,7 +57,7 @@ const ALLOWED_KEYS: RegExp[] = [
 ]
 
 /** 값까지 맞아야 허용하는 키. git-lfs 가 `git lfs install` 로 쓰는 기본값(--skip-smudge 변형 포함) */
-const ALLOWED_VALUES: Record<string, string[]> = {
+export const ALLOWED_VALUES: Record<string, string[]> = {
   'filter.lfs.clean': ['git-lfs clean -- %f'],
   'filter.lfs.smudge': ['git-lfs smudge -- %f', 'git-lfs smudge --skip -- %f'],
   'filter.lfs.process': ['git-lfs filter-process', 'git-lfs filter-process --skip'],
@@ -67,8 +67,8 @@ const ALLOWED_VALUES: Record<string, string[]> = {
   'core.bare': ['false']
 }
 
-const REMOTE_URL_KEY = /^remote\..+\.(url|pushurl)$/
-const SUBMODULE_URL_KEY = /^submodule\..+\.url$/
+export const REMOTE_URL_KEY = /^remote\..+\.(url|pushurl)$/
+export const SUBMODULE_URL_KEY = /^submodule\..+\.url$/
 
 /** 저장소 설정 항목이 허용 목록에 있는가(키, 필요하면 값까지) */
 /**
@@ -181,12 +181,12 @@ export function inspectEntries(entries: ConfigEntry[]): ConfigInspection {
   return { hasRemote, dangerous, remoteNames: [], remotes: [], remotesFingerprint: '', forbidden, userSshCommand, fingerprint }
 }
 
-function fingerprintOf(dangerous: ConfigInspection['dangerous']): string {
+export function fingerprintOf(dangerous: ConfigInspection['dangerous']): string {
   return createHash('sha256').update(JSON.stringify(dangerous.map((d) => [d.key, d.raw ?? d.value]))).digest('hex')
 }
 
 /** http(s) URL 의 userinfo(user[:pass]@). 있으면 NTLM/Negotiate 인증이 allowNTLMAuth=false 로도 나갈 수 있다 */
-const HTTP_USERINFO = /^(https?:\/\/)([^/?#]*)@/i
+export const HTTP_USERINFO = /^(https?:\/\/)([^/?#]*)@/i
 
 /**
  * 설정 파일 목록에 없는 옛 형식 remote(.git/remotes/<n>, .git/branches/<n>)까지 포함해, 모든 remote 의 실제 URL 을 검사한다.
@@ -242,7 +242,7 @@ export async function inspectConfig(exec: GitExecutor, repoPath: string, opts?: 
 }
 
 /** `--worktree` 를 모르는 git, 또는 config.worktree 가 없음(GIT_ENV 가 LC_ALL=C.UTF-8 이라 메시지는 영어다) */
-const WORKTREE_CONFIG_ABSENT = /unknown option [`']worktree'|unable to read config file '[^']*config\.worktree': No such file or directory/
+export const WORKTREE_CONFIG_ABSENT = /unknown option [`']worktree'|unable to read config file '[^']*config\.worktree': No such file or directory/
 
 function configReadError(code: number, stderr: string): GitError {
   return new GitError(`저장소 설정을 검사하지 못해 fetch 하지 않습니다: ${stderr.trim()}`, code, stderr, ['config'])
@@ -337,7 +337,7 @@ export function fetchConfigArgs(hooksPath: string, opts: { credentialHelpers?: b
   ]
 }
 
-const FETCH_ARGS = ['fetch', '--prune', '--no-prune-tags', '--no-recurse-submodules']
+export const FETCH_ARGS = ['fetch', '--prune', '--no-prune-tags', '--no-recurse-submodules']
 
 /**
  * 훅 차단용 디렉터리. Windows 의 로컬 git.exe 는 `/dev/null` 을 그대로 받아 `<저장소 드라이브>:\dev\null\` 로 풀어 쓰므로

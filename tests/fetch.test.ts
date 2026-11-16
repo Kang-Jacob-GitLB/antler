@@ -35,154 +35,54 @@ import {
 import { ConfigStore } from '../src/main/services/ConfigStore'
 import { FetchService } from '../src/main/services/FetchService'
 import { RepoService } from '../src/main/services/RepoService'
-
-const SSH_DEFAULT = 'ssh -o BatchMode=yes -o ConnectTimeout=15'
+import {
+  ALLOWED_PAIRS,
+  BACKOFF_CASES,
+  CLASSIFY_CASES,
+  CONFIG_LIST_ENTRIES,
+  CONFIG_LIST_OUT,
+  DISPLAY_CODEPOINTS,
+  HELPER_URLS,
+  OPTION_LIKE_URLS,
+  REFSPEC_CASES,
+  SAFE_URLS,
+  SCOPED_LIST_ENTRIES,
+  SCOPED_LIST_OUT,
+  SSH_CASES,
+  SSH_DEFAULT,
+  UNC_ALLOW,
+  UNC_REJECT,
+  UNKNOWN_KEYS,
+  VALUE_CASES,
+  VERSION_AT_LEAST_CASES,
+  VERSION_PARSE_CASES
+} from './fixtures/fetchGuardCases'
 
 describe('설정 검사(순수 함수)', () => {
   it('git config --list --show-scope -z 출력을 파싱한다', () => {
-    const out = 'global\0user.name\nA B\0local\0core.sshcommand\nssh -i x\0local\0core.bare\0worktree\0remote.o.url\nu\nrl\0'
-    expect(parseConfigList(out)).toEqual([
-      { scope: 'global', key: 'user.name', value: 'A B' },
-      { scope: 'local', key: 'core.sshcommand', value: 'ssh -i x' },
-      { scope: 'local', key: 'core.bare', value: null },
-      { scope: 'worktree', key: 'remote.o.url', value: 'u\nrl' }
-    ])
+    expect(parseConfigList(CONFIG_LIST_OUT)).toEqual(CONFIG_LIST_ENTRIES)
   })
 
   it('--show-scope 없는 git config --<scope> --list -z 출력을 호출자가 정한 scope 로 파싱한다', () => {
-    expect(parseScopedConfigList('core.bare\0Core.SshCommand\nssh -i x\0remote.o.url\nu\nrl\0', 'local')).toEqual([
-      { scope: 'local', key: 'core.bare', value: null },
-      { scope: 'local', key: 'core.sshcommand', value: 'ssh -i x' },
-      { scope: 'local', key: 'remote.o.url', value: 'u\nrl' }
-    ])
+    expect(parseScopedConfigList(SCOPED_LIST_OUT, 'local')).toEqual(SCOPED_LIST_ENTRIES)
     expect(parseScopedConfigList('', 'global')).toEqual([])
   })
 
   // 허용 목록 모델: 목록에 없는 키는 전부 "알 수 없는 설정"이다
-  it.each([
-    'core.sshcommand',
-    'core.gitproxy',
-    'core.askpass',
-    'core.alternaterefscommand',
-    'core.editor',
-    'core.pager',
-    'fetch.prunetags',
-    'remote.origin.prunetags',
-    'credential.helper',
-    'credential.https://example.com.helper',
-    'credential.trace',
-    'credential.tracesecrets',
-    'credential.https://example.com.provider',
-    'credential.interactive',
-    'credential.username',
-    'remote.origin.uploadpack',
-    'remote.origin.receivepack',
-    'remote.origin.vcs',
-    'remote.my.fork.proxy',
-    'protocol.ext.allow',
-    'protocol.allow',
-    'protocol.version',
-    'url.ext::sh -c x%s.insteadof',
-    'url.https://x/.pushinsteadof',
-    'uploadpack.packobjectshook',
-    'http.proxy',
-    'http.version',
-    'http.https://example.com/.sslcainfo',
-    'http.extraheader',
-    'http.emptyauth',
-    'http.proactiveauth',
-    'http.delegation',
-    'http.allowntlmauth',
-    'http.schannelcheckrevoke',
-    'http.schannelusesslcainfo',
-    'http.followredirects',
-    'ssh.variant',
-    'trace2.eventtarget',
-    'trace2.normaltarget',
-    'trace2.perftarget',
-    'fetch.bundleuri',
-    'fetch.bundlecreationtoken',
-    'transfer.bundleuri',
-    'alias.st',
-    'diff.external',
-    'merge.tool',
-    'gui.wmstate',
-    'color.ui',
-    'some.future.key'
-  ])('알 수 없는 설정: %s', (key) => expect(isAllowedConfig(key, 'x')).toBe(false))
+  it.each(UNKNOWN_KEYS)('알 수 없는 설정: %s', (key) => expect(isAllowedConfig(key, 'x')).toBe(false))
 
-  it.each([
-    ['user.name', 'a'],
-    ['user.email', 'a@b'],
-    ['core.bare', 'false'],
-    ['core.repositoryformatversion', '0'],
-    ['core.filemode', 'false'],
-    ['core.autocrlf', 'true'],
-    ['core.hookspath', '.husky'],
-    ['core.fsmonitor', 'true'],
-    ['core.fsmonitor', 'false'],
-    ['remote.origin.url', 'https://h/r.git'],
-    ['remote.my.fork.fetch', '+refs/heads/*:refs/remotes/my.fork/*'],
-    ['remote.origin.promisor', 'true'],
-    ['remote.origin.partialclonefilter', 'blob:none'],
-    ['branch.main.remote', 'origin'],
-    ['branch.feature/x.merge', 'refs/heads/main'],
-    ['branch.main.vscode-merge-base', 'origin/main'],
-    ['branch.main.github-pr-owner-number', 'o#r#1'],
-    ['pull.rebase', 'true'],
-    ['fetch.prune', 'true'],
-    ['extensions.partialclone', 'origin'],
-    ['extensions.worktreeconfig', 'true'],
-    ['lfs.repositoryformatversion', '0'],
-    ['filter.lfs.clean', 'git-lfs clean -- %f'],
-    ['filter.lfs.smudge', 'git-lfs smudge -- %f'],
-    ['filter.lfs.process', 'git-lfs filter-process'],
-    ['filter.lfs.required', 'true'],
-    ['submodule.lib.url', 'https://h/lib.git'],
-    ['submodule.active', '.'],
-    ['include.path', '../x'],
-    ['includeif.gitdir:~/w/.path', '~/w.cfg']
-  ])('허용 키: %s = %s', (key, value) => expect(isAllowedConfig(key, value)).toBe(true))
+  it.each(ALLOWED_PAIRS)('허용 키: %s = %s', (key, value) => expect(isAllowedConfig(key, value)).toBe(true))
 
-  it.each([
-    ['remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*', true],
-    ['remote.origin.fetch', 'refs/heads/*:refs/remotes/origin/*', true],
-    ['remote.origin.fetch', '+refs/heads/main:refs/remotes/origin/main', true],
-    ['remote.my.fork.fetch', '+refs/heads/*:refs/remotes/my.fork/*', true],
-    ['remote.origin.fetch', '+refs/heads/feature:refs/heads/feature', false],
-    ['remote.origin.fetch', '+refs/heads/main:refs/stash', false],
-    ['remote.origin.fetch', '+refs/heads/main:refs/replace/abc', false],
-    ['remote.origin.fetch', '+refs/heads/main:HEAD', false],
-    ['remote.origin.fetch', '+refs/heads/none/*:refs/heads/*', false],
-    ['remote.origin.fetch', '+refs/heads/*:refs/remotes/other/*', false],
-    ['remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/x/*', false],
-    ['remote.origin.fetch', '+refs/heads/a:refs/remotes/origin/b', false],
-    ['remote.origin.fetch', '+refs/tags/*:refs/tags/*', false],
-    ['remote.origin.fetch', '+refs/*:refs/remotes/origin/*', false],
-    ['remote.origin.fetch', '^refs/heads/x', false],
-    ['remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*:refs/heads/x', false]
-  ])('remote 설정의 fetch refspec: %s = %s → 허용 %s', (key, value, ok) => expect(isAllowedConfig(key, value)).toBe(ok))
+  it.each(REFSPEC_CASES)('remote 설정의 fetch refspec: %s = %s → 허용 %s', (key, value, ok) => expect(isAllowedConfig(key, value)).toBe(ok))
 
   it('값까지 맞아야 허용하는 키: git-lfs 기본값이 아니거나 fsmonitor 가 명령이면 알 수 없는 설정', () => {
-    expect(isAllowedConfig('filter.lfs.clean', 'evil --x')).toBe(false)
-    expect(isAllowedConfig('filter.lfs.process', 'sh -c "touch x"')).toBe(false)
-    expect(isAllowedConfig('filter.lfs.required', 'false')).toBe(false)
-    expect(isAllowedConfig('core.fsmonitor', '.git/hooks/fsmonitor-watchman')).toBe(false)
-    expect(isAllowedConfig('core.bare', 'true')).toBe(false)
-    expect(isAllowedConfig('filter.lfs.clean', null)).toBe(false)
-    expect(isAllowedConfig('filter.other.clean', 'git-lfs clean -- %f')).toBe(false)
+    for (const [key, value, ok] of VALUE_CASES) expect(isAllowedConfig(key, value)).toBe(ok)
   })
 
   it('거부할 remote URL', () => {
-    expect(unsafeRemoteUrl('ext::sh -c "touch /tmp/x"')).toMatch(/ext::/)
-    expect(unsafeRemoteUrl('fd::17')).toMatch(/fd::/)
-    expect(unsafeRemoteUrl('foo::bar')).toMatch(/foo::/)
-    expect(unsafeRemoteUrl('-oProxyCommand=x')).not.toBeNull()
-    expect(unsafeRemoteUrl('ssh://-oProxyCommand=x/repo')).not.toBeNull()
-    expect(unsafeRemoteUrl('ssh://git@-host/repo')).not.toBeNull()
-    for (const ok of ['https://github.com/a/b.git', 'git@github.com:a/b.git', 'file:///tmp/r.git', '../r.git', 'C:/r.git', 'ssh://git@host/r']) {
-      expect(unsafeRemoteUrl(ok)).toBeNull()
-    }
+    for (const [url, reason] of HELPER_URLS) expect(unsafeRemoteUrl(url)).toMatch(reason)
+    for (const url of OPTION_LIKE_URLS) expect(unsafeRemoteUrl(url)).not.toBeNull()
+    for (const ok of SAFE_URLS) expect(unsafeRemoteUrl(ok)).toBeNull()
   })
 
   it('사용자 전역 core.sshCommand 는 존중하고, 저장소 안의 것은 위험 항목으로 본다', () => {
@@ -204,27 +104,12 @@ describe('설정 검사(순수 함수)', () => {
   })
 
   it('ssh 명령 선택: 사용자 설정 > 환경변수 GIT_SSH_COMMAND > GIT_SSH > BatchMode 기본(저장소 설정은 어디에도 없다)', () => {
-    const none = { userSshCommand: null }
-    expect(resolveSshCommand({ userSshCommand: 'ssh -F my' }, 'local', { GIT_SSH_COMMAND: 'env-ssh' })).toBe('ssh -F my')
-    expect(resolveSshCommand(none, 'local', { GIT_SSH_COMMAND: 'env-ssh', GIT_SSH: '/x/ssh' })).toBe('env-ssh')
-    expect(resolveSshCommand(none, 'local', { GIT_SSH: '/opt/my ssh/ssh' }, 'linux')).toBe("'/opt/my ssh/ssh'")
-    expect(resolveSshCommand(none, 'local', { GIT_SSH: 'C:\\Program Files\\PuTTY\\plink.exe' }, 'win32')).toBe("'C:/Program Files/PuTTY/plink.exe'")
-    expect(resolveSshCommand(none, 'local', {})).toBe(SSH_DEFAULT)
-    // 원격 환경(WSL·SSH)에서는 이 프로세스의 환경변수가 의미 없다
-    expect(resolveSshCommand(none, 'wsl', { GIT_SSH_COMMAND: 'env-ssh' })).toBe(SSH_DEFAULT)
+    for (const c of SSH_CASES) expect(resolveSshCommand({ userSshCommand: c.userSshCommand }, c.kind, c.env, c.platform ?? 'linux')).toBe(c.expected)
   })
 
   it('git 버전 파싱·비교(file 전송은 2.45.1 이상에서만)', () => {
-    expect(parseGitVersion('git version 2.49.0.windows.1\n')).toEqual([2, 49, 0])
-    expect(parseGitVersion('git version 2.43.0')).toEqual([2, 43, 0])
-    expect(parseGitVersion('git version 2.39')).toEqual([2, 39, 0])
-    expect(parseGitVersion('weird')).toBeNull()
-    expect(versionAtLeast([2, 45, 1], FILE_TRANSPORT_MIN_GIT)).toBe(true)
-    expect(versionAtLeast([2, 49, 0], FILE_TRANSPORT_MIN_GIT)).toBe(true)
-    expect(versionAtLeast([3, 0, 0], FILE_TRANSPORT_MIN_GIT)).toBe(true)
-    expect(versionAtLeast([2, 45, 0], FILE_TRANSPORT_MIN_GIT)).toBe(false)
-    expect(versionAtLeast([2, 43, 0], FILE_TRANSPORT_MIN_GIT)).toBe(false)
-    expect(versionAtLeast(null, FILE_TRANSPORT_MIN_GIT)).toBe(false)
+    for (const [text, v] of VERSION_PARSE_CASES) expect(parseGitVersion(text)).toEqual(v)
+    for (const [v, ok] of VERSION_AT_LEAST_CASES) expect(versionAtLeast(v, FILE_TRANSPORT_MIN_GIT)).toBe(ok)
   })
 
   it('훅 디렉터리: 로컬은 앱 소유 디렉터리(슬래시), 원격은 /dev/null, Windows 로컬에 디렉터리가 없으면 거부', () => {
@@ -245,20 +130,11 @@ describe('설정 검사(순수 함수)', () => {
   })
 
   it('백오프: 주기 → 2배씩 → 30분 상한', () => {
-    expect(nextDelayMs(5, 0)).toBe(5 * 60_000)
-    expect(nextDelayMs(5, 1)).toBe(10 * 60_000)
-    expect(nextDelayMs(5, 2)).toBe(20 * 60_000)
-    expect(nextDelayMs(5, 3)).toBe(30 * 60_000)
-    expect(nextDelayMs(1, 20)).toBe(30 * 60_000)
-    expect(nextDelayMs(60, 5)).toBe(60 * 60_000)
+    for (const [minutes, failures, ms] of BACKOFF_CASES) expect(nextDelayMs(minutes, failures)).toBe(ms)
   })
 
   it('오류 분류: 인증 실패는 auth, 허용 안 된 전송은 protocol, 나머지는 network', () => {
-    expect(classifyFailure(new Error("fatal: transport 'file' not allowed"))).toBe('protocol')
-    expect(classifyFailure(new Error('fatal: Authentication failed for https://x'))).toBe('auth')
-    expect(classifyFailure(new Error('git@h: Permission denied (publickey).'))).toBe('auth')
-    expect(classifyFailure(new Error('fatal: could not read Username for https://x: terminal prompts disabled'))).toBe('auth')
-    expect(classifyFailure(new Error('fatal: unable to access: Could not resolve host'))).toBe('network')
+    for (const [text, kind] of CLASSIFY_CASES) expect(classifyFailure(new Error(text))).toBe(kind)
   })
 
   it('fetch 환경변수가 WSL·SSH 실행 명령에 실린다', () => {
@@ -1008,27 +884,7 @@ describe('확인 창: 닮은꼴 문자', () => {
   const ch = (...c: number[]): string => String.fromCodePoint(...c)
   const unesc = (cp: number): string => (cp > 0xffff ? `\\u{${cp.toString(16)}}` : `\\u${cp.toString(16).padStart(4, '0')}`)
 
-  it.each([
-    ['한글 채움 U+115F', 0x115f],
-    ['한글 채움 U+1160', 0x1160],
-    ['한글 채움 U+3164', 0x3164],
-    ['반각 한글 채움 U+FFA0', 0xffa0],
-    ['점자 빈칸 U+2800', 0x2800],
-    ['결합 그래핌 조이너 U+034F', 0x034f],
-    ['변이 선택자 U+FE0F', 0xfe0f],
-    ['변이 선택자 보충 U+E0100', 0xe0100],
-    ['NBSP U+00A0', 0x00a0],
-    ['전각 공백 U+3000', 0x3000],
-    ['EM 공백 U+2003', 0x2003],
-    ['결합 겹침 줄 U+0336', 0x0336],
-    ['오른쪽 큰따옴표 U+201D', 0x201d],
-    ['왼쪽 큰따옴표 U+201C', 0x201c],
-    ['전각 따옴표 U+FF02', 0xff02],
-    ['꺾쇠 따옴표 U+00BB', 0x00bb],
-    ['ALM U+061C', 0x061c],
-    ['소프트 하이픈 U+00AD', 0x00ad],
-    ['몽골어 모음 구분자 U+180E', 0x180e]
-  ])('%s 는 \\uXXXX 로 드러난다', (_n, cp) => {
+  it.each(DISPLAY_CODEPOINTS)('%s 는 \\uXXXX 로 드러난다', (_n, cp) => {
     expect(quoteForDisplay(`a${ch(cp)}b`)).toBe(`"a${unesc(cp)}b"`)
   })
 
@@ -1171,31 +1027,9 @@ describe('fetch 는 로컬 ref 를 쓰지 않는다(설정이 목적지를 정�
 })
 
 describe('UNC·네트워크 경로 remote URL 은 어느 플랫폼에서든 거부한다', () => {
-  it.each([
-    '//host@8080/DavWWWRoot/x.git',
-    '//host/share/x.git',
-    '\\\\host\\share\\x.git',
-    '\\\\?\\UNC\\host\\share\\x.git',
-    '\\\\.\\pipe\\x',
-    '/\\host/share/x',
-    '  \\\\host\\share\\x.git',
-    'file://host/share/x.git',
-    'file://localhost/share/x.git',
-    'file:////host/share/x.git',
-    'FILE://host/share/x.git',
-    'file:\\\\host\\share\\x.git',
-    // NT 네임스페이스 접두어 — 앞이 역슬래시 하나라 // 검사를 빠져나간다(git -C '\??\C:\…' 이 실제로 열린다)
-    '\\??\\UNC\\host\\share\\x.git',
-    '  \\??\\UNC\\host\\share\\x.git',
-    '/??/UNC/host/share/x.git',
-    'file:///??/UNC/host/share/x.git',
-    'file:/??/UNC/host/share/x.git'
-  ])('거부: %s', (url) => expect(unsafeRemoteUrl(url)).not.toBeNull())
+  it.each(UNC_REJECT)('거부: %s', (url) => expect(unsafeRemoteUrl(url)).not.toBeNull())
 
-  it.each(['file:///C:/repos/x.git', 'file:///tmp/r.git', '/tmp/r.git', 'C:\\repos\\x.git', 'C:/repos/x.git', '../r.git', 'https://example.com/x.git', 'git@github.com:a/b.git'])(
-    '허용: %s',
-    (url) => expect(unsafeRemoteUrl(url)).toBeNull()
-  )
+  it.each(UNC_ALLOW)('허용: %s', (url) => expect(unsafeRemoteUrl(url)).toBeNull())
 
   it('설정의 UNC remote 는 확인 없이 거부하고 접속하지 않는다', async () => {
     const { repo } = makeRepos()

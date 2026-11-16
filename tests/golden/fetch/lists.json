@@ -1,0 +1,41 @@
+{
+ "runtime": {
+  "unicode": "16.0"
+ },
+ "allowedKeys": [
+  {"source":"^core\\.(repositoryformatversion|filemode|logallrefupdates|ignorecase|precomposeunicode|symlinks|autocrlf|eol|safecrlf|longpaths|quotepath|checkstat|trustctime|untrackedcache|fscache|preloadindex|commentchar|hidedotfiles|abbrev|whitespace|worktree|sparsecheckout|sparsecheckoutcone|hookspath|excludesfile)$","flags":""},
+  {"source":"^remote\\..+\\.(url|pushurl|push|tagopt|prune|mirror|skipdefaultupdate|skipfetchall|promisor|partialclonefilter)$","flags":""},
+  {"source":"^branch\\..+\\.(remote|merge|rebase|pushremote|description|vscode-merge-base|github-pr-owner-number)$","flags":""},
+  {"source":"^user\\.(name|email)$","flags":""},
+  {"source":"^init\\.defaultbranch$","flags":""},
+  {"source":"^pull\\.(rebase|ff)$","flags":""},
+  {"source":"^push\\.(default|autosetupremote)$","flags":""},
+  {"source":"^fetch\\.prune$","flags":""},
+  {"source":"^lfs\\.repositoryformatversion$","flags":""},
+  {"source":"^extensions\\.(objectformat|worktreeconfig|refstorage|partialclone)$","flags":""},
+  {"source":"^submodule\\.(.+\\.)?(url|active)$","flags":""},
+  {"source":"^include\\.path$","flags":""},
+  {"source":"^includeif\\..+\\.path$","flags":""}
+ ],
+ "allowedValues": {
+  "filter.lfs.clean": ["git-lfs clean -- %f"],
+  "filter.lfs.smudge": ["git-lfs smudge -- %f","git-lfs smudge --skip -- %f"],
+  "filter.lfs.process": ["git-lfs filter-process","git-lfs filter-process --skip"],
+  "filter.lfs.required": ["true"],
+  "core.fsmonitor": ["true","false"],
+  "core.bare": ["false"]
+ },
+ "remoteUrlKey": {
+  "source": "^remote\\..+\\.(url|pushurl)$",
+  "flags": ""
+ },
+ "submoduleUrlKey": {
+  "source": "^submodule\\..+\\.url$",
+  "flags": ""
+ },
+ "handWritten": {
+  "httpUserinfo": {"source":"^(https?:\\/\\/)([^/?#]*)@","flags":"i"},
+  "ntNamespace": {"source":"[\\\\/]\\?\\?[\\\\/]","flags":""},
+  "worktreeConfigAbsent": {"source":"unknown option [`']worktree'|unable to read config file '[^']*config\\.worktree': No such file or directory","flags":""}
+ }
+}

@@ -19,7 +19,7 @@ pub const SCOPE_MAX_ITEMS: usize = 200;
 const MAX_REF_LEN: usize = 1024;
 
 /// JS 정규식 `\s`: 공백·줄바꿈 + `     -          　 ﻿`
-fn is_js_space(c: char) -> bool {
+pub(crate) fn is_js_space(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
