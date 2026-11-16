@@ -12,9 +12,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::{auth_header, JiraKind};
 use crate::git::fetch::js_trim;
-use crate::net::http::{
-    classify, header, now_ms, or_abort, read_capped, Failure, HttpClient, HttpInitError, NetError, Profile, ReadError, Redirects, Rewrite, REQUEST_TIMEOUT_SECS,
-};
+#[cfg(feature = "test-hooks")]
+use crate::net::http::{Profile, Rewrite};
+use crate::net::http::{classify, header, now_ms, or_abort, read_capped, Failure, HttpClient, HttpInitError, NetError, ReadError, Redirects, REQUEST_TIMEOUT_SECS};
 use crate::net::http_error::{jira_http_error, parse_retry_after};
 use crate::net::json::{self, Json};
 use crate::net::redact::{jira_secrets, SecretString};
@@ -70,6 +70,7 @@ impl JiraClient {
     }
 
     /// 테스트 전용(루프백 http·짧은 제한 시간·주소 치환·짧은 재시도 대기). 운영 코드에서 부르지 않는다
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn new_for_test(timeout: Duration, rewrite: Option<Rewrite>, retry_unit: Duration) -> Result<Self, HttpInitError> {
         Ok(Self { http: HttpClient::build(Redirects::None, Profile::Test { timeout, rewrite })?, retry_unit })
@@ -103,7 +104,7 @@ impl JiraClient {
             let bytes = read_body(&mut res, limit, opts.cancel, status).await?;
             let text = String::from_utf8_lossy(&bytes);
             if !res.status().is_success() {
-                return Err(http_error(&res, status, &text, cred.kind, opts.not_found));
+                return Err(http_error(&res, status, &text, cred, opts.not_found));
             }
             return json::parse(&text).map_err(|_| NetError::api("JIRA_HTTP", Some(status), "Jira 응답을 해석할 수 없습니다"));
         }
@@ -117,7 +118,7 @@ impl JiraClient {
         let bytes = read_body(&mut res, opts.max_bytes.unwrap_or(MAX_BODY_BYTES), opts.cancel, status).await?;
         let text = String::from_utf8_lossy(&bytes);
         if !res.status().is_success() {
-            return Err(http_error(&res, status, &text, cred.kind, opts.not_found));
+            return Err(http_error(&res, status, &text, cred, opts.not_found));
         }
         if js_trim(&text).is_empty() {
             return Ok(None);
@@ -202,7 +203,10 @@ async fn read_body(res: &mut Response, limit: usize, cancel: Option<&Cancellatio
     }
 }
 
-fn http_error(res: &Response, status: u16, text: &str, kind: JiraKind, not_found: Option<&str>) -> NetError {
-    let e = jira_http_error(status, header(res.headers(), RETRY_AFTER.as_str()), text, kind, not_found, now_ms());
+/// 본문 메시지의 비밀은 자르기 전에 여기서 가린다(`get`·`post` 의 `sealed` 는 마지막 방어)
+fn http_error(res: &Response, status: u16, text: &str, cred: &JiraCredential, not_found: Option<&str>) -> NetError {
+    let secrets = jira_secrets(&cred.email, &cred.token);
+    let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    let e = jira_http_error(status, header(res.headers(), RETRY_AFTER.as_str()), text, cred.kind, not_found, now_ms(), &refs);
     NetError::api(e.code, Some(e.status), e.message)
 }

@@ -48,6 +48,7 @@ dependencies = [
  "base64 0.23.1",
  "ctor",
  "futures-util",
+ "native-tls",
  "reqwest",
  "rfd",
  "serde",

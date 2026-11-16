@@ -17,6 +17,11 @@ disallowed-methods = [
   { path = "reqwest::Client::builder", reason = "HTTP 클라이언트는 net::http 에서만 만든다" },
   { path = "reqwest::ClientBuilder::new", reason = "HTTP 클라이언트는 net::http 에서만 만든다" },
   { path = "reqwest::get", reason = "HTTP 클라이언트는 net::http 에서만 만든다" },
+  # `Client::default`·`ClientBuilder::default` 는 트레이트 구현이라 clippy 가 경로로 찾지 못한다("does not refer to a reachable function").
+  # 대신 tests/net.rs 의 소스 검사가 net/http.rs 밖의 `Client`·`ClientBuilder` 이름을 막는다
   { path = "reqwest::ClientBuilder::danger_accept_invalid_certs", reason = "인증서 검증을 끄지 않는다" },
   { path = "reqwest::ClientBuilder::danger_accept_invalid_hostnames", reason = "호스트 이름 검증을 끄지 않는다" },
+  # reqwest 0.13 의 실제 이름(위 두 줄은 이전 이름이라 0.13 에서는 아무것도 막지 못한다)
+  { path = "reqwest::ClientBuilder::tls_danger_accept_invalid_certs", reason = "인증서 검증을 끄지 않는다" },
+  { path = "reqwest::ClientBuilder::tls_danger_accept_invalid_hostnames", reason = "호스트 이름 검증을 끄지 않는다" },
 ]

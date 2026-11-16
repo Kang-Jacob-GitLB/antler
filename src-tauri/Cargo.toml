@@ -42,6 +42,8 @@ ctor = "1.0.13"
 # fetch 통합 테스트(tests/fetch.rs)의 루프백(127.0.0.1) 가짜 서버: 401 NTLM/Negotiate 챌린지·번들 호스트. 제품 코드는 네트워크를 열지 않는다
 # test-util: fetch 상태 기계(service.rs)의 주기·백오프·60초 제한을 멈춘 시계(start_paused)로 검증한다
 tokio = { version = "1", features = ["net", "test-util"] }
+# tests/net.rs 의 자체 서명 인증서 TLS 목 서버(운영 클라이언트가 핸드셰이크에서 실패하는지)와 검증을 끈 대조 클라이언트. reqwest 가 이미 끌어오는 판(0.2)이라 새 크레이트가 아니다
+native-tls = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판
@@ -53,3 +55,10 @@ rfd = { version = "0.17", default-features = false, features = ["common-controls
 
 [features]
 cdp = []
+# HTTP 테스트 훅(`Profile::Test`·`Rewrite`·net/github/jira 의 `*_for_test`·`SiteOptions::insecure_loopback_for_test`): 루프백 http 허용·짧은 제한 시간·주소 치환.
+# 운영 빌드에는 없다 — tests/net.rs 는 이 feature 가 있어야 빌드된다(`cargo test --features test-hooks`)
+test-hooks = []
+
+[[test]]
+name = "net"
+required-features = ["test-hooks"]

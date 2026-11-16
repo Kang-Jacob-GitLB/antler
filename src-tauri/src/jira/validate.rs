@@ -37,6 +37,7 @@ pub struct SiteOptions {
 
 impl SiteOptions {
     /// 테스트 전용: 루프백 http 를 허용한다. **운영 코드에서 부르지 않는다**
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn insecure_loopback_for_test() -> Self {
         Self { allow_insecure_loopback: true }

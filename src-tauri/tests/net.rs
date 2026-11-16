@@ -599,12 +599,66 @@ fn 오류_본문_메시지가_ts_와_같다() {
     let g = golden("http.json");
     let mut d = Diffs::default();
     for c in arr(&g["bodyGh"], "bodyGh") {
-        d.eq(|| format!("github bodyMessage({:.80})", c["t"]), &json!(github_body_message(s(&c["t"]))), &c["out"]);
+        d.eq(|| format!("github bodyMessage({:.80})", c["t"]), &json!(github_body_message(s(&c["t"]), &[])), &c["out"]);
     }
     for c in arr(&g["bodyJira"], "bodyJira") {
-        d.eq(|| format!("jira bodyMessage({:.80})", c["t"]), &json!(jira_body_message(s(&c["t"]))), &c["out"]);
+        d.eq(|| format!("jira bodyMessage({:.80})", c["t"]), &json!(jira_body_message(s(&c["t"]), &[])), &c["out"]);
     }
     d.finish("오류 본문 메시지");
+}
+
+/// 비밀이 200 단위 경계에 걸쳐도 남지 않는다 — 가린 **뒤에** 자른다(자른 뒤에 가리면 잘린 접두가 그대로 남는다)
+#[test]
+fn 본문_메시지는_가린_뒤에_자른다() {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+
+    // 반복·접두 겹침이 없는 영숫자 토큰(결정적)
+    fn token(len: usize) -> String {
+        const A: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let body: String = (0..len)
+            .map(|_| {
+                x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+                A[((x >> 33) % A.len() as u64) as usize] as char
+            })
+            .collect();
+        format!("tok_{body}")
+    }
+    /// 비밀의 길이 8 이상 접두(8 단위부터 전체까지)가 문구에 남아 있으면 그 접두
+    fn leaked<'a>(out: &str, secret: &'a str) -> Option<&'a str> {
+        (8..=secret.len()).map(|n| &secret[..n]).find(|p| out.contains(p))
+    }
+
+    let long = token(300);
+    let at_190 = token(60);
+    let email = "someone@example.com";
+    let basic = STANDARD.encode(format!("{email}:{}", token(220)));
+    assert!(basic.len() > 200);
+    let cases: Vec<(&str, String, String)> = vec![
+        ("200 단위보다 긴 토큰", long.clone(), format!("실패: {long}")),
+        ("190번째 단위 근처에서 시작하는 토큰", at_190.clone(), format!("{}{at_190} 끝", "x".repeat(190))),
+        ("200자를 넘는 base64(email:token)", basic.clone(), format!("Basic {basic}")),
+        ("경계 바로 앞에서 시작하는 base64", basic.clone(), format!("{}{basic}", "y".repeat(199))),
+    ];
+    for (name, secret, message) in cases {
+        let secrets = [secret.as_str()];
+        let gh_body = serde_json::json!({ "message": message }).to_string();
+        let jira_body = serde_json::json!({ "errorMessages": [message] }).to_string();
+        let jira_fields = serde_json::json!({ "errors": { "a": "앞", "b": message } }).to_string();
+
+        let gh = github_body_message(&gh_body, &secrets);
+        let ji = jira_body_message(&jira_body, &secrets);
+        let jf = jira_body_message(&jira_fields, &secrets);
+        let rh = RateHeaders { remaining: None, limit: None, reset: None, retry_after: None };
+        let gh_err = github_http_error(403, &rh, &gh_body, true, &|_| String::new(), &secrets).message;
+        let ji_err = jira_http_error(403, None, &jira_body, JiraKind::Cloud, None, 0.0, &secrets).message;
+        for (what, out) in [("gh", &gh), ("jira", &ji), ("jira errors", &jf), ("gh 오류", &gh_err), ("jira 오류", &ji_err)] {
+            assert_eq!(leaked(out, &secret), None, "{name} / {what}: 비밀의 접두가 남았다: {out}");
+            // 199 단위 뒤에서 가려진 `***` 는 200 단위 상한에서 `*` 하나만 남을 수 있고, 필드 앞 문구가 붙는 `errors` 는 통째로 잘릴 수 있다
+            assert!(out.contains('*') || what == "jira errors","{name} / {what}: 가린 흔적이 없다: {out}");
+        }
+    }
 }
 
 #[test]
@@ -613,7 +667,7 @@ fn jira_오류_분류가_ts_와_같다() {
     let mut d = Diffs::default();
     for c in arr(&g["jiraError"], "jiraError") {
         let kind = if s(&c["kind"]) == "cloud" { JiraKind::Cloud } else { JiraKind::Server };
-        let e = jira_http_error(c["status"].as_u64().expect("상태") as u16, opt_s(&c["retry"]), s(&c["body"]), kind, opt_s(&c["notFound"]), 1_700_000_000_000.0);
+        let e = jira_http_error(c["status"].as_u64().expect("상태") as u16, opt_s(&c["retry"]), s(&c["body"]), kind, opt_s(&c["notFound"]), 1_700_000_000_000.0, &[]);
         d.eq(|| format!("jira httpError({}, {}, {:.60})", c["status"], c["retry"], c["body"]), &json!({ "code": e.code, "status": e.status, "message": e.message }), &c["out"]);
     }
     d.finish("jira httpError");
@@ -626,7 +680,7 @@ fn github_오류_분류가_ts_와_같다() {
     for c in arr(&g["ghError"], "ghError") {
         let h = &c["h"];
         let rh = RateHeaders { remaining: opt_s(&h["remaining"]), limit: opt_s(&h["limit"]), reset: opt_s(&h["reset"]), retry_after: opt_s(&h["retry"]) };
-        let e = github_http_error(c["status"].as_u64().expect("상태") as u16, &rh, s(&c["body"]), c["signed"].as_bool().expect("signed"), &|_| "{TIME}".to_string());
+        let e = github_http_error(c["status"].as_u64().expect("상태") as u16, &rh, s(&c["body"]), c["signed"].as_bool().expect("signed"), &|_| "{TIME}".to_string(), &[]);
         d.eq(|| format!("github httpError({}, {h}, {:.60})", c["status"], c["body"]), &json!({ "code": e.code, "status": e.status, "message": e.message }), &c["out"]);
     }
     d.finish("github httpError");
@@ -680,13 +734,13 @@ fn 차이_깊은_중첩은_rust_가_더_엄격하다() {
         // 배열은 depth+0 겹이 최상위 값이다. 객체({"a":…})와 접두가 붙은 경우는 한 겹씩 더 깊다 — 정확한 경계는 아래 단위 단언이 본다
         if depth <= MAX_DEPTH - 2 {
             assert_eq!(if rust_ok { "ok" } else { "err" }, s(&c["json"]), "depth {depth} {:.40}", text);
-            assert_eq!(json!(github_body_message(&text)), c["gh"], "gh depth {depth}");
-            assert_eq!(json!(jira_body_message(&text)), c["jira"], "jira depth {depth}");
+            assert_eq!(json!(github_body_message(&text, &[])), c["gh"], "gh depth {depth}");
+            assert_eq!(json!(jira_body_message(&text, &[])), c["jira"], "jira depth {depth}");
             within += 1;
         } else if depth > MAX_DEPTH + 2 {
             assert!(!rust_ok, "depth {depth}: 상한을 넘는데 받았다");
-            assert_eq!(github_body_message(&text), "");
-            assert_eq!(jira_body_message(&text), "");
+            assert_eq!(github_body_message(&text, &[]), "");
+            assert_eq!(jira_body_message(&text, &[]), "");
             if s(&c["json"]) == "ok" {
                 beyond_known += 1;
             }
@@ -2230,6 +2284,41 @@ mod live {
         }
     }
 
+    /// 자체 서명 인증서(tests/fixtures/selfsigned-loopback.pfx — 테스트 전용 키, tests/fixtures/README.md)로 TLS 를 하는 루프백 서버.
+    /// 핸드셰이크를 끝낸 연결이 보낸 바이트를 기록하고 200 으로 답한다(클라이언트가 인증서를 거부하면 읽을 바이트가 없다)
+    struct TlsMock {
+        addr: SocketAddr,
+        received: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl TlsMock {
+        fn start() -> TlsMock {
+            let identity = native_tls::Identity::from_pkcs12(include_bytes!("fixtures/selfsigned-loopback.pfx"), "antler-test").expect("테스트 PFX");
+            let acceptor = Arc::new(native_tls::TlsAcceptor::new(identity).expect("TLS 수락기"));
+            let l = TcpListener::bind("127.0.0.1:0").expect("tls 목");
+            let addr = l.local_addr().expect("tls 목");
+            let received = Arc::new(Mutex::new(Vec::new()));
+            let r2 = received.clone();
+            std::thread::spawn(move || {
+                for s in l.incoming() {
+                    let Ok(s) = s else { continue };
+                    let (acceptor, r3) = (acceptor.clone(), r2.clone());
+                    std::thread::spawn(move || {
+                        let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+                        let Ok(mut tls) = acceptor.accept(s) else { return };
+                        let mut buf = [0u8; 8192];
+                        if let Ok(n) = tls.read(&mut buf) {
+                            r3.lock().unwrap().extend_from_slice(&buf[..n]);
+                        }
+                        let _ = tls.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+                        let _ = tls.shutdown();
+                    });
+                }
+            });
+            TlsMock { addr, received }
+        }
+    }
+
     /// 아무도 듣지 않는 루프백 주소
     fn closed_addr() -> SocketAddr {
         let l = TcpListener::bind("127.0.0.1:0").expect("빈 포트");
@@ -3025,6 +3114,49 @@ mod live {
         assert!(HttpClient::production(Redirects::None).is_ok());
     }
 
+    /// 인증서 검증이 실제로 걸린다: 자체 서명 인증서 서버에서 운영 클라이언트는 핸드셰이크에서 실패하고, 서버는 `Authorization` 을 받지 못한다
+    #[tokio::test]
+    async fn 운영_클라이언트는_자체_서명_인증서_서버와_핸드셰이크에서_실패하고_인증_정보가_새지_않는다() {
+        let _g = Guard;
+        let tls = TlsMock::start();
+
+        // 대조: 검증을 끈 클라이언트(native-tls 직접 — 이 파일은 테스트라 clippy 의 reqwest 규칙과 소스 검사 대상이 아니다)는 서버와 요청을 주고받는다.
+        // 이게 없으면 "서버가 아무것도 못 받았다"가 서버 고장과 구별되지 않는다
+        {
+            let connector = native_tls::TlsConnector::builder().danger_accept_invalid_certs(true).danger_accept_invalid_hostnames(true).build().expect("대조 클라이언트");
+            let tcp = TcpStream::connect(tls.addr).expect("대조 연결");
+            let mut s = connector.connect("127.0.0.1", tcp).expect("검증을 끈 클라이언트는 핸드셰이크가 된다");
+            s.write_all(b"GET /control HTTP/1.1\r\nHost: x\r\nAuthorization: CONTROL\r\n\r\n").expect("대조 요청");
+            let t = Instant::now();
+            while !String::from_utf8_lossy(&tls.received.lock().unwrap()).contains("CONTROL") {
+                assert!(t.elapsed() < Duration::from_secs(5), "대조 요청이 서버에 닿지 않았다 — 목 서버가 고장이다");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        tls.received.lock().unwrap().clear();
+
+        // 운영 클라이언트(JiraClient): 연결 실패 계열 오류
+        let c = cred(&format!("https://{}", tls.addr));
+        let e = err(JiraClient::new().unwrap().get(&c, "/rest/api/2/myself", JiraGet::default()).await);
+        assert_eq!((api(&e).0, api(&e).1), ("JIRA_NETWORK", None));
+        assert!(!format!("{e:?}").contains(JTOKEN));
+
+        // 운영 HTTP 코어를 직접: Authorization 을 실어도 핸드셰이크에서 끊긴다
+        let direct = HttpClient::production(Redirects::None).unwrap();
+        let sent = direct.request(reqwest::Method::GET, &format!("https://{}/x", tls.addr)).header("Authorization", format!("Bearer {JTOKEN}")).send().await;
+        let failure = sent.expect_err("자체 서명 인증서는 거부돼야 한다");
+        assert_eq!(antler_lib::net::http::classify(&failure), antler_lib::net::http::Failure::Connect);
+
+        // 서버 쪽 처리가 끝날 시간을 준 뒤 확인한다. Windows(SChannel)는 서버 쪽 핸드셰이크가 끝난 뒤 클라이언트가 인증서를 검증하므로
+        // 서버의 `completed` 는 늘 수 있다 — 검증은 요청을 보내기 전에 끝나야 하므로 서버가 받은 바이트가 비어 있는 것이 기준이다
+        std::thread::sleep(Duration::from_millis(500));
+        let got = String::from_utf8_lossy(&tls.received.lock().unwrap()).to_lowercase();
+        assert!(got.is_empty(), "서버가 운영 클라이언트에게서 바이트를 받았다: {got:?}");
+        for secret in [JTOKEN.to_lowercase(), "authorization".to_string(), b64(&format!("{EMAIL}:{JTOKEN}")).to_lowercase()] {
+            assert!(!got.contains(&secret), "서버가 받은 바이트에 {secret} 가 있다");
+        }
+    }
+
     #[tokio::test]
     async fn 운영_클라이언트는_tls_가_아닌_서버와_핸드셰이크에서_실패하고_인증_정보가_새지_않는다() {
         let _g = Guard;
@@ -3094,8 +3226,12 @@ mod live {
             // (문자열 리터럴 안의 글자는 보지 않는다: `"Client ID"` 같은 문구가 있다)
             let code: String = t.split('"').step_by(2).collect::<Vec<_>>().join(" ");
             let names_reqwest_client = code.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| w == "Client" || w == "ClientBuilder");
-            let client = rel != "net/http.rs" && (names_reqwest_client || t.contains("danger_accept") || t.contains("reqwest::get"));
-            if test_hook || loopback || client {
+            let client = rel != "net/http.rs" && (names_reqwest_client || t.contains("reqwest::get"));
+            // TLS 검증·프록시·이름 해석을 바꾸는 호출은 net/http.rs 도 예외 없이 쓰지 않는다(운영 설정은 `no_proxy()` 와 기본 TLS 검증뿐이다)
+            // (`.resolve(` 는 reqwest 의 `resolve(도메인, 주소)` 처럼 인자가 둘 이상인 것만 본다 — 인자 하나짜리는 앱 안의 다른 `resolve` 다)
+            let resolves_name = t.find(".resolve(").is_some_and(|i| t[i..].split(')').next().is_some_and(|args| args.contains(',')));
+            let weakens = resolves_name || ["danger_accept", "tls_danger", ".proxy(", ".resolve_to_addrs("].iter().any(|p| t.contains(p));
+            if test_hook || loopback || client || weakens {
                 out.push(format!("{rel}:{}: {t}", i + 1));
             }
         }
@@ -3116,6 +3252,12 @@ mod live {
         assert_eq!(source_violations("x.rs", "use reqwest::{Client, Method};").len(), 1);
         assert!(source_violations("x.rs", "let c = JiraClient::new().unwrap(); let h = HttpClient::production(r);").is_empty());
         assert!(source_violations("net/http.rs", "let client = Client::builder()").is_empty());
+        assert!(source_violations("net/http.rs", "    .no_proxy()").is_empty());
+        assert!(source_violations("router.rs", "match self.mirror.resolve(repo_id) {").is_empty());
+        for bad in ["b.danger_accept_invalid_certs(true)", "b.tls_danger_accept_invalid_hostnames(true)", "b.proxy(p)", "b.resolve(h, a)"] {
+            assert_eq!(source_violations("net/http.rs", bad).len(), 1, "net/http.rs 도 예외가 아니다: {bad}");
+            assert_eq!(source_violations("x.rs", bad).len(), 1, "{bad}");
+        }
 
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
@@ -3127,5 +3269,54 @@ mod live {
             bad.extend(source_violations(&rel, &std::fs::read_to_string(f).unwrap()));
         }
         assert!(bad.is_empty(), "운영 코드가 테스트 전용 주입을 쓰거나 클라이언트를 직접 만든다:\n{}", bad.join("\n"));
+    }
+
+    const HOOK_CFG: &str = r#"#[cfg(feature = "test-hooks")]"#;
+
+    /// 테스트 훅의 정의(`Rewrite`·`Profile::Test` 변형·net/github/jira 의 `*_for_test`·`insecure_loopback_for_test`)와, 그 위 속성·문서 줄에
+    /// `#[cfg(feature = "test-hooks")]` 가 없는 것. 반환은 (정의 수, 속성이 빠진 정의들)
+    fn unguarded_hooks(rel: &str, text: &str) -> (usize, Vec<String>) {
+        let in_net_area = ["net/", "github/", "jira/"].iter().any(|d| rel.starts_with(d));
+        let lines: Vec<&str> = text.lines().map(str::trim_start).collect();
+        let (mut defs, mut bad) = (0, Vec::new());
+        for (i, t) in lines.iter().enumerate() {
+            let is_def = t.starts_with("pub type Rewrite") || t.starts_with("Test {") || (in_net_area && t.contains("fn ") && t.contains("_for_test("));
+            if !is_def || t.starts_with("//") {
+                continue;
+            }
+            defs += 1;
+            let guarded = lines[..i].iter().rev().take_while(|l| l.starts_with("#[") || l.starts_with("//")).any(|l| *l == HOOK_CFG);
+            if !guarded {
+                bad.push(format!("{rel}:{}: {t}", i + 1));
+            }
+        }
+        (defs, bad)
+    }
+
+    /// feature 없이 빌드하면 훅이 존재하지 않는다 — 컴파일 실패 예제 대신, 정의마다 cfg 속성이 붙어 있는지를 소스에서 검사한다
+    /// (feature 없는 `cargo clippy --all-targets` 가 훅 없이 lib 가 컴파일되는 것을 따로 확인한다)
+    #[test]
+    fn 테스트_훅_정의는_모두_test_hooks_feature_뒤에_있다() {
+        assert_eq!(unguarded_hooks("net/http.rs", "pub type Rewrite = X;").1.len(), 1);
+        assert!(unguarded_hooks("net/http.rs", "#[cfg(feature = \"test-hooks\")]\n#[doc(hidden)]\npub fn new_for_test(a: u8) {").1.is_empty());
+        assert!(unguarded_hooks("net/http.rs", "#[cfg(feature = \"test-hooks\")]\n/// 문서\n#[doc(hidden)]\npub fn new_for_test(a: u8) {").1.is_empty());
+        assert_eq!(unguarded_hooks("jira/client.rs", "#[doc(hidden)]\npub fn new_for_test(a: u8) {").1.len(), 1);
+        assert_eq!(unguarded_hooks("net/http.rs", "enum P {\n    Production,\n    Test { a: u8 },\n}").1.len(), 1);
+        // 앞 항목의 속성이 다음 정의로 번지지 않는다
+        assert_eq!(unguarded_hooks("net/http.rs", "#[cfg(feature = \"test-hooks\")]\nfn a() {}\nfn b_for_test() {}").1.len(), 1);
+
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rs_files(&src, &mut files);
+        let (mut defs, mut bad) = (0, Vec::new());
+        for f in &files {
+            let rel = f.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+            let (d, b) = unguarded_hooks(&rel, &std::fs::read_to_string(f).unwrap());
+            defs += d;
+            bad.extend(b);
+        }
+        // Rewrite·Profile::Test·HttpClient/GitHubClient/JiraClient 의 new_for_test·insecure_loopback_for_test — 정의를 못 찾았다면 검사기가 눈먼 것이다
+        assert!(defs >= 6, "훅 정의를 {defs}개만 찾았다");
+        assert!(bad.is_empty(), "test-hooks feature 뒤에 있지 않은 테스트 훅:\n{}", bad.join("\n"));
     }
 }

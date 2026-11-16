@@ -542,6 +542,15 @@ TS 의 허용 태그·속성을 넓히지 않았다(링크 주소는 PR 1 의 `p
 **clippy**: `clippy.toml` 의 `disallowed-methods` 에 `reqwest::Client::new`·`Client::builder`·`ClientBuilder::new`·`reqwest::get`·`ClientBuilder::danger_accept_invalid_certs`·`danger_accept_invalid_hostnames` 를 넣었다
 (허용 없이 돌리면 `Client::builder` 에서 경고가 나는 것을 확인했다). 소스 검사 테스트(`운영_코드에는_테스트_전용_주입_호출과_클라이언트_생성이_없다`)가 `net/http.rs` 밖의 `Client`·`ClientBuilder` 이름과
 `new_for_test`·`insecure_loopback_for_test` 호출을 막는다(`SiteOptions::allow_insecure_loopback` 필드는 비공개다).
+TLS 가드레일은 reqwest 0.13 의 실제 이름(`tls_danger_accept_invalid_certs`·`tls_danger_accept_invalid_hostnames`)과 `Client::default`·`ClientBuilder::default` 도 막고, `Client::builder()` 의 예외 `allow` 는
+`net/http.rs` 의 `new_builder()` 한 줄에만 둔다. 소스 검사는 `danger_accept`·`tls_danger`·`.proxy(`·`.resolve(도메인, 주소)` 를 `net/http.rs` 도 예외 없이 검사한다.
+자체 서명 인증서 TLS 목 서버(`tests/fixtures/selfsigned-loopback.pfx` — 테스트 전용 공개 키, `native-tls` dev-dependency) 음성 테스트가 운영 클라이언트의 핸드셰이크 실패(`JIRA_NETWORK`·`Failure::Connect`)와
+서버가 `Authorization` 을 받지 못함을 확인한다(검증을 끈 대조 클라이언트로 목 서버가 정상임도 확인).
+
+**`test-hooks` feature**: `Profile::Test`·`Rewrite`·net/github/jira 의 `*_for_test`·`SiteOptions::insecure_loopback_for_test` 는 Cargo feature `test-hooks` 뒤(`#[cfg(feature = "test-hooks")]`)에만 있어
+운영 빌드에는 존재하지 않는다. `tests/net.rs` 는 `required-features = ["test-hooks"]` 라 feature 없이는 빌드되지 않고(건너뛴다), 소스 검사 `테스트_훅_정의는_모두_test_hooks_feature_뒤에_있다` 가 정의마다 cfg 속성을 강제한다.
+다른 테스트 바이너리는 이 훅을 쓰지 않는다(`git/fetch` 의 `*_for_test` 는 운영 코드가 부르는 순수 함수라 대상이 아니다). CI 는 `cargo test --features test-hooks …` 와
+`cargo clippy --all-targets -- -D warnings`(feature 없음 — 운영 빌드 모양) + `cargo clippy --all-targets --features test-hooks -- -D warnings` 둘을 돈다. 로컬: `cargo test --features test-hooks --lib --test net`.
 
 **테스트**(`src-tauri/tests/net.rs` 의 `mod live`, 외부 접속 없음, `start_paused` 안 씀): 127.0.0.1 `TcpListener` 목 서버(요청 기록·지연·chunked 무한 본문·도중 끊기·헤더만 보내고 멈춤·3xx),
 **프록시 덫**(`ctor` 가 테스트 시작 전에 `HTTP(S)_PROXY`·`ALL_PROXY` 를 덫 리스너로 돌리고 소켓 테스트마다 끝에서 덫 연결 0 을 확인, 덫이 살아 있는지 대조 테스트 포함), TLS 음성 둘(운영 클라이언트가 http 루프백에 연결 0,
@@ -560,8 +569,8 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
 - **자격 증명·토큰은 호출마다 받는다**: Jira 는 `JiraCredential` 인자, GitHub 는 `TokenProvider`(+`TokenChoice`). TS 의 `credProvider` 대응은 서비스 계층(PR 5·7)이 맡는다. 비로그인 3분 캐시 시간·재시도 대기 단위는 생성자에서만 바꿀 수 있다(`new_for_test`).
 - **Jira 사진 요청 오류**: 사진은 연결·시간 초과·상한 초과·잘못된 응답 모두 `None`(TS 와 같다), 취소만 오류다.
 
-**알려진 한계**: 공개 사진 호스트의 실제 TLS 연결(gravatar·wp.com)은 시험하지 못했다(외부 접속 금지 — 주소 치환으로 홉 규칙만 확인). 서버 본문 메시지는 200 단위로 자른 뒤 비밀을 가리므로
-토큰이 자르는 경계에 걸리면 앞부분 일부가 남을 수 있다(TS 와 같은 순서다 — 필요하면 가린 뒤 자르도록 서비스 계층 전에 바꾼다). 소스 검사는 `git/fetch` 의 기존 `*_for_test` 함수(운영 코드가 부르는 순수 함수)를 대상으로 삼지 않는다.
+**알려진 한계**: 공개 사진 호스트의 실제 TLS 연결(gravatar·wp.com)은 시험하지 못했다(외부 접속 금지 — 주소 치환으로 홉 규칙만 확인). 서버 본문 메시지는 비밀을 **가린 뒤** 200 단위로 자른다(`github_body_message`·`jira_body_message`·`*_http_error` 가 `secrets` 를 받는다. TS 는 자른 뒤 가리는 순서였으나 Rust 는 경계에 걸린 토큰이 남지 않게 바꿨다 — 골든 비교는 `secrets` 가 비면 TS 와 같다).
+`sealed` 는 마지막 방어로 남아 있다. 소스 검사는 `git/fetch` 의 기존 `*_for_test` 함수(운영 코드가 부르는 순수 함수)를 대상으로 삼지 않는다.
 
 ## Phase 0 에서 확인한 것
 

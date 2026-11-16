@@ -17,7 +17,9 @@ use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
 use crate::git::lru::LruCache;
-use crate::net::http::{classify, header, or_abort, read_capped, Failure, HttpClient, HttpInitError, NetError, Profile, ReadError, Redirects, Rewrite, REQUEST_TIMEOUT_SECS};
+#[cfg(feature = "test-hooks")]
+use crate::net::http::{Profile, Rewrite};
+use crate::net::http::{classify, header, or_abort, read_capped, Failure, HttpClient, HttpInitError, NetError, ReadError, Redirects, REQUEST_TIMEOUT_SECS};
 use crate::net::http_error::{github_http_error, has_next_link, parse_rate, RateHeaders, RateInfo};
 use crate::net::js_value::truthy;
 use crate::net::json::{self, Json};
@@ -101,6 +103,7 @@ impl GitHubClient {
 
     /// 테스트 전용: `https://api.github.com` 으로 가는 요청을 `mock_base`(`http://127.0.0.1:포트`)로 보내고, 그 origin 으로의 리다이렉트만 따른다.
     /// 루프백 http 를 허용하고 제한 시간·비로그인 신선 시간을 줄일 수 있다. **운영 코드에서 부르지 않는다**
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn new_for_test(token: TokenProvider, mock_base: &str, timeout: Duration, anon_fresh: Duration) -> Result<Self, HttpInitError> {
         let base = mock_base.trim_end_matches('/').to_string();
@@ -201,7 +204,7 @@ impl GitHubClient {
         let bytes = read_body(&mut res, opts.cancel, status).await?;
         let text = String::from_utf8_lossy(&bytes);
         if !res.status().is_success() {
-            return Err(self.http_error(&res, &text, token.is_some()));
+            return Err(self.http_error(&res, &text, token));
         }
         let data = json::parse(&text).map_err(|_| NetError::api("GH_HTTP", Some(status), "GitHub 응답을 해석할 수 없습니다"))?;
         let has_more = has_next_link(header(res.headers(), LINK.as_str()));
@@ -237,7 +240,7 @@ impl GitHubClient {
         let bytes = read_body(&mut res, cancel, status).await?;
         let text = String::from_utf8_lossy(&bytes);
         if !res.status().is_success() {
-            return Err(self.http_error(&res, &text, true));
+            return Err(self.http_error(&res, &text, Some(token)));
         }
         let body = json::parse(&text).map_err(|_| NetError::api("GH_HTTP", Some(status), "GitHub 응답을 해석할 수 없습니다"))?;
         let rate_limited = matches!(body.get("errors"), Some(Json::Arr(errs)) if errs.iter().any(|e| e.get("type").and_then(Json::as_str) == Some("RATE_LIMITED")));
@@ -262,8 +265,11 @@ impl GitHubClient {
         }
     }
 
-    fn http_error(&self, res: &Response, text: &str, signed_in: bool) -> NetError {
-        let e = github_http_error(res.status().as_u16(), &rate_headers(res.headers()), text, signed_in, &*self.format_time);
+    /// 본문 메시지의 비밀은 자르기 전에 여기서 가린다(`get`·`graphql` 의 `sealed` 는 마지막 방어)
+    fn http_error(&self, res: &Response, text: &str, token: Option<&SecretString>) -> NetError {
+        let secrets = token.map(github_secrets).unwrap_or_default();
+        let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+        let e = github_http_error(res.status().as_u16(), &rate_headers(res.headers()), text, token.is_some(), &*self.format_time, &refs);
         NetError::api(e.code, Some(e.status), e.message)
     }
 }

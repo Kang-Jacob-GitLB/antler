@@ -5,15 +5,17 @@
 //! - 본문은 [`read_capped`] 로만 읽는다(Content-Length 선검사 + chunk 누계). 취소는 [`or_abort`].
 //! - `reqwest::Error` 의 `Display` 는 쓰지 않는다. 요청 주소·헤더가 문구에 실릴 수 있어서다 — [`classify`] 가 `is_timeout`·`is_connect`·`is_body` 로 분류만 하고 문구는 호출자의 고정 문구다.
 //!
-//! 테스트 전용 주입(`*_for_test`, `#[doc(hidden)]`)은 루프백 http 허용·짧은 제한 시간·요청 주소 치환뿐이다. 운영 코드에서 부르지 않는다는 것을
+//! 테스트 전용 주입(`*_for_test`, `#[doc(hidden)]`)은 루프백 http 허용·짧은 제한 시간·요청 주소 치환뿐이다. 모두 Cargo feature `test-hooks` 뒤에 있어
+//! 운영 빌드(feature 없음)에는 `Profile::Test`·`Rewrite`·`*_for_test` 가 존재하지 않는다. 운영 코드에서 부르지 않는다는 것과 cfg 속성이 붙어 있다는 것을
 //! `tests/net.rs` 의 소스 검사가 강제한다. 주소 치환은 "https://secure.gravatar.com/…" 같은 **판정은 원래 주소로 하고 연결만 루프백으로** 보내기 위한 것이다(실제 인터넷에 나가지 않고 경로를 시험한다).
 use std::future::Future;
+#[cfg(feature = "test-hooks")]
 use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::header::HeaderMap;
 use reqwest::redirect::Policy;
-use reqwest::{Client, Method, RequestBuilder, Response};
+use reqwest::{Client, ClientBuilder, Method, RequestBuilder, Response};
 use tokio_util::sync::CancellationToken;
 
 use super::redact::redact_secrets;
@@ -47,11 +49,13 @@ impl std::fmt::Display for HttpInitError {
 impl std::error::Error for HttpInitError {}
 
 /// 테스트가 요청 주소를 바꾸는 함수(원래 주소 → 실제로 연결할 주소)
+#[cfg(feature = "test-hooks")]
 pub type Rewrite = Arc<dyn Fn(&str) -> String + Send + Sync>;
 
-/// 클라이언트를 만드는 방식. [`Profile::Test`] 는 `*_for_test` 생성자만 쓴다
+/// 클라이언트를 만드는 방식. [`Profile::Test`] 는 `test-hooks` feature 를 켠 빌드(테스트)에만 존재하고 `*_for_test` 생성자만 쓴다
 pub enum Profile {
     Production,
+    #[cfg(feature = "test-hooks")]
     Test { timeout: Duration, rewrite: Option<Rewrite> },
 }
 
@@ -59,8 +63,13 @@ pub enum Profile {
 #[derive(Clone)]
 pub struct HttpClient {
     client: Client,
+    #[cfg(feature = "test-hooks")]
     rewrite: Option<Rewrite>,
 }
+
+/// reqwest 빌더를 만드는 유일한 줄이다(clippy.toml 의 disallowed-methods 예외를 이 한 줄로 좁힌다)
+#[allow(clippy::disallowed_methods)]
+fn new_builder() -> ClientBuilder { Client::builder() }
 
 impl HttpClient {
     /// 운영 클라이언트: https 만, 프록시 무시, 15초, UA `Antler`
@@ -69,17 +78,22 @@ impl HttpClient {
     }
 
     /// 테스트 전용: 루프백 http 를 허용하고 제한 시간을 줄이며 요청 주소를 바꿀 수 있다. **운영 코드에서 부르지 않는다**
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn new_for_test(redirects: Redirects, timeout: Duration, rewrite: Option<Rewrite>) -> Result<Self, HttpInitError> {
         Self::build(redirects, Profile::Test { timeout, rewrite })
     }
 
-    // reqwest 클라이언트를 만드는 유일한 곳이다(clippy.toml 의 disallowed-methods 예외)
-    #[allow(clippy::disallowed_methods)]
     pub(crate) fn build(redirects: Redirects, profile: Profile) -> Result<Self, HttpInitError> {
-        let (https_only, timeout, rewrite) = match profile {
-            Profile::Production => (true, REQUEST_TIMEOUT, None),
-            Profile::Test { timeout, rewrite } => (false, timeout, rewrite),
+        let (https_only, timeout) = match &profile {
+            Profile::Production => (true, REQUEST_TIMEOUT),
+            #[cfg(feature = "test-hooks")]
+            Profile::Test { timeout, .. } => (false, *timeout),
+        };
+        #[cfg(feature = "test-hooks")]
+        let rewrite = match profile {
+            Profile::Production => None,
+            Profile::Test { rewrite, .. } => rewrite,
         };
         let policy = match redirects {
             Redirects::None => Policy::none(),
@@ -92,7 +106,7 @@ impl HttpClient {
                 }
             }),
         };
-        let client = Client::builder()
+        let client = new_builder()
             .tls_backend_native()
             .https_only(https_only)
             .no_proxy()
@@ -101,15 +115,20 @@ impl HttpClient {
             .redirect(policy)
             .build()
             .map_err(|_| HttpInitError)?;
-        Ok(Self { client, rewrite })
+        Ok(Self {
+            client,
+            #[cfg(feature = "test-hooks")]
+            rewrite,
+        })
     }
 
     /// 요청 만들기. 주소가 잘못돼도 여기서는 실패하지 않고 `send` 에서 실패한다
     pub fn request(&self, method: Method, url: &str) -> RequestBuilder {
-        match &self.rewrite {
-            Some(f) => self.client.request(method, f(url)),
-            None => self.client.request(method, url),
+        #[cfg(feature = "test-hooks")]
+        if let Some(f) = &self.rewrite {
+            return self.client.request(method, f(url));
         }
+        self.client.request(method, url)
     }
 }
 
