@@ -12,6 +12,8 @@ pub enum ExecError {
     Aborted,
     /// 프로세스를 띄우지 못했거나 기다리다 실패했다(git 없음 등)
     SpawnFailed { message: String },
+    /// 실행기 밖의 검증·해석 실패(잘못된 입력, 파서가 거부한 출력). TS 의 일반 `Error` 에 해당해 code 는 ERROR 다
+    Other { message: String },
 }
 
 impl ExecError {
@@ -20,7 +22,7 @@ impl ExecError {
         match self {
             ExecError::Git { .. } => "GIT",
             ExecError::Aborted => "ABORTED",
-            ExecError::SpawnFailed { .. } => "ERROR",
+            ExecError::SpawnFailed { .. } | ExecError::Other { .. } => "ERROR",
         }
     }
 
@@ -34,7 +36,7 @@ impl fmt::Display for ExecError {
         match self {
             ExecError::Git { message, .. } => f.write_str(message),
             ExecError::Aborted => f.write_str("aborted"),
-            ExecError::SpawnFailed { message } => f.write_str(message),
+            ExecError::SpawnFailed { message } | ExecError::Other { message } => f.write_str(message),
         }
     }
 }
@@ -51,6 +53,7 @@ mod tests {
         assert_eq!(git.envelope_code(), "GIT");
         assert_eq!(ExecError::Aborted.envelope_code(), "ABORTED");
         assert_eq!(ExecError::SpawnFailed { message: "x".into() }.envelope_code(), "ERROR");
+        assert_eq!(ExecError::Other { message: "x".into() }.envelope_code(), "ERROR");
         assert_eq!(ExecError::Aborted.to_string(), "aborted");
     }
 }

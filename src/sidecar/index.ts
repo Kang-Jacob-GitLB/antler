@@ -1,6 +1,7 @@
 // Tauri 용 개발 전용 Node 사이드카. src/main 의 서비스 조립(src/main/index.ts)을 electron 없이 재현하고,
 // registerIpc 를 그대로 재사용해 Rust 가 stdin 으로 넘기는 채널 호출을 처리한다. 프로토콜은 protocol.ts.
 import { createInterface } from 'node:readline'
+import { inspect } from 'node:util'
 import { join } from 'node:path'
 import { GitHubService } from '../main/github/service'
 import { createGhCli } from '../main/github/ghCli'
@@ -15,12 +16,16 @@ import { RepoService } from '../main/services/RepoService'
 import { RepoWatcher } from '../main/services/RepoWatcher'
 import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
+import { MirrorSender } from './mirror'
 import { UNDEFINED_ARG, type FromSidecar, type ToSidecar } from './protocol'
 import { IPC_CHANNELS } from '@shared/ipc'
 
 // stdout 은 프로토콜 전용이다 — 서비스가 console.log/info 를 써도 프로토콜 줄이 깨지지 않게 stderr 로 돌린다
 console.log = console.error
 console.info = console.error
+// Node 의 console.debug·dir 도 stdout 으로 쓴다 — 프로토콜 줄({t:'repos'} 등)을 위조할 수 있는 길이 되지 않게 함께 돌린다
+console.debug = console.error
+console.dir = (item, options) => void process.stderr.write(`${inspect(item, options)}\n`)
 
 const userData = process.env['ANTLER_USER_DATA']
 if (!userData) {
@@ -43,6 +48,11 @@ const emit = (name: string, payload: unknown): void => out({ t: 'evt', name, pay
 const cacheDir = join(userData, 'remote-repos')
 const noHooksDir = join(userData, 'no-hooks')
 const config = new ConfigStore(join(userData, 'antler.config.json'), { cacheDir })
+// Rust 라우터가 쓰는 저장소 미러. 시작 때(ready 전) 한 번, 이후 목록이 바뀔 때마다 보낸다. update 안에서 동기로 불리므로
+// 저장소를 바꾸는 호출의 res 줄보다 repos 줄이 먼저 나가 renderer 의 다음 호출은 새 미러를 본다
+const mirror = new MirrorSender(out)
+config.onChange = (c) => mirror.push(c)
+mirror.push(config.get())
 let netConfig: readonly NetworkConfigEntry[] = []
 const netReady = readNetworkConfig().then((c) => {
   netConfig = c

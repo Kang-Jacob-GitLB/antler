@@ -1,0 +1,562 @@
+{
+  "scenarios": [
+    {
+      "hash": "72a68ce72ca0ed3fa09e57227563baf32075ea5c",
+      "name": "루트 커밋",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 62,
+          "authorDate": 1700003600,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": null,
+          "body": "본문 첫 줄\n본문 둘째 줄",
+          "commitDate": 1700003600,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 0,
+          "files": [
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "README.md",
+              "status": "A"
+            },
+            {
+              "additions": 40,
+              "binary": false,
+              "deletions": 0,
+              "path": "a.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "docs/한글 문서 이름.md",
+              "status": "A"
+            },
+            {
+              "additions": null,
+              "binary": true,
+              "deletions": null,
+              "path": "img.bin",
+              "status": "A"
+            },
+            {
+              "additions": 20,
+              "binary": false,
+              "deletions": 0,
+              "path": "old name.ts",
+              "status": "A"
+            }
+          ],
+          "hash": "72a68ce72ca0ed3fa09e57227563baf32075ea5c",
+          "parents": [],
+          "subject": "init",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+      "name": "수정·추가·삭제·이름 변경·바이너리·한글 경로",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 5,
+          "authorDate": 1700007200,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": "72a68ce72ca0ed3fa09e57227563baf32075ea5c",
+          "body": "",
+          "commitDate": 1700007200,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 4,
+          "files": [
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 1,
+              "path": "README.md",
+              "status": "D"
+            },
+            {
+              "additions": 2,
+              "binary": false,
+              "deletions": 2,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "docs/한글 문서 이름.md",
+              "status": "M"
+            },
+            {
+              "additions": null,
+              "binary": true,
+              "deletions": null,
+              "path": "img.bin",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "new.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "old name.ts",
+              "path": "src/new name.ts",
+              "similarity": 95,
+              "status": "R"
+            }
+          ],
+          "hash": "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+          "parents": [
+            "72a68ce72ca0ed3fa09e57227563baf32075ea5c"
+          ],
+          "subject": "feat: 여러 변경",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "45c2104daba8df006e2bd1fe3653064bf1ea868b",
+      "name": "병합 커밋(첫 부모 대비)",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 2,
+          "authorDate": 1700014400,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+          "body": "",
+          "commitDate": 1700014400,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 0,
+          "files": [
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "merged.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "side.txt",
+              "status": "A"
+            }
+          ],
+          "hash": "45c2104daba8df006e2bd1fe3653064bf1ea868b",
+          "parents": [
+            "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+            "bfb65e92b68dc84f2b21d6e2749051a9e779b46b"
+          ],
+          "subject": "Merge branch 'feature'",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+      "name": "가지의 커밋",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 1,
+          "authorDate": 1700010800,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": "72a68ce72ca0ed3fa09e57227563baf32075ea5c",
+          "body": "",
+          "commitDate": 1700010800,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 0,
+          "files": [
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "side.txt",
+              "status": "A"
+            }
+          ],
+          "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+          "parents": [
+            "72a68ce72ca0ed3fa09e57227563baf32075ea5c"
+          ],
+          "subject": "feature: side 파일",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "f79d260c0374825ede572587567c476425efbfe8",
+      "name": "빈 커밋(변경 파일 없음)",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 0,
+          "authorDate": 1700018000,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": "45c2104daba8df006e2bd1fe3653064bf1ea868b",
+          "body": "",
+          "commitDate": 1700018000,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 0,
+          "files": [],
+          "hash": "f79d260c0374825ede572587567c476425efbfe8",
+          "parents": [
+            "45c2104daba8df006e2bd1fe3653064bf1ea868b"
+          ],
+          "subject": "chore: 빈 커밋",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+      "name": "본문이 공백뿐인 커밋",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 0,
+          "authorDate": 1700021600,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": "f79d260c0374825ede572587567c476425efbfe8",
+          "body": "",
+          "commitDate": 1700021600,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 0,
+          "files": [],
+          "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+          "parents": [
+            "f79d260c0374825ede572587567c476425efbfe8"
+          ],
+          "subject": "subject only",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "D2ED02DE5D7030C00A7CD29072501E71E9089D4E",
+      "name": "대문자 해시",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 5,
+          "authorDate": 1700007200,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": "72a68ce72ca0ed3fa09e57227563baf32075ea5c",
+          "body": "",
+          "commitDate": 1700007200,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 4,
+          "files": [
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 1,
+              "path": "README.md",
+              "status": "D"
+            },
+            {
+              "additions": 2,
+              "binary": false,
+              "deletions": 2,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "docs/한글 문서 이름.md",
+              "status": "M"
+            },
+            {
+              "additions": null,
+              "binary": true,
+              "deletions": null,
+              "path": "img.bin",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "new.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "old name.ts",
+              "path": "src/new name.ts",
+              "similarity": 95,
+              "status": "R"
+            }
+          ],
+          "hash": "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+          "parents": [
+            "72a68ce72ca0ed3fa09e57227563baf32075ea5c"
+          ],
+          "subject": "feat: 여러 변경",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "d2ed02d",
+      "name": "7글자 약식 해시",
+      "repo": "basic",
+      "result": {
+        "data": {
+          "additions": 5,
+          "authorDate": 1700007200,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": "72a68ce72ca0ed3fa09e57227563baf32075ea5c",
+          "body": "",
+          "commitDate": 1700007200,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 4,
+          "files": [
+            {
+              "additions": 0,
+              "binary": false,
+              "deletions": 1,
+              "path": "README.md",
+              "status": "D"
+            },
+            {
+              "additions": 2,
+              "binary": false,
+              "deletions": 2,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "docs/한글 문서 이름.md",
+              "status": "M"
+            },
+            {
+              "additions": null,
+              "binary": true,
+              "deletions": null,
+              "path": "img.bin",
+              "status": "M"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "new.txt",
+              "status": "A"
+            },
+            {
+              "additions": 1,
+              "binary": false,
+              "deletions": 1,
+              "oldPath": "old name.ts",
+              "path": "src/new name.ts",
+              "similarity": 95,
+              "status": "R"
+            }
+          ],
+          "hash": "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+          "parents": [
+            "72a68ce72ca0ed3fa09e57227563baf32075ea5c"
+          ],
+          "subject": "feat: 여러 변경",
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "d17a190d50562f0fdab1664a5e84c72c85a55c2c",
+      "name": "상한을 넘는 변경 파일(truncated)",
+      "repo": "many",
+      "result": {
+        "data": {
+          "additions": 5001,
+          "authorDate": 1700003600,
+          "authorEmail": "dev@example.com",
+          "authorName": "홍길동",
+          "baseParent": null,
+          "body": "",
+          "commitDate": 1700003600,
+          "committerEmail": "dev@example.com",
+          "committerName": "홍길동",
+          "deletions": 0,
+          "files": {
+            "count": 5000,
+            "first": {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "f/0000.txt",
+              "status": "A"
+            },
+            "last": {
+              "additions": 1,
+              "binary": false,
+              "deletions": 0,
+              "path": "f/4999.txt",
+              "status": "A"
+            }
+          },
+          "hash": "d17a190d50562f0fdab1664a5e84c72c85a55c2c",
+          "parents": [],
+          "subject": "many files",
+          "truncated": true
+        },
+        "ok": true
+      }
+    },
+    {
+      "hash": "0000000000000000000000000000000000000000",
+      "name": "없는 해시는 GIT 오류",
+      "repo": "basic",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      }
+    },
+    {
+      "hash": "zzzz",
+      "name": "해시가 아닌 값 zzzz",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": "abc",
+      "name": "너무 짧은 해시",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "너무 긴 해시",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": "-x",
+      "name": "옵션처럼 보이는 -x",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": "--output=pwned.txt",
+      "name": "옵션 --output",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": "-calias.x=!echo",
+      "name": "옵션 -c alias",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": "HEAD",
+      "name": "HEAD 같은 이름",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58\n",
+      "name": "해시 뒤 개행",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": " be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+      "name": "해시 앞 공백",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": 123,
+      "name": "숫자",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "hash": null,
+      "name": "null",
+      "repo": "basic",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    }
+  ]
+}

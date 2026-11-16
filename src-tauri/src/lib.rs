@@ -1,6 +1,8 @@
 mod commands;
 mod dialogs;
 pub mod git;
+pub mod mirror;
+pub mod router;
 mod sidecar;
 mod snap;
 
@@ -76,7 +78,10 @@ pub fn run() {
                 None => app.path().app_data_dir()?,
             };
             std::fs::create_dir_all(&user_data)?;
-            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data)?);
+            // 라우터와 사이드카가 같은 미러를 본다(사이드카가 채우고 라우터가 읽는다)
+            let mirror = mirror::RepoMirror::default();
+            app.manage(router::Router::from_env(mirror.clone()));
+            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror)?);
 
             let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Antler")
