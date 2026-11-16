@@ -1,12 +1,13 @@
 //! HTTP 응답 해석의 순수 부분: `Retry-After`·rate limit 헤더·`Link` 의 next·오류 본문의 메시지·상태 코드별 오류 분류.
 //! 원본은 `src/main/jira/client.ts`(`parseRetryAfter`·`bodyMessage`·`httpError`)와 `src/main/github/client.ts`(`hasNextLink`·`parseRate`·`bodyMessage`·`httpError`)다.
-//! 오류 문구는 TS 와 글자 그대로 같고, 비밀은 어디에도 싣지 않는다(본문 메시지는 길이를 자른다).
+//! 오류 문구는 TS 와 글자 그대로 같고, 비밀은 어디에도 싣지 않는다(본문 메시지는 비밀을 가린 **뒤에** 길이를 자른다).
 //!
 //! 알려진 차이:
 //! - [`parse_retry_after`] 의 날짜는 IMF-fixdate·RFC 850·asctime 만 받는다. TS 의 `Date.parse` 는 ISO 8601 같은 임의 형식도 받으므로 Rust 가 더 엄격하다(받으면 같은 값).
 //!   asctime 은 시간대가 없어 TS 는 로컬 시간으로, Rust 는 HTTP 규격대로 UTC 로 푼다(서버가 보내는 형식이 아니라 골든 값 비교에서 뺀다).
 //! - 본문 메시지를 UTF-16 200 단위로 자르다 서로게이트 쌍이 쪼개지면 Rust 는 U+FFFD 다(TS 는 짝 없는 서로게이트를 그대로 둔다).
 use super::json::{self, js_number, js_number_opt, js_number_string, Json};
+use super::redact::redact_secrets;
 use crate::git::fetch::{js_trim, slice_utf16_lossy};
 use crate::git::scope::is_js_space;
 use crate::jira::JiraKind;
@@ -154,17 +155,19 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 
 // ── 오류 본문 메시지 ─────────────────────────────────────────────────────
 
-/// GitHub 오류 본문의 `message`(문자열일 때만, 200 단위까지). 해석 실패·없음은 빈 문자열
-pub fn github_body_message(text: &str) -> String {
+/// GitHub 오류 본문의 `message`(문자열일 때만, 200 단위까지). 해석 실패·없음은 빈 문자열.
+/// `secrets` 는 **자르기 전에** 가린다 — 자른 뒤에 가리면 200 단위 경계에 걸친 토큰이 일부만 남아 가려지지 않는다
+pub fn github_body_message(text: &str, secrets: &[&str]) -> String {
     match json::parse(text) {
-        Ok(b) => b.get("message").and_then(Json::as_str).map(|m| slice_utf16_lossy(m, 200)).unwrap_or_default(),
+        Ok(b) => b.get("message").and_then(Json::as_str).map(|m| slice_utf16_lossy(&redact_secrets(m, secrets), 200)).unwrap_or_default(),
         Err(_) => String::new(),
     }
 }
 
 /// Jira 오류 본문의 `errorMessages[0]` 또는 `message`, 없으면 필드별 오류(`errors`)의 문자열 값들을 ` / ` 로 이은 것.
-/// 공백·제어 문자 덩어리는 한 칸으로 줄이고 200 단위까지만 남긴다. 해석 실패·없음은 빈 문자열
-pub fn jira_body_message(text: &str) -> String {
+/// 공백·제어 문자 덩어리는 한 칸으로 줄이고 200 단위까지만 남긴다. 해석 실패·없음은 빈 문자열.
+/// `secrets` 는 줄이기·자르기 **전에** 가린다(경계에 걸친 토큰이 일부만 남지 않게)
+pub fn jira_body_message(text: &str, secrets: &[&str]) -> String {
     let Ok(b) = json::parse(text) else { return String::new() };
     let first = match b.get("errorMessages") {
         Some(Json::Arr(a)) => a.first().and_then(Json::as_str),
@@ -185,6 +188,7 @@ pub fn jira_body_message(text: &str) -> String {
         }
     }
     let Some(m) = m else { return String::new() };
+    let m = redact_secrets(&m, secrets);
     // `[\s\u0000-\u001f\u007f]+` → 한 칸
     let mut squeezed = String::with_capacity(m.len());
     let mut in_run = false;
@@ -212,14 +216,14 @@ fn with_message(prefix: String, msg: &str) -> String {
     }
 }
 
-/// TS Jira `httpError`: 상태 코드별 분류와 문구. `not_found` 는 호출자가 정한 404 문장
-pub fn jira_http_error(status: u16, retry_after: Option<&str>, body: &str, kind: JiraKind, not_found: Option<&str>, now_ms: f64) -> ApiError {
+/// TS Jira `httpError`: 상태 코드별 분류와 문구. `not_found` 는 호출자가 정한 404 문장. `secrets` 는 본문 메시지에서 자르기 전에 가린다
+pub fn jira_http_error(status: u16, retry_after: Option<&str>, body: &str, kind: JiraKind, not_found: Option<&str>, now_ms: f64, secrets: &[&str]) -> ApiError {
     let (code, message) = match status {
         401 => {
             let how = if kind == JiraKind::Cloud { "이메일·API 토큰을 확인하고" } else { "Personal Access Token 을 확인하고" };
             ("JIRA_AUTH", format!("Jira 인증이 거부되었습니다. {how} 다시 연결하세요"))
         }
-        403 => ("JIRA_FORBIDDEN", with_message("Jira 접근이 거부되었습니다".into(), &jira_body_message(body))),
+        403 => ("JIRA_FORBIDDEN", with_message("Jira 접근이 거부되었습니다".into(), &jira_body_message(body, secrets))),
         404 => ("JIRA_NOT_FOUND", not_found.unwrap_or("요청한 항목을 찾을 수 없거나 볼 권한이 없습니다").to_string()),
         429 => {
             let m = match parse_retry_after(retry_after, now_ms) {
@@ -228,13 +232,14 @@ pub fn jira_http_error(status: u16, retry_after: Option<&str>, body: &str, kind:
             };
             ("JIRA_RATE_LIMIT", m)
         }
-        s => ("JIRA_HTTP", with_message(format!("Jira API 오류({s})"), &jira_body_message(body))),
+        s => ("JIRA_HTTP", with_message(format!("Jira API 오류({s})"), &jira_body_message(body, secrets))),
     };
     ApiError { code, status, message }
 }
 
-/// TS GitHub `httpError`. `format_time` 은 한도가 풀리는 시각(epoch 초)의 표시 문자열(TS 는 ko-KR 로컬 시각 — 시간대에 달려 있어 호출자가 넣는다)
-pub fn github_http_error(status: u16, h: &RateHeaders<'_>, body: &str, signed_in: bool, format_time: &dyn Fn(f64) -> String) -> ApiError {
+/// TS GitHub `httpError`. `format_time` 은 한도가 풀리는 시각(epoch 초)의 표시 문자열(TS 는 ko-KR 로컬 시각 — 시간대에 달려 있어 호출자가 넣는다).
+/// `secrets` 는 본문 메시지에서 자르기 전에 가린다
+pub fn github_http_error(status: u16, h: &RateHeaders<'_>, body: &str, signed_in: bool, format_time: &dyn Fn(f64) -> String, secrets: &[&str]) -> ApiError {
     let (code, message) = match status {
         401 => ("GH_AUTH", "GitHub 인증이 만료되었거나 잘못되었습니다. 다시 로그인하세요".to_string()),
         403 | 429 => {
@@ -248,11 +253,11 @@ pub fn github_http_error(status: u16, h: &RateHeaders<'_>, body: &str, signed_in
             } else if status == 429 {
                 ("GH_RATE_LIMIT", "GitHub 요청이 너무 잦습니다. 잠시 후 다시 시도하세요".to_string())
             } else {
-                ("GH_FORBIDDEN", with_message("GitHub 접근이 거부되었습니다".into(), &github_body_message(body)))
+                ("GH_FORBIDDEN", with_message("GitHub 접근이 거부되었습니다".into(), &github_body_message(body, secrets)))
             }
         }
         404 => ("GH_NOT_FOUND", "저장소를 찾을 수 없거나 접근 권한이 없습니다(비공개 저장소면 로그인 필요)".to_string()),
-        s => ("GH_HTTP", with_message(format!("GitHub API 오류({s})"), &github_body_message(body))),
+        s => ("GH_HTTP", with_message(format!("GitHub API 오류({s})"), &github_body_message(body, secrets))),
     };
     ApiError { code, status, message }
 }

@@ -30,8 +30,18 @@ fn err<T>(msg: impl Into<String>) -> Res<T> {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SiteOptions {
-    /// 테스트용 가짜 서버(127.0.0.1·localhost)에 한해 http 를 허용한다. 실제 사용에서는 항상 false
-    pub allow_insecure_loopback: bool,
+    /// 테스트용 가짜 서버(127.0.0.1·localhost)에 한해 http 를 허용한다. 실제 사용에서는 항상 false.
+    /// 필드는 비공개다 — [`SiteOptions::insecure_loopback_for_test`] 로만 켤 수 있고, 운영 코드(`src/**`)에서 그것을 부르지 않는다는 것을 `tests/net.rs` 의 소스 검사가 강제한다
+    allow_insecure_loopback: bool,
+}
+
+impl SiteOptions {
+    /// 테스트 전용: 루프백 http 를 허용한다. **운영 코드에서 부르지 않는다**
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn insecure_loopback_for_test() -> Self {
+        Self { allow_insecure_loopback: true }
+    }
 }
 
 /// 사이트 주소를 정규화한다: https 만(자격 증명·쿼리·해시 거부), 끝의 '/' 제거. Data Center 의 컨텍스트 경로(/jira)는 유지한다.
