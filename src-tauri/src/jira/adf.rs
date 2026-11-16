@@ -5,6 +5,7 @@
 //! TS 와 같게 옮겼다 — 허용 태그·속성은 TS 와 같고 더 넓히지 않는다. 다른 점(모두 더 좁거나 같은 쪽):
 //! - 링크 주소는 [`crate::net::url_rules::parse_url`] 로 해석한다(IDN 호스트·`blob:` 를 TS 보다 엄격하게 거른다).
 //! - 출력을 UTF-16 1,000,000 단위에서 자를 때 서로게이트 쌍이 쪼개지면 U+FFFD 다(TS 는 반쪽을 그대로 둔다).
+//! - 자른 끝에 미완성 태그(`<strong`)·엔티티(`&am`)가 남으면 그 자리부터 버린다(TS 는 그대로 둔다) — Rust 출력은 TS 출력의 접두사다.
 //! - TS 의 예외 대체 경로(평문 한 문단)는 옮기지 않았다 — JSON 값만으로는 TS 변환이 던지지 않는다(재귀 깊이는 50 으로 묶인다).
 use crate::git::commit::utf16_len;
 use crate::git::fetch::slice_utf16_lossy;
@@ -168,6 +169,22 @@ fn render(n: &Json, depth: usize, b: &mut Budget) -> String {
     out
 }
 
+/// 상한으로 자른 끝에 남은 미완성 태그(`<strong`)와 미완성 엔티티(`&am`)를 버린다.
+/// 본문 텍스트의 `<`·`&` 는 모두 이스케이프되므로 끝의 `<` 뒤에 `>` 가 없으면 잘린 태그고, `&` 뒤에 `;` 가 없으면 잘린 엔티티다
+fn drop_incomplete_tail(mut html: String) -> String {
+    if let Some(i) = html.rfind('<') {
+        if !html[i..].contains('>') {
+            html.truncate(i);
+        }
+    }
+    if let Some(i) = html.rfind('&') {
+        if !html[i..].contains(';') {
+            html.truncate(i);
+        }
+    }
+    html
+}
+
 /// ADF 문서(또는 노드)를 HTML 로. 해석할 수 없는 입력은 빈 문자열
 pub fn adf_to_html(doc: &Json) -> String {
     if !matches!(doc, Json::Obj(_) | Json::Arr(_)) {
@@ -175,7 +192,7 @@ pub fn adf_to_html(doc: &Json) -> String {
     }
     let html = render(doc, 0, &mut Budget { size: 0 });
     if utf16_len(&html) > MAX_OUTPUT {
-        slice_utf16_lossy(&html, MAX_OUTPUT)
+        drop_incomplete_tail(slice_utf16_lossy(&html, MAX_OUTPUT))
     } else {
         html
     }
