@@ -22,7 +22,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
-| 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | |
+| 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 진행 중 — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"). git 실행·상태 기계·라우팅은 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
@@ -289,6 +289,25 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
   Rust 경로·`ANTLER_RUST_GIT=0`·Electron 에서 같은 시나리오를 돌렸다. `drive.mjs` 에 파일 히스토리·blame(diff 머리의 버튼)과 두 커밋 비교(Shift+클릭) 단계가 새로 들어갔다.
   세 모드의 출력이 같다 — diff `log_service.rs` 67줄, 파일 히스토리 `mod.rs` 4개 항목(같은 제목들), blame 8행(같은 해시·작성자), 비교 13개 파일 `+599−60`(`715edde → 29bf645`).
   (상대 시간 문구만 실행 시각에 따라 다르다.) 1회씩이라 시간(ms)은 비교하지 않았다.
+
+## fetch 가드 판정 로직(Phase 3, `src-tauri/src/git/fetch/`)
+
+fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목록·URL 판정·확인 창 표시·오류 분류)를 **1:1 로** 옮긴다 — 더 엄격하게도, 느슨하게도 바꾸지 않는다(바꾸려면 TS 에 먼저 고친다).
+이 단계는 git 을 실행하지 않고 앱에도 연결하지 않았다. 실행(`git config`·`remote`·`fetch`)·상태 기계(진행·큐·백오프·승인 저장)·라우팅은 뒤 단계다.
+
+- **파일**: `guard.rs`(`fetch.ts` 의 순수 함수), `confirm_text.rs`(`confirmText.ts`), `pattern.rs`(허용 목록 매처), `special_table.rs`(생성 파일).
+- **허용 목록은 regex 크레이트 없이** TS 정규식 소스 문자열(`ALLOWED_KEY_SOURCES`)을 그대로 두고 `pattern.rs` 의 작은 매처가 해석한다.
+  아는 문법은 `^…$`, `\.`, `.+`, 리터럴, `(a|b)`, `(…)?` 뿐이고(`.` 는 `\n`·`\r`·U+2028·U+2029 를 맞추지 않는다), 그 밖의 토큰이 소스에 들어오면
+  TS(`tests/goldenFetch.test.ts` 의 문법 검사)와 Rust(컴파일 단위 테스트) 양쪽이 실패한다 — 그 정규식은 새로 옮긴다.
+- **골든** `tests/golden/fetch/*.json`(TS 가 기준: `UPDATE_GOLDEN=1 npx vitest run tests/goldenFetch.test.ts`, 이어서 `node scripts/gen-fetch-special.mjs`):
+  `lists`(소스·값 표·손으로 옮긴 정규식 소스), `allowed`(접두×가운데×접미 그리드·값 근접 오답·refspec), `urls`, `config`, `inspect`(가짜 실행기로 돌린 `inspectConfig`·지문),
+  `confirm`(표시·`SPECIAL` 범위), `misc`(오류 분류·백오프·버전·`-c` 인자·환경·stderr 판정). `src-tauri/tests/fetch_guard.rs` 가 전부 읽어 비교하고, 처리기 없는 골든이 있으면 실패한다.
+  입력 표는 `tests/fixtures/fetchGuardCases.ts` 를 `tests/fetch.test.ts` 와 골든 생성기가 함께 쓴다.
+- **안전 방향**: 판정 그리드 전체에서 "Rust 허용 ⇒ TS 허용"을 따로 센다.
+- **JS 와 다른 곳**(각각 `위험N_…` 테스트가 있다): `trim`·`\s` 는 U+FEFF 를 공백으로 보고 U+0085 는 아니다 / `$` 는 맨 끝만 / `i` 플래그는 ASCII 만 접는다(`ſ`·`K` 는 `s`·`k` 가 아니다) /
+  길이·자르기는 UTF-16 단위(이모지 경계에서 짝이 쪼개지면 TS 는 `\ud83d` 로 드러내고, Rust 안쪽은 `&[u16]` 로 같게 처리한다) / `toLowerCase` 로 길이가 바뀌는 문자(`İ`)가 있는 refspec 의 어긋남까지 그대로 / NT 네임스페이스(`\??\`)는 URL 어디에 있어도 거부.
+- `special_table.rs` 와 `toLowerCase` 골든은 Node 의 **Unicode 판**(`lists.json` 의 `runtime.unicode`)에 묶인다. CI 의 Node 판이 달라 골든이 어긋나면 골든과 표를 함께 다시 만든다.
+- 알려진 차이: TS `ALLOWED_VALUES[key]` 는 일반 객체 조회라 키가 `constructor`·`__proto__` 면 `TypeError` 를 던진다(git 키는 점이 있어야 해 실제로는 오지 않는다). Rust 는 허용 목록에 없는 키로 본다.
 
 ## Phase 0 에서 확인한 것
 
