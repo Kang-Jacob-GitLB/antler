@@ -23,11 +23,16 @@ pub struct HexHash(String);
 
 impl HexHash {
     pub fn parse(value: &str) -> Result<Self, ExecError> {
+        Self::parse_named(value, "commit hash")
+    }
+
+    /// 거부할 때의 오류 문구가 `invalid <what>` 이다(TS `assertHex(값, what)`: `commit hash`·`parent hash`·`from hash`·`to hash`)
+    pub fn parse_named(value: &str, what: &str) -> Result<Self, ExecError> {
         let n = value.len();
         if (4..=64).contains(&n) && value.bytes().all(|b| b.is_ascii_hexdigit()) {
             Ok(HexHash(value.to_string()))
         } else {
-            Err(other("invalid commit hash"))
+            Err(other(&format!("invalid {what}")))
         }
     }
 
@@ -92,7 +97,7 @@ pub enum Range {
 }
 
 /// `ok`: 종료 코드가 0 이 아니면 `GitError`(메시지는 stderr, 비면 `git <서브커맨드> failed (<코드>)`)
-fn ok(r: RunResult, args: &[String]) -> Result<Vec<u8>, ExecError> {
+pub fn ok(r: RunResult, args: &[String]) -> Result<Vec<u8>, ExecError> {
     if r.code != 0 {
         let trimmed = js_trim(&r.stderr);
         let message = if trimmed.is_empty() { format!("git {} failed ({})", args[0], r.code) } else { trimmed.to_string() };
@@ -125,8 +130,16 @@ pub async fn commit_detail(exec: &GitExecutor, repo_path: &str, hash: &HexHash) 
         None => Range::Root(this),
     };
 
-    let ns_args = diff_tree_args(true, DiffMode::NameStatus, &range);
-    let num_args = diff_tree_args(true, DiffMode::Numstat, &range);
+    let all = changed_files(exec, repo_path, &range).await?;
+    let (files, additions, deletions, truncated) = summarize(all);
+    Ok(CommitDetail { meta, base_parent, files, additions, deletions, truncated })
+}
+
+/// 범위의 변경 파일 목록(name-status 에 numstat 의 +/- 를 합친다). 둘을 동시에 돌린다. 커밋 상세와 `git:compare` 가 같이 쓴다
+pub async fn changed_files(exec: &GitExecutor, repo_path: &str, range: &Range) -> Result<Vec<FileChange>, ExecError> {
+    let opts = RunOpts::default();
+    let ns_args = diff_tree_args(true, DiffMode::NameStatus, range);
+    let num_args = diff_tree_args(true, DiffMode::Numstat, range);
     let (ns, num) = tokio::join!(exec.run(repo_path, &ns_args, &opts), exec.run(repo_path, &num_args, &opts));
     let (ns, num) = (ns?, num?);
     if ns.code != 0 {
@@ -135,13 +148,11 @@ pub async fn commit_detail(exec: &GitExecutor, repo_path: &str, hash: &HexHash) 
     if num.code != 0 {
         return Err(fail(num, DiffMode::Numstat));
     }
-    let all = parse_changes(&ns.stdout, &num.stdout);
-    let (files, additions, deletions, truncated) = summarize(all);
-    Ok(CommitDetail { meta, base_parent, files, additions, deletions, truncated })
+    Ok(parse_changes(&ns.stdout, &num.stdout))
 }
 
 /// 변경 파일 목록에 +/- 합계를 매기고 상한에서 자른다. 합계는 잘리기 전 전체 기준이다(바이너리는 null 이라 빠진다)
-fn summarize(all: Vec<FileChange>) -> (Vec<FileChange>, JsNumber, JsNumber, bool) {
+pub fn summarize(all: Vec<FileChange>) -> (Vec<FileChange>, JsNumber, JsNumber, bool) {
     let (mut add, mut del) = (0.0_f64, 0.0_f64);
     for f in &all {
         add += f.additions.map_or(0.0, |n| n.0);

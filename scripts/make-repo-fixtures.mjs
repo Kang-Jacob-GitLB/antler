@@ -140,6 +140,50 @@ const lines = (n, tag = 'line') => `${Array.from({ length: n }, (_, i) => `${tag
   s.write('branchy.fi')
 }
 
+// ---- files: 파일 단위 채널(compare·fileDiff·fileHistory·blame)용 — 이름 변경 이력·삭제·바이너리·3000줄을 넘는 diff·병합·작성자가 둘·glob 문자·옵션처럼 보이는 파일 이름·blame 상한을 넘는 파일 ----
+{
+  const s = new Stream()
+  const ALICE = 'Alice <alice@example.com>'
+  const nums = (n, tag) => `${Array.from({ length: n }, (_, i) => `${tag} ${i + 1}`).join('\n')}\n`
+  s.blob(1, lines(30, 'alpha'))
+  s.blob(2, lines(25, 'old'))
+  s.blob(3, Buffer.from([0, 1, 2, 3, 0, 255]))
+  s.blob(4, '공백 경로\n')
+  // 1: 루트 커밋
+  s.commit({ mark: 10, n: 1, msg: 'init\n', files: [['M', 'a.txt', 1], ['M', 'dir/old.txt', 2], ['M', 'bin.dat', 3], ['M', 'sp ace/한글 파일.txt', 4], ['M', 'b.txt', 1]] })
+  s.blob(5, lines(30, 'alpha').replace('alpha 3\n', 'ALICE 3\n').replace('alpha 28\n', 'ALICE 28\n'))
+  // 2: 다른 작성자가 a.txt 의 두 줄을 고친다(blame 의 작성자 구분)
+  s.commit({ mark: 20, n: 2, from: 10, who: ALICE, msg: 'fix: alice edits\n', files: [['M', 'a.txt', 5]] })
+  s.blob(6, lines(25, 'old').replace('old 10\n', 'new 10\n'))
+  // 3: dir/old.txt → dir/new.txt (이름 변경 + 한 줄 수정)
+  s.commit({ mark: 30, n: 3, from: 20, msg: 'rename old to new\n', files: [['D', 'dir/old.txt'], ['M', 'dir/new.txt', 6]] })
+  s.blob(7, nums(4000, 'row'))
+  // 4: 바이너리 삭제 + 4000줄 파일 추가(diff 상한 3000줄 초과)
+  s.commit({ mark: 40, n: 4, from: 30, msg: 'big file\n', files: [['D', 'bin.dat'], ['M', 'big.txt', 7]] })
+  s.blob(8, nums(4000, 'ROW'))
+  // 5: 4000줄을 전부 바꾼다(삭제 4000 + 추가 4000 = 8000줄)
+  s.commit({ mark: 50, n: 5, from: 40, msg: 'rewrite big\n', files: [['M', 'big.txt', 8]] })
+  s.blob(9, 'side\n')
+  // 6: 2 에서 갈라진 가지
+  s.commit({ ref: 'refs/heads/side', mark: 60, n: 6, from: 20, who: ALICE, msg: 'side branch\n', files: [['M', 'side.txt', 9]] })
+  s.blob(10, 'glob\n')
+  s.blob(11, 'opt\n')
+  s.blob(12, lines(30, 'alpha').replace('alpha 15\n', 'BOB 15\n'))
+  // 7: 병합(첫 부모 = 5) + a.txt 한 줄 수정 + 옵션·glob 문자처럼 보이는 이름의 파일
+  s.commit({
+    mark: 70,
+    n: 7,
+    from: 50,
+    merge: 60,
+    msg: "Merge branch 'side'\n",
+    files: [['M', 'side.txt', 9], ['M', 'a.txt', 12], ['M', '[ab].txt', 10], ['M', '--output=pwned.txt', 11]]
+  })
+  // 8: blame 상한(512KiB)을 넘는 파일
+  s.blob(13, `${Array.from({ length: 11000 }, (_, i) => `line ${String(i).padStart(5, '0')} ${'x'.repeat(36)}`).join('\n')}\n`)
+  s.commit({ mark: 80, n: 8, from: 70, msg: 'large file\n', files: [['M', 'large.txt', 13]] })
+  s.write('files.fi')
+}
+
 // ---- empty: 커밋이 하나도 없는 저장소(빈 스트림) ----
 writeFileSync(join(OUT, 'empty.fi'), '')
 

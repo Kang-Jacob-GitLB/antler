@@ -306,9 +306,55 @@ try {
         await page.click('.file-row').catch(() => {})
         await page.waitForSelector('.diff-view', { timeout: 5_000 }).catch(() => {})
       }
+      // 파일 히스토리·blame(git:fileHistory·git:blame): diff 머리의 버튼으로 연다. 로딩이 끝나면(행이 그려지거나 안내가 나오면) 읽는다
+      const fileView = await page.$('.diff-head .icon-btn:is([title="파일 히스토리"], [title="File history"])')
+      if (fileView) {
+        const tFv = Date.now()
+        await fileView.click()
+        await page.waitForSelector('.file-view .fh-entry, .file-view .fh-note:not(.is-error)', { timeout: 15_000 }).catch(() => {})
+        await page.waitForFunction(() => document.querySelector('.file-view .fh-entry') !== null || !/불러오는 중|Loading/i.test(document.querySelector('.file-view .fh-note')?.textContent ?? ''), null, { timeout: 15_000 }).catch(() => {})
+        await page.waitForTimeout(500)
+        const subjects = await page.$$eval('.fh-entry__subject', (els) => els.slice(0, 3).map((e) => e.textContent?.trim()))
+        const histCount = await page.$$eval('.fh-entry', (els) => els.length)
+        console.log(`file history "${await page.textContent('.file-view .diff-head__base')}": ${histCount} entries rendered (+${Date.now() - tFv} ms) — ${subjects.join(' | ')}; first detail: "${await page.textContent('.fh-detail__subject').catch(() => '')}"`)
+        await shot(`file-history-${theme}`)
+        const tBl = Date.now()
+        await page.click('.file-view .seg__btn >> nth=1')
+        await page.waitForFunction(
+          () =>
+            document.querySelector('.file-view .bl-row') !== null ||
+            [...document.querySelectorAll('.file-view .diff-notice')].some((n) => !/불러오는 중|Loading/i.test(n.textContent ?? '')),
+          null,
+          { timeout: 20_000 }
+        ).catch(() => {})
+        await page.waitForTimeout(500)
+        const blRows = await page.$$eval('.file-view .bl-row', (els) => els.length)
+        const gutters = await page.$$eval('.file-view .bl-gutter', (els) => els.slice(0, 3).map((e) => e.textContent?.replace(/\s+/g, ' ').trim()))
+        console.log(`blame: ${blRows} rows rendered (+${Date.now() - tBl} ms) — notice: "${await page.textContent('.file-view .diff-notice').catch(() => '')}"; gutters: ${gutters.join(' | ')}`)
+        await shot(`blame-${theme}`)
+        await page.keyboard.press('Escape')
+        await page.waitForSelector('.file-view', { state: 'detached' }).catch(() => {})
+      }
       await page.keyboard.press('Escape')
       await page.waitForSelector('.diff-view', { state: 'detached' })
       console.log('Esc → diff closed, graph visible:', await page.isVisible('.commit-list'))
+    }
+
+    // 두 커밋 비교(git:compare): 맨 위 커밋을 고른 채 셋째 줄을 Shift+클릭한다(CDP 입력 — OS 입력 합성이 아니다)
+    {
+      const rows = await page.$$('.commit-row:not(.commit-row--wip)')
+      if (rows.length >= 3) {
+        const tCmp = Date.now()
+        await page.click('.commit-list__scroll', { position: { x: 5, y: 200 } })
+        await page.keyboard.press('Home')
+        await page.click('.commit-row:not(.commit-row--wip) >> nth=2', { modifiers: ['Shift'] })
+        await page.waitForSelector('.compare-end', { timeout: 10_000 }).catch(() => {})
+        await page.waitForFunction(() => document.querySelector('.file-row') !== null || document.querySelector('.compare-end') === null, null, { timeout: 15_000 }).catch(() => {})
+        await page.waitForTimeout(500)
+        console.log(`compare: ${await page.$$eval('.file-row', (e) => e.length)} files (+${Date.now() - tCmp} ms) — ${await page.textContent('.file-list__head').catch(() => '')}; ends: ${(await page.$$eval('.compare-end__sha', (e) => e.map((x) => x.textContent))).join(' → ')}`)
+        await page.keyboard.press('Escape')
+        await page.waitForTimeout(300)
+      }
     }
 
     // --github: 첫 저장소의 origin 이 GitHub 공개 저장소면 PR 목록·상세·파일 탭을 확인한다(로그인 없이 읽기만)

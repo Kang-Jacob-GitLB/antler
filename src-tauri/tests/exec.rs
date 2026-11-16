@@ -775,6 +775,15 @@ async fn wsl_통합() {
     let r = wsl.run(&dir, &["ls-files", "-z"], &o).await.unwrap();
     assert_eq!(String::from_utf8_lossy(&r.stdout).split('\0').next().unwrap(), "a b.txt");
 
+    // 파일 단위 채널(compare·fileDiff·fileHistory·blame)이 renderer 의 경로를 argv 로 보낸다 — 공백·따옴표·백슬래시·한글이 wsl.exe 를 거쳐
+    // 한 인자로 그대로 도착해야 한다(git 이 오류 메시지에 받은 경로를 그대로 적는다)
+    for path in ["HEAD:q\"x\\y z", "HEAD:한글 'q' %s $HOME"] {
+        let r = wsl.run(&dir, &["rev-parse", path], &o).await.unwrap();
+        assert_ne!(r.code, 0);
+        let shown = &path["HEAD:".len()..];
+        assert!(r.stderr.contains(&format!("'{shown}'")), "{path}: {:?}", r.stderr);
+    }
+
     // stream 이 출력을 돌려준다
     let out = read_all(wsl.stream(&dir, &["log", "--format=%H"], &o).unwrap()).await.unwrap();
     let hash = text(&out);

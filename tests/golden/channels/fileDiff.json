@@ -1,0 +1,2275 @@
+{
+  "scenarios": [
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "a.txt"
+        }
+      ],
+      "name": "수정(첫 부모 대비)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "alpha 1"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "alpha 2"
+                },
+                {
+                  "o": 3,
+                  "t": "-",
+                  "text": "alpha 3"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "ALICE 3"
+                },
+                {
+                  "n": 4,
+                  "o": 4,
+                  "t": " ",
+                  "text": "alpha 4"
+                },
+                {
+                  "n": 5,
+                  "o": 5,
+                  "t": " ",
+                  "text": "alpha 5"
+                },
+                {
+                  "n": 6,
+                  "o": 6,
+                  "t": " ",
+                  "text": "alpha 6"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 1,
+              "oldLines": 6,
+              "oldStart": 1
+            },
+            {
+              "header": "alpha 24",
+              "lines": [
+                {
+                  "n": 25,
+                  "o": 25,
+                  "t": " ",
+                  "text": "alpha 25"
+                },
+                {
+                  "n": 26,
+                  "o": 26,
+                  "t": " ",
+                  "text": "alpha 26"
+                },
+                {
+                  "n": 27,
+                  "o": 27,
+                  "t": " ",
+                  "text": "alpha 27"
+                },
+                {
+                  "o": 28,
+                  "t": "-",
+                  "text": "alpha 28"
+                },
+                {
+                  "n": 28,
+                  "t": "+",
+                  "text": "ALICE 28"
+                },
+                {
+                  "n": 29,
+                  "o": 29,
+                  "t": " ",
+                  "text": "alpha 29"
+                },
+                {
+                  "n": 30,
+                  "o": 30,
+                  "t": " ",
+                  "text": "alpha 30"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 25,
+              "oldLines": 6,
+              "oldStart": 25
+            }
+          ],
+          "meta": [],
+          "path": "a.txt",
+          "totalLines": 14,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "df275b04de5429eac2d974b6f278a2876945d81e",
+          "path": "a.txt"
+        }
+      ],
+      "name": "루트 커밋은 빈 트리 대비",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "alpha 1"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "alpha 2"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "alpha 3"
+                },
+                {
+                  "n": 4,
+                  "t": "+",
+                  "text": "alpha 4"
+                },
+                {
+                  "n": 5,
+                  "t": "+",
+                  "text": "alpha 5"
+                },
+                {
+                  "n": 6,
+                  "t": "+",
+                  "text": "alpha 6"
+                },
+                {
+                  "n": 7,
+                  "t": "+",
+                  "text": "alpha 7"
+                },
+                {
+                  "n": 8,
+                  "t": "+",
+                  "text": "alpha 8"
+                },
+                {
+                  "n": 9,
+                  "t": "+",
+                  "text": "alpha 9"
+                },
+                {
+                  "n": 10,
+                  "t": "+",
+                  "text": "alpha 10"
+                },
+                {
+                  "n": 11,
+                  "t": "+",
+                  "text": "alpha 11"
+                },
+                {
+                  "n": 12,
+                  "t": "+",
+                  "text": "alpha 12"
+                },
+                {
+                  "n": 13,
+                  "t": "+",
+                  "text": "alpha 13"
+                },
+                {
+                  "n": 14,
+                  "t": "+",
+                  "text": "alpha 14"
+                },
+                {
+                  "n": 15,
+                  "t": "+",
+                  "text": "alpha 15"
+                },
+                {
+                  "n": 16,
+                  "t": "+",
+                  "text": "alpha 16"
+                },
+                {
+                  "n": 17,
+                  "t": "+",
+                  "text": "alpha 17"
+                },
+                {
+                  "n": 18,
+                  "t": "+",
+                  "text": "alpha 18"
+                },
+                {
+                  "n": 19,
+                  "t": "+",
+                  "text": "alpha 19"
+                },
+                {
+                  "n": 20,
+                  "t": "+",
+                  "text": "alpha 20"
+                },
+                {
+                  "n": 21,
+                  "t": "+",
+                  "text": "alpha 21"
+                },
+                {
+                  "n": 22,
+                  "t": "+",
+                  "text": "alpha 22"
+                },
+                {
+                  "n": 23,
+                  "t": "+",
+                  "text": "alpha 23"
+                },
+                {
+                  "n": 24,
+                  "t": "+",
+                  "text": "alpha 24"
+                },
+                {
+                  "n": 25,
+                  "t": "+",
+                  "text": "alpha 25"
+                },
+                {
+                  "n": 26,
+                  "t": "+",
+                  "text": "alpha 26"
+                },
+                {
+                  "n": 27,
+                  "t": "+",
+                  "text": "alpha 27"
+                },
+                {
+                  "n": 28,
+                  "t": "+",
+                  "text": "alpha 28"
+                },
+                {
+                  "n": 29,
+                  "t": "+",
+                  "text": "alpha 29"
+                },
+                {
+                  "n": 30,
+                  "t": "+",
+                  "text": "alpha 30"
+                }
+              ],
+              "newLines": 30,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "a.txt",
+          "totalLines": 30,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "003074736548ee495215b8d9b58444269f114596",
+          "oldPath": "dir/old.txt",
+          "path": "dir/new.txt"
+        }
+      ],
+      "name": "이름 변경(oldPath)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "old 6",
+              "lines": [
+                {
+                  "n": 7,
+                  "o": 7,
+                  "t": " ",
+                  "text": "old 7"
+                },
+                {
+                  "n": 8,
+                  "o": 8,
+                  "t": " ",
+                  "text": "old 8"
+                },
+                {
+                  "n": 9,
+                  "o": 9,
+                  "t": " ",
+                  "text": "old 9"
+                },
+                {
+                  "o": 10,
+                  "t": "-",
+                  "text": "old 10"
+                },
+                {
+                  "n": 10,
+                  "t": "+",
+                  "text": "new 10"
+                },
+                {
+                  "n": 11,
+                  "o": 11,
+                  "t": " ",
+                  "text": "old 11"
+                },
+                {
+                  "n": 12,
+                  "o": 12,
+                  "t": " ",
+                  "text": "old 12"
+                },
+                {
+                  "n": 13,
+                  "o": 13,
+                  "t": " ",
+                  "text": "old 13"
+                }
+              ],
+              "newLines": 7,
+              "newStart": 7,
+              "oldLines": 7,
+              "oldStart": 7
+            }
+          ],
+          "meta": [
+            "similarity index 95%",
+            "rename from dir/old.txt",
+            "rename to dir/new.txt"
+          ],
+          "oldPath": "dir/old.txt",
+          "path": "dir/new.txt",
+          "totalLines": 8,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "003074736548ee495215b8d9b58444269f114596",
+          "path": "dir/new.txt"
+        }
+      ],
+      "name": "이름 변경인데 oldPath 를 안 줌",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "old 1"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "old 2"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "old 3"
+                },
+                {
+                  "n": 4,
+                  "t": "+",
+                  "text": "old 4"
+                },
+                {
+                  "n": 5,
+                  "t": "+",
+                  "text": "old 5"
+                },
+                {
+                  "n": 6,
+                  "t": "+",
+                  "text": "old 6"
+                },
+                {
+                  "n": 7,
+                  "t": "+",
+                  "text": "old 7"
+                },
+                {
+                  "n": 8,
+                  "t": "+",
+                  "text": "old 8"
+                },
+                {
+                  "n": 9,
+                  "t": "+",
+                  "text": "old 9"
+                },
+                {
+                  "n": 10,
+                  "t": "+",
+                  "text": "new 10"
+                },
+                {
+                  "n": 11,
+                  "t": "+",
+                  "text": "old 11"
+                },
+                {
+                  "n": 12,
+                  "t": "+",
+                  "text": "old 12"
+                },
+                {
+                  "n": 13,
+                  "t": "+",
+                  "text": "old 13"
+                },
+                {
+                  "n": 14,
+                  "t": "+",
+                  "text": "old 14"
+                },
+                {
+                  "n": 15,
+                  "t": "+",
+                  "text": "old 15"
+                },
+                {
+                  "n": 16,
+                  "t": "+",
+                  "text": "old 16"
+                },
+                {
+                  "n": 17,
+                  "t": "+",
+                  "text": "old 17"
+                },
+                {
+                  "n": 18,
+                  "t": "+",
+                  "text": "old 18"
+                },
+                {
+                  "n": 19,
+                  "t": "+",
+                  "text": "old 19"
+                },
+                {
+                  "n": 20,
+                  "t": "+",
+                  "text": "old 20"
+                },
+                {
+                  "n": 21,
+                  "t": "+",
+                  "text": "old 21"
+                },
+                {
+                  "n": 22,
+                  "t": "+",
+                  "text": "old 22"
+                },
+                {
+                  "n": 23,
+                  "t": "+",
+                  "text": "old 23"
+                },
+                {
+                  "n": 24,
+                  "t": "+",
+                  "text": "old 24"
+                },
+                {
+                  "n": 25,
+                  "t": "+",
+                  "text": "old 25"
+                }
+              ],
+              "newLines": 25,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "dir/new.txt",
+          "totalLines": 25,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "oldPath": "a.txt",
+          "path": "a.txt"
+        }
+      ],
+      "name": "oldPath 가 path 와 같다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "alpha 1"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "alpha 2"
+                },
+                {
+                  "o": 3,
+                  "t": "-",
+                  "text": "alpha 3"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "ALICE 3"
+                },
+                {
+                  "n": 4,
+                  "o": 4,
+                  "t": " ",
+                  "text": "alpha 4"
+                },
+                {
+                  "n": 5,
+                  "o": 5,
+                  "t": " ",
+                  "text": "alpha 5"
+                },
+                {
+                  "n": 6,
+                  "o": 6,
+                  "t": " ",
+                  "text": "alpha 6"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 1,
+              "oldLines": 6,
+              "oldStart": 1
+            },
+            {
+              "header": "alpha 24",
+              "lines": [
+                {
+                  "n": 25,
+                  "o": 25,
+                  "t": " ",
+                  "text": "alpha 25"
+                },
+                {
+                  "n": 26,
+                  "o": 26,
+                  "t": " ",
+                  "text": "alpha 26"
+                },
+                {
+                  "n": 27,
+                  "o": 27,
+                  "t": " ",
+                  "text": "alpha 27"
+                },
+                {
+                  "o": 28,
+                  "t": "-",
+                  "text": "alpha 28"
+                },
+                {
+                  "n": 28,
+                  "t": "+",
+                  "text": "ALICE 28"
+                },
+                {
+                  "n": 29,
+                  "o": 29,
+                  "t": " ",
+                  "text": "alpha 29"
+                },
+                {
+                  "n": 30,
+                  "o": 30,
+                  "t": " ",
+                  "text": "alpha 30"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 25,
+              "oldLines": 6,
+              "oldStart": 25
+            }
+          ],
+          "meta": [],
+          "oldPath": "a.txt",
+          "path": "a.txt",
+          "totalLines": 14,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "df275b04de5429eac2d974b6f278a2876945d81e",
+          "path": "bin.dat"
+        }
+      ],
+      "name": "바이너리 추가",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": true,
+          "hunks": [],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "bin.dat",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "ea72145878021c5b46a47988564524852a10047d",
+          "path": "bin.dat"
+        }
+      ],
+      "name": "바이너리 삭제",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": true,
+          "hunks": [],
+          "meta": [
+            "deleted file mode 100644"
+          ],
+          "path": "bin.dat",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "df275b04de5429eac2d974b6f278a2876945d81e",
+          "path": "sp ace/한글 파일.txt"
+        }
+      ],
+      "name": "한글·공백 경로",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "공백 경로"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "sp ace/한글 파일.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "b12d65799ed5c9498d26058279355393d9372b78",
+          "path": "side.txt"
+        }
+      ],
+      "name": "병합은 첫 부모 대비",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "side"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "side.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "b12d65799ed5c9498d26058279355393d9372b78",
+          "path": "a.txt"
+        }
+      ],
+      "name": "병합의 a.txt(첫 부모 대비 한 줄)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "alpha 1"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "alpha 2"
+                },
+                {
+                  "o": 3,
+                  "t": "-",
+                  "text": "ALICE 3"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "alpha 3"
+                },
+                {
+                  "n": 4,
+                  "o": 4,
+                  "t": " ",
+                  "text": "alpha 4"
+                },
+                {
+                  "n": 5,
+                  "o": 5,
+                  "t": " ",
+                  "text": "alpha 5"
+                },
+                {
+                  "n": 6,
+                  "o": 6,
+                  "t": " ",
+                  "text": "alpha 6"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 1,
+              "oldLines": 6,
+              "oldStart": 1
+            },
+            {
+              "header": "alpha 11",
+              "lines": [
+                {
+                  "n": 12,
+                  "o": 12,
+                  "t": " ",
+                  "text": "alpha 12"
+                },
+                {
+                  "n": 13,
+                  "o": 13,
+                  "t": " ",
+                  "text": "alpha 13"
+                },
+                {
+                  "n": 14,
+                  "o": 14,
+                  "t": " ",
+                  "text": "alpha 14"
+                },
+                {
+                  "o": 15,
+                  "t": "-",
+                  "text": "alpha 15"
+                },
+                {
+                  "n": 15,
+                  "t": "+",
+                  "text": "BOB 15"
+                },
+                {
+                  "n": 16,
+                  "o": 16,
+                  "t": " ",
+                  "text": "alpha 16"
+                },
+                {
+                  "n": 17,
+                  "o": 17,
+                  "t": " ",
+                  "text": "alpha 17"
+                },
+                {
+                  "n": 18,
+                  "o": 18,
+                  "t": " ",
+                  "text": "alpha 18"
+                }
+              ],
+              "newLines": 7,
+              "newStart": 12,
+              "oldLines": 7,
+              "oldStart": 12
+            },
+            {
+              "header": "alpha 24",
+              "lines": [
+                {
+                  "n": 25,
+                  "o": 25,
+                  "t": " ",
+                  "text": "alpha 25"
+                },
+                {
+                  "n": 26,
+                  "o": 26,
+                  "t": " ",
+                  "text": "alpha 26"
+                },
+                {
+                  "n": 27,
+                  "o": 27,
+                  "t": " ",
+                  "text": "alpha 27"
+                },
+                {
+                  "o": 28,
+                  "t": "-",
+                  "text": "ALICE 28"
+                },
+                {
+                  "n": 28,
+                  "t": "+",
+                  "text": "alpha 28"
+                },
+                {
+                  "n": 29,
+                  "o": 29,
+                  "t": " ",
+                  "text": "alpha 29"
+                },
+                {
+                  "n": 30,
+                  "o": 30,
+                  "t": " ",
+                  "text": "alpha 30"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 25,
+              "oldLines": 6,
+              "oldStart": 25
+            }
+          ],
+          "meta": [],
+          "path": "a.txt",
+          "totalLines": 22,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "b12d65799ed5c9498d26058279355393d9372b78",
+          "parent": "d626a5f234b9727437ae698b367bc01f9c77a774",
+          "path": "a.txt"
+        }
+      ],
+      "name": "병합을 두 번째 부모 대비로",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "alpha 1"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "alpha 2"
+                },
+                {
+                  "o": 3,
+                  "t": "-",
+                  "text": "ALICE 3"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "alpha 3"
+                },
+                {
+                  "n": 4,
+                  "o": 4,
+                  "t": " ",
+                  "text": "alpha 4"
+                },
+                {
+                  "n": 5,
+                  "o": 5,
+                  "t": " ",
+                  "text": "alpha 5"
+                },
+                {
+                  "n": 6,
+                  "o": 6,
+                  "t": " ",
+                  "text": "alpha 6"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 1,
+              "oldLines": 6,
+              "oldStart": 1
+            },
+            {
+              "header": "alpha 11",
+              "lines": [
+                {
+                  "n": 12,
+                  "o": 12,
+                  "t": " ",
+                  "text": "alpha 12"
+                },
+                {
+                  "n": 13,
+                  "o": 13,
+                  "t": " ",
+                  "text": "alpha 13"
+                },
+                {
+                  "n": 14,
+                  "o": 14,
+                  "t": " ",
+                  "text": "alpha 14"
+                },
+                {
+                  "o": 15,
+                  "t": "-",
+                  "text": "alpha 15"
+                },
+                {
+                  "n": 15,
+                  "t": "+",
+                  "text": "BOB 15"
+                },
+                {
+                  "n": 16,
+                  "o": 16,
+                  "t": " ",
+                  "text": "alpha 16"
+                },
+                {
+                  "n": 17,
+                  "o": 17,
+                  "t": " ",
+                  "text": "alpha 17"
+                },
+                {
+                  "n": 18,
+                  "o": 18,
+                  "t": " ",
+                  "text": "alpha 18"
+                }
+              ],
+              "newLines": 7,
+              "newStart": 12,
+              "oldLines": 7,
+              "oldStart": 12
+            },
+            {
+              "header": "alpha 24",
+              "lines": [
+                {
+                  "n": 25,
+                  "o": 25,
+                  "t": " ",
+                  "text": "alpha 25"
+                },
+                {
+                  "n": 26,
+                  "o": 26,
+                  "t": " ",
+                  "text": "alpha 26"
+                },
+                {
+                  "n": 27,
+                  "o": 27,
+                  "t": " ",
+                  "text": "alpha 27"
+                },
+                {
+                  "o": 28,
+                  "t": "-",
+                  "text": "ALICE 28"
+                },
+                {
+                  "n": 28,
+                  "t": "+",
+                  "text": "alpha 28"
+                },
+                {
+                  "n": 29,
+                  "o": 29,
+                  "t": " ",
+                  "text": "alpha 29"
+                },
+                {
+                  "n": 30,
+                  "o": 30,
+                  "t": " ",
+                  "text": "alpha 30"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 25,
+              "oldLines": 6,
+              "oldStart": 25
+            }
+          ],
+          "meta": [],
+          "path": "a.txt",
+          "totalLines": 22,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "fe58a5ff59da77b397cacd04d188827e13407f14",
+          "parent": "df275b04de5429eac2d974b6f278a2876945d81e",
+          "path": "a.txt"
+        }
+      ],
+      "name": "parent 를 직접 준 비교(루트 → 병합 직전)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "alpha 1"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "alpha 2"
+                },
+                {
+                  "o": 3,
+                  "t": "-",
+                  "text": "alpha 3"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "ALICE 3"
+                },
+                {
+                  "n": 4,
+                  "o": 4,
+                  "t": " ",
+                  "text": "alpha 4"
+                },
+                {
+                  "n": 5,
+                  "o": 5,
+                  "t": " ",
+                  "text": "alpha 5"
+                },
+                {
+                  "n": 6,
+                  "o": 6,
+                  "t": " ",
+                  "text": "alpha 6"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 1,
+              "oldLines": 6,
+              "oldStart": 1
+            },
+            {
+              "header": "alpha 24",
+              "lines": [
+                {
+                  "n": 25,
+                  "o": 25,
+                  "t": " ",
+                  "text": "alpha 25"
+                },
+                {
+                  "n": 26,
+                  "o": 26,
+                  "t": " ",
+                  "text": "alpha 26"
+                },
+                {
+                  "n": 27,
+                  "o": 27,
+                  "t": " ",
+                  "text": "alpha 27"
+                },
+                {
+                  "o": 28,
+                  "t": "-",
+                  "text": "alpha 28"
+                },
+                {
+                  "n": 28,
+                  "t": "+",
+                  "text": "ALICE 28"
+                },
+                {
+                  "n": 29,
+                  "o": 29,
+                  "t": " ",
+                  "text": "alpha 29"
+                },
+                {
+                  "n": 30,
+                  "o": 30,
+                  "t": " ",
+                  "text": "alpha 30"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 25,
+              "oldLines": 6,
+              "oldStart": 25
+            }
+          ],
+          "meta": [],
+          "path": "a.txt",
+          "totalLines": 14,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62A9E11B8E10507012236832D279F9BE3BB6F279",
+          "parent": "DF275B04DE5429EAC2D974B6F278A2876945D81E",
+          "path": "a.txt"
+        }
+      ],
+      "name": "대문자 해시",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "alpha 1"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "alpha 2"
+                },
+                {
+                  "o": 3,
+                  "t": "-",
+                  "text": "alpha 3"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "ALICE 3"
+                },
+                {
+                  "n": 4,
+                  "o": 4,
+                  "t": " ",
+                  "text": "alpha 4"
+                },
+                {
+                  "n": 5,
+                  "o": 5,
+                  "t": " ",
+                  "text": "alpha 5"
+                },
+                {
+                  "n": 6,
+                  "o": 6,
+                  "t": " ",
+                  "text": "alpha 6"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 1,
+              "oldLines": 6,
+              "oldStart": 1
+            },
+            {
+              "header": "alpha 24",
+              "lines": [
+                {
+                  "n": 25,
+                  "o": 25,
+                  "t": " ",
+                  "text": "alpha 25"
+                },
+                {
+                  "n": 26,
+                  "o": 26,
+                  "t": " ",
+                  "text": "alpha 26"
+                },
+                {
+                  "n": 27,
+                  "o": 27,
+                  "t": " ",
+                  "text": "alpha 27"
+                },
+                {
+                  "o": 28,
+                  "t": "-",
+                  "text": "alpha 28"
+                },
+                {
+                  "n": 28,
+                  "t": "+",
+                  "text": "ALICE 28"
+                },
+                {
+                  "n": 29,
+                  "o": 29,
+                  "t": " ",
+                  "text": "alpha 29"
+                },
+                {
+                  "n": 30,
+                  "o": 30,
+                  "t": " ",
+                  "text": "alpha 30"
+                }
+              ],
+              "newLines": 6,
+              "newStart": 25,
+              "oldLines": 6,
+              "oldStart": 25
+            }
+          ],
+          "meta": [],
+          "path": "a.txt",
+          "totalLines": 14,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "ea72145878021c5b46a47988564524852a10047d",
+          "path": "big.txt"
+        }
+      ],
+      "name": "3000줄을 넘는 diff 는 잘린다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 3000,
+                "first": {
+                  "n": 1,
+                  "t": "+",
+                  "text": "row 1"
+                },
+                "last": {
+                  "n": 3000,
+                  "t": "+",
+                  "text": "row 3000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "big.txt",
+          "totalLines": 4000,
+          "truncated": true
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "full": true,
+          "hash": "ea72145878021c5b46a47988564524852a10047d",
+          "path": "big.txt"
+        }
+      ],
+      "name": "잘린 diff 를 전체로 다시 받는다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 4000,
+                "first": {
+                  "n": 1,
+                  "t": "+",
+                  "text": "row 1"
+                },
+                "last": {
+                  "n": 4000,
+                  "t": "+",
+                  "text": "row 4000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "big.txt",
+          "totalLines": 4000,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "fe58a5ff59da77b397cacd04d188827e13407f14",
+          "path": "big.txt"
+        }
+      ],
+      "name": "삭제와 추가 8000줄도 잘린다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 3000,
+                "first": {
+                  "o": 1,
+                  "t": "-",
+                  "text": "row 1"
+                },
+                "last": {
+                  "o": 3000,
+                  "t": "-",
+                  "text": "row 3000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 4000,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "big.txt",
+          "totalLines": 8000,
+          "truncated": true
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "full": true,
+          "hash": "fe58a5ff59da77b397cacd04d188827e13407f14",
+          "path": "big.txt"
+        }
+      ],
+      "name": "삭제와 추가 8000줄 전체",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 8000,
+                "first": {
+                  "o": 1,
+                  "t": "-",
+                  "text": "row 1"
+                },
+                "last": {
+                  "n": 4000,
+                  "t": "+",
+                  "text": "ROW 4000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 4000,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "big.txt",
+          "totalLines": 8000,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "full": 1,
+          "hash": "ea72145878021c5b46a47988564524852a10047d",
+          "path": "big.txt"
+        }
+      ],
+      "name": "full 은 JS 참 거짓: 1",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 4000,
+                "first": {
+                  "n": 1,
+                  "t": "+",
+                  "text": "row 1"
+                },
+                "last": {
+                  "n": 4000,
+                  "t": "+",
+                  "text": "row 4000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "big.txt",
+          "totalLines": 4000,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "full": 0,
+          "hash": "ea72145878021c5b46a47988564524852a10047d",
+          "path": "big.txt"
+        }
+      ],
+      "name": "full 은 JS 참 거짓: 0",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 3000,
+                "first": {
+                  "n": 1,
+                  "t": "+",
+                  "text": "row 1"
+                },
+                "last": {
+                  "n": 3000,
+                  "t": "+",
+                  "text": "row 3000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "big.txt",
+          "totalLines": 4000,
+          "truncated": true
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "full": "",
+          "hash": "ea72145878021c5b46a47988564524852a10047d",
+          "path": "big.txt"
+        }
+      ],
+      "name": "full 은 JS 참 거짓: 빈 문자열",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 3000,
+                "first": {
+                  "n": 1,
+                  "t": "+",
+                  "text": "row 1"
+                },
+                "last": {
+                  "n": 3000,
+                  "t": "+",
+                  "text": "row 3000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "big.txt",
+          "totalLines": 4000,
+          "truncated": true
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "full": "no",
+          "hash": "ea72145878021c5b46a47988564524852a10047d",
+          "path": "big.txt"
+        }
+      ],
+      "name": "full 은 JS 참 거짓: 문자열",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": {
+                "count": 4000,
+                "first": {
+                  "n": 1,
+                  "t": "+",
+                  "text": "row 1"
+                },
+                "last": {
+                  "n": 4000,
+                  "t": "+",
+                  "text": "row 4000"
+                }
+              },
+              "newLines": 4000,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "big.txt",
+          "totalLines": 4000,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "b.txt"
+        }
+      ],
+      "name": "그 커밋에서 안 바뀐 경로",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "b.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "path": "nope/없음.txt"
+        }
+      ],
+      "name": "없는 경로",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "nope/없음.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "b12d65799ed5c9498d26058279355393d9372b78",
+          "path": "[ab].txt"
+        }
+      ],
+      "name": "경로의 glob 문자는 리터럴이다([ab].txt 파일)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "glob"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "[ab].txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "*.txt"
+        }
+      ],
+      "name": "glob 패턴은 파일을 고르지 않는다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "*.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": ":(glob)*.txt"
+        }
+      ],
+      "name": "pathspec 매직 :(glob)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": ":(glob)*.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": ":(top)a.txt"
+        }
+      ],
+      "name": "pathspec 매직 :(top)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": ":(top)a.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": ":!a.txt"
+        }
+      ],
+      "name": "pathspec 매직 :!(exclude)",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": ":!a.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "b12d65799ed5c9498d26058279355393d9372b78",
+          "path": "--output=pwned.txt"
+        }
+      ],
+      "name": "--output 이름의 파일은 파일로 읽는다",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "opt"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "--output=pwned.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "-calias.x=!echo"
+        }
+      ],
+      "name": "경로가 -c alias 모양",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "-calias.x=!echo",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "--"
+        }
+      ],
+      "name": "경로가 -- 로 시작",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "--",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "../a.txt"
+        }
+      ],
+      "name": "경로가 .. 로 시작",
+      "repo": "files",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "/a.txt"
+        }
+      ],
+      "name": "절대 경로",
+      "repo": "files",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "path": "a.txt\n--output=pwned.txt"
+        }
+      ],
+      "name": "경로에 개행",
+      "repo": "files",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "a.txt\n--output=pwned.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "0000000000000000000000000000000000000000",
+          "path": "a.txt"
+        }
+      ],
+      "name": "없는 해시",
+      "repo": "files",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "zzzz",
+          "path": "a.txt"
+        }
+      ],
+      "name": "해시가 아니다",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "-x",
+          "path": "a.txt"
+        }
+      ],
+      "name": "해시가 옵션 -x",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "--output=pwned.txt",
+          "path": "a.txt"
+        }
+      ],
+      "name": "해시가 --output",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "parent": "-c",
+          "path": "a.txt"
+        }
+      ],
+      "name": "parent 가 해시가 아니다",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid parent hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "parent": null,
+          "path": "a.txt"
+        }
+      ],
+      "name": "parent 가 null",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid parent hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "62a9e11b8e10507012236832d279f9be3bb6f279",
+          "parent": "0000000000000000000000000000000000000000",
+          "path": "a.txt"
+        }
+      ],
+      "name": "parent 가 없는 해시",
+      "repo": "files",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "path": ""
+        }
+      ],
+      "name": "path 가 빈 문자열",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "path": "a.txt\u0000b"
+        }
+      ],
+      "name": "path 에 NUL",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "path": 5
+        }
+      ],
+      "name": "path 가 숫자",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb"
+        }
+      ],
+      "name": "path 가 없다(TS 는 spawn 인자 오류, 문구는 비교하지 않는다)",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "oldPath": "",
+          "path": "a.txt"
+        }
+      ],
+      "name": "oldPath 가 빈 문자열",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "oldPath": null,
+          "path": "a.txt"
+        }
+      ],
+      "name": "oldPath 가 null",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "hash": "65c3255a2946625134cb709c7be012786dc824fb",
+          "oldPath": "x\u0000",
+          "path": "a.txt"
+        }
+      ],
+      "name": "oldPath 에 NUL",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        null
+      ],
+      "name": "요청이 null",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "a.txt"
+      ],
+      "name": "요청이 문자열",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    },
+    {
+      "args": [],
+      "name": "요청이 없다",
+      "repo": "files",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    }
+  ]
+}
