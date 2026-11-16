@@ -9,7 +9,7 @@ import { listSshHosts } from '../executors/SshExecutor'
 import { listWslDistros } from '../executors/WslExecutor'
 import type { ConfigStore } from '../services/ConfigStore'
 import type { FetchService } from '../services/FetchService'
-import { display, formatItem, MAX_CONFIRM_ITEMS } from './confirmText'
+import { fetchConfirmOptions } from './confirmText'
 import { StaleLogError, type RepoService } from '../services/RepoService'
 import type { RepoWatcher } from '../services/RepoWatcher'
 import { GitHubApiError } from '../github/client'
@@ -125,33 +125,9 @@ async function confirmDangerousConfig(
   const win = BrowserWindow.fromWebContents(e.sender)
   const show = (opts: Electron.MessageBoxOptions): Promise<Electron.MessageBoxReturnValue> =>
     win ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts)
-  // 저장소가 정한 문자열(이름·키·값)은 따옴표·이스케이프로 표시한다 — 문구를 꾸며 사용자를 속이지 못하게
-  const title = `${display(name)} 저장소의 설정에 fetch 때 외부 프로그램을 실행하거나 연결을 가로챌 수 있는 항목이 있습니다.`
-  if (items.length > MAX_CONFIRM_ITEMS) {
-    // 전부 보여 줄 수 없으면 허용 여부를 물을 수 없다
-    await show({
-      type: 'warning',
-      buttons: ['닫기'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'fetch 차단',
-      message: title,
-      detail: `항목이 ${items.length}개로 너무 많아 모두 확인할 수 없어 fetch 하지 않습니다. 저장소의 .git/config 를 직접 확인하세요.\n\n${items
-        .slice(0, MAX_CONFIRM_ITEMS)
-        .map((i) => formatItem(i.key, i.value))
-        .join('\n')}\n… 외 ${items.length - MAX_CONFIRM_ITEMS}개`
-    })
-    return false
-  }
-  const res = await show({
-    type: 'warning',
-    buttons: ['이번만 fetch', '이 저장소에서 항상 허용', '취소'],
-    defaultId: 2,
-    cancelId: 2,
-    title: 'fetch 확인',
-    message: title,
-    detail: `${items.map((i) => formatItem(i.key, i.value)).join('\n')}\n\n직접 만든 설정이거나 신뢰하는 저장소일 때만 허용하세요. "이번만"은 이번 실행 동안, "항상"은 앱을 다시 켜도 적용되며, 어느 쪽이든 위 키·값이 바뀌면 다시 묻습니다. 값이 가리키는 스크립트·파일의 내용이 바뀌는 것은 확인하지 않습니다.`
-  })
+  const { tooMany, options } = fetchConfirmOptions(name, items)
+  const res = await show(options)
+  if (tooMany) return false
   return res.response === 0 ? true : res.response === 1 ? 'always' : false
 }
 

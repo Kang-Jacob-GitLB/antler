@@ -171,6 +171,43 @@ fn 골든_wsl_argv_와_wsl_exe_환경() {
     }
 }
 
+/// TS `runFetch` 가 실제로 spawn 에 준 argv·환경(로컬)과 wsl.exe argv(WSL)를 Rust 의 `fetch_args`·`FetchEnv`·`wsl_argv_with` 가 그대로 만드는지
+#[test]
+fn 골든_fetch_argv_와_환경이_ts_와_같다() {
+    use antler_lib::git::fetch::guard::{fetch_config_args, hooks_path_with, resolve_ssh_command, ConfigArgsOpts, FollowRedirects};
+    use antler_lib::git::fetch::run::fetch_args;
+    use antler_lib::git::exec::{merged_env, wsl_argv_with, FetchEnv};
+    use std::collections::HashMap;
+
+    let g = golden();
+    let samples = g["fetch"].as_array().expect("fetch 골든");
+    assert!(samples.len() >= 4, "fetch 표본이 줄었다");
+    for s in samples {
+        let kind = s["kind"].as_str().unwrap();
+        let local = kind == "local";
+        // 훅 경로는 TS 가 준 값 그대로다(디렉터리 검사는 hooks_path_for 가 따로 한다 — 여기서는 모양만)
+        let hooks = hooks_path_with(local, Some(s["hooksPath"].as_str().unwrap()), true, |_| true).unwrap();
+        assert_eq!(hooks.as_str(), s["hooksPath"].as_str().unwrap(), "훅 경로 {kind}");
+        let cfg = fetch_config_args(&hooks, ConfigArgsOpts { credential_helpers: s["credentialHelpers"].as_bool().unwrap(), follow_redirects: FollowRedirects::Initial });
+        let ssh = resolve_ssh_command(s["userSsh"].as_str(), kind, &HashMap::new(), true);
+        let fe = FetchEnv { allow_file: s["allowFile"].as_bool().unwrap(), ssh_command: ssh };
+        let remotes = strs(&s["remotes"]);
+        let calls = s["calls"].as_array().unwrap();
+        assert_eq!(calls.len(), remotes.len(), "remote 마다 한 번(--no-write-fetch-head 가 통하면 재시도 없음)");
+        for (name, call) in remotes.iter().zip(calls) {
+            let args = fetch_args(&cfg, name, false);
+            if local {
+                assert_eq!(call["command"], "git");
+                assert_eq!(strs(&call["argv"]), build_git_args("/home/me/repo", &args), "local argv {name}");
+                assert_eq!(pairs(&call["env"]), merged_env(Some(&fe)), "local env {name}");
+            } else {
+                assert_eq!(call["command"], "wsl.exe");
+                assert_eq!(strs(&call["argv"]), wsl_argv_with("Ubuntu", "/home/me/repo", &args, Some(&fe)), "wsl argv {name}");
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // 격리
 // ---------------------------------------------------------------------------------------------------------------------
@@ -266,7 +303,7 @@ async fn 한글_경로와_출력이_깨지지_않는다() {
 
 #[tokio::test]
 async fn stdout_상한을_넘으면_트리를_죽이고_git_오류() {
-    let o = RunOpts { cancel: None, max_buffer: Some(1000) };
+    let o = RunOpts { cancel: None, max_buffer: Some(1000), ..RunOpts::default() };
     let err = local().run(&root_str(), &["log", "-p", "--root", "--format=%H"], &o).await.unwrap_err();
     let ExecError::Git { message, code, .. } = err else { panic!("Git 오류여야 한다") };
     assert_eq!(code, -1);

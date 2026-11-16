@@ -106,3 +106,59 @@ pub fn format_item_units(key: &[u16], value: &[u16]) -> String {
 pub fn format_item(key: &str, value: &str) -> String {
     format!("{} = {}", display(key), display(value))
 }
+
+/// fetch 확인 창의 옵션(TS `fetchConfirmOptions` 의 `options`: Electron 의 MessageBoxOptions 중 쓰는 것만)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmBox {
+    pub buttons: Vec<String>,
+    pub default_id: usize,
+    pub cancel_id: usize,
+    pub title: String,
+    pub message: String,
+    pub detail: String,
+}
+
+impl ConfirmBox {
+    /// 사이드카 shim(`electronShim.ts` 의 `showMessageBox`)이 Rust 에 넘기는 `MessageBoxArg`: 본문은 message 와 detail 을 빈 줄로 잇되 빈 것은 뺀다.
+    /// 네이티브 대화상자는 기본 버튼 지정을 지원하지 않아 `defaultId` 는 가지 않는다(취소가 마지막 자리·Esc 가 된다)
+    pub fn to_message_box_arg(&self) -> serde_json::Value {
+        let message: Vec<&str> = [self.message.as_str(), self.detail.as_str()].into_iter().filter(|s| !s.is_empty()).collect();
+        serde_json::json!({
+            "kind": "warning",
+            "title": self.title,
+            "message": message.join("\n\n"),
+            "buttons": self.buttons,
+            "cancelId": self.cancel_id,
+        })
+    }
+}
+
+const CONFIRM_FOOTER: &str = "직접 만든 설정이거나 신뢰하는 저장소일 때만 허용하세요. \"이번만\"은 이번 실행 동안, \"항상\"은 앱을 다시 켜도 적용되며, 어느 쪽이든 위 키·값이 바뀌면 다시 묻습니다. 값이 가리키는 스크립트·파일의 내용이 바뀌는 것은 확인하지 않습니다.";
+
+/// TS `fetchConfirmOptions`: 알 수 없는 저장소 설정이 있을 때 수동 fetch 전에 띄우는 확인 창. 앞 값은 `tooMany`(전부 보여 줄 수 없어 허용을 묻지 않고 닫기만 있는 차단 창).
+/// 기본 선택은 어느 쪽이든 취소(닫기)다. 저장소가 정한 문자열(이름·키·값)은 모두 [`display`] 로 드러낸다
+pub fn fetch_confirm_box(name: &str, items: &[(&str, &str)]) -> (bool, ConfirmBox) {
+    let title = format!("{} 저장소의 설정에 fetch 때 외부 프로그램을 실행하거나 연결을 가로챌 수 있는 항목이 있습니다.", display(name));
+    let shown = |list: &[(&str, &str)]| list.iter().map(|(k, v)| format_item(k, v)).collect::<Vec<_>>().join("\n");
+    if items.len() > MAX_CONFIRM_ITEMS {
+        let detail = format!(
+            "항목이 {}개로 너무 많아 모두 확인할 수 없어 fetch 하지 않습니다. 저장소의 .git/config 를 직접 확인하세요.\n\n{}\n… 외 {}개",
+            items.len(),
+            shown(&items[..MAX_CONFIRM_ITEMS]),
+            items.len() - MAX_CONFIRM_ITEMS
+        );
+        return (true, ConfirmBox { buttons: vec!["닫기".into()], default_id: 0, cancel_id: 0, title: "fetch 차단".into(), message: title, detail });
+    }
+    let detail = format!("{}\n\n{CONFIRM_FOOTER}", shown(items));
+    (
+        false,
+        ConfirmBox {
+            buttons: vec!["이번만 fetch".into(), "이 저장소에서 항상 허용".into(), "취소".into()],
+            default_id: 2,
+            cancel_id: 2,
+            title: "fetch 확인".into(),
+            message: title,
+            detail,
+        },
+    )
+}
