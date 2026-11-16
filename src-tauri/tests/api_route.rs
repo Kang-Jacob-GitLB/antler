@@ -282,6 +282,18 @@ async fn req_cancel_은_jira_가_켜져_있어도_사이드카에_전달한다()
 }
 
 #[tokio::test]
+async fn 배열이_아닌_인자의_jira_호출도_사이드카로_보내지_않는다() {
+    // 토큰을 담은 객체 인자가 사이드카 stdin 으로 가지 않게 — 서비스 검증이 거부한다(보안 리뷰)
+    let r = Router::new(true, false, RepoMirror::default());
+    r.set_jira(host());
+    let bad = json!({"kind": "cloud", "siteUrl": "https://x.atlassian.net", "email": "a@b.c", "token": "SECRET"});
+    for ch in ["jira:connect", "jira:issue", "jira:auth"] {
+        let Routed::Done(env) = r.route(ch, &bad).await else { panic!("{ch} 가 사이드카로 갔다") };
+        assert!(!env.to_string().contains("SECRET"), "{ch}");
+    }
+}
+
+#[tokio::test]
 async fn 등록_전에_온_cancel_은_조회를_취소하지만_전환은_취소하지_않는다() {
     let r = Router::new(true, false, RepoMirror::default());
     r.set_jira(host());

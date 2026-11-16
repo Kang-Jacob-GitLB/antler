@@ -408,6 +408,12 @@ impl Router {
 
     /// 채널 하나를 라우팅한다. `args` 는 renderer 가 보낸 인자 배열 그대로다(표식 포함)
     pub async fn route(&self, channel: &str, args: &Value) -> Routed {
+        // jira:* 는 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아닌 인자(토큰 포함 가능)가 사이드카 stdin 으로 가지 않게.
+        // 배열이 아니면 빈 인자로 넘겨 서비스 검증이 거부한다(보안 리뷰)
+        if API_CHANNELS.contains(&channel) {
+            let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            return self.jira_channel(channel, raw).await;
+        }
         let Some(raw) = args.as_array() else { return Routed::Sidecar };
         if channel == "req:cancel" {
             // Rust 레지스트리를 먼저 취소하고, 요청이 어디서 돌든(사이드카 포함) 항상 사이드카에도 전달한다
@@ -422,10 +428,6 @@ impl Router {
                 }
             }
             return Routed::Sidecar;
-        }
-        // jira:* — 스위치가 켜져 있고 서비스가 있으면 미러와 무관하게 Rust 가 처리한다. 아니면 사이드카가 지금까지처럼
-        if API_CHANNELS.contains(&channel) {
-            return self.jira_channel(channel, raw).await;
         }
         if channel == "repos:watch" {
             // 사이드카로 넘기기 전에 다른 저장소(또는 null 이면 전부)의 로그 커서를 닫는다 — 멈춘 git log 가 pack 파일 핸들을 쥐지 않게
