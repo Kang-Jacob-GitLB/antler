@@ -88,8 +88,15 @@ export async function fileBlame(exec: GitExecutor, repoPath: string, req: BlameR
   const run = (args: string[]) => exec.run(repoPath, args, { ...opts, maxBuffer: BLAME_MAX_BUFFER })
   let r = await run(base)
   // blame.ignoreRevsFile 이 없는 파일을 가리키면 git 이 blame 자체를 거부한다 — 이번 실행에서만 설정된 목록을 비운다
-  // (-c blame.ignoreRevsFile= 는 빈 항목을 더할 뿐 비우지 못해서 --no-ignore-revs-file 을 쓴다)
-  if (r.code !== 0 && /could not open object name list/i.test(r.stderr)) r = await run(['blame', '--no-ignore-revs-file', ...base.slice(1)])
+  // (-c blame.ignoreRevsFile= 는 빈 항목을 더할 뿐 비우지 못해서 --no-ignore-revs-file 을 쓴다).
+  // 목록 파일이 OID 가 아닌 줄을 담으면 git 은 `invalid object name: <그 줄>` 로 **파일 내용**을 stderr 에 낸다 — 악성 저장소가
+  // ignoreRevsFile 을 사용자 파일(자격 증명 등)로 가리키면 그 첫 줄이 오류 문구로 renderer 에 간다. 그런 실패도 목록을 끄고 다시 돌리고,
+  // 그래도 실패하면 원문 대신 고정 문구를 쓴다
+  const listBroken = (stderr: string): boolean => /object name list|invalid object name/i.test(stderr)
+  if (r.code !== 0 && listBroken(r.stderr)) {
+    r = await run(['blame', '--no-ignore-revs-file', ...base.slice(1)])
+    if (r.code !== 0 && listBroken(r.stderr)) throw new GitError('git blame failed', r.code, '', base)
+  }
   if (r.code !== 0) throw new GitError(r.stderr.trim() || `git blame failed (${r.code})`, r.code, r.stderr, base)
   const parsed = parseBlame(r.stdout)
   if (parsed.binary) return { ...empty, size, binary: true, tooLarge: false, missing: false }

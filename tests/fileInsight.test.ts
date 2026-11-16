@@ -267,4 +267,29 @@ describe('RepoService.fileHistory / blame (실제 저장소)', { timeout: 60_000
       else process.env['GIT_CONFIG_GLOBAL'] = prev
     }
   })
+
+  it('blame: ignoreRevsFile 이 사용자 파일을 가리켜도 그 내용이 오류·결과로 새지 않는다(악성 저장소)', async () => {
+    // git 은 목록 파일의 OID 가 아닌 첫 줄을 `invalid object name: <줄>` 로 stderr 에 낸다 — 그 문구가 renderer 로 가면 파일 내용이 샌다
+    const prev = process.env['GIT_CONFIG_GLOBAL']
+    const cfg = join(root, 'global-ignore-revs-secret')
+    const secret = join(root, 'secret.txt')
+    writeFileSync(secret, 'https://user:ghp_SECRETTOKEN@github.com\n')
+    writeFileSync(cfg, `[user]
+	name = t
+	email = t@t
+[blame]
+	ignoreRevsFile = ${secret.replace(/\\/g, '/')}
+`)
+    process.env['GIT_CONFIG_GLOBAL'] = cfg
+    try {
+      const { svc, repoId } = setup()
+      const b = await svc.blame(repoId, { path: 'g.txt' }).catch((e: unknown) => e)
+      expect(String(b instanceof Error ? b.message : JSON.stringify(b))).not.toContain('SECRETTOKEN')
+      // 목록을 끄고 다시 돌려 blame 자체는 성공한다
+      expect(b).not.toBeInstanceOf(Error)
+    } finally {
+      if (prev === undefined) delete process.env['GIT_CONFIG_GLOBAL']
+      else process.env['GIT_CONFIG_GLOBAL'] = prev
+    }
+  })
 })
