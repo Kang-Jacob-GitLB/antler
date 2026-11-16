@@ -45,6 +45,7 @@ dependencies = [
 name = "antler"
 version = "0.0.0"
 dependencies = [
+ "base64 0.23.1",
  "ctor",
  "futures-util",
  "rfd",
@@ -59,6 +60,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tokio",
  "tokio-util",
+ "url",
  "windows",
 ]
 

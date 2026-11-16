@@ -254,7 +254,7 @@ export interface GithubEnvOpts {
 }
 
 /** 환경 변수·헤더에 넣어도 되는 토큰인가(개행 등이 든 값은 헤더를 깨뜨린다) */
-function usableToken(token: string | null): token is string {
+export function usableToken(token: string | null): token is string {
   return typeof token === 'string' && token.length > 0 && token.length <= 4096 && !/[\s\0]/.test(token)
 }
 

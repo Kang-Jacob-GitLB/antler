@@ -2,7 +2,11 @@ mod commands;
 mod dialogs;
 mod fetch_host;
 pub mod git;
+// Phase 4 의 순수 로직(PR 1) — 앱 경로에서는 아직 부르지 않는다. 통합 테스트(tests/net.rs)가 별도 크레이트라 pub 이다
+pub mod github;
+pub mod jira;
 pub mod mirror;
+pub mod net;
 pub mod router;
 mod sidecar;
 mod snap;

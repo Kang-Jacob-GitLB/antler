@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든, 앱에 연결 안 됨) 완료. 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -424,6 +424,67 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
 - **되돌리기**: `ANTLER_RUST_GIT=0` 으로 실행하면 사이드카가 fetch 를 전부 맡는다(env·Rust 서비스 없음). 확인용 로그는 `ANTLER_ROUTE_LOG=1`(`[route] git:fetch -> rust`).
 
 **사람 확인 필요**: 확인 창(`[이번만][항상][취소]`)이 실제로 뜨고 버튼이 맞게 동작하는지(자동화는 입력을 합성하지 않는다), WSL 저장소의 실제 fetch.
+
+## GitHub·Jira(Phase 4, `src-tauri/src/{net,github,jira}`)
+
+### 계획 요약
+
+- **경계**: Rust 가 `gh:*`(`gh:repo` 제외)·`jira:*` 전부와 토큰 영속(Windows 자격 증명 관리자), API 호출·로그인을 맡는다. 사이드카에는 `gh:repo`·`repos:addGithub`·GitHub 원격 전용 저장소 git 이 남고,
+  GitHub 토큰의 메모리 사본만 Rust → Node(`{t:"ghToken"}`)로 간다(Jira 토큰은 넘기지 않는다). Rust → Node 질의 `{t:"repoq",id,op}` 로 `ghRepo`·`ghRemotes` 등을 받는다.
+  스위치는 `ANTLER_RUST_API`(0 이면 끔), `ANTLER_RUST_GIT=0` 이면 함께 꺼진다. 마이그레이션은 없다(다시 로그인) — Phase 6 전에 사용자 확인이 필요하다.
+- **HTTP**: reqwest 0.13(`default-features=false`, `native-tls`), 클라이언트 생성은 한 곳(`net/http.rs`)에 모으고 `Client::new` 등은 clippy 로 막는다. `https_only`·`no_proxy`·15초·UA `Antler`,
+  Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
+  `reqwest::Error` 의 Display 는 쓰지 않는다. 비밀은 `SecretString`(Display·Serialize 없음, Debug `***`)이고 오류 문구는 마지막에 `redact_secrets` 를 거친다.
+- **PR 순서**: 1 순수 로직·골든(이 PR) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf) → 3 HTTP 코어·두 클라이언트(루프백 목 서버) → 4 SecretStore(키링·메모리) → 5 Jira 서비스 →
+  6 Jira 연결(채널·`openExternal`) → 7 GitHub 서비스 → 8 gh CLI → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
+
+### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
+
+`lib.rs` 에 `pub mod net / github / jira` 가 선언돼 있을 뿐 앱 경로에서 부르는 곳이 없다(통합 테스트가 별도 크레이트라 `pub`). 네트워크·reqwest·키체인은 없다.
+
+| 모듈 | 원본(TS) | 내용 |
+|---|---|---|
+| `net/json.rs` | — | `JSON.parse` 같은 관대한 해석(짝 없는 서로게이트·삽입 순서·중복 키), JS `Number(문자열)`·숫자 문자열화, IPC 인자(`serde_json::Value`) 헬퍼 |
+| `net/url_rules.rs` | `jira/client.ts` | `inSite`, `PUBLIC_AVATAR_HOST_RE`(정규식 크레이트 없이 손 판정), 프로필 사진 홉 판정, 요청 URL 조립(`searchParams.set` 의 공백 → `+` 포함), IDN 안전 범위 |
+| `net/http_error.rs` | `jira/client.ts`·`github/client.ts` | `parseRetryAfter`, `hasNextLink`, `parseRate`, `bodyMessage` 둘, `httpError` 둘(분류 + 문구) |
+| `net/redact.rs` | `git/githubCache.ts` | `usableToken`·`redactToken`, Rust 전용 `redact_secrets`, `SecretString` |
+| `github/validate.rs`·`jira/validate.rs` | `validate.ts` | IPC 인자 검증 전부(문구·검사 순서까지) |
+| `github/device_rules.rs` | `deviceFlow.ts` | 시작·폴링 응답 해석 분기(`PollState`: 간격·백오프·`slow_down`·만료) |
+| `github/gh_env.rs` | `ghCli.ts` | `ghEnv` 허용 목록 필터 |
+| `jira/mod.rs` | `jira/client.ts` | `JiraKind`, `authHeader` |
+
+공백은 `git::scope::is_js_space`·`git::fetch::js_trim`, UTF-16 길이는 `git::commit::utf16_len`, 소문자화는 `git::fetch::js_to_lowercase`(Node 표)를 재사용한다. 의존성은 `url = "2"`·`base64 = "0.23"`(둘 다 이미 Cargo.lock 에 있던 판).
+
+**골든**: `tests/fixtures/netCases.ts`(입력 표) → `tests/goldenNet.test.ts` 가 TS 로 `tests/golden/net/{validate,urls,http,device,env}.json` 을 만든다(`UPDATE_GOLDEN=1 npx vitest run tests/goldenNet.test.ts`),
+`src-tauri/tests/net.rs` 가 전부 읽어 비교한다(처리기 없는 골든이 있으면 실패). 시간대에 따라 달라지는 값(시간대 표기 없는 날짜·ko-KR 시각)은 골든에 값을 넣지 않는다(`"tz"`, `{TIME}`) —
+`TZ=UTC`·`America/New_York`·`Asia/Kolkata` 에서 모두 통과를 확인했다. TS 쪽은 `src/main` 동작을 바꾸지 않았다(`PUBLIC_AVATAR_HOST_RE`·`inSite`·`bodyMessage`·`httpError`·`parseRate`·`usableToken` 에 `export` 만 더했다).
+요청 URL·사진 홉·Device Flow 는 실제 `JiraClient`/`GitHubClient`/`DeviceFlow` 를 가짜 `fetch`·`sleep`·`now` 로 돌려 얻은 결과다. 손으로 옮긴 정규식은 소스 조각을 골든(`handWritten`)과 `net::HAND_WRITTEN` 에 적어 TS 가 바뀌면 둘 다 알아챈다.
+
+**안전 방향**: URL 판정 격자(약 1,500개 주소 × 사이트 주소·외부 링크·사이트 안·Jira 링크·직렬화, 총 12,000여 판정)와 IDN 전수 대조에서 "Rust 허용 ⇒ TS 허용" 위반이 0 이다(위반이 있으면 실패).
+
+**TS 와 다르게 동작하는 곳**(각각 `차이_…` 테스트나 알려진 목록 단언이 고정한다. 대부분 Rust 가 더 엄격한 쪽이고, **같은 입력을 다른 값으로 받는 곳**은 따로 표시했다):
+
+- **IDN 호스트(Unicode 판) — 설계 결정**: Node 22 는 Unicode 16, `url` 크레이트의 idna 는 더 새 판이라 새로 배정된 문자(U+A7CE 등)·UTS 46 이 갈리는 문자(U+04C0, U+0558 등)를 Rust 만 받는 호스트가 생겼다(Rust 허용 ⇒ TS 허용 위반).
+  그래서 `parse_url` 은 호스트 부분의 입력 문자(탭·개행을 지운 뒤)와 `xn--` 레이블을 해독한 문자가 모두 ASCII 이거나 `IDNA_SAFE_RANGES`(오래된 블록 17개)에 있고 `IDNA_SAFE_EXCLUDED`(전수 대조가 찾은 9자)에 없을 때만 받는다.
+  호스트의 퍼센트 이스케이프 비 ASCII 바이트(`%D3%80`)·`blob:`·`ẞ` 가 든 IDN 은 거부한다(해독한 문자를 입력 쪽에서 검사할 수 없거나 origin 이 안쪽 주소의 것이어서). `resolve_location`(리다이렉트 `Location`)도 호스트가 바뀌면 같은 검사를 거친다.
+  `xn--` 레이블 해독은 자체 구현(`punycode_decode`, RFC 3492)이다. 범위 안 모든 코드 포인트(약 4만 자)를 골든 `idna` 가 TS 와 같은 호스트로 푸는지 대조하고, TS 만 받는 문자(분수·`ŉ`·`ẞ`·반각 기호 20자)와
+  격자의 TS 만 받는 주소 17개(잘못된 punycode `xn--github-`, `ẞ`(TS `ss`·Rust `xn--zca` 로 다른 서버), `№`·`①`·`ﬁ`·ZWSP·BOM, `blob:`, 호스트의 `%C3%A9` 등)는 목록으로 못 박았다. 탭·개행·퍼센트 이스케이프로 검사를 비켜 가려는 입력도 격자에 있다.
+  idna 크레이트를 올려 새로 어긋나는 문자가 생기면 이 전수 대조가 실패한다 — 제외 목록에 더하거나 범위를 줄인다. 한계: 전수 대조는 `a{문자}b.example.com` 한 가지 문맥뿐이라 bidi(RTL) 레이블 같은 문맥 규칙의 조합은 대조하지 않았다.
+  대안(상위 결정): 비 ASCII 호스트를 전부 거부하거나, idna 판을 Node 와 맞춰 고정한다.
+- **`parseRetryAfter`**: 날짜는 IMF-fixdate·RFC 850·asctime 만 받는다(TS `Date.parse` 는 ISO 8601·`Mon, 31 Apr`·초 60 같은 것도 받는다 — Rust 는 `null`). 받는 것은 TS 와 같은 값이다(두 자리 연도: 0–49 → 2000년대, 50–99 → 1900년대, V8 과 같다).
+  **다른 값**: asctime 은 시간대 표기가 없어 TS 는 로컬 시간, Rust 는 UTC(HTTP 규격)로 푼다 — 골든 값 비교에서 빼고 Rust 단독으로 단언한다. 숫자(초)는 `Number()` 와 같다(`0x10`·` 5 `·`1e3`·`""` 포함).
+- **JSON(`net/json.rs`)**: **다른 값**: 짝 없는 서로게이트는 U+FFFD 로 받는다(TS 는 그대로 둔다. 서버가 보낸 `device_code`·`access_token`·메시지에 있으면 Rust 는 다른 문자열이 된다. 응답 문구를 UTF-16 200 단위로 자르다 쌍이 쪼개져도 U+FFFD).
+  중첩 깊이 상한 512(배열 513겹까지 — 넘으면 오류, TS 는 스택이 다할 때까지 받는다). `serde_json` 은 거부하는 짝 없는 서로게이트 이스케이프와 삽입 순서(정수형 키 먼저)를 위해 쓰지 않는다.
+- **Device Flow**: 필드 타입이 틀린 응답(문자열이 아닌 `access_token`·`device_code`, 문자열 `interval`)을 TS 는 truthiness·형 변환으로 받지만 Rust 는 없는 것으로 본다. 본문이 `null` 이면 TS 는 `TypeError` 를 던지고 Rust 는 `DeviceError::TypeError` 다.
+- **`inSite`**: 사이트 주소가 URL 이 아니면 TS 는 던지고 Rust 는 `false`. GitHub `httpError` 의 시각 문자열은 호출자가 넣는다(TS 는 ko-KR 로컬 시각).
+- Jira `httpError` 는 코드 외에 문구까지 옮겼다(골든이 글자 단위로 비교한다). 토큰이 든 값(`authHeader` 결과·PAT·Jira 토큰)은 `SecretString` 으로 돌려준다.
+
+**대응표**(`tests/golden/net/test-map.json`): 대상 테스트 15개(`avatars`·`ghAccessibleRepos`·`ghApi`·`ghChecks`·`ghClient`·`ghCliImport`·`ghDevice`·`ghService`·`jiraAdf`·`jiraAvatar`·`jiraClient`·`jiraHardening`·`jiraService`·`launchpadQuery`·`launchpadService`)의
+모든 `it`(271개)이 `net.rs::<테스트>`, `N/A: PR n`(뒤 PR 이 채운다) 또는 `N/A: 사유` 다. **기준**: TS `it` 이 순수 함수(검증·`ghEnv`·`authHeader`·`parseRetryAfter`)를 **직접** 부를 때만 `net.rs::` 이고(25개 → 테스트 5개),
+client·service·DeviceFlow 를 가짜 서버로 구동하는 `it` 은 Rust 가 순수 판정만 옮겼어도 `N/A: PR n`(그 계층을 옮기는 PR 이 실제 테스트로 바꾼다)이다. 지금 `N/A: PR n` 은 241개(2→72, 3→41, 4→5, 5→49, 7→56, 8→18),
+`N/A: 사유` 는 5개(ConfigStore 는 사이드카에 남는다). `net.rs` 의 나머지 테스트(요청 URL·사진 홉·Device Flow·오류 분류 등)는 표에 묶이지 않은 추가 패리티 검사다.
+vitest 가 누락·낡은 항목·존재하지 않는 Rust 테스트를 막는다(`N/A: PR [2-9]` 형식은 따로 허용). 계획에는 "15파일 ~268 it" 만 있고 목록이 없어, `src/main/{github,jira}` 를 import 하는 테스트 중 GitHub 원격 URL 해석(`ghRemote`)·`launchpadMerge`(병합 로직)를 뺀 15개로 골랐다(it 271개).
+파일별 PR 번호도 추정이다. 목록이 다르면 `TARGET_TESTS`(`tests/goldenNet.test.ts`)와 표를 고친다.
 
 ## Phase 0 에서 확인한 것
 
