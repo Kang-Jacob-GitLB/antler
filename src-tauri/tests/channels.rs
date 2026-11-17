@@ -19,7 +19,7 @@ use antler_lib::git::fetch::service::{ApprovalKind, FetchHost, FetchService, Hos
 use antler_lib::git::log_service::NoteOp;
 use antler_lib::git::scope::{log_args, parse_scope};
 use antler_lib::mirror::{MirrorRepo, RepoMirror};
-use antler_lib::router::{Routed, Router, RUST_CHANNELS};
+use antler_lib::router::{Routed, Router, RUST_CHANNELS, UNDEFINED_ARG};
 use serde_json::{json, Value};
 
 // jira:*(PR 6)·gh:*(PR 9) 채널 골든. 루프백 http 를 허용하는 테스트 훅이 필요해 `test-hooks` feature 가 있을 때만 빌드한다(CI 는 항상 켠다). 목 서버는 둘이 나눠 쓴다
@@ -365,7 +365,7 @@ async fn 사이드카로_가야_하는_요청은_건드리지_않는다() {
     let dir = import(&tmp.0, "basic");
     let router = Router::new(true, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(router.route("git:commit", &json!(["unknown-id", "abcd1234"])).await, Routed::Sidecar));
-    assert!(matches!(router.route("git:search", &json!(["basic"])).await, Routed::Sidecar));
+    assert!(matches!(router.route("git:lfsPaths", &json!(["basic"])).await, Routed::Sidecar));
     let off = Router::new(false, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(off.route("git:commit", &json!(["basic", "abcd1234"])).await, Routed::Sidecar));
     assert_eq!(router.rust_handled() + off.rust_handled(), 0);
@@ -1650,6 +1650,433 @@ async fn 서브모듈은_200개까지_담고_앞_50개만_확인한다() {
     // 디렉터리가 없는 gitlink 는 확인한 것만 uninitialized 이고(`cannot change to`) 확인하지 않은 것은 unknown 이다
     assert_eq!((count("uninitialized"), count("unknown")), (50, 150));
     assert!(subs[..50].iter().all(|s| s["status"] == "uninitialized") && subs[50..].iter().all(|s| s["status"] == "unknown"));
+}
+
+// ── 검색·활동: git:search · git:activity ────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 검색_활동_시나리오가_ts_골든과_같다() {
+    search_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 검색_활동_시나리오가_ssh_에서도_ts_골든과_같다() {
+    search_scenarios(&Mode::ssh().await).await;
+}
+
+async fn search_scenarios(mode: &Mode) {
+    let all = read_json("tests/fixtures/repos/search.scenarios.json");
+    let scenarios = all["scenarios"].as_array().expect("scenarios");
+    let golden = [read_json("tests/golden/channels/search.json"), read_json("tests/golden/channels/activity.json")];
+    let tmp = TempDir::new("search");
+    let mut cursor = [0usize; 2];
+    let mut diffs = Vec::new();
+    for (si, sc) in scenarios.iter().enumerate() {
+        let name = sc["name"].as_str().unwrap();
+        // 시나리오마다 새 디렉터리에 import 한다(저장소를 바꾸는 단계가 다른 시나리오에 번지지 않게)
+        let dir = import_at(tmp.0.join(format!("s{si}")), sc["repo"].as_str().unwrap());
+        let id = format!("s{si}");
+        let router = mode.router(&[(id.as_str(), dir.as_path())]);
+        let rev = |expr: &str| rev_parse(&dir, expr);
+        for (i, step) in sc["steps"].as_array().unwrap().iter().enumerate() {
+            if let Some(args) = step.get("git") {
+                let args = expand(args, &rev);
+                let args: Vec<&str> = args.as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+                assert!(refs_git(&dir).args(&args).status().unwrap().success(), "{name}: git {args:?}");
+                continue;
+            }
+            // 인자 자리: search 는 (질의, 범위, requestId), activity 는 (범위, requestId). 비어 있는 자리는 bridge 가 보내는 표식이다
+            let (k, route, slots) = if step.get("search").is_some() { (0, "git:search", 2) } else { (1, "git:activity", 1) };
+            let list = expand(&step[if k == 0 { "search" } else { "activity" }], &rev);
+            let mut args = vec![json!(id)];
+            args.extend(list.as_array().unwrap().iter().cloned());
+            while args.len() < 1 + slots {
+                args.push(json!({ UNDEFINED_ARG: true }));
+            }
+            args.push(json!(format!("req-{si}-{i}")));
+            let env = envelope(router.route(route, &Value::Array(args)).await);
+            let got = if env["ok"] == true {
+                json!({ "ok": true, "data": env["data"] })
+            } else if step.get("msg") == Some(&json!(true)) {
+                json!({ "ok": false, "code": env["code"], "error": env["error"] })
+            } else {
+                json!({ "ok": false, "code": env["code"] })
+            };
+            let g = &golden[k]["scenarios"][cursor[k]];
+            cursor[k] += 1;
+            assert_eq!((&g["name"], &g["step"]), (&json!(name), &json!(i)), "{name}/{route}: 골든의 순서가 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+            assert_eq!(norm_numbers(&g["args"]), norm_numbers(&list), "{name}/{route} 단계 {i}: 인자가 골든과 다르다");
+            if norm_numbers(&got) != norm_numbers(&g["result"]) {
+                diffs.push(format!("{name} / {route} 단계 {i}: 골든과 다르다\n  인자: {}\n  Rust: {}\n  TS  : {}", short(&list), short(&got), short(&g["result"])));
+            }
+        }
+        // 옵션처럼 보이는 질의(`--output=x`)가 옵션으로 읽혔다면 git 이 저장소에 파일을 만들었을 것이다
+        assert!(!dir.join("x").exists() && !dir.join("pwned.txt").exists(), "{name}: 질의가 옵션으로 해석됐다");
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+    assert_eq!([golden[0]["scenarios"].as_array().unwrap().len(), golden[1]["scenarios"].as_array().unwrap().len()], cursor, "골든 항목 수가 시나리오와 다르다");
+    mode.finish();
+}
+
+/// 검증에 걸린 요청은 git 을 띄우지도(저장소 경로가 없는 곳 — 띄웠다면 다른 오류가 난다) 취소 레지스트리를 쓰지도 `rust_handled` 에 세지도 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 적대적_검색_활동_입력은_git_을_띄우지_않는다() {
+    let nowhere = Path::new("/nonexistent-antler-search");
+    let router = Router::new(true, false, mirror_of(&[("a", nowhere)]));
+    let big_hash = "a".repeat(40);
+    for (args, want) in [
+        (json!(["a", "x\u{0}y"]), "invalid query"),
+        (json!(["a", "\u{0}"]), "invalid query"),
+        (json!(["a", "  \u{0}  "]), "invalid query"),
+        (json!(["a", 5]), "invalid query"),
+        (json!(["a", null]), "invalid query"),
+        (json!(["a", { UNDEFINED_ARG: true }]), "invalid query"),
+        (json!(["a"]), "invalid query"),
+        (json!(["a", "q", null]), "invalid scope"),
+        (json!(["a", "q", "x"]), "invalid scope"),
+        (json!(["a", "q", { "solo": ["-x"] }]), "invalid solo"),
+        (json!(["a", "q", { "solo": ["--output=pwned.txt"] }]), "invalid solo"),
+        (json!(["a", "q", { "hide": [big_hash] }]), "invalid hide"),
+        (json!(["a", "q", { "includeHead": "no" }]), "invalid scope"),
+        // 범위 오류가 질의 오류보다 먼저다
+        (json!(["a", 5, null]), "invalid scope"),
+    ] {
+        let env = envelope(router.route("git:search", &args).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone(), env["error"].clone()), (json!(false), json!("ERROR"), json!(want)), "{args}");
+    }
+    for (args, want) in [
+        (json!(["a", null]), "invalid scope"),
+        (json!(["a", "x"]), "invalid scope"),
+        (json!(["a", { "solo": ["--output=pwned.txt"] }]), "invalid solo"),
+        (json!(["a", { "hide": [big_hash] }]), "invalid hide"),
+        (json!(["a", { "includeHead": 1 }]), "invalid scope"),
+    ] {
+        let env = envelope(router.route("git:activity", &args).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone(), env["error"].clone()), (json!(false), json!("ERROR"), json!(want)), "{args}");
+    }
+    assert_eq!(router.rust_handled(), 0, "거부된 요청은 처리한 것으로 세지 않는다");
+    assert!(!Path::new("pwned.txt").exists());
+}
+
+/// 검증을 통과한 요청이 git 을 돌려 실패하면 TS 처럼 GIT 이다(저장소 경로가 없다) — 검색의 갈래·활동의 시그니처 계산 모두. 검색이 빈 결과로 삼키지도 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 검증을_통과한_요청이_git_실패로_끝나면_git_오류다() {
+    let router = Router::new(true, false, mirror_of(&[("a", Path::new("/nonexistent-antler-search"))]));
+    for (ch, args) in [("git:search", json!(["a", "abc"])), ("git:search", json!(["a", "로그인"])), ("git:activity", json!(["a"]))] {
+        let env = envelope(router.route(ch, &args).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("GIT")), "{ch} {args}: {env}");
+    }
+    assert_eq!(router.rust_handled(), 3);
+}
+
+/// `activity` 는 첫 로그 페이지 문(`repos:watch` 가 닫는다)이 열릴 때까지 기다린다(TS `RepoService.activity` 의 `afterFirstPage`). `search` 는 기다리지 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 활동은_첫_페이지_문이_열릴_때까지_기다리고_검색은_기다리지_않는다() {
+    let tmp = TempDir::new("actgate");
+    let dir = import(&tmp.0, "basic");
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("b", dir.as_path())])));
+    // 문이 없는 저장소는 바로 간다
+    assert_eq!(envelope(router.route("git:activity", &json!(["b"])).await)["ok"], true);
+    assert!(matches!(router.route("repos:watch", &json!(["b"])).await, Routed::Sidecar));
+    assert!(router.repo_state().is_armed("b"));
+    assert_eq!(envelope(router.route("git:search", &json!(["b", "init"])).await)["ok"], true, "검색은 문과 무관하다");
+    let r = router.clone();
+    let pending = tokio::spawn(async move { envelope(r.route("git:activity", &json!(["b"])).await) });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!pending.is_finished(), "문이 닫혀 있는 동안 활동이 끝났다");
+    // 첫 로그 페이지가 나갔다는 알림이 문을 연다(로그 서비스·fetch 호스트가 쓰는 같은 길)
+    router.note_sink()(NoteOp::FirstPage, "b");
+    let env = tokio::time::timeout(std::time::Duration::from_secs(60), pending).await.expect("문이 열리면 끝나야 한다").unwrap();
+    assert_eq!((env["ok"].clone(), env["data"]["total"].as_u64().is_some()), (json!(true), true));
+}
+
+/// 질의는 셸이 해석하지 않는다 — local 은 셸 없이, ssh 는 인용된 한 인자로 간다. 표식 파일이 생기면 명령이 실행된 것이다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 셸_메타문자_질의는_명령을_실행하지_않는다() {
+    for mode in [Mode::Local, Mode::ssh().await] {
+        let tmp = TempDir::new("searchshell");
+        let dir = import(&tmp.0, "search");
+        let marker = tmp.0.join("search-evil-ran");
+        let m = marker.to_string_lossy().replace('\\', "/");
+        let router = mode.router(&[("s", dir.as_path())]);
+        for q in [
+            format!("$(touch '{m}')"),
+            format!("`touch '{m}'`"),
+            format!(";touch '{m}';"),
+            format!("' ; touch '{m}' ; '"),
+            format!("\" ; touch '{m}' ; \""),
+            format!("a\ntouch '{m}'"),
+            format!("| touch '{m}'"),
+            format!("&& touch '{m}'"),
+            format!("> '{m}'"),
+            format!("--output={m}"),
+            format!("-c core.pager=touch '{m}'"),
+        ] {
+            let env = envelope(router.route("git:search", &json!(["s", q, null])).await);
+            // 범위가 null 이라 거부된다 — 같은 질의를 범위 없이도 보낸다
+            assert_eq!(env["code"], "ERROR", "{q}");
+            let env = envelope(router.route("git:search", &json!(["s", q])).await);
+            assert_eq!(env["ok"], true, "{q}: {env}");
+            assert!(!marker.exists(), "{q}: 질의가 실행됐다");
+        }
+        mode.finish();
+    }
+}
+
+/// `n` 개의 커밋을 `git fast-import` 로 만든다(작성자·메시지에 `bulk` 가 들어 있다 — 메시지·작성자 두 갈래가 모두 찬다)
+fn make_bulk(dir: &Path, n: usize) {
+    use std::io::Write;
+    assert!(raw_git(dir).args(["init", "-q", "-b", "main"]).status().unwrap().success());
+    let mut stream = String::new();
+    for i in 1..=n {
+        let msg = format!("bulk {i}\n");
+        stream.push_str(&format!("commit refs/heads/main\nmark :{i}\nauthor bulk <b@example.com> 1700000000 +0000\ncommitter bulk <b@example.com> 1700000000 +0000\ndata {}\n{msg}", msg.len()));
+        if i > 1 {
+            stream.push_str(&format!("from :{}\n", i - 1));
+        }
+        stream.push('\n');
+    }
+    let mut child = raw_git(dir).args(["fast-import", "--quiet"]).stdin(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(stream.as_bytes()).unwrap();
+    assert!(child.wait().unwrap().success(), "fast-import");
+}
+
+/// 결과는 1만 개에서 자르고 `truncated` 를 알린다(TS `SEARCH_LIMIT`). 두 갈래가 모두 1만 1개씩 차서 병합 스트림을 끝까지 훑는 경로다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 검색_결과는_1만개에서_자르고_truncated_를_알린다() {
+    let tmp = TempDir::new("searchbulk");
+    let dir = tmp.0.join("bulk");
+    fs::create_dir_all(&dir).unwrap();
+    make_bulk(&dir, 10_010);
+    let router = Router::new(true, false, mirror_of(&[("b", dir.as_path())]));
+    let env = envelope(router.route("git:search", &json!(["b", "bulk"])).await);
+    assert_eq!(env["ok"], true, "{}", short(&env));
+    let hashes = env["data"]["hashes"].as_array().unwrap();
+    assert_eq!((hashes.len(), &env["data"]["truncated"]), (10_000, &json!(true)));
+    // 그래프 순서(자식 먼저)의 앞 1만 개다
+    assert_eq!(hashes[0], json!(rev_parse(&dir, "main")));
+    assert_eq!(hashes[9_999], json!(rev_parse(&dir, "main~9999")));
+    // 1만 개 이하면 자르지 않는다
+    let env = envelope(router.route("git:search", &json!(["b", "bulk 10009"])).await);
+    assert_eq!((env["data"]["hashes"].as_array().unwrap().len(), env["data"]["truncated"].clone()), (1, json!(false)));
+    // 활동은 상한 없이 모든 커밋을 센다
+    let env = envelope(router.route("git:activity", &json!(["b"])).await);
+    assert_eq!(env["data"]["total"], 10_010);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 검색_활동_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카() {
+    for ch in ["git:search", "git:activity"] {
+        assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+    }
+    let m = RepoMirror::default();
+    m.apply(
+        1,
+        vec![
+            MirrorRepo { id: "a".into(), kind: "local".into(), path: "/nonexistent-antler-search".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "g".into(), kind: "github".into(), path: "/cache".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "s".into(), kind: "ssh".into(), path: "/srv".into(), distro: None, ssh_host: Some("devbox".into()) },
+            MirrorRepo { id: "unc".into(), kind: "local".into(), path: "\\\\evil\\share\\repo".into(), distro: None, ssh_host: None },
+        ],
+    );
+    let router = Router::new(true, false, m.clone());
+    let off = Router::new(false, false, m);
+    for (ch, tail) in [("git:search", json!(["q"])), ("git:activity", json!([]))] {
+        let call = |id: &Value| {
+            let mut v = vec![id.clone()];
+            v.extend(tail.as_array().unwrap().iter().cloned());
+            Value::Array(v)
+        };
+        // 미러에 없는 id·github·(풀이 없는) ssh 는 사이드카가 처리한다
+        for id in ["nope", "g", "s"] {
+            assert!(matches!(router.route(ch, &call(&json!(id))).await, Routed::Sidecar), "{id} {ch}");
+        }
+        // 저장소 id 가 문자열이 아니거나 없다
+        for id in [json!(null), json!(5)] {
+            assert!(matches!(router.route(ch, &call(&id)).await, Routed::Sidecar), "{ch} {id}");
+        }
+        assert!(matches!(router.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
+        // 스위치(ANTLER_RUST_GIT=0)를 끄면 미러에 있어도 사이드카다
+        assert!(matches!(off.route(ch, &call(&json!("a"))).await, Routed::Sidecar), "{ch}");
+        // 미러 검사에 걸린 저장소는 사이드카가 아니라 ERROR 다(다른 채널과 같다)
+        let env = envelope(router.route(ch, &call(&json!("unc"))).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+    }
+    assert_eq!(router.rust_handled() + off.rust_handled(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 등록_전에_온_cancel_은_검색과_활동을_git_없이_취소한다() {
+    let nowhere = Path::new("/nonexistent-antler-search");
+    let router = Router::new(true, false, mirror_of(&[("a", nowhere)]));
+    for (i, (ch, args)) in [("git:search", json!(["a", "q", { "solo": ["refs/heads/main"] }])), ("git:activity", json!(["a", { "solo": ["refs/heads/main"] }]))].into_iter().enumerate() {
+        let id = format!("early{i}");
+        assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+        let mut call = args.as_array().unwrap().clone();
+        call.push(json!(id));
+        // git 을 띄웠다면 경로가 없어 GIT/ERROR 가 난다 — ABORTED 면 띄우지 않은 것이다
+        let env = envelope(router.route(ch, &Value::Array(call)).await);
+        assert_eq!(env["code"], "ABORTED", "{ch}: {env}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 진행_중_검색_활동을_취소해도_멈추지_않는다() {
+    let tmp = TempDir::new("searchcancel");
+    let dir = tmp.0.join("bulk");
+    fs::create_dir_all(&dir).unwrap();
+    make_bulk(&dir, 3_000);
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("b", dir.as_path())])));
+    for (i, (ch, args)) in [("git:search", json!(["b", "bulk"])), ("git:search", json!(["b", "bulk 1"])), ("git:activity", json!(["b"]))].into_iter().enumerate() {
+        let id = format!("slow{i}");
+        // search 는 (질의, 범위, requestId), activity 는 (범위, requestId) — 범위 자리는 표식으로 비운다
+        let mut call = args.as_array().unwrap().clone();
+        call.push(json!({ UNDEFINED_ARG: true }));
+        call.push(json!(id));
+        let r = router.clone();
+        let task = tokio::spawn(async move { envelope(r.route(ch, &Value::Array(call)).await) });
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+        let env = tokio::time::timeout(std::time::Duration::from_secs(60), task).await.expect("취소 뒤에도 끝나야 한다").unwrap();
+        // 타이밍에 따라 이미 끝났을 수도 있다 — 어느 쪽이든 형식이 맞아야 한다
+        match env["ok"].as_bool() {
+            Some(true) => {}
+            _ => assert_eq!(env["code"], "ABORTED", "{ch}: {env}"),
+        }
+    }
+    // 취소한 뒤에도 같은 요청을 다시 받을 수 있다(슬롯·합치기 표가 풀렸다)
+    // `bulk 7`·`bulk 70`~`bulk 79`·`bulk 700`~`bulk 799`
+    assert_eq!(envelope(router.route("git:search", &json!(["b", "bulk 7"])).await)["data"]["hashes"].as_array().unwrap().len(), 1 + 10 + 100);
+    assert_eq!(envelope(router.route("git:activity", &json!(["b"])).await)["data"]["total"], 3_000);
+}
+
+async fn activity_total(router: &Router, id: &str) -> u64 {
+    let env = envelope(router.route("git:activity", &json!([id])).await);
+    assert_eq!(env["ok"], true, "{env}");
+    env["data"]["total"].as_u64().unwrap()
+}
+
+/// 기본 보기(모든 브랜치·리모트·태그 + HEAD)에서 닿는 커밋 수 — 활동의 `total` 과 같아야 한다
+fn reachable_count(dir: &Path) -> u64 {
+    let out = raw_git(dir).args(["rev-list", "--count", "--ignore-missing", "--branches", "--remotes", "--tags", "HEAD"]).output().unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().parse().unwrap()
+}
+
+fn commit_empty(dir: &Path, msg: &str) {
+    assert!(refs_git(dir).args(["commit", "-q", "--allow-empty", "-m", msg]).status().unwrap().success());
+}
+
+// 아래 네 시험은 TS `repoService.test.ts` 의 첫 페이지 문·시그니처 `it` 4개를 activity 수준으로 옮긴 것이다(test-map.json).
+// Phase 6a PR 4 의 Rust `activity` 는 감시가 기억한 시그니처(`known_signature`)를 **쓰지 않고** 매번 새로 계산하므로(감시는 PR 7b 에서 온다)
+// 알림(`logStale`·`fetchChanged`)이 없어도 같은 결과가 나온다 — 알림 시험은 알림 길이 활동 결과를 깨지 않음을 보증하고,
+// 재사용 시험은 TS 와 반대로 "재사용하지 않음"을 단정한다. 7b 에서 재사용을 켜면 알림 시험이 의미를 갖는다(알림 없이는 낡은 값이 나오므로)
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 활동은_logstale_알림_뒤에도_바뀐_저장소를_새로_센다() {
+    let tmp = TempDir::new("actstale");
+    let dir = import(&tmp.0, "search");
+    let router = Router::new(true, false, mirror_of(&[("a", dir.as_path())]));
+    let before = activity_total(&router, "a").await;
+    assert_eq!(before, reachable_count(&dir));
+    commit_empty(&dir, "note-stale");
+    // Rust 가 `StaleLogError` 에 해당하는 일을 알려 오면 기억한 시그니처를 버린다(로그 서비스가 같은 길로 알린다)
+    router.note_sink()(NoteOp::Stale, "a");
+    assert_eq!(router.repo_state().known_signature("a"), None, "알림이 기억을 버렸다");
+    assert_eq!(activity_total(&router, "a").await, before + 1);
+    // 모르는 저장소 id 는 아무 일도 하지 않는다
+    router.note_sink()(NoteOp::Stale, "nope");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 활동은_fetch_변경_알림_뒤에도_바뀐_저장소를_새로_센다() {
+    let tmp = TempDir::new("actfetch");
+    let dir = import(&tmp.0, "search");
+    let router = Router::new(true, false, mirror_of(&[("a", dir.as_path())]));
+    let before = activity_total(&router, "a").await;
+    commit_empty(&dir, "note-fetch-changed");
+    router.note_sink()(NoteOp::FetchChanged, "a");
+    assert_eq!(router.repo_state().known_signature("a"), None);
+    assert_eq!(activity_total(&router, "a").await, before + 1);
+    router.note_sink()(NoteOp::FetchChanged, "nope");
+}
+
+/// TS 의 "감시가 계산한 ref 시그니처를 활동 조회가 다시 계산하지 않고 쓴다"의 PR 4 판: **재사용하지 않는다**.
+/// 첫 활동이 시그니처를 기억해도(공유 계산이 기록한다) 알림 없이 저장소가 바뀐 뒤의 활동은 낡은 기억 대신 새로 계산해 바뀐 값을 낸다 — 기억값을 읽는 구현이면 캐시 적중으로 낡은 값이 나온다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 활동은_기억한_시그니처를_재사용하지_않고_알림_없이도_매번_새로_계산한다() {
+    let tmp = TempDir::new("actfresh");
+    let dir = import(&tmp.0, "search");
+    let router = Router::new(true, false, mirror_of(&[("a", dir.as_path())]));
+    let first = activity_total(&router, "a").await;
+    let remembered = router.repo_state().known_signature("a");
+    assert!(remembered.is_some(), "공유 계산은 시그니처를 기억한다(소비하지 않을 뿐이다)");
+    // 알림 없이 저장소가 바뀐다 — 감시가 없는 상태다
+    commit_empty(&dir, "silent");
+    assert_eq!(activity_total(&router, "a").await, first + 1, "기억한 낡은 시그니처로 캐시에 적중했다");
+    assert_ne!(router.repo_state().known_signature("a"), remembered, "새 계산이 기억을 갱신했다");
+    // 바뀐 것이 없으면 같은 값(캐시 적중)이다
+    assert_eq!(activity_total(&router, "a").await, first + 1);
+    // ref 를 지워도 같다
+    assert!(refs_git(&dir).args(["update-ref", "-d", "refs/heads/side"]).status().unwrap().success());
+    assert_eq!(activity_total(&router, "a").await, reachable_count(&dir));
+}
+
+/// TS 의 "StaleLogError 로 이력이 바뀐 것을 알면 … 새로 계산해 활동을 돌려준다": 로그 이어 읽기가 이력 변경(STALE)을 알린 뒤에도, 알린 적이 없을 때도 활동은 바뀐 이력을 센다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 로그가_stale_을_알린_뒤의_활동은_바뀐_이력을_센다() {
+    let tmp = TempDir::new("actlog");
+    let dir = import(&tmp.0, "branchy");
+    let router = Router::new(true, false, mirror_of(&[("a", dir.as_path())]));
+    let before = activity_total(&router, "a").await;
+    assert_eq!(before, reachable_count(&dir));
+    let first = envelope(router.route("git:log", &json!(["a", { "skip": 0, "count": 5 }])).await);
+    assert_eq!(first["data"]["hasMore"], true);
+    // 커서를 다른 범위로 물러나게 한 뒤 앞쪽 이력을 바꾼다(log.scenarios.json 의 STALE 시나리오와 같다)
+    envelope(router.route("git:log", &json!(["a", { "skip": 0, "count": 1, "scope": { "solo": ["refs/tags/v1.0"] } }])).await);
+    assert!(refs_git(&dir).args(["update-ref", "-d", "refs/heads/topic"]).status().unwrap().success());
+    let stale = envelope(router.route("git:log", &json!(["a", { "skip": 5, "count": 5 }])).await);
+    assert_eq!((stale["ok"].clone(), stale["code"].clone()), (json!(false), json!("STALE")), "{stale}");
+    let after = activity_total(&router, "a").await;
+    assert_eq!(after, reachable_count(&dir));
+    assert!(after < before, "topic 에만 있던 커밋이 빠졌다: {before} → {after}");
+}
+
+/// 같은 키의 활동 요청은 하나로 합쳐지고, 한 호출자의 취소가 다른 호출자의 결과를 죽이지 않는다. 키가 서로 다른 요청이 소스의 큐 한도(local 6·ssh 4)보다 많아도
+/// 서로 막지 않고 끝난다 — 합치기는 슬롯을 쥐지 않고, 슬롯 안에서는 시그니처가 다시 슬롯을 기다리지 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 활동_요청은_합쳐지고_큐_한도보다_많아도_서로_막지_않는다() {
+    for mode in [Mode::Local, Mode::ssh().await] {
+        let tmp = TempDir::new("actjoin");
+        let dir = import(&tmp.0, "search");
+        let router = Arc::new(mode.router(&[("a", dir.as_path())]));
+        let want = reachable_count(&dir);
+        // 같은 키 셋 중 첫 요청만 취소한다
+        let mut tasks = Vec::new();
+        for i in 0..3 {
+            let r = router.clone();
+            tasks.push(tokio::spawn(async move { envelope(r.route("git:activity", &json!(["a", { "hide": ["refs/heads/side"] }, format!("same{i}")])).await) }));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        assert!(matches!(router.route("req:cancel", &json!(["same0"])).await, Routed::Sidecar));
+        for (i, t) in tasks.into_iter().enumerate() {
+            let env = tokio::time::timeout(std::time::Duration::from_secs(60), t).await.expect("끝나야 한다").unwrap();
+            match (i, env["ok"].as_bool()) {
+                (0, Some(false)) => assert_eq!(env["code"], "ABORTED"),
+                _ => assert_eq!(env["data"]["total"], want - 1, "{i}: {env}"),
+            }
+        }
+        // 키가 모두 다른 요청 16개(존재하지 않는 solo ref)
+        let mut tasks = Vec::new();
+        for i in 0..16 {
+            let r = router.clone();
+            tasks.push(tokio::spawn(async move { envelope(r.route("git:activity", &json!(["a", { "solo": [format!("refs/heads/none{i}")] }])).await) }));
+        }
+        for t in tasks {
+            let env = tokio::time::timeout(std::time::Duration::from_secs(120), t).await.expect("큐 한도보다 많아도 끝나야 한다").unwrap();
+            assert_eq!((env["ok"].clone(), env["data"]["total"].clone()), (json!(true), json!(0)), "{env}");
+        }
+        mode.finish();
+    }
 }
 
 // ── git:fetch ──────────────────────────────────────────

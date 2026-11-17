@@ -26,9 +26,9 @@ class Stream {
     this.data(body)
   }
   /** files: [['M', 경로, mark(, 모드)] | ['G', 경로, 서브모듈 커밋 해시] | ['D', 경로]] (경로는 따옴표가 필요 없는 문자만. 모드 기본 100644, 심볼릭 링크는 '120000') */
-  commit({ ref = 'refs/heads/main', mark, n, msg, from, merge, files }) {
+  commit({ ref = 'refs/heads/main', mark, n, msg, from, merge, files, by = WHO }) {
     const when = `${BASE + n * 3600} +0900`
-    this.raw(`commit ${ref}\nmark :${mark}\nauthor ${WHO} ${when}\ncommitter ${WHO} ${when}\n`)
+    this.raw(`commit ${ref}\nmark :${mark}\nauthor ${by} ${when}\ncommitter ${by} ${when}\n`)
     this.data(msg)
     if (from) this.raw(`from :${from}\n`)
     if (merge) this.raw(`merge :${merge}\n`)
@@ -253,6 +253,24 @@ const lines = (n, tag = 'line') => `${Array.from({ length: n }, (_, i) => `${tag
   s.reset('refs/heads/feature/x', 110)
   s.tag('v2', 110, 3, 'annotated\n')
   s.write('code.fi')
+}
+
+// ---- search: 검색·활동(git:search·git:activity)용 — 작성자 셋·옵션처럼 보이는 메시지·정규식 문자가 든 메시지·한글·side 가지·기본 보기에서 닿지 않는 refs/stash 커밋 ----
+// 시각이 모두 달라 --date-order 가 결정적이다(같은 시각이면 git 의 동률 처리에 기댄다)
+{
+  const s = new Stream()
+  const ALICE = 'Alice <alice@example.com>'
+  const BOB = 'Bob <bob@example.com>'
+  for (let i = 1; i <= 6; i++) s.blob(i, `v${i}\n`)
+  s.commit({ mark: 10, n: 1, msg: '로그인 버그 수정\n', files: [['M', 'f.txt', 1]] })
+  s.commit({ mark: 20, n: 2, from: 10, by: ALICE, msg: 'feat: add search\n', files: [['M', 'f.txt', 2]] })
+  s.commit({ mark: 30, n: 3, from: 20, by: ALICE, msg: '--force 옵션 처리\n', files: [['M', 'f.txt', 3]] })
+  s.commit({ mark: 40, n: 4, from: 30, by: BOB, msg: "revert alice's change\n", files: [['M', 'f.txt', 4]] })
+  s.commit({ ref: 'refs/heads/side', mark: 50, n: 5, from: 30, by: BOB, msg: 'side 전용 커밋\n', files: [['M', 'side.txt', 5]] })
+  s.commit({ mark: 60, n: 6, from: 40, msg: 'refactor: x.y (z) [w] *v* a|b $u ^t\n', files: [['M', 'f.txt', 6]] })
+  // 스태시와 같은 모양: 어느 브랜치·태그에서도 닿지 않고 refs/stash 만 가리킨다
+  s.commit({ ref: 'refs/stash', mark: 70, n: 7, from: 30, msg: 'WIP on main: wip\n', files: [['M', 'f.txt', 6]] })
+  s.write('search.fi')
 }
 
 // ---- empty: 커밋이 하나도 없는 저장소(빈 스트림) ----

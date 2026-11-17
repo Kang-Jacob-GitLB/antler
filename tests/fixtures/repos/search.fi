@@ -1,0 +1,99 @@
+blob
+mark :1
+data 3
+v1
+
+blob
+mark :2
+data 3
+v2
+
+blob
+mark :3
+data 3
+v3
+
+blob
+mark :4
+data 3
+v4
+
+blob
+mark :5
+data 3
+v5
+
+blob
+mark :6
+data 3
+v6
+
+commit refs/heads/main
+mark :10
+author 홍길동 <dev@example.com> 1700003600 +0900
+committer 홍길동 <dev@example.com> 1700003600 +0900
+data 24
+로그인 버그 수정
+
+M 100644 :1 f.txt
+
+commit refs/heads/main
+mark :20
+author Alice <alice@example.com> 1700007200 +0900
+committer Alice <alice@example.com> 1700007200 +0900
+data 17
+feat: add search
+
+from :10
+M 100644 :2 f.txt
+
+commit refs/heads/main
+mark :30
+author Alice <alice@example.com> 1700010800 +0900
+committer Alice <alice@example.com> 1700010800 +0900
+data 22
+--force 옵션 처리
+
+from :20
+M 100644 :3 f.txt
+
+commit refs/heads/main
+mark :40
+author Bob <bob@example.com> 1700014400 +0900
+committer Bob <bob@example.com> 1700014400 +0900
+data 22
+revert alice's change
+
+from :30
+M 100644 :4 f.txt
+
+commit refs/heads/side
+mark :50
+author Bob <bob@example.com> 1700018000 +0900
+committer Bob <bob@example.com> 1700018000 +0900
+data 19
+side 전용 커밋
+
+from :30
+M 100644 :5 side.txt
+
+commit refs/heads/main
+mark :60
+author 홍길동 <dev@example.com> 1700021600 +0900
+committer 홍길동 <dev@example.com> 1700021600 +0900
+data 36
+refactor: x.y (z) [w] *v* a|b $u ^t
+
+from :40
+M 100644 :6 f.txt
+
+commit refs/stash
+mark :70
+author 홍길동 <dev@example.com> 1700025200 +0900
+committer 홍길동 <dev@example.com> 1700025200 +0900
+data 17
+WIP on main: wip
+
+from :30
+M 100644 :6 f.txt
+

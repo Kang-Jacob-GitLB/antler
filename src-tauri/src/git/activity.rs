@@ -1,9 +1,18 @@
-//! 커밋 활동(미니맵) 집계의 순수 로직(`src/main/git/activity.ts` 의 `bucketize`·`TimeStreamParser`·`emptyActivity`).
-//! git 을 부르는 부분(`commitActivity`)은 `git:activity` 채널 PR 에서 옮긴다.
+//! 커밋 활동(미니맵) 집계(`src/main/git/activity.ts`): 순수 로직(`bucketize`·`TimeStreamParser`·`emptyActivity`)과 그 위의 git 호출(`commitActivity`).
+//! `git:activity` 채널의 큐·합치기·시그니처·캐시는 라우터가 맡는다(`ActivityCache` 만 여기 있다).
+
+use std::sync::Arc;
 
 use serde::Serialize;
+use serde_json::Value;
+use tokio::io::AsyncReadExt;
 
+use super::exec::ssh::is_read_ahead_exceeded;
+use super::exec::{ExecError, GitExecutor, RunOpts};
+use super::log_service::is_empty_repo_error;
 use super::parsers::JsNumber;
+use super::scope::{parse_scope, scope_args, scope_key};
+use super::signature::Signature;
 
 /// 구간 수 상한. 실제로는 아래 단위 중 구간 수가 이 값 이하가 되는 가장 작은 단위를 고른다
 pub const MAX_BUCKETS: usize = 400;
@@ -128,6 +137,110 @@ impl TimeStreamParser {
     }
 }
 
+/// 활동 캐시 항목 수 상한(`ACTIVITY_CACHE_ENTRIES`)
+pub const ACTIVITY_CACHE_ENTRIES: usize = 8;
+
+/// 읽기 버퍼
+const CHUNK: usize = 64 * 1024;
+
+/// 검증을 마친 `git:activity` 요청: 보기 범위의 시작점 인자와 합치기·캐시 키에 쓰는 범위 키
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityRequest {
+    scope_args: Vec<String>,
+    scope_key: String,
+}
+
+impl ActivityRequest {
+    /// TS `git.scopeArgs(scope)` 와 같은 검증(`invalid scope`·`invalid solo`·`invalid hide`). 오류는 ERROR 다
+    pub fn parse(scope: Option<&Value>) -> Result<Self, ExecError> {
+        let other = |m: String| ExecError::Other { message: m };
+        let scope = parse_scope(scope).map_err(other)?;
+        let args = scope_args(scope.as_ref()).map_err(other)?;
+        Ok(ActivityRequest { scope_args: args, scope_key: scope_key(scope.as_ref()) })
+    }
+
+    /// 같은 범위는 항목 순서와 무관하게 같은 키다
+    pub fn scope_key(&self) -> &str {
+        &self.scope_key
+    }
+
+    /// `git log --format=%at <범위> --`. `%at` 는 목록의 authorDate 와 같은 필드라 뷰포트 표시·점프가 어긋나지 않는다
+    pub fn args(&self) -> Vec<String> {
+        let mut v: Vec<String> = vec!["log".into(), "--format=%at".into()];
+        v.extend(self.scope_args.iter().cloned());
+        v.push("--".into());
+        v
+    }
+}
+
+/// 현재 시각(epoch 초 — TS `Date.now() / 1000`)
+pub fn now_secs() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_millis() as f64 / 1000.0)
+}
+
+/// 보기 범위의 모든 커밋 작성 시각을 스트림으로 읽어 집계한다. 커밋이 하나도 없는 새 저장소는 빈 차트다.
+/// SSH 스트림은 선읽기 상한(16MB)을 넘으면 오류로 끝난다 — 소비가 숫자 파싱뿐이라 지연으로 넘는 일은 거의 없다(TS 는 backpressure 라 넘지 않는다)
+pub async fn commit_activity(exec: &GitExecutor, repo_path: &str, req: &ActivityRequest, opts: &RunOpts, now: f64) -> Result<CommitActivity, ExecError> {
+    let mut parser = TimeStreamParser::new();
+    let mut stream = exec.stream(repo_path, &req.args(), opts).await?;
+    let mut chunk = vec![0u8; CHUNK];
+    loop {
+        let n = match stream.read(&mut chunk).await {
+            Ok(n) => n,
+            // 토큰으로 깨어난 읽기 오류는 취소다
+            Err(_) if opts.cancel.as_ref().is_some_and(tokio_util::sync::CancellationToken::is_cancelled) => return Err(ExecError::Aborted),
+            Err(e) if is_read_ahead_exceeded(&e) => return Err(ExecError::Other { message: "SSH 선읽기 상한(16MB)을 넘어 활동 집계를 중단했습니다".to_string() }),
+            Err(e) => return Err(ExecError::Other { message: e.to_string() }),
+        };
+        if n == 0 {
+            match stream.finish().await {
+                Ok(()) => {}
+                // 커밋이 하나도 없는 새 저장소는 빈 차트로 취급한다
+                Err(ExecError::Git { stderr, .. }) if is_empty_repo_error(&stderr) => {}
+                Err(e) => return Err(e),
+            }
+            break;
+        }
+        parser.push(&chunk[..n]);
+    }
+    parser.end();
+    Ok(bucketize(parser.values(), now))
+}
+
+/// 활동 결과 캐시: 범위 키 → (시그니처, 결과). TS `Map` 처럼 **삽입 순서**다 — 적중해도 순서가 바뀌지 않고, 같은 키를 다시 넣으면 맨 뒤로 가며,
+/// 상한을 넘으면 가장 오래 전에 넣은 것부터 버린다(저장소·필터를 오가도 메모리가 쌓이지 않게)
+#[derive(Default)]
+pub struct ActivityCache {
+    entries: Vec<(String, Signature, Arc<Value>)>,
+}
+
+impl ActivityCache {
+    /// 시그니처가 같을 때만 적중이다
+    pub fn get(&self, key: &str, sig: &Signature) -> Option<Arc<Value>> {
+        self.entries.iter().find(|(k, s, _)| k == key && s == sig).map(|(_, _, v)| v.clone())
+    }
+
+    pub fn set(&mut self, key: &str, sig: Signature, value: Arc<Value>) {
+        self.entries.retain(|(k, _, _)| k != key);
+        self.entries.push((key.to_string(), sig, value));
+        if self.entries.len() > ACTIVITY_CACHE_ENTRIES {
+            self.entries.remove(0);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +357,54 @@ mod tests {
         let a = bucketize(&[1_700_172_800u32, 1_700_172_801], now);
         assert_eq!((a.first, a.last), (JsNumber(1_700_172_800.0), JsNumber(1_700_172_800.0)));
         assert_eq!(a.total, 2);
+    }
+
+    // ---- git:activity 요청·캐시(채널 PR) ----
+
+    #[test]
+    fn 인자는_ts_와_바이트까지_같다() {
+        // activity.ts: ['log', '--format=%at', ...scopeArgs(scope), '--']
+        let strs = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<String>>();
+        assert_eq!(ActivityRequest::parse(None).unwrap().args(), strs(&["log", "--format=%at", "--ignore-missing", "--branches", "--remotes", "--tags", "HEAD", "--"]));
+        let solo = ActivityRequest::parse(Some(&serde_json::json!({ "solo": ["refs/heads/a", "refs/remotes/o/*"] }))).unwrap();
+        assert_eq!(solo.args(), strs(&["log", "--format=%at", "--ignore-missing", "--glob=refs/remotes/o/*", "--end-of-options", "refs/heads/a", "--"]));
+    }
+
+    #[test]
+    fn 범위_검증은_ts_scope_args_와_같다() {
+        let bad = |v: serde_json::Value| ActivityRequest::parse(Some(&v)).unwrap_err().to_string();
+        assert_eq!(bad(serde_json::json!(null)), "invalid scope");
+        assert_eq!(bad(serde_json::json!("x")), "invalid scope");
+        assert_eq!(bad(serde_json::json!({ "solo": ["-x"] })), "invalid solo");
+        assert_eq!(bad(serde_json::json!({ "hide": ["a".repeat(40)] })), "invalid hide");
+        assert_eq!(bad(serde_json::json!({ "includeHead": 1 })), "invalid scope");
+        // 같은 범위는 항목 순서와 무관하게 같은 키다
+        let k = |v: serde_json::Value| ActivityRequest::parse(Some(&v)).unwrap().scope_key().to_string();
+        assert_eq!(k(serde_json::json!({ "solo": ["refs/heads/a", "refs/heads/b"] })), k(serde_json::json!({ "solo": ["refs/heads/b", "refs/heads/a"] })));
+        assert_ne!(k(serde_json::json!({ "solo": ["refs/heads/a"] })), k(serde_json::json!({ "solo": ["refs/heads/b"] })));
+    }
+
+    #[test]
+    fn 캐시는_시그니처가_같을_때만_적중하고_삽입_순서로_8개를_둔다() {
+        let sig = |n: u8| Signature::from_parts(&[n], b"", b"");
+        let val = |n: u64| Arc::new(serde_json::json!(n));
+        let mut c = ActivityCache::default();
+        assert!(c.is_empty());
+        c.set("k0", sig(0), val(0));
+        assert_eq!(c.get("k0", &sig(0)), Some(val(0)));
+        assert_eq!(c.get("k0", &sig(1)), None, "시그니처가 다르면 적중이 아니다");
+        // 같은 키를 다시 넣으면 교체되고 맨 뒤로 간다
+        c.set("k0", sig(1), val(10));
+        assert_eq!((c.len(), c.get("k0", &sig(1))), (1, Some(val(10))));
+        for i in 1..ACTIVITY_CACHE_ENTRIES as u8 {
+            c.set(&format!("k{i}"), sig(i), val(u64::from(i)));
+        }
+        assert_eq!(c.len(), ACTIVITY_CACHE_ENTRIES);
+        // 적중해도 순서가 바뀌지 않는다(TS Map 과 같다) — k0 가 가장 오래된 채로 남아 아홉 번째 항목이 밀어낸다
+        assert!(c.get("k0", &sig(1)).is_some());
+        c.set("extra", sig(99), val(99));
+        assert_eq!((c.len(), c.get("k0", &sig(1)), c.get("k1", &sig(1)).is_some()), (ACTIVITY_CACHE_ENTRIES, None, true));
+        c.clear();
+        assert!(c.is_empty());
     }
 }
