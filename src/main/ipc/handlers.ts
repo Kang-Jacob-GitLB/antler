@@ -210,6 +210,7 @@ export function registerIpc(
       repos.removeGithubCache(repoId)
     }
     const next = config.removeRepo(repoId)
+    repos.forgetWip(repoId)
     fetcher.forget(repoId)
     if (watcher.current === repoId) void watcher.watch(null)
     await repos.releaseUnused()

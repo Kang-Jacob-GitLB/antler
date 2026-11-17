@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
-import { refs, refsDetails, submodules } from '../src/main/git/commands'
+import { isSafeSubmodulePath, refs, refsDetails, submodules } from '../src/main/git/commands'
 import { parseGitlinks, parseGitmodules, parseProbe, submoduleStatus } from '../src/main/git/parsers/submodule'
 
 const SHA_A = 'a'.repeat(40)
@@ -166,4 +167,92 @@ describe('악성 서브모듈', () => {
     expect(subs.find((s) => s.path === 'libs/한글 모듈')?.status).toBe('clean')
     expect(existsSync(marker)).toBe(false)
   }, 30_000)
+})
+
+// git 명령은 `..` 경로를 인덱스에 넣지 못하게 하므로 인덱스 파일(v2)을 직접 쓴다
+function writeGitlinkIndex(gitDir: string, entries: { path: string; sha: string }[]): void {
+  const parts: Buffer[] = []
+  const header = Buffer.alloc(12)
+  header.write('DIRC', 0, 'latin1')
+  header.writeUInt32BE(2, 4)
+  header.writeUInt32BE(entries.length, 8)
+  parts.push(header)
+  for (const e of entries) {
+    const name = Buffer.from(e.path, 'utf8')
+    const fixed = Buffer.alloc(62)
+    fixed.writeUInt32BE(0o160000, 24) // mode
+    Buffer.from(e.sha, 'hex').copy(fixed, 40)
+    fixed.writeUInt16BE(Math.min(name.length, 0xfff), 60)
+    const body = Buffer.concat([fixed, name])
+    parts.push(body, Buffer.alloc(8 - (body.length % 8) || 8))
+  }
+  const all = Buffer.concat(parts)
+  writeFileSync(join(gitDir, 'index'), Buffer.concat([all, createHash('sha1').update(all).digest()]))
+}
+
+describe('서브모듈 경로 검증', () => {
+  it('저장소 밖을 가리키는 gitlink(`../outside` 등)는 git 을 돌리지 않고 unknown 으로 둔다', async () => {
+    const outside = join(root, 'outside')
+    execFileSync('git', ['init', '-q', '-b', 'main', outside])
+    git(outside, 'commit', '-q', '--allow-empty', '-m', 'outside')
+    const outHead = git(outside, 'rev-parse', 'HEAD').trim()
+    const evil = join(root, 'evil', 'inner')
+    mkdirSync(evil, { recursive: true })
+    execFileSync('git', ['init', '-q', '-b', 'main', evil])
+    const paths = ['../outside', 'a/../../outside', 'a//b', './x', 'a/./b', '/abs', 'C:/abs']
+    writeGitlinkIndex(
+      join(evil, '.git'),
+      paths.sort().map((path) => ({ path, sha: outHead }))
+    )
+    const subs = await submodules(exec, evil)
+    expect(subs.map((s) => s.path).sort()).toEqual([...paths].sort())
+    for (const s of subs) {
+      expect(s.status, s.path).toBe('unknown')
+      expect(s.head, s.path).toBeUndefined()
+    }
+  })
+})
+
+describe.runIf(process.platform === 'win32')('서브모듈 경로가 정션인 경우', () => {
+  it('저장소 밖·.git 을 가리키는 정션은 git 을 돌리지 않고 unknown 으로 둔다', async () => {
+    const dir = join(root, 'jsub-repo')
+    const outside = join(root, 'jsub-out')
+    execFileSync('git', ['init', '-q', '-b', 'main', dir])
+    execFileSync('git', ['init', '-q', '-b', 'main', outside])
+    git(outside, 'commit', '-q', '--allow-empty', '-m', 'outside')
+    const outHead = git(outside, 'rev-parse', 'HEAD').trim()
+    const links = [join(dir, 'outj'), join(dir, 'gitj')]
+    try {
+      execFileSync('cmd', ['/c', 'mklink', '/J', links[0]!, outside], { stdio: 'ignore' })
+      execFileSync('cmd', ['/c', 'mklink', '/J', links[1]!, join(dir, '.git')], { stdio: 'ignore' })
+      writeGitlinkIndex(
+        join(dir, '.git'),
+        ['gitj', 'outj'].map((path) => ({ path, sha: outHead }))
+      )
+      const subs = await submodules(exec, dir)
+      expect(subs.map((s) => s.path).sort()).toEqual(['gitj', 'outj'])
+      for (const s of subs) {
+        expect(s.status, s.path).toBe('unknown')
+        expect(s.head, s.path).toBeUndefined()
+      }
+    } finally {
+      // 정션부터 지운다(rmdir 은 링크만 지운다). rm -r 을 정션에 쓰지 않는다
+      for (const l of links) {
+        try {
+          rmdirSync(l)
+        } catch {
+          /* 만들지 못함 */
+        }
+      }
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('isSafeSubmodulePath', () => {
+  it('상대 경로의 정상 구성 요소만 허용한다(역슬래시 구분자 포함)', () => {
+    for (const p of ['sub', 'libs/한글 모듈', 'a/b/c', '..outside', 'a..b']) expect(isSafeSubmodulePath(p), p).toBe(true)
+    for (const p of ['..', '../x', 'a/..', '..\\outside', 'a\\..\\b', '.', './x', 'a//b', 'a/', '/abs', '\\abs', 'C:/abs', 'c:x']) expect(isSafeSubmodulePath(p), p).toBe(false)
+  })
 })

@@ -48,6 +48,18 @@
 - 코드 탐색기: 저장소 문서(README 등)의 외부 링크는 사용자가 누를 때만 `code:openLink` 로 연다 — https 만, 사용자 정보가 든 URL 은 거부, 마우스를 올리면 실제 주소를 보여 준다.
 - 경로·diff: `GIT_LITERAL_PATHSPECS=1` 이라 renderer 가 보낸 경로가 pathspec 매직으로 해석되지 않고,
   `--no-textconv`·`--no-ext-diff` 로 저장소 설정이 외부 프로그램을 실행하지 못하게 한다.
+- 추적 안 되는 파일 diff(`git:wipDiff`, area `untracked`): `--no-index` 는 파일을 직접 열기 때문에 **허용 목록**만 받는다. main(RepoService)이 저장소별 마지막 `wipStatus` 가
+  git 출력(`-uall`)으로 보고한 경로를 보관하고, 정확히 일치하는 경로만 연다(wipStatus 전이거나 목록에 없으면 거부, 저장소 제거 시 정리).
+  `.git` 을 문자열로 비교하는 검사만으로는 Windows NTFS 8.3 짧은 이름(`GIT~1/config`)으로 `.git/config` 를 읽을 수 있어서다. 접두사 허용은 두지 않는다.
+  `--no-index` 가 종료 코드 1 이면서 출력이 없으면 "차이 있음"이 아니라 파일을 못 연 오류로 올린다.
+- 작업 트리 diff 의 정션·symlink 우회: Git for Windows 의 `status -uall` 은 `mklink /J j .git` 정션을 따라 들어가 `j/config` 를 untracked 로 보고하고 `--no-index` 가 `.git/config` 를 출력한다
+  (저장소 밖을 가리키는 정션도 같다). 그래서 **로컬 실행기**(`exec.kind === 'local'`)는 untracked·unstaged diff 를 열기 직전에(`src/main/git/linkGuard.ts`)
+  저장소 루트부터 구성 요소마다 `lstat` 해 symlink·정션(Node 는 정션도 `isSymbolicLink` 로 보고 — 시험으로 확인)이면 거부하고(untracked 는 파일 자체가 링크여도 거부, unstaged 는 추적 중인 링크 파일만 허용),
+  `realpath.native`(8.3 이름이 펴진다)가 저장소 루트 실제 경로 안이며 `.git` 구성 요소가 없는지 확인한다. 허용 목록을 만들 때(wipStatus)는 파일마다 lstat 하지 않는다(파일 수천 개 비용) — diff 시점 검사가 방어선이다.
+  unstaged 는 추가로 `~숫자` 로 끝나는 구성 요소(8.3 모양)를 거부한다(조작된 index 의 `GIT~1/config`; 정상 파일 `foo~1` 도 막히는 오탐을 허용).
+  WSL·SSH 실행기는 Node 가 그 파일 시스템을 볼 수 없어 이 검사를 하지 않는다. Linux git 의 status 는 디렉터리 symlink 를 따라 들어가지 않고 링크 자체를 한 항목으로 보고하므로 `j/config` 가 허용 목록에 들어오지 않는다고 본다 — **미확인**(실측하지 않았다).
+  확인과 git 의 읽기 사이 경쟁(TOCTOU)은 막지 못한다. **알려진 한계**: 정션이 순환(`mklink /J a .`)하면 status 의 재귀가 길어지는 로컬 DoS 가 가능하다 — 이 가드의 범위 밖이다.
+- 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
 Jira 토큰은 Rust 프로세스 밖(renderer·사이드카)으로 나가지 않는다 — 사이드카는 `ANTLER_RUST_API=1` 이면 `jira:`·`gh:`(`gh:repo` 제외)를 처리하지 않는다.

@@ -6,6 +6,7 @@ import { GitError, type GitExecutor, type RunOpts, type RunResult } from '../exe
 import { pickDefaultBranch } from './defaultBranch'
 import { parseChanges } from './parsers/changes'
 import { COMMIT_FORMAT_ARGS, parseCommitMeta } from './parsers/commit'
+import { assertInsideRoot } from './linkGuard'
 import { DiffParser } from './parsers/diff'
 import { LOG_FORMAT_ARGS } from './parsers/log'
 import { NulRecordSplitter } from './parsers/nulRecords'
@@ -172,6 +173,11 @@ export const SUBMODULE_MAX = 200
 export const SUBMODULE_PROBE_MAX = 50
 const SUBMODULE_PROBE_CONCURRENCY = 8
 
+export function isSafeSubmodulePath(p: string): boolean {
+  if (/^([\\/]|[a-zA-Z]:)/.test(p)) return false
+  return p.split(/[\\/]/).every((seg) => seg !== '' && seg !== '.' && seg !== '..')
+}
+
 /**
  * 최상위 서브모듈 목록. `git submodule` 은 쓰지 않는다(하위 저장소 설정까지 건드린다).
  * 상태 판정은 하위 경로에서 하드닝된 executor 로 `rev-parse --absolute-git-dir HEAD` 만 돌린다 —
@@ -199,7 +205,12 @@ export async function submodules(exec: GitExecutor, repoPath: string, opts?: Run
 
   const base = repoPath.replace(/[\\/]+$/, '')
   const probe = async (s: SubmoduleInfo): Promise<void> => {
+    // 인덱스의 gitlink 경로는 저장소가 정하는 값이다(`git -C` 로 저장소 밖을 가리킬 수 있다) — 절대 경로·`..`·빈/`.` 구성 요소면 git 을 돌리지 않는다
+    if (!isSafeSubmodulePath(s.path)) return
     try {
+      // 로컬이면 정션·symlink 로 저장소 밖(또는 .git 안)을 가리키는 경로도 거부한다(unknown). 실패·밖이면 git 을 돌리지 않는다.
+      // WSL·SSH 는 Node 가 그 파일 시스템을 볼 수 없어 하지 않는다
+      if (exec.kind === 'local') await assertInsideRoot(base, `${base}/${s.path}`)
       const r = await exec.run(`${base}/${s.path}`, ['rev-parse', '--absolute-git-dir', 'HEAD'], opts)
       const { gitDir, head } = parseProbe(r.stdout.toString('utf8'))
       // 디렉터리 자체가 없는 경우(체크아웃된 적 없음)도 미초기화다

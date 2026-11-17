@@ -2,6 +2,7 @@
 import type { FileDiff, WipDiffRequest, WipStatus } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { DIFF_FULL_MAX_BYTES, DIFF_MAX_BYTES } from './commands'
+import { assertNoLinkEscape } from './linkGuard'
 import { DiffParser } from './parsers/diff'
 import { WIP_STATUS_ARGS, WipStatusParser } from './parsers/wipStatus'
 
@@ -67,15 +68,38 @@ function assertRelPath(p: unknown): asserts p is string {
   }
 }
 
-/** 작업 트리 파일 하나의 diff. FileDiff 형식은 커밋 diff 와 같아 같은 뷰어가 그린다 */
-export async function wipFileDiff(exec: GitExecutor, repoPath: string, req: WipDiffRequest, opts?: RunOpts): Promise<FileDiff> {
+/**
+ * 작업 트리 파일 하나의 diff. FileDiff 형식은 커밋 diff 와 같아 같은 뷰어가 그린다.
+ * untrackedAllow: 마지막 wipStatus 가 git 출력으로 보고한 추적 안 되는 경로 집합. area 가 untracked 면 **정확히 일치**하는 경로만 받는다
+ * (없으면 거부 — 닫힌 기본값). assertRelPath 의 문자열 비교는 Windows NTFS 8.3 짧은 이름(`GIT~1/config`)을 `.git` 으로 알아보지 못해
+ * `--no-index` 가 .git/config 를 읽게 되므로, 이름 모양을 막는 대신 git 이 실제로 보고한 경로만 허용한다.
+ * -uall 이라 폴더는 파일 단위로 나오고, 폴더 항목(`dir/`)은 중첩 저장소뿐이라 접두사 허용은 필요 없다(하위 구성 요소 우회를 다시 열지 않는다).
+ */
+export async function wipFileDiff(
+  exec: GitExecutor,
+  repoPath: string,
+  req: WipDiffRequest,
+  opts?: RunOpts,
+  untrackedAllow?: ReadonlySet<string>
+): Promise<FileDiff> {
   if (!req || !AREAS.has(req.area)) throw new Error('invalid area')
   assertRelPath(req.path)
   if (req.oldPath !== undefined) assertRelPath(req.oldPath)
+  if (req.area === 'untracked' && !untrackedAllow?.has(req.path)) throw new Error('invalid path')
 
   const parser = new DiffParser(req.path, req.oldPath, req.full ? { maxLines: Infinity, maxBytes: DIFF_FULL_MAX_BYTES } : { maxBytes: DIFF_MAX_BYTES })
   // 추적 안 되는 폴더(중첩 저장소)는 파일이 아니라 내용을 비교할 수 없다
   if (req.area === 'untracked' && /[\\/]$/.test(req.path)) return parser.finish()
+
+  if (req.area !== 'staged') {
+    // unstaged: 조작된 index 의 `GIT~1/config` 항목이 작업 트리 diff 로 .git/config 를 읽게 하는 8.3 짧은 이름을 구성 요소 모양(`~숫자`)으로 거부한다.
+    // 정상 파일 이름에도 드물게 있는 형태(`foo~1`)라 오탐을 허용한다 — .git 안을 읽는 쪽이 더 나쁘다. (untracked 는 허용 목록이 이미 막는다)
+    if (req.area === 'unstaged' && req.path.split(/[\\/]/).some((seg) => /~\d+$/.test(seg))) throw new Error('invalid path')
+    // 정션·symlink 로 .git 이나 저장소 밖을 읽는 우회: 로컬 파일 시스템일 때만 열기 직전에 확인한다.
+    // WSL·SSH 는 Node 가 파일 시스템을 볼 수 없어 하지 않는다 — Linux git 의 status 는 디렉터리 symlink 를 따라 들어가지 않고 링크 자체를
+    // 하나의 항목으로 보고하므로 `j/config` 형태의 경로가 허용 목록에 들어오지 않는다고 본다(미확인: 실측하지 않았다. docs/security.md 참고).
+    if (exec.kind === 'local') await assertNoLinkEscape(repoPath, req.path, req.area === 'unstaged')
+  }
 
   // --no-index 는 저장소 속성을 읽지 않지만, 작업 트리·인덱스 diff 는 clean 필터를 돈다
   const guard = req.area === 'untracked' ? [] : await filterOverrides(exec, repoPath, opts)
@@ -88,14 +112,17 @@ export async function wipFileDiff(exec: GitExecutor, repoPath: string, req: WipD
         ? [...common, '--no-renames', '--', req.path]
         : // 추적 안 되는 파일은 빈 파일과의 비교로 "전부 추가" diff 를 만든다. /dev/null 은 git 이 모든 OS 에서 직접 해석한다
           [...common, '--no-index', '--', '/dev/null', req.path]
+  let produced = false
   try {
     for await (const chunk of exec.stream(repoPath, args, opts)) {
+      if (chunk.length > 0) produced = true
       // 상한을 넘기고 줄 수 세기도 끝났으면 git 을 끊는다(break 하면 stream 이 프로세스를 정리한다)
       if (!parser.push(chunk)) break
     }
   } catch (err) {
-    // --no-index 는 차이가 있으면 종료 코드 1 로 끝난다 — 오류가 아니다
-    if (!(req.area === 'untracked' && err instanceof GitError && err.code === 1)) throw err
+    // --no-index 는 차이가 있으면 종료 코드 1 로 끝난다 — 오류가 아니다. 단 출력이 하나도 없으면 차이가 아니라
+    // 파일을 못 연 것("Could not access")이라 빈 diff 로 가리지 않고 오류로 올린다(정상 diff 는 rc 1 + 출력 있음, 빈 파일은 rc 0)
+    if (!(req.area === 'untracked' && err instanceof GitError && err.code === 1 && produced)) throw err
   }
   return parser.finish()
 }
