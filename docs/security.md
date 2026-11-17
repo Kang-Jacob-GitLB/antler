@@ -7,7 +7,7 @@
 - 창: contextIsolation · sandbox · nodeIntegration off, preload 는 허용 목록 채널만 노출, 권한 요청은 모두 거부,
   프로덕션 빌드에 CSP 메타 태그 주입, 외부 링크는 기본 브라우저로. 외부 HTML 은 sanitize 로 정화한다.
 - IPC: main 이 모든 입력(경로·해시·ref 등)을 검증한다.
-- 악성 저장소 방어: 모든 git 호출에 `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `-c core.fsmonitor=false` 를 줘
+- 악성 저장소 방어: 모든 git 호출에 `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `-c core.fsmonitor=false`, `-c core.protectNTFS=true` 를 줘
   저장소 설정이 네트워크 접근이나 외부 명령 실행을 일으키지 못하게 한다.
 - fetch: 사용자 저장소에 하는 유일한 쓰기이자 유일한 git 네트워크 접근이다 — GitHub 원격 전용 저장소는 아래 별도 절을 본다(remote 마다 `git fetch --prune --no-prune-tags --no-recurse-submodules --no-write-fetch-head --refmap= -- <이름> +refs/heads/*:refs/remotes/<이름>/*`).
   **로컬 ref 는 쓰지 않는다**: 설정의 `remote.<n>.fetch` 를 쓰는 `fetch --all` 은 목적지를 설정이 정해 `refs/heads`·`refs/stash`·`refs/replace`·`HEAD` 를 덮어쓰고

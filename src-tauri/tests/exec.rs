@@ -255,6 +255,15 @@ async fn 저장소_안에서_git_을_실행한다() {
 }
 
 #[tokio::test]
+async fn 저장소_로컬_설정이_protect_ntfs_false_여도_실행되는_git_은_true_로_본다() {
+    let dir = TempDir::new("ntfs");
+    init_repo(dir.path());
+    raw_git(dir.path(), &["config", "core.protectNTFS", "false"]);
+    let r = local().run(&dir.path().to_string_lossy(), &["config", "--get", "core.protectNTFS"], &opts()).await.unwrap();
+    assert_eq!(text(&r.stdout), "true");
+}
+
+#[tokio::test]
 async fn 실패_코드를_그대로_돌려준다() {
     let r = local().run(&root_str(), &["rev-parse", "--verify", "refs/heads/__없는_브랜치__"], &opts()).await.unwrap();
     assert_ne!(r.code, 0);
