@@ -61,7 +61,7 @@
   git-lfs 의 clean 은 기본 명령 그대로여도 저장소 설정의 `lfs.extension.<이름>.clean` 명령을 실행하고 `.git/lfs/objects` 에 객체를 **쓴다**(`lfs.storage` 로 쓰기 위치도 바꿀 수 있다) —
   저장소를 열기만 해도(repoExtras) 임의 명령 실행과 쓰기가 가능해 읽기 전용 경계를 깬다(재현: git-lfs 3.6.1, `.gitattributes filter=lfs` + `lfs.extension.x.clean` 표지 명령). 그래서 git-lfs 프로세스는 아예 뜨지 않는다.
   **화면 영향**: clean 이 돌지 않으므로 stat 이 바뀐(내용은 같은) LFS 추적 파일은 포인터가 아닌 원본과 비교돼 "수정됨"으로 보일 수 있고, 그 diff 는 포인터가 아니라 실제 내용(바이너리면 바이너리)으로 나온다.
-  체크아웃 직후 수정 없는 LFS 파일은 인덱스 stat 캐시 덕분에 수정됨으로 보이지 않는다(`tests/lfsFilterExemption.test.ts` 로 확인). repoExtras 의 LFS 판정(`lfs`)은 속성 파일 텍스트만 읽어 바뀌지 않는다.
+  체크아웃 직후 수정 없는 LFS 파일은 인덱스 stat 캐시 덕분에 수정됨으로 보이지 않는다(`tests/lfsFilterExemption.test.ts` 로 확인). 단 파일과 인덱스가 같은 타임스탬프 단위에 쓰인 직후(racy-git)는 git 이 내용을 다시 해시해 수정됨으로 보일 수 있다. repoExtras 의 LFS 판정(`lfs`)은 속성 파일 텍스트만 읽어 바뀌지 않는다.
   (fetch 가드의 `filter.lfs.*` 기본값 허용 목록은 별개다 — fetch 는 작업 트리를 읽지 않아 clean 을 돌지 않는다.)
   `git config -z --get-regexp '^filter\.'` 출력을 **바이트로** 받아 키를 UTF-8 로 엄격히 검증하고(접미사 판정도 JS 에서 — git 정규식의 로캘 의존 제거),
   **무력화할 수 없는 저장소는 작업 트리를 읽지 않고 거부한다**: 이름에 `=` 가 있음, 이름이 UTF-8 이 아님(`\xff` 등 — 문자열로 바꾸면 U+FFFD 가 돼 `-c` 가 실제 드라이버를 덮지 못하고,

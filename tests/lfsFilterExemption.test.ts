@@ -115,6 +115,9 @@ describe.skipIf(!hasLfs)('화면 영향: LFS 저장소의 작업 중 변경 (git
 
   it('체크아웃 직후 수정 없는 LFS 파일은 stat 캐시 덕분에 수정됨으로 보이지 않는다', async () => {
     const r = checkedOut()
+    // 실사용처럼 파일이 인덱스보다 먼저 쓰인 상태로 만든다. 같은 타임스탬프 단위에 쓰이면(racy-git) git 이 내용을 다시 해시하는데,
+    // 필터를 끈 Antler 는 원본과 포인터를 비교해 수정됨으로 본다 — 체크아웃 직후 같은 순간에만 생기는 알려진 한계다(CI 리눅스에서 관찰)
+    touch(join(r.dir, 'big.bin'), -10_000)
     r.git('status', '--porcelain') // 인덱스 stat 갱신(실사용에서도 직전 status 가 있다)
     const st = await wipStatus(new LocalExecutor(), r.dir)
     expect(st.staged).toEqual([])
