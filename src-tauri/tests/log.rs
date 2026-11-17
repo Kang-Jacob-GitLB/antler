@@ -346,7 +346,7 @@ async fn 커서를_그냥_버려도_git_트리가_끝난다() {
 
 fn mirror_of(entries: &[(&str, &Path)]) -> RepoMirror {
     let m = RepoMirror::default();
-    m.apply(1, entries.iter().map(|(id, p)| MirrorRepo { id: (*id).into(), kind: "local".into(), path: path_str(p), distro: None }).collect());
+    m.apply(1, entries.iter().map(|(id, p)| MirrorRepo { id: (*id).into(), kind: "local".into(), path: path_str(p), distro: None, ssh_host: None }).collect());
     m
 }
 
@@ -530,18 +530,18 @@ async fn 미러에서_사라지거나_바뀐_저장소의_커서와_앵커를_�
     log_page(&router, "a", 0, 50).await;
     assert_eq!(router.log_cursor_count(), 1);
     // 변화 없는 미러는 건드리지 않는다
-    mirror.apply(2, vec![MirrorRepo { id: "a".into(), kind: "local".into(), path: path_str(&a), distro: None }, MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&b), distro: None }]);
+    mirror.apply(2, vec![MirrorRepo { id: "a".into(), kind: "local".into(), path: path_str(&a), distro: None, ssh_host: None }, MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&b), distro: None, ssh_host: None }]);
     router.on_mirror_changed();
     assert_eq!(router.log_cursor_count(), 1);
     // 저장소 a 가 지워졌다
-    mirror.apply(3, vec![MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&b), distro: None }]);
+    mirror.apply(3, vec![MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&b), distro: None, ssh_host: None }]);
     router.on_mirror_changed();
     assert_eq!(router.log_cursor_count(), 0);
     // 같은 id 로 다른 경로가 들어와도(지우고 다시 추가) 옛 커서로 읽지 않는다
-    mirror.apply(4, vec![MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&b), distro: None }, MirrorRepo { id: "a".into(), kind: "local".into(), path: path_str(&a), distro: None }]);
+    mirror.apply(4, vec![MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&b), distro: None, ssh_host: None }, MirrorRepo { id: "a".into(), kind: "local".into(), path: path_str(&a), distro: None, ssh_host: None }]);
     log_page(&router, "b", 0, 10).await;
     assert_eq!(router.log_cursor_count(), 1);
-    mirror.apply(5, vec![MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&a), distro: None }]);
+    mirror.apply(5, vec![MirrorRepo { id: "b".into(), kind: "local".into(), path: path_str(&a), distro: None, ssh_host: None }]);
     router.on_mirror_changed();
     assert_eq!(router.log_cursor_count(), 0);
     // 종료하면 전부 닫힌다

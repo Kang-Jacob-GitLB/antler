@@ -134,7 +134,7 @@ fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든�
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
     assert!(jira < api && github < api && api < manage && manage < spawn);
-    assert!(lib.contains(", fetch_kinds, rust_api)"));
+    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh)"));
     // env 하나가 두 서비스를 함께 넘기므로 둘 다 만들어졌을 때만 둘 다 주입한다(하나만 되면 둘 다 사이드카가 처리한다)
     assert_eq!(lib.matches("router.set_jira(").count(), 1);
     assert_eq!(lib.matches("router.set_github(").count(), 1);
@@ -155,11 +155,11 @@ fn 사이드카_env_는_항상_직접_정한다() {
     assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_API\", \"1\")"));
     // 값이 없을 때 부모의 env 를 지운다(되돌리기가 뒤집히지 않게)
     assert!(sidecar.contains("cmd.env_remove(\"ANTLER_RUST_API\")"));
-    // 사이드카에 env 로 가는 것은 이 넷뿐이다 — 토큰은 env 에 없다(stdin 의 ghToken 줄로만 간다)
+    // 사이드카에 env 로 가는 것은 이 넷뿐이다(ANTLER_USER_DATA·FETCH_KINDS·API·SSH) — 토큰은 env 에 없다(stdin 의 ghToken 줄로만 간다)
     let envs: Vec<&str> = sidecar.lines().filter(|l| l.contains("cmd.env(") || l.contains(".env(") || l.contains("env_remove(")).collect();
     for l in &envs {
         assert!(
-            ["ANTLER_USER_DATA", "ANTLER_RUST_FETCH_KINDS", "ANTLER_RUST_API"].iter().any(|n| l.contains(n)),
+            ["ANTLER_USER_DATA", "ANTLER_RUST_FETCH_KINDS", "ANTLER_RUST_API", "ANTLER_RUST_SSH"].iter().any(|n| l.contains(n)),
             "사이드카에 알 수 없는 env 를 넘긴다: {l}"
         );
     }

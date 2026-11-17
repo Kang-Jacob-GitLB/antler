@@ -12,9 +12,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::error::ExecError;
 
-/// 저장소 종류별 동시 git 프로세스 상한(`RepoService.ts` 의 CONCURRENCY 에서 local·wsl 만)
+/// 저장소 종류별 동시 git 프로세스 상한(`RepoService.ts` 의 CONCURRENCY. ssh 는 호스트마다 큐 하나 — 연결 하나의 채널 6개 안에서 4개)
 pub const LOCAL_LIMIT: usize = 6;
 pub const WSL_LIMIT: usize = 4;
+pub const SSH_LIMIT: usize = 4;
 
 type SharedRun<T> = Shared<BoxFuture<'static, Result<T, ExecError>>>;
 type Inflight<T> = Mutex<HashMap<String, (u64, WeakShared<BoxFuture<'static, Result<T, ExecError>>>)>>;

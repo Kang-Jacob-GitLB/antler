@@ -2,13 +2,20 @@
 import type { AppConfig } from '@shared/types'
 import type { FromSidecar, MirrorRepo } from './protocol'
 
-/** 설정의 저장소를 미러 모양으로 바꾼다. 소스를 못 찾은 저장소는 라우터가 쓸 수 없으므로 뺀다 */
+/** 설정의 저장소를 미러 모양으로 바꾼다(wsl 은 distro, ssh 는 sshHost 를 함께 담는다). 소스를 못 찾은 저장소는 라우터가 쓸 수 없으므로 뺀다 */
 export function mirrorOf(config: AppConfig): MirrorRepo[] {
   const out: MirrorRepo[] = []
   for (const r of config.repos) {
     const s = config.sources.find((x) => x.id === r.sourceId)
     if (!s) continue
-    out.push({ id: r.id, kind: s.kind, path: r.path, name: r.name, ...(s.kind === 'wsl' && s.distro ? { distro: s.distro } : {}) })
+    out.push({
+      id: r.id,
+      kind: s.kind,
+      path: r.path,
+      name: r.name,
+      ...(s.kind === 'wsl' && s.distro ? { distro: s.distro } : {}),
+      ...(s.kind === 'ssh' && s.sshHost ? { sshHost: s.sshHost } : {})
+    })
   }
   return out
 }

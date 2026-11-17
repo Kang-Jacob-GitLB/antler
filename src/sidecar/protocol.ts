@@ -68,7 +68,8 @@ export type HostOp = 'openExternal' | 'clipboard' | 'messageBox' | 'pickPath'
 /**
  * Rust 라우터가 저장소 경로·환경을 읽는 유일한 출처(미러). 설정을 쓰는 쪽은 사이드카(main 의 ConfigStore)뿐이고,
  * Rust 는 renderer 가 보낸 경로를 쓰지 않는다. 토큰 등 비밀은 담지 않는다.
- * kind 는 저장소가 속한 소스의 종류, distro 는 wsl 소스의 배포판 이름이다.
+ * kind 는 저장소가 속한 소스의 종류, distro 는 wsl 소스의 배포판 이름, sshHost 는 ssh 소스의 호스트(`~/.ssh/config` 별칭 또는 `[user@]host[:port]`)다.
+ * Rust 는 sshHost 를 쓰기 전에 `handlers.ts` 의 SSH 호스트 규칙으로 다시 검사한다(비었거나 255자 초과·공백·NUL·제어 문자·`-` 시작이면 거부).
  */
 export interface MirrorRepo {
   id: string
@@ -77,6 +78,7 @@ export interface MirrorRepo {
   /** 사용자가 붙인 이름. Rust 는 fetch 확인 창 제목에만 쓴다(경로·kind 판정에는 쓰지 않는다) */
   name: string
   distro?: string
+  sshHost?: string
 }
 
 /** Node → Rust */

@@ -1,12 +1,16 @@
 //! 채널 라우터. renderer 의 `antler_invoke` 를 Rust 가 직접 처리할지 Node 사이드카로 넘길지 정한다.
 //!
-//! Rust 가 처리하는 것: [`RUST_CHANNELS`](`git:fetch` 포함 — fetch 가드·상태 기계는 `git::fetch`)에 있는 채널이고, 인자의 저장소 id 가 미러([`RepoMirror`])에 있고 kind 가 local·wsl 이고,
+//! Rust 가 처리하는 것: [`RUST_CHANNELS`](`git:fetch` 포함 — fetch 가드·상태 기계는 `git::fetch`)에 있는 채널이고, 인자의 저장소 id 가 미러([`RepoMirror`])에 있고 kind 가 local·wsl(또는 ssh — 아래)이고,
 //! 환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아닐 때. 그 밖에는 전부 사이드카가 지금까지처럼 처리한다
 //! (미러에 없는 id 의 오류 문구도 사이드카가 만든다). `ANTLER_RUST_GIT=0` 은 즉시 되돌리는 스위치다.
 //!
 //! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
 //! `ANTLER_RUST_FETCH_KINDS=local,wsl` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
 //! 스위치가 꺼져 있으면 env 도 서비스도 없다 — 사이드카가 전부 맡는다(이중 fetch 없음).
+//!
+//! ssh(Phase 5 PR 3): `ANTLER_RUST_SSH` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이면 함께 꺼진다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 `git:fetch` 를 뺀 6개 채널을 Rust 가 처리한다.
+//! 호스트마다 실행기(= 연결 하나)를 [`SshPool`] 에서 받고 큐는 호스트마다 하나(동시 4)다. **ssh 의 `git:fetch` 는 이 PR 에서 계속 사이드카다** —
+//! fetch 소유는 해석 결과가 아니라 소스 종류([`RUST_FETCH_KINDS`])로 정한다(`RepoMirror::resolve_fetch`). 아니면 ssh 가 Rust 로 풀리는 순간 Rust 도 ssh 를 자동 fetch 해 이중 fetch 가 된다.
 //!
 //! `jira:*`·`gh:*`(`gh:repo` 제외, [`API_CHANNELS`])는 별개의 스위치다: `ANTLER_RUST_API` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이어도 꺼진다) 서비스가 주입돼 있으면 **미러와 무관하게**
 //! Rust 가 처리한다([`api_host`]). 꺼져 있으면 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
@@ -31,7 +35,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api_host::{self, GithubHost, JiraHost};
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
-use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, WSL_LIMIT};
+use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, SSH_LIMIT, WSL_LIMIT};
+use crate::git::exec::ssh::SshPool;
 use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, WslExecutor};
 use crate::git::fetch::service::{FetchControl, FetchPrefs};
 use crate::git::file_channels::{
@@ -96,6 +101,12 @@ pub const RUST_FETCH_KINDS: &str = "local,wsl";
 /// 사이드카를 띄울 때 넣을 `ANTLER_RUST_FETCH_KINDS` 값. 라우터가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 없다 — 사이드카가 fetch 를 전부 맡는다
 pub fn sidecar_fetch_kinds(router_enabled: bool) -> Option<&'static str> {
     router_enabled.then_some(RUST_FETCH_KINDS)
+}
+
+/// `ANTLER_RUST_SSH`(`0` 이면 끔)와 `ANTLER_RUST_GIT`(`0` 이면 함께 끔)으로 ssh 저장소의 git 채널(fetch 제외)을 Rust 가 처리할지 정한다.
+/// 기본은 켬이다. 실제 판정은 [`Router::ssh_active`] 하나(이 스위치 + 풀 주입)이고 미러 해석·사이드카 env 가 같은 값을 쓴다
+pub fn rust_ssh_enabled(ssh_var: Option<&str>, git_var: Option<&str>) -> bool {
+    ssh_var != Some("0") && rust_git_enabled(git_var)
 }
 
 /// `ANTLER_RUST_API`(`0` 이면 끔)와 `ANTLER_RUST_GIT`(`0` 이면 함께 끔)으로 [`API_CHANNELS`] 를 Rust 가 처리할지 정한다.
@@ -269,6 +280,7 @@ impl CancelRegistry {
 
 /// 소스(local 하나, wsl 은 배포판마다 하나)마다 실행기와 동시성 큐를 하나씩 둔다(TS `RepoService.runtime` 과 같다).
 /// 큐의 결과 타입은 직렬화된 JSON 이라 이후 채널들이 같은 큐(같은 6/4 상한)를 나눠 쓸 수 있다
+/// ssh 소스의 실행기는 [`SshPool`] 에서 온다(호스트마다 하나 — fetch 서비스와 나눠 쓴다)
 struct SourceRuntime {
     exec: Arc<GitExecutor>,
     queue: ProcessQueue<Arc<Value>>,
@@ -289,6 +301,10 @@ pub struct Router {
     fetch: Mutex<Option<Arc<dyn FetchControl>>>,
     /// 서비스가 주입되기 전에 도착한 fetchPrefs(마지막 것만). 주입될 때 적용한다
     pending_prefs: Mutex<Option<FetchPrefs>>,
+    /// `ANTLER_RUST_SSH` 스위치(`ANTLER_RUST_GIT=0` 이어도 꺼진다). 꺼져 있으면 ssh 저장소는 풀 없이 사이드카로 간다
+    ssh_enabled: bool,
+    /// 호스트별 SSH 실행기 풀(앱이 스위치가 켜져 있을 때만 주입한다). 없으면 ssh 저장소는 미러에서 사이드카로 해석된다
+    ssh_pool: Mutex<Option<Arc<SshPool>>>,
     /// `ANTLER_RUST_API` 스위치(`ANTLER_RUST_GIT=0` 이어도 꺼진다). 꺼져 있으면 `jira:*` 는 서비스 없이 사이드카로 간다
     api_enabled: bool,
     /// Jira 서비스(앱이 스위치가 켜져 있을 때만 주입한다). 없으면 `jira:*` 는 사이드카가 처리한다
@@ -303,6 +319,8 @@ impl Router {
     pub fn new(enabled: bool, log: bool, mirror: RepoMirror) -> Self {
         Router {
             enabled,
+            ssh_enabled: enabled,
+            ssh_pool: Mutex::default(),
             api_enabled: enabled,
             jira: Mutex::default(),
             github: Mutex::default(),
@@ -330,6 +348,37 @@ impl Router {
     pub fn with_api(mut self, enabled: bool) -> Self {
         self.api_enabled = enabled;
         self
+    }
+
+    /// `ssh` 스위치를 정한다(만든 직후에만). 기본은 git 스위치와 같다
+    pub fn with_ssh(mut self, enabled: bool) -> Self {
+        self.ssh_enabled = enabled;
+        self
+    }
+
+    /// `ANTLER_RUST_SSH` 스위치가 켜져 있는가(풀이 주입됐는지와는 별개 — 만들기 전에 이 값으로 정한다)
+    pub fn ssh_enabled(&self) -> bool {
+        self.enabled && self.ssh_enabled
+    }
+
+    /// Rust 가 ssh 저장소의 git 채널(fetch 제외)을 처리하는가: 스위치가 켜져 있고 풀이 주입됐다. **미러의 ssh 해석**(`RepoMirror::set_ssh`)과
+    /// 사이드카 env(`ANTLER_RUST_SSH`)가 모두 이 값 하나로 정해진다
+    pub fn ssh_active(&self) -> bool {
+        self.enabled && self.ssh_enabled && self.ssh_pool().is_some()
+    }
+
+    /// SSH 풀을 주입한다. 스위치가 꺼져 있으면 주입하지 않는다(연결 설정을 읽지 않고 ssh 는 사이드카가 전부 맡는다). 주입하면 미러가 ssh 를 Rust 로 풀기 시작한다.
+    /// 이후 fetch 서비스도 이 풀을 쓴다(호스트당 연결 하나)
+    pub fn set_ssh_pool(&self, pool: Arc<SshPool>) {
+        if self.enabled && self.ssh_enabled {
+            *self.ssh_pool.lock().unwrap_or_else(PoisonError::into_inner) = Some(pool);
+            self.mirror.set_ssh(true);
+        }
+    }
+
+    /// 주입된 SSH 풀(스위치가 꺼져 있으면 없다)
+    pub fn ssh_pool(&self) -> Option<Arc<SshPool>> {
+        self.ssh_pool.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     /// `ANTLER_RUST_API` 스위치가 켜져 있는가(서비스가 만들어졌는지와는 별개 — 만들기 전에 이 값으로 정한다)
@@ -418,8 +467,9 @@ impl Router {
     pub fn from_env(mirror: RepoMirror) -> Self {
         let enabled = rust_git_enabled(std::env::var("ANTLER_RUST_GIT").ok().as_deref());
         let api = rust_api_enabled(std::env::var("ANTLER_RUST_API").ok().as_deref(), std::env::var("ANTLER_RUST_GIT").ok().as_deref());
+        let ssh = rust_ssh_enabled(std::env::var("ANTLER_RUST_SSH").ok().as_deref(), std::env::var("ANTLER_RUST_GIT").ok().as_deref());
         let log = std::env::var("ANTLER_ROUTE_LOG").as_deref() == Ok("1");
-        Router::new(enabled, log, mirror).with_api(api)
+        Router::new(enabled, log, mirror).with_api(api).with_ssh(ssh)
     }
 
     /// 로그 커서의 유휴 시간·훑는 주기를 바꾼다(테스트용 — 프로세스 목록을 읽는 테스트가 느려도 커서가 먼저 닫히지 않게). 만든 직후에만 부른다
@@ -433,18 +483,33 @@ impl Router {
         self.logs.set_sink(sink);
     }
 
-    /// 미러가 바뀐 직후 불린다 — 사라졌거나 대상이 바뀐 저장소의 로그 커서를 닫는다
+    /// 미러가 바뀐 직후 불린다 — 사라졌거나 대상이 바뀐 저장소의 로그 커서를 닫고, 더 이상 쓰지 않는 ssh 호스트의 연결·큐를 정리한다
     pub fn on_mirror_changed(&self) {
         self.logs.sync_mirror();
+        self.sync_ssh_hosts();
         // 사라졌거나 Rust 가 맡지 않게 된 저장소의 fetch 상태를 비운다
         if let Some(service) = self.fetch_port() {
             service.sync_mirror();
         }
     }
 
+    /// 미러에 없는(또는 Rust 로 풀리지 않는) 호스트의 SSH 연결을 닫고 풀·큐에서 뺀다. 닫은 실행기는 영구히 거부하므로 **풀과 `sources` 를 함께** 비워야
+    /// 같은 호스트를 다시 추가했을 때 새 연결이 맺어진다. `sources` 잠금을 쥔 채 풀을 만진다 — `runtime` 과 같은 순서(sources → 풀)라 그 사이에 낡은 실행기가 끼어들지 않는다
+    fn sync_ssh_hosts(&self) {
+        let Some(pool) = self.ssh_pool() else { return };
+        let keep = self.mirror.ssh_hosts();
+        let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
+        sources.retain(|key, _| key.strip_prefix("ssh:").is_none_or(|host| keep.contains(host)));
+        pool.retain(&keep);
+    }
+
     /// 앱 종료: 열려 있는 로그 커서(git 프로세스)를 모두 닫는다
     pub fn shutdown(&self) {
         self.logs.close_all();
+        // SSH 연결을 닫는다(런타임 밖 스레드면 정중한 해제 메시지는 보내지 못하고 연결만 버린다 — 프로세스가 끝나며 소켓이 닫힌다)
+        if let Some(pool) = self.ssh_pool() {
+            pool.dispose_all();
+        }
         // 진행 중인 fetch 를 끊는다(git 프로세스가 끝나기를 기다리지는 않는다 — 종료 때 Job 이 정리한다)
         if let Some(service) = self.fetch_port() {
             service.dispose();
@@ -504,11 +569,11 @@ impl Router {
                 _ => None,
             };
             self.logs.close_others(active);
-            // 자동 fetch 대상. Rust 가 맡는 저장소(미러에 있고 local·wsl)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
+            // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl — ssh 는 Rust 로 풀려도 사이드카가 fetch 한다)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
             // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
             if self.enabled {
                 if let Some(service) = self.fetch_port() {
-                    service.set_active(active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))));
+                    service.set_active(active.filter(|id| matches!(self.mirror.resolve_fetch(id), Resolved::Rust(_))));
                 }
             }
             return Routed::Sidecar;
@@ -624,7 +689,13 @@ impl Router {
         let token = reg.as_ref().map_or_else(CancellationToken::new, |r| r.token.clone());
         self.note("git:log", "rust");
         self.rust_handled.fetch_add(1, Ordering::Relaxed);
-        let rt = self.runtime(&target);
+        let rt = match self.runtime(&target) {
+            Ok(rt) => rt,
+            Err(e) => {
+                drop(reg);
+                return Routed::Done(err_env(&e.to_string(), e.envelope_code()));
+            }
+        };
         let result = self.logs.log(repo_id, &rt.exec, &target, &query, &token).await;
         drop(reg);
         Routed::Done(match result.and_then(|page| serde_json::to_value(&page).map_err(|e| crate::git::exec::ExecError::Other { message: e.to_string() }.into())) {
@@ -634,11 +705,11 @@ impl Router {
     }
 
     /// `git:fetch(repoId, manual)`. `manual` 은 정확히 `true` 일 때만 참이다(`handlers.ts` 의 `manual === true`) — renderer 가 주장하는 값이라 다른 모양은 모두 자동 fetch 다.
-    /// 저장소의 경로·kind 는 미러에서만 얻고(서비스가 다시 미러로 푼다), 미러에 없거나 ssh·github 면 사이드카가 처리한다.
+    /// 저장소의 경로·kind 는 미러에서만 얻고(서비스가 다시 미러로 푼다), 미러에 없거나 ssh·github 면 사이드카가 처리한다 — **ssh 가 Rust 로 풀려도 마찬가지다**(`resolve_fetch` 는 소스 종류로 거른다).
     /// local·wsl 이면 **절대 사이드카로 보내지 않는다** — 사이드카는 그 저장소를 맡지 않아(`ANTLER_RUST_FETCH_KINDS`) 보내면 오류가 나고, 보내서 둘이 fetch 하는 길도 없어야 한다
     async fn git_fetch(&self, args: &[Option<&Value>]) -> Routed {
         let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
-        match self.mirror.resolve(repo_id) {
+        match self.mirror.resolve_fetch(repo_id) {
             Resolved::Rust(_) => {}
             Resolved::Sidecar => {
                 self.note("git:fetch", "sidecar");
@@ -700,7 +771,7 @@ impl Router {
     }
 
     async fn file_job(&self, repo_id: &str, target: &Target, job: FileJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
-        let rt = self.runtime(target);
+        let rt = self.runtime(target)?;
         let (exec, path) = (rt.exec.clone(), target.path().to_string());
         match job {
             // 해시 쌍 기준이라 불변: 캐시 + 같은 키 요청 합치기
@@ -766,17 +837,28 @@ impl Router {
         }
     }
 
-    fn runtime(&self, target: &Target) -> Arc<SourceRuntime> {
+    /// 소스의 실행기·큐. ssh 는 호스트마다 하나이고 실행기는 풀에서 온다(풀이 없으면 — 미러가 ssh 를 풀지 않으므로 오지 않는 길 — 오류)
+    fn runtime(&self, target: &Target) -> Result<Arc<SourceRuntime>, ExecError> {
         let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
-        sources
-            .entry(target.source_key())
-            .or_insert_with(|| {
-                Arc::new(match target {
-                    Target::Local { .. } => SourceRuntime { exec: Arc::new(GitExecutor::Local(LocalExecutor::default())), queue: ProcessQueue::new(LOCAL_LIMIT) },
-                    Target::Wsl { distro, .. } => SourceRuntime { exec: Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))), queue: ProcessQueue::new(WSL_LIMIT) },
-                })
-            })
-            .clone()
+        let key = target.source_key();
+        if let Some(rt) = sources.get(&key) {
+            return Ok(rt.clone());
+        }
+        let rt = Arc::new(match target {
+            Target::Local { .. } => SourceRuntime { exec: Arc::new(GitExecutor::Local(LocalExecutor::default())), queue: ProcessQueue::new(LOCAL_LIMIT) },
+            Target::Wsl { distro, .. } => SourceRuntime { exec: Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))), queue: ProcessQueue::new(WSL_LIMIT) },
+            Target::Ssh { host, .. } => {
+                // resolve 와 이 사이에 미러가 바뀌어 정리된 호스트면 다시 만들지 않는다(낡은 대상이 지운 호스트로 접속·등록하지 않게).
+                // sources 잠금 안에서 본다 — 정리(sync_ssh_hosts)도 이 잠금을 잡으므로, 여기서 통과하면 뒤이은 정리가 지운다
+                if !self.mirror.ssh_hosts().contains(host) {
+                    return Err(ExecError::Other { message: "저장소 목록이 바뀌었습니다. 다시 시도하세요".to_string() });
+                }
+                let pool = self.ssh_pool().ok_or_else(|| ExecError::Other { message: "SSH 를 사용할 수 없습니다".to_string() })?;
+                SourceRuntime { exec: Arc::new(GitExecutor::Ssh(pool.get(host))), queue: ProcessQueue::new(SSH_LIMIT) }
+            }
+        });
+        sources.insert(key, rt.clone());
+        Ok(rt)
     }
 
     /// 커밋 상세. TS `RepoService.commit` 과 같은 순서: 해시 기준 불변 캐시 → 같은 키 요청 합치기 → 큐 슬롯 안에서 git 세 번.
@@ -787,7 +869,7 @@ impl Router {
         if let Some(hit) = self.commit_cache.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
             return Ok(hit);
         }
-        let rt = self.runtime(target);
+        let rt = self.runtime(target)?;
         let (exec, path, cache, cache_key) = (rt.exec.clone(), target.path().to_string(), self.commit_cache.clone(), key.clone());
         let run = rt.queue.run(Some(&key), None, move || async move {
             let detail = commit_detail(&exec, &path, &hash).await?;
@@ -817,7 +899,7 @@ mod tests {
     }
 
     fn repo(id: &str, kind: &str, path: &str) -> MirrorRepo {
-        MirrorRepo { id: id.into(), kind: kind.into(), path: path.into(), distro: None }
+        MirrorRepo { id: id.into(), kind: kind.into(), path: path.into(), distro: None, ssh_host: None }
     }
 
     fn is_sidecar(r: &Routed) -> bool {
@@ -838,6 +920,45 @@ mod tests {
         assert!(rust_git_enabled(Some("")));
         assert!(rust_git_enabled(Some("false")));
         assert!(!rust_git_enabled(Some("0")));
+    }
+
+    #[test]
+    fn ssh_스위치는_0_과_git_0_이_끈다() {
+        assert!(rust_ssh_enabled(None, None));
+        assert!(rust_ssh_enabled(Some("1"), None));
+        assert!(rust_ssh_enabled(Some(""), Some("1")));
+        assert!(!rust_ssh_enabled(Some("0"), None));
+        assert!(!rust_ssh_enabled(None, Some("0")));
+        assert!(!rust_ssh_enabled(Some("1"), Some("0")));
+    }
+
+    fn ssh_repo(id: &str, host: &str) -> MirrorRepo {
+        MirrorRepo { id: id.into(), kind: "ssh".into(), path: "/srv/r".into(), distro: None, ssh_host: Some(host.into()) }
+    }
+
+    #[tokio::test]
+    async fn ssh_는_스위치와_풀이_둘_다_있어야_rust_로_간다() {
+        let m = mirror_of(vec![ssh_repo("bad", "-x"), ssh_repo("ok", "devbox")]);
+        let r = Router::new(true, false, m.clone());
+        // 풀이 없다 — ssh 는 사이드카
+        assert!(!r.ssh_active());
+        assert!(is_sidecar(&r.route("git:commit", &json!(["bad", "abcd1234"])).await));
+        r.set_ssh_pool(SshPool::for_home("C:\\nonexistent-antler-home"));
+        assert!(r.ssh_active());
+        // 호스트 검사에 걸리면 연결하지 않고 ERROR 다(같은 판정이 미러에서 한 번만 난다)
+        let env = envelope(r.route("git:commit", &json!(["bad", "abcd1234"])).await);
+        assert_eq!((env["ok"].clone(), env["error"].clone()), (json!(false), json!("잘못된 SSH 호스트입니다")));
+        // 스위치가 꺼져 있으면(ANTLER_RUST_SSH=0) 풀을 주입해도 무시한다
+        let off = Router::new(true, false, mirror_of(vec![ssh_repo("ok", "devbox")])).with_ssh(false);
+        off.set_ssh_pool(SshPool::for_home("C:\\nonexistent-antler-home"));
+        assert!(!off.ssh_active() && off.ssh_pool().is_none() && !off.ssh_enabled());
+        assert!(is_sidecar(&off.route("git:commit", &json!(["ok", "abcd1234"])).await));
+        // ANTLER_RUST_GIT=0(라우터 전체가 꺼짐)이면 함께 꺼진다
+        let git_off = Router::new(false, false, mirror_of(vec![ssh_repo("ok", "devbox")]));
+        git_off.set_ssh_pool(SshPool::for_home("C:\\nonexistent-antler-home"));
+        assert!(!git_off.ssh_active() && !git_off.ssh_enabled());
+        assert!(is_sidecar(&git_off.route("git:commit", &json!(["ok", "abcd1234"])).await));
+        assert_eq!(off.rust_handled() + git_off.rust_handled(), 0);
     }
 
     #[test]

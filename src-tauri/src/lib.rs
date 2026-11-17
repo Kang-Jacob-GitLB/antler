@@ -24,6 +24,7 @@ use tauri::window::Color;
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
 
+use git::exec::ssh::SshPool;
 use git::exec::{GitExecutor, LocalExecutor, WslExecutor};
 use git::fetch::service::{FetchPrefsSink, FetchService};
 use mirror::Target;
@@ -112,13 +113,36 @@ pub fn run() {
                     s.note(op, repo_id);
                 }
             }));
+            // SSH 풀(Phase 5 PR 3). 스위치가 꺼져 있으면(ANTLER_RUST_SSH=0·ANTLER_RUST_GIT=0) 만들지 않는다 — ssh 저장소는 사이드카가 전부 맡는다.
+            // 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(사이드카가 처리한다).
+            // **fetch 서비스·사이드카 env 보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓰고, 사이드카 env 가 같은 판정(ssh_active)을 따른다
+            // 홈은 Node `os.homedir()`(libuv)와 같은 순서로 정한다 — 환경변수(Windows `USERPROFILE`·그 밖 `HOME`)가 있으면 그것, 없으면 Tauri 의 `home_dir`.
+            // 그래야 사이드카와 Rust 가 같은 `~/.ssh` 를 읽는다
+            if router.ssh_enabled() {
+                let env_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|v| !v.is_empty()).map(PathBuf::from);
+                match env_home.or_else(|| app.path().home_dir().ok()) {
+                    Some(home) => router.set_ssh_pool(SshPool::for_home(&home.to_string_lossy())),
+                    None => eprintln!("[ssh] 홈 디렉터리를 알 수 없다 — 사이드카가 SSH 를 처리한다"),
+                }
+            }
             // fetch 서비스(local·wsl 저장소). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다
             if router.enabled() {
+                let ssh_pool = router.ssh_pool();
                 let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone());
                 let no_hooks_dir = user_data.join("no-hooks").to_string_lossy().into_owned();
-                let make_runner = |target: &Target| match target {
+                let make_runner = move |target: &Target| match target {
                     Target::Local { .. } => std::sync::Arc::new(GitExecutor::Local(LocalExecutor::default())),
                     Target::Wsl { distro, .. } => std::sync::Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))),
+                    // fetch 의 소유는 소스 종류(local·wsl)로 정하므로(RepoMirror::resolve_fetch) ssh 는 여기까지 오지 않는다 — PR 4 가 ssh fetch 를 켤 때 같은 풀을 쓴다
+                    Target::Ssh { host, .. } => std::sync::Arc::new(GitExecutor::Ssh(match &ssh_pool {
+                        Some(pool) => pool.get(host),
+                        // 풀이 없으면 오지 않는 길이다 — 닿아도 어떤 설정 파일도 읽지 않게 닫힌 실행기를 준다(모든 호출이 거부된다)
+                        None => {
+                            let closed = SshPool::for_home("").get(host);
+                            closed.dispose();
+                            closed
+                        }
+                    })),
                 };
                 router.set_fetch(std::sync::Arc::new(FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir))));
             }
@@ -158,6 +182,8 @@ pub fn run() {
                 }
             }
             let fetch_kinds = router::sidecar_fetch_kinds(router.enabled());
+            // 사이드카에 ssh 를 Rust 가 처리함을 알리는 값. 미러의 ssh 해석과 같은 판정(ssh_active) 하나다
+            let rust_ssh = router.ssh_active();
             // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
             let rust_api = router.claim_api();
             app.manage(router);
@@ -169,7 +195,7 @@ pub fn run() {
                     router::in_runtime_of(tauri::async_runtime::handle().inner(), || r.apply_fetch_prefs(prefs));
                 }
             })));
-            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, fetch_kinds, rust_api)?);
+            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, fetch_kinds, rust_api, rust_ssh)?);
             // 저장된 로그인의 토큰 사본을 사이드카에 한 번 보낸다(사이드카의 원격 전용 저장소 fetch 용). 이후는 위의 인증 변경 콜백이 보낸다. Rust 가 GitHub 를 처리할 때만이다
             if let (true, Some(gh)) = (rust_api, gh_service) {
                 if let Some(s) = app.try_state::<sidecar::Sidecar>() {

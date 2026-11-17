@@ -267,7 +267,7 @@ const FP_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 
 fn mirror_of(repos: &[(&str, &str, &str, Option<&str>)]) -> RepoMirror {
     let m = RepoMirror::default();
-    let list = repos.iter().map(|(id, kind, path, distro)| MirrorRepo { id: (*id).into(), kind: (*kind).into(), path: (*path).into(), distro: distro.map(Into::into) }).collect();
+    let list = repos.iter().map(|(id, kind, path, distro)| MirrorRepo { id: (*id).into(), kind: (*kind).into(), path: (*path).into(), distro: distro.map(Into::into), ssh_host: None }).collect();
     assert!(m.apply(1, list));
     m
 }

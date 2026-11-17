@@ -161,7 +161,7 @@ impl FetchControl for Fake {
 }
 
 fn repo(id: &str, kind: &str, path: &str, distro: Option<&str>) -> MirrorRepo {
-    MirrorRepo { id: id.into(), kind: kind.into(), path: path.into(), distro: distro.map(Into::into) }
+    MirrorRepo { id: id.into(), kind: kind.into(), path: path.into(), distro: distro.map(Into::into), ssh_host: None }
 }
 
 fn mirror() -> RepoMirror {
@@ -366,4 +366,101 @@ fn 활성_저장소가_있을_때_런타임_밖_스레드의_prefs_적용은_런
     .expect("런타임에 들어가서 부르면 패닉하지 않는다");
     router.shutdown();
     rt.shutdown_timeout(Duration::from_secs(2));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// ssh 가 Rust 로 풀려도 fetch 는 사이드카가 맡는다(Phase 5 PR 3 — 이중 fetch 방지)
+// ---------------------------------------------------------------------------------------------------------------------
+
+fn ssh_repo(id: &str, host: &str) -> MirrorRepo {
+    MirrorRepo { id: id.into(), kind: "ssh".into(), path: "/srv/r".into(), distro: None, ssh_host: Some(host.into()) }
+}
+
+/// ssh 저장소가 Rust 로 풀리는(풀이 주입된) 라우터. 호스트가 잘못된 ssh 저장소(`sshbad`)도 있다
+fn ssh_rig() -> (Router, RepoMirror, Arc<Calls>) {
+    let m = mirror();
+    m.apply(
+        2,
+        vec![repo("loc", "local", "C:\nonexistent-antler\r", None), ssh_repo("ssh", "devbox"), ssh_repo("sshbad", "-oProxyCommand=x"), repo("gh", "github", "/cache/r", None)],
+    );
+    let router = Router::new(true, false, m.clone());
+    let calls = Arc::new(Calls::default());
+    router.set_fetch(Arc::new(Fake(calls.clone())));
+    router.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\nonexistent-antler-home"));
+    assert!(router.ssh_active());
+    (router, m, calls)
+}
+
+#[tokio::test]
+async fn ssh_저장소의_git_fetch_는_rust_로_풀려도_사이드카로_간다() {
+    let (router, m, calls) = ssh_rig();
+    // 이 시험의 전제: ssh 는 정말 Rust 로 풀린다(다른 채널은 Rust 가 처리한다)
+    assert!(matches!(m.resolve("ssh"), antler_lib::mirror::Resolved::Rust(Target::Ssh { .. })));
+    assert!(matches!(m.resolve("sshbad"), antler_lib::mirror::Resolved::Invalid(_)));
+    // 호스트가 잘못된 것도 오류가 아니라 사이드카다(사이드카가 자기 방식으로 오류를 만든다)
+    for id in ["ssh", "sshbad", "gh", "nope"] {
+        for manual in [true, false] {
+            assert!(is_sidecar(&router.route("git:fetch", &json!([id, manual])).await), "{id} {manual}");
+        }
+    }
+    assert!(log(&calls).is_empty(), "Rust fetch 서비스에 닿지 않는다: {:?}", log(&calls));
+    assert_eq!(router.rust_handled(), 0);
+    // local 은 그대로 Rust 가 맡는다
+    assert_eq!(envelope(router.route("git:fetch", &json!(["loc", true])).await)["ok"], true);
+    assert_eq!(log(&calls), ["fetch loc true"]);
+    // 사이드카의 fetch 가 ssh 를 계속 맡도록 env 는 그대로 local,wsl 이다
+    assert_eq!(sidecar_fetch_kinds(router.enabled()), Some("local,wsl"));
+}
+
+#[tokio::test]
+async fn ssh_저장소는_자동_fetch_대상이_아니다() {
+    let (router, _m, calls) = ssh_rig();
+    for (arg, want) in [(json!(["ssh"]), "active None"), (json!(["sshbad"]), "active None"), (json!(["loc"]), "active Some(\"loc\")")] {
+        calls.log.lock().unwrap().clear();
+        assert!(is_sidecar(&router.route("repos:watch", &arg).await), "{arg}");
+        assert_eq!(log(&calls), [want], "{arg}");
+    }
+}
+
+#[derive(Default)]
+struct Built(Mutex<Vec<String>>);
+
+/// 진짜 fetch 서비스: ssh 가 Rust 로 풀려도 자기 것이 아니다 — 실행기를 만들지 않고 "unknown repo" 이며, 활성 저장소·자동 예약에도 들어가지 않는다
+#[tokio::test]
+async fn fetch_서비스는_ssh_를_소유하지_않는다() {
+    let (_router, m, _calls) = ssh_rig();
+    let built = Arc::new(Built::default());
+    let b = built.clone();
+    let make_runner = move |t: &Target| {
+        b.0.lock().unwrap().push(t.source_key());
+        Arc::new(GitExecutor::Local(LocalExecutor::default()))
+    };
+    let svc = FetchService::new(NullHost, m.clone(), make_runner, None);
+    for id in ["ssh", "sshbad"] {
+        let s = svc.fetch(id, true).await;
+        assert_eq!(s.error.as_deref(), Some(format!("unknown repo: {id}").as_str()), "{id}");
+    }
+    // 서비스가 만든 실행기는 하나도 없다(자동 fetch 도 같은 판정을 쓴다)
+    assert!(built.0.lock().unwrap().is_empty(), "{:?}", built.0.lock().unwrap());
+    // 활성 저장소로 정해 두어도 미러 정리(sync_mirror)가 ssh 를 맡지 않는 것으로 비운다
+    svc.set_active(Some("ssh"));
+    svc.sync_mirror();
+    assert!(built.0.lock().unwrap().is_empty());
+}
+
+#[test]
+fn fetch_소유_판정은_소스_종류만_쓴다() {
+    // 서비스·라우터의 fetch 쪽은 mirror.resolve 가 아니라 resolve_fetch 만 부른다 — 해석 결과로 소유를 정하면 ssh 가 Rust 로 풀리는 순간 이중 fetch 가 된다
+    let service = prod_code("src/git/fetch/service.rs");
+    assert!(!service.contains("mirror.resolve("), "fetch 서비스가 mirror.resolve 로 소유를 정한다");
+    assert_eq!(service.matches("mirror.resolve_fetch(").count(), 2);
+    let router = prod_code("src/router.rs");
+    assert_eq!(router.matches("mirror.resolve_fetch(").count(), 2, "git_fetch 와 repos:watch 의 자동 fetch 대상");
+    // git_fetch 안에는 해석 함수가 resolve_fetch 하나뿐이다
+    let body = &router[router.find("async fn git_fetch").expect("git_fetch")..];
+    let body = &body[..body.find("async fn git_file_channel").expect("다음 함수")];
+    assert!(body.contains("resolve_fetch(") && !body.contains("mirror.resolve("));
+    // 소스 종류 상수가 미러의 판정에 쓰인다
+    assert!(prod_code("src/mirror.rs").contains("RUST_FETCH_KINDS.split(',')"));
+    assert_eq!(RUST_FETCH_KINDS, "local,wsl");
 }
