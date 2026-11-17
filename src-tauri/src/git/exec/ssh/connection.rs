@@ -1,0 +1,747 @@
+//! russh 연결 수명 관리(`src/main/executors/ssh/connection.ts`): 지연 연결·재사용·재연결, ProxyJump 체인, 채널 동시성 제한, 유휴 종료, 원격 셸 확인.
+//! Windows OpenSSH 에는 ControlMaster 가 없으므로 프로세스 안에서 연결 하나를 직접 유지한다.
+//!
+//! 방어(TS 의 `connection.ts` 가 하던 것 — 빠뜨리면 PR 1 의 순수 로직이 막은 것이 연결에서 새 나간다):
+//! - **홉마다 `unsupported` 거부**: 대상과 모든 ProxyJump 홉을 `resolve_host` 로 해석해 하나라도 `unsupported`(ProxyCommand·Match·비 ASCII·포트 범위·RevokedHostKeys)면 연결 전에 거부한다.
+//! - **홉마다 known_hosts 판정**(`verify_host_key_text`, TOFU·쓰기 없음). 알려진 키 종류로 서버 호스트 키 알고리즘을 제한한다. `HostKeyAlias` 가 있으면 별칭·포트 22 로 조회한다.
+//! - **원격 셸 확인**([`SHELL_PROBE`]): 접속 직후 로그인 셸이 POSIX 인용을 해석하는지 본다. 확인 전에는 사용자 값이 든 명령을 보내지 않는다.
+//! - 인증은 agent·키 파일뿐이다(`auth.rs`). 비밀번호·keyboard-interactive·agent 전달·X11·포트 포워딩은 쓰지 않는다(clippy.toml).
+//!
+//! **채널은 태스크가 소유한다.** Rust 에서는 future 를 버리는 것이 취소이고 `Drop` 은 동기라 원격에 KILL/close 를 보낼 수 없다. 그래서 exec 채널을 연 순간부터는
+//! 스폰된 태스크가 채널·슬롯(세마포어 허가)을 쥐고, 호출자가 버려지면(취소 토큰) 태스크가 KILL → close → 닫힘 확인까지 하고 **그 뒤에** 슬롯을 돌려준다.
+
+use std::borrow::Cow;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
+
+use russh::client::{self, Handle, Msg};
+use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PublicKeyOrCertificate};
+use russh::{Channel, ChannelMsg, Preferred, Sig};
+use tokio::net::TcpStream;
+use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
+use tokio_util::sync::CancellationToken;
+
+use super::auth::{self, AgentSetting};
+use super::config::{load_ssh_config, resolve_host, Ctx, RealFs, ResolvedHost};
+use super::known_hosts::{known_host_key_algorithms, read_known_hosts, verify_host_key_text};
+use crate::git::exec::common::{to_strings, RunOpts, RunResult, DEFAULT_MAX_BUFFER, MAX_STDERR};
+use crate::git::exec::error::ExecError;
+use crate::git::parsers::js_trim;
+
+/// 원격 로그인 셸 확인용 고정 명령. 원격 명령은 POSIX 작은따옴표로 인용하는데, 로그인 셸이 cmd.exe·PowerShell 이면 작은따옴표가 인용이 아니라서
+/// 경로 안의 `&`·`|` 등이 명령으로 해석될 수 있다. 사용자 값이 든 명령을 보내기 전에 연결마다 한 번 확인한다:
+/// sh/bash/zsh/fish 는 인접한 두 따옴표 문자열을 이어 `antler` 를 출력하고, cmd 는 따옴표를 그대로, PowerShell 은 `an'tler` 를 출력한다.
+pub const SHELL_PROBE: &str = "echo 'an''tler'";
+const SHELL_PROBE_EXPECT: &str = "antler";
+const CONNECTION_LOST: &str = "SSH 연결이 끊겨 원격 git 이 끝나기 전에 종료되었습니다";
+const DISPOSED: &str = "SSH 연결이 이미 종료되었습니다";
+/// 채널을 열고 exec 요청을 보내는 데 주는 시간(응답이 없는 서버에서 영원히 기다리지 않는다)
+const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
+/// 취소·종료 때 KILL·close 요청을 보내는 데 주는 시간
+const KILL_TIMEOUT: Duration = Duration::from_secs(2);
+/// KILL 뒤 서버가 채널을 닫기를 기다리는 시간(그 뒤에야 슬롯을 돌려준다)
+const CLOSE_WAIT: Duration = Duration::from_secs(3);
+/// 한 연결에서 sshd `MaxSessions`(기본 10)보다 안쪽으로 유지할 동시 채널 수
+pub const DEFAULT_MAX_CHANNELS: usize = 6;
+
+/// 시간 제한. 기본값은 TS 와 같고, 시험은 짧은 값을 주입한다(시계를 멈추는 `start_paused` 는 실제 소켓과 맞지 않는다)
+#[derive(Debug, Clone, Copy)]
+pub struct Timeouts {
+    /// 호스트 하나(TCP·키 교환·인증)를 여는 제한
+    pub ready: Duration,
+    /// keepalive 간격(응답이 3번 연속 없으면 끊는다)
+    pub keepalive: Duration,
+    /// 채널이 하나도 없는 채로 이만큼 지나면 연결을 닫는다
+    pub idle: Duration,
+    /// 원격 셸 확인 제한
+    pub probe: Duration,
+}
+
+impl Default for Timeouts {
+    fn default() -> Self {
+        Timeouts { ready: Duration::from_secs(15), keepalive: Duration::from_secs(15), idle: Duration::from_secs(5 * 60), probe: Duration::from_secs(10) }
+    }
+}
+
+/// 환경변수 조회(주입 가능)
+pub type EnvFn = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// 연결 옵션. 홈·환경변수·agent 는 전부 주입한다(시험이 사용자의 `~/.ssh`·agent 를 건드리지 않게)
+#[derive(Clone)]
+pub struct SshOptions {
+    /// `~/.ssh/config`
+    pub config_path: String,
+    /// 기본 `~/.ssh/known_hosts`(`UserKnownHostsFile` 이 있으면 그쪽)
+    pub known_hosts_path: String,
+    /// `~` 와 기본 키(`~/.ssh/id_*`) 위치의 기준
+    pub home_dir: String,
+    pub agent: AgentSetting,
+    /// 설정 해석(`IdentityAgent` 의 `$VAR`)과 agent 기본값이 읽는 환경변수
+    pub env: EnvFn,
+    /// `%u`·기본 User
+    pub local_user: String,
+    pub timeouts: Timeouts,
+    pub max_channels: usize,
+}
+
+impl SshOptions {
+    /// 홈 기준 기본값(`<홈>/.ssh/config`·`<홈>/.ssh/known_hosts`, 프로세스 환경변수, 로컬 사용자)
+    pub fn for_home(home_dir: &str) -> Self {
+        let ssh = std::path::Path::new(home_dir).join(".ssh");
+        SshOptions {
+            config_path: ssh.join("config").to_string_lossy().into_owned(),
+            known_hosts_path: ssh.join("known_hosts").to_string_lossy().into_owned(),
+            home_dir: home_dir.to_string(),
+            agent: AgentSetting::UseConfig,
+            env: Arc::new(super::config::process_env),
+            local_user: super::config::local_user_name(),
+            timeouts: Timeouts::default(),
+            max_channels: DEFAULT_MAX_CHANNELS,
+        }
+    }
+}
+
+fn other(message: impl Into<String>) -> ExecError {
+    ExecError::Other { message: message.into() }
+}
+
+/// 서버 호스트 키를 known_hosts 로 판정하는 클라이언트 핸들러. 거부 사유는 `verdict` 에 남겨 연결 오류 문구로 쓴다
+struct HostKeyHandler {
+    known_hosts: Arc<String>,
+    name: String,
+    port: u32,
+    verdict: Arc<Mutex<Option<String>>>,
+}
+
+impl client::Handler for HostKeyHandler {
+    type Error = russh::Error;
+
+    async fn check_server_key(&mut self, key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
+        let set = |msg: String| *self.verdict.lock().unwrap_or_else(PoisonError::into_inner) = Some(msg);
+        // 호스트 인증서(`*-cert-v01`)는 광고하지 않지만 서버가 내밀면 신뢰 기준이 없으므로 거부한다
+        let PublicKeyOrCertificate::PublicKey { key, .. } = key else {
+            set("호스트 인증서는 지원하지 않습니다(known_hosts 의 일반 호스트 키만 검증합니다)".to_string());
+            return Ok(false);
+        };
+        let Ok(blob) = key.to_bytes() else {
+            set("서버 호스트 키를 해석하지 못했습니다".to_string());
+            return Ok(false);
+        };
+        match verify_host_key_text(&self.known_hosts, &self.name, self.port, &blob) {
+            Ok(()) => Ok(true),
+            Err(message) => {
+                set(message);
+                Ok(false)
+            }
+        }
+    }
+}
+
+type ClientHandle = Handle<HostKeyHandler>;
+
+/// 연결된 체인(점프 호스트들 + 대상). 점프 호스트의 세션을 버리면 그 위의 터널이 끊기므로 체인 전체를 쥔다
+struct Live {
+    chain: Vec<ClientHandle>,
+}
+
+impl Live {
+    fn last(&self) -> &ClientHandle {
+        self.chain.last().expect("체인은 비지 않는다")
+    }
+
+    fn is_closed(&self) -> bool {
+        self.last().is_closed()
+    }
+}
+
+struct Inner {
+    host_spec: String,
+    opts: SshOptions,
+    permits: Arc<Semaphore>,
+    live: Mutex<Option<Arc<Live>>>,
+    /// 연결을 동시에 한 번만 맺는다(기다리던 호출은 맺어진 연결을 쓴다)
+    connect_lock: tokio::sync::Mutex<()>,
+    disposed: AtomicBool,
+    /// 유휴 타이머 세대. 슬롯을 잡으면 올라가 이미 걸린 타이머를 무효로 만든다
+    idle_gen: AtomicU64,
+    /// 걸려 있는 유휴 타이머(새로 걸거나 슬롯을 잡으면 이전 것을 중단한다 — 호출마다 5분짜리 태스크가 쌓이지 않게)
+    idle_timer: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+/// 호스트 하나의 SSH 연결(프로세스 안에서 재사용)
+pub(super) struct Connection {
+    inner: Arc<Inner>,
+}
+
+/// 채널 슬롯. 버려지면(그 뒤에) 유휴 타이머를 건다
+struct Slot {
+    permit: Option<OwnedSemaphorePermit>,
+    inner: Arc<Inner>,
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        drop(self.permit.take());
+        self.inner.start_idle_if_unused();
+    }
+}
+
+impl Inner {
+    fn current(&self) -> Option<Arc<Live>> {
+        let mut g = self.live.lock().unwrap_or_else(PoisonError::into_inner);
+        match g.as_ref() {
+            Some(l) if !l.is_closed() => Some(l.clone()),
+            Some(_) => {
+                // 끊긴 연결: 다음 호출이 다시 맺도록 비우고 점프 호스트 세션도 정리한다
+                let dead = g.take();
+                drop(g);
+                if let Some(l) = dead {
+                    disconnect_in_background(l);
+                }
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn teardown(&self) {
+        let taken = self.live.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(l) = taken {
+            disconnect_in_background(l);
+        }
+    }
+
+    fn start_idle_if_unused(self: &Arc<Self>) {
+        if self.disposed.load(Ordering::SeqCst) || self.permits.available_permits() != self.opts.max_channels {
+            return;
+        }
+        let generation = self.idle_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        let weak = Arc::downgrade(self);
+        let idle = self.opts.timeouts.idle;
+        // 런타임 밖(Drop 이 런타임 종료 중에 불린 경우)이면 타이머를 걸지 않는다
+        let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+        let timer = rt.spawn(async move {
+            tokio::time::sleep(idle).await;
+            if let Some(inner) = weak.upgrade() {
+                if inner.idle_gen.load(Ordering::SeqCst) == generation && inner.permits.available_permits() == inner.opts.max_channels {
+                    inner.teardown();
+                }
+            }
+        });
+        self.set_idle_timer(Some(timer));
+    }
+
+    /// 걸려 있던 유휴 타이머를 중단하고 `new` 로 바꾼다
+    fn set_idle_timer(&self, new: Option<tokio::task::JoinHandle<()>>) {
+        let old = std::mem::replace(&mut *self.idle_timer.lock().unwrap_or_else(PoisonError::into_inner), new);
+        if let Some(t) = old {
+            t.abort();
+        }
+    }
+
+    async fn acquire(self: &Arc<Self>) -> Result<Slot, ExecError> {
+        self.idle_gen.fetch_add(1, Ordering::SeqCst);
+        self.set_idle_timer(None);
+        match self.permits.clone().acquire_owned().await {
+            Ok(permit) => Ok(Slot { permit: Some(permit), inner: self.clone() }),
+            Err(_) => Err(other(DISPOSED)),
+        }
+    }
+
+    async fn live(&self) -> Result<Arc<Live>, ExecError> {
+        if self.disposed.load(Ordering::SeqCst) {
+            return Err(other(DISPOSED));
+        }
+        if let Some(l) = self.current() {
+            return Ok(l);
+        }
+        let _guard = self.connect_lock.lock().await;
+        if let Some(l) = self.current() {
+            return Ok(l);
+        }
+        if self.disposed.load(Ordering::SeqCst) {
+            return Err(other(DISPOSED));
+        }
+        let live = Arc::new(self.do_connect().await?);
+        if self.disposed.load(Ordering::SeqCst) {
+            disconnect_in_background(live);
+            return Err(other(DISPOSED));
+        }
+        *self.live.lock().unwrap_or_else(PoisonError::into_inner) = Some(live.clone());
+        Ok(live)
+    }
+
+    /// 설정을 읽어 대상과 모든 홉을 해석한다(동기 — `Ctx` 가 `Sync` 가 아니라 `await` 를 건너 쥐지 않게 따로 뺐다)
+    fn resolve_nodes(&self) -> (Vec<ResolvedHost>, usize) {
+        // 연결할 때마다 설정을 다시 읽는다(사용자가 ~/.ssh/config 를 고친 뒤 재연결하면 반영)
+        let config = load_ssh_config(&self.opts.config_path, &self.opts.home_dir, &RealFs);
+        let ctx = Ctx { local_user: &self.opts.local_user, env: &*self.opts.env };
+        let target = resolve_host(&config, &self.host_spec, &ctx);
+        let hops: Vec<ResolvedHost> = target.proxy_jump.iter().map(|h| resolve_host(&config, &h.spec, &ctx)).collect();
+        let hop_count = hops.len();
+        (hops.into_iter().chain(std::iter::once(target)).collect(), hop_count)
+    }
+
+    async fn do_connect(&self) -> Result<Live, ExecError> {
+        let (nodes, hop_count) = self.resolve_nodes();
+        for n in &nodes {
+            if let Some(why) = &n.unsupported {
+                return Err(other(format!(
+                    "{}: 지원하지 않는 ssh 설정({why})이 걸려 있어 접속하지 않습니다 — ProxyJump 로 바꾸거나 해당 블록을 정리하세요",
+                    n.alias
+                )));
+            }
+        }
+        let mut chain: Vec<ClientHandle> = Vec::new();
+        let result = self.connect_chain(&nodes, hop_count, &mut chain).await;
+        match result {
+            Ok(()) => Ok(Live { chain }),
+            Err(e) => {
+                if !chain.is_empty() {
+                    disconnect_in_background(Arc::new(Live { chain }));
+                }
+                Err(e)
+            }
+        }
+    }
+
+    async fn connect_chain(&self, nodes: &[ResolvedHost], hop_count: usize, chain: &mut Vec<ClientHandle>) -> Result<(), ExecError> {
+        for (i, node) in nodes.iter().enumerate() {
+            let prefix = if i < hop_count { format!("[점프 호스트 {}] ", node.alias) } else { String::new() };
+            let handle = match i {
+                0 => self.open_hop(node, None, &prefix).await?,
+                _ => {
+                    let from = &nodes[i - 1];
+                    let via = chain.last().expect("앞 홉이 있다");
+                    self.open_hop(node, Some((via, from)), &prefix).await?
+                }
+            };
+            chain.push(handle);
+        }
+        let last = chain.last().expect("대상이 있다");
+        check_posix_shell(last, self.opts.timeouts.probe).await
+    }
+
+    /// 호스트 하나를 연다(TCP 또는 앞 홉의 direct-tcpip 위에서 키 교환·호스트 키 검증·인증). 전체가 `ready` 시간 안이어야 한다
+    async fn open_hop(&self, node: &ResolvedHost, via: Option<(&ClientHandle, &ResolvedHost)>, prefix: &str) -> Result<ClientHandle, ExecError> {
+        let t = self.opts.timeouts;
+        let where_ = format!("{}:{}", node.host_name, node.port);
+        let work = self.open_hop_inner(node, via, prefix, &where_);
+        match tokio::time::timeout(t.ready, work).await {
+            Ok(r) => r,
+            Err(_) => Err(other(format!("{prefix}연결 시간이 초과되었습니다 ({where_}, {}초).", t.ready.as_secs()))),
+        }
+    }
+
+    async fn open_hop_inner(&self, node: &ResolvedHost, via: Option<(&ClientHandle, &ResolvedHost)>, prefix: &str, where_: &str) -> Result<ClientHandle, ExecError> {
+        let Ok(port) = u16::try_from(node.port) else {
+            return Err(other(format!("{prefix}포트가 1~65535 범위 밖입니다 ({where_})")));
+        };
+        let mut plan = auth::build_plan(node, &self.opts.home_dir, &self.opts.agent, &*self.opts.env);
+        if plan.is_empty() {
+            let tail = format!("ssh-agent 를 실행해 키를 등록하거나 암호 없는 개인키를 IdentityFile 로 지정하세요. {}", plan.notes.join(" "));
+            return Err(other(format!("{prefix}사용할 수 있는 인증 수단이 없습니다 ({}@{}). {}", node.user, node.host_name, tail.trim())));
+        }
+        // UserKnownHostsFile·HostKeyAlias 를 따른다(지정이 없으면 기본 known_hosts 와 HostName).
+        // OpenSSH 는 HostKeyAlias 를 쓸 때 [이름]:포트 가 아니라 별칭 그대로 조회한다(포트를 붙이지 않는다)
+        let files: Vec<&str> =
+            if node.known_hosts_files.is_empty() { vec![self.opts.known_hosts_path.as_str()] } else { node.known_hosts_files.iter().map(String::as_str).collect() };
+        let known_hosts = Arc::new(read_known_hosts(&files));
+        let name = node.host_key_alias.clone().unwrap_or_else(|| node.host_name.clone());
+        let kh_port = if node.host_key_alias.is_some() { 22 } else { node.port };
+        let algorithms = host_key_algorithms(&known_host_key_algorithms(&known_hosts, &name, kh_port));
+
+        let verdict = Arc::new(Mutex::new(None));
+        let handler = HostKeyHandler { known_hosts, name, port: kh_port, verdict: verdict.clone() };
+        let mut preferred = Preferred::default();
+        if !algorithms.is_empty() {
+            preferred.key = Cow::Owned(algorithms);
+        }
+        let config = Arc::new(client::Config {
+            keepalive_interval: Some(self.opts.timeouts.keepalive),
+            keepalive_max: 3,
+            inactivity_timeout: None,
+            nodelay: true,
+            preferred,
+            ..client::Config::default()
+        });
+        let fail = |e: russh::Error, plan_notes: &[String]| other(format!("{prefix}{}", describe_error(&e, node, where_, &verdict, plan_notes, self.opts.timeouts.ready)));
+
+        // password·keyboard-interactive 는 의도적으로 쓰지 않는다(키/agent 인증만)
+        let mut handle = match via {
+            None => {
+                let tcp = tcp_connect(&node.host_name, port, prefix, where_).await?;
+                // russh 의 연결 함수는 이 파일에서만 부른다(clippy.toml)
+                #[allow(clippy::disallowed_methods)]
+                let r = client::connect_stream(config, tcp, handler).await;
+                r.map_err(|e| fail(e, &plan.notes))?
+            }
+            Some((via_handle, from)) => {
+                #[allow(clippy::disallowed_methods)]
+                let tunnel = via_handle.channel_open_direct_tcpip(node.host_name.clone(), node.port, "127.0.0.1", 0).await;
+                let channel = tunnel.map_err(|e| {
+                    other(format!("점프 호스트 {} 에서 {}:{} 로 연결하지 못했습니다: {e}", from.alias, node.host_name, node.port))
+                })?;
+                #[allow(clippy::disallowed_methods)]
+                let r = client::connect_stream(config, channel.into_stream(), handler).await;
+                r.map_err(|e| fail(e, &plan.notes))?
+            }
+        };
+        match auth::authenticate(&mut handle, &node.user, &mut plan).await {
+            Ok(true) => Ok(handle),
+            Ok(false) => {
+                let notes = plan.notes.join(" ");
+                Err(other(format!(
+                    "{prefix}인증에 실패했습니다 ({}@{where_}). 비밀번호 인증은 지원하지 않습니다 — 서버에 공개키를 등록하고 ssh-agent 에 키를 올리거나 IdentityFile 을 지정하세요. {notes}",
+                    node.user
+                ).trim_end().to_string()))
+            }
+            Err(e) => Err(fail(e, &plan.notes)),
+        }
+    }
+}
+
+/// known_hosts 에 등록된 키 종류 이름 → russh 알고리즘. 알 수 없는 이름(`sk-…` 등)은 건너뛴다
+fn host_key_algorithms(names: &[String]) -> Vec<Algorithm> {
+    names
+        .iter()
+        .filter_map(|n| match n.as_str() {
+            "ssh-ed25519" => Some(Algorithm::Ed25519),
+            "ecdsa-sha2-nistp256" => Some(Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }),
+            "ecdsa-sha2-nistp384" => Some(Algorithm::Ecdsa { curve: EcdsaCurve::NistP384 }),
+            "ecdsa-sha2-nistp521" => Some(Algorithm::Ecdsa { curve: EcdsaCurve::NistP521 }),
+            "rsa-sha2-512" => Some(Algorithm::Rsa { hash: Some(HashAlg::Sha512) }),
+            "rsa-sha2-256" => Some(Algorithm::Rsa { hash: Some(HashAlg::Sha256) }),
+            "ssh-rsa" => Some(Algorithm::Rsa { hash: None }),
+            _ => None,
+        })
+        .collect()
+}
+
+async fn tcp_connect(host: &str, port: u16, prefix: &str, where_: &str) -> Result<TcpStream, ExecError> {
+    let not_found = || other(format!("{prefix}호스트 이름을 찾을 수 없습니다 ({host})."));
+    let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, port)).await.map_err(|_| not_found())?.collect();
+    if addrs.is_empty() {
+        return Err(not_found());
+    }
+    TcpStream::connect(&addrs[..]).await.map_err(|e| match e.kind() {
+        std::io::ErrorKind::ConnectionRefused => other(format!("{prefix}연결이 거부되었습니다 ({where_}). sshd 가 떠 있는지, 포트가 맞는지 확인하세요.")),
+        std::io::ErrorKind::TimedOut => other(format!("{prefix}연결 시간이 초과되었습니다 ({where_}).")),
+        _ => other(format!("{prefix}SSH 연결에 실패했습니다 ({where_}): {e}")),
+    })
+}
+
+/// 연결 오류 문구(앞의 `prefix` 는 호출자가 붙인다). 호스트 키 거부 사유가 있으면 그것이 우선이다
+fn describe_error(e: &russh::Error, node: &ResolvedHost, where_: &str, verdict: &Mutex<Option<String>>, notes: &[String], ready: Duration) -> String {
+    if let Some(v) = verdict.lock().unwrap_or_else(PoisonError::into_inner).clone() {
+        return v;
+    }
+    match e {
+        russh::Error::ConnectionTimeout => format!("연결 시간이 초과되었습니다 ({where_}, {}초).", ready.as_secs()),
+        russh::Error::IO(io) if io.kind() == std::io::ErrorKind::ConnectionRefused => {
+            format!("연결이 거부되었습니다 ({where_}). sshd 가 떠 있는지, 포트가 맞는지 확인하세요.")
+        }
+        russh::Error::Disconnect | russh::Error::HUP => format!("연결이 닫혔습니다 ({}:{})", node.host_name, node.port),
+        other_err => format!("SSH 연결에 실패했습니다 ({where_}): {other_err} {}", notes.join(" ")).trim_end().to_string(),
+    }
+}
+
+/// 체인을 닫는다(대상 → 점프 순). 동기 문맥(Drop)에서도 부를 수 있게 런타임에 맡긴다
+fn disconnect_in_background(live: Arc<Live>) {
+    let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+    rt.spawn(async move {
+        for h in live.chain.iter().rev() {
+            let _ = tokio::time::timeout(KILL_TIMEOUT, h.disconnect(russh::Disconnect::ByApplication, "", "en")).await;
+        }
+    });
+}
+
+/// 원격 로그인 셸이 POSIX 계열인지 확인한다(`SHELL_PROBE` 참고). 아니면 사용자 값이 든 명령을 보내지 않는다
+async fn check_posix_shell(handle: &ClientHandle, limit: Duration) -> Result<(), ExecError> {
+    let probe = async {
+        let mut ch = tokio::time::timeout(OPEN_TIMEOUT, handle.channel_open_session())
+            .await
+            .map_err(|_| other("원격 셸을 확인하지 못했습니다: 채널을 열지 못했습니다"))?
+            .map_err(|e| other(format!("원격 셸을 확인하지 못했습니다: {e}")))?;
+        ch.exec(true, SHELL_PROBE).await.map_err(|e| other(format!("원격 셸을 확인하지 못했습니다: {e}")))?;
+        let mut out: Vec<u8> = Vec::new();
+        let (mut eof, mut exited) = (false, false);
+        while let Some(msg) = ch.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => {
+                    if out.len() < 256 {
+                        out.extend_from_slice(&data);
+                    }
+                }
+                ChannelMsg::Failure => return Err(other("원격 셸을 확인하지 못했습니다: 서버가 exec 요청을 거부했습니다")),
+                ChannelMsg::ExitStatus { .. } | ChannelMsg::ExitSignal { .. } => exited = true,
+                ChannelMsg::Eof => eof = true,
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+            if eof && exited {
+                break;
+            }
+        }
+        let _ = ch.close().await;
+        Ok(out)
+    };
+    let out = match tokio::time::timeout(limit, probe).await {
+        Ok(r) => r?,
+        Err(_) => return Err(other("원격 셸 확인이 시간 안에 끝나지 않았습니다")),
+    };
+    if js_trim(&String::from_utf8_lossy(&out)) == SHELL_PROBE_EXPECT {
+        Ok(())
+    } else {
+        Err(other("원격 로그인 셸이 POSIX 셸이 아닙니다(sh·bash·zsh·fish 만 지원합니다). Windows OpenSSH 서버라면 기본 셸을 바꿔야 합니다."))
+    }
+}
+
+async fn cancelled(cancel: &Option<CancellationToken>) {
+    match cancel {
+        Some(t) => t.cancelled().await,
+        None => std::future::pending().await,
+    }
+}
+
+/// 원격 프로세스에 KILL 을 요청하고 채널을 닫는다(이미 닫힌 채널이면 실패해도 무해하다)
+async fn kill_channel(ch: &Channel<Msg>) {
+    let _ = tokio::time::timeout(KILL_TIMEOUT, async {
+        let _ = ch.signal(Sig::KILL).await;
+        let _ = ch.close().await;
+    })
+    .await;
+}
+
+/// KILL 뒤 서버가 채널을 닫을 때까지 남은 메시지를 버리며 기다린다(슬롯을 닫힘 뒤에 돌려주려고)
+async fn drain_until_closed(ch: &mut Channel<Msg>) {
+    let _ = tokio::time::timeout(CLOSE_WAIT, async { while ch.wait().await.is_some() {} }).await;
+}
+
+enum Outcome {
+    /// 원격이 끝났다. 종료 코드를 받지 못했으면 `None`(연결이 끊긴 것)
+    Done(Option<i32>),
+    /// stdout 이 상한을 넘었다
+    TooBig,
+    /// 서버가 exec 요청을 거부했다
+    Rejected,
+    Aborted,
+}
+
+struct Job {
+    live: Arc<Live>,
+    command: String,
+    max_stdout: usize,
+    git_args: Vec<String>,
+}
+
+impl Job {
+    /// 채널을 열어 명령을 실행하고 끝까지 읽는다. **슬롯은 이 함수가 끝난 뒤(닫힘 확인 뒤)** 호출자가 돌려준다
+    async fn run(self, token: CancellationToken) -> Result<RunResult, ExecError> {
+        let start = async {
+            let ch = self.live.last().channel_open_session().await.map_err(|e| format!("{e}"))?;
+            ch.exec(true, self.command.as_str()).await.map_err(|e| format!("{e}"))?;
+            Ok::<_, String>(ch)
+        };
+        let mut ch = match tokio::time::timeout(OPEN_TIMEOUT, start).await {
+            Ok(Ok(ch)) => ch,
+            Ok(Err(e)) => return Err(other(format!("원격 명령을 시작하지 못했습니다: {e}"))),
+            Err(_) => return Err(other("원격 명령을 시작하지 못했습니다: 시간 초과")),
+        };
+        let mut stdout: Vec<u8> = Vec::new();
+        let mut stderr: Vec<u8> = Vec::new();
+        let outcome = self.read_all(&mut ch, &token, &mut stdout, &mut stderr).await;
+        match outcome {
+            Outcome::Done(code) => {
+                let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
+                match code {
+                    None => Err(other(CONNECTION_LOST)),
+                    Some(code) => Ok(RunResult { stdout, stderr: String::from_utf8_lossy(&stderr).into_owned(), code }),
+                }
+            }
+            Outcome::TooBig => {
+                kill_channel(&ch).await;
+                drain_until_closed(&mut ch).await;
+                Err(ExecError::Git { message: format!("output exceeded {} bytes", self.max_stdout), code: -1, stderr: String::new(), args: self.git_args.clone() })
+            }
+            Outcome::Rejected => {
+                let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
+                Err(other("원격 명령을 시작하지 못했습니다: 서버가 exec 요청을 거부했습니다"))
+            }
+            Outcome::Aborted => {
+                kill_channel(&ch).await;
+                drain_until_closed(&mut ch).await;
+                Err(ExecError::Aborted)
+            }
+        }
+    }
+
+    /// 채널이 닫히거나(Close) EOF·종료 코드를 모두 받을 때까지 읽는다. **EOF·종료 코드만 보고 끊지 않는다** — 데이터는 항상 그 앞에 온다
+    async fn read_all(&self, ch: &mut Channel<Msg>, token: &CancellationToken, stdout: &mut Vec<u8>, stderr: &mut Vec<u8>) -> Outcome {
+        let mut code: Option<i32> = None;
+        let mut eof = false;
+        loop {
+            let msg = tokio::select! {
+                biased;
+                _ = token.cancelled() => return Outcome::Aborted,
+                m = ch.wait() => m,
+            };
+            let Some(msg) = msg else { return Outcome::Done(code) };
+            match msg {
+                ChannelMsg::Data { data } => {
+                    if stdout.len() + data.len() > self.max_stdout {
+                        return Outcome::TooBig;
+                    }
+                    stdout.extend_from_slice(&data);
+                }
+                ChannelMsg::ExtendedData { data, ext: 1 } => {
+                    let room = MAX_STDERR.saturating_sub(stderr.len());
+                    stderr.extend_from_slice(&data[..data.len().min(room)]);
+                }
+                ChannelMsg::ExitStatus { exit_status } => code = Some(i32::try_from(exit_status).unwrap_or(-1)),
+                // 시그널로 죽었으면 -1(TS 와 같다)
+                ChannelMsg::ExitSignal { .. } => code = Some(-1),
+                ChannelMsg::Eof => eof = true,
+                ChannelMsg::Failure => return Outcome::Rejected,
+                ChannelMsg::Close => return Outcome::Done(code),
+                _ => {}
+            }
+            if eof && code.is_some() {
+                return Outcome::Done(code);
+            }
+        }
+    }
+}
+
+impl Connection {
+    pub(super) fn new(host_spec: &str, opts: SshOptions) -> Self {
+        let max = opts.max_channels.max(1);
+        let opts = SshOptions { max_channels: max, ..opts };
+        Connection {
+            inner: Arc::new(Inner {
+                host_spec: host_spec.to_string(),
+                permits: Arc::new(Semaphore::new(max)),
+                opts,
+                live: Mutex::new(None),
+                connect_lock: tokio::sync::Mutex::new(()),
+                disposed: AtomicBool::new(false),
+                idle_gen: AtomicU64::new(0),
+                idle_timer: Mutex::new(None),
+            }),
+        }
+    }
+
+    /// 지금 살아 있는 연결이 있는가(관측용)
+    pub(super) fn is_connected(&self) -> bool {
+        self.inner.current().is_some()
+    }
+
+    /// 비어 있는 채널 슬롯 수(관측용 — 슬롯 누수 시험)
+    pub(super) fn free_slots(&self) -> usize {
+        self.inner.permits.available_permits()
+    }
+
+    /// 원격 명령 하나를 실행해 출력을 모은다. 연결은 지연해서 맺고, 동시 채널은 세마포어로 제한한다.
+    /// 호출자가 취소(`opts.cancel`)하거나 future 를 버리면 원격 프로세스에 KILL 을 보내고 슬롯은 채널이 닫힌 뒤에 돌려준다.
+    pub(super) async fn run(&self, command: String, git_args: &[String], opts: &RunOpts) -> Result<RunResult, ExecError> {
+        if opts.cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+            return Err(ExecError::Aborted);
+        }
+        let inner = &self.inner;
+        let Some(slot) = (tokio::select! {
+            biased;
+            _ = cancelled(&opts.cancel) => None,
+            s = inner.acquire() => Some(s),
+        }) else {
+            return Err(ExecError::Aborted);
+        };
+        let slot = slot?;
+        // 슬롯을 얻은 뒤 연결 전 사이에 이미 취소됐으면 연결(최대 15초)을 기다리지 않는다
+        let live = tokio::select! {
+            biased;
+            _ = cancelled(&opts.cancel) => return Err(ExecError::Aborted),
+            l = inner.live() => l?,
+        };
+        let job = Job { live, command, max_stdout: opts.max_buffer.unwrap_or(DEFAULT_MAX_BUFFER), git_args: to_strings(git_args) };
+        let token = CancellationToken::new();
+        // 이 future 가 어떤 경로로든 끝나거나 버려지면 태스크에 취소를 알린다(이미 끝났다면 무해하다)
+        let _guard = token.clone().drop_guard();
+        let (tx, rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let r = job.run(token).await;
+            let _ = tx.send(r);
+            drop(slot);
+        });
+        tokio::select! {
+            biased;
+            _ = cancelled(&opts.cancel) => Err(ExecError::Aborted),
+            r = rx => r.unwrap_or_else(|_| Err(other("SSH 실행 작업이 중단되었습니다"))),
+        }
+    }
+
+    /// 연결을 닫고 이후 호출을 거부한다. 슬롯을 기다리던 호출도 깨어나 "이미 종료" 로 실패한다
+    pub(super) fn dispose(&self) {
+        self.inner.disposed.store(true, Ordering::SeqCst);
+        self.inner.idle_gen.fetch_add(1, Ordering::SeqCst);
+        self.inner.set_idle_timer(None);
+        self.inner.permits.close();
+        self.inner.teardown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use russh::client::Handler;
+    use russh::keys::PrivateKey;
+
+    use super::*;
+
+    fn ed25519() -> russh::keys::PublicKey {
+        PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap().public_key().clone()
+    }
+
+    fn line(host: &str, key: &russh::keys::PublicKey) -> String {
+        format!("{host} {}\n", key.to_openssh().unwrap().split_whitespace().take(2).collect::<Vec<_>>().join(" "))
+    }
+
+    fn handler(known_hosts: String, name: &str) -> (HostKeyHandler, Arc<Mutex<Option<String>>>) {
+        let verdict = Arc::new(Mutex::new(None));
+        (HostKeyHandler { known_hosts: Arc::new(known_hosts), name: name.to_string(), port: 22, verdict: verdict.clone() }, verdict)
+    }
+
+    async fn check(h: &mut HostKeyHandler, key: &russh::keys::PublicKey) -> bool {
+        h.check_server_key(&PublicKeyOrCertificate::PublicKey { key: key.clone(), hash_alg: None }).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn 호스트_키_콜백은_known_hosts_와_같을_때만_수락한다() {
+        let key = ed25519();
+        let (mut h, verdict) = handler(line("example.com", &key), "example.com");
+        assert!(check(&mut h, &key).await);
+        assert!(verdict.lock().unwrap().is_none());
+        // 다른 키: 거부하고 사유를 남긴다
+        assert!(!check(&mut h, &ed25519()).await);
+        assert!(verdict.lock().unwrap().as_deref().is_some_and(|m| m.contains("중간자")));
+    }
+
+    #[tokio::test]
+    async fn 호스트_키_콜백은_비_ascii_호스트를_판정하지_않고_거부한다() {
+        // check_host_key 의 Unsupported 가 콜백의 거부로 이어진다(설정 관문을 거치지 않고 직접 부른다)
+        let key = ed25519();
+        let (mut h, verdict) = handler(line("example.com", &key), "호스트.example");
+        assert!(!check(&mut h, &key).await);
+        assert!(verdict.lock().unwrap().as_deref().is_some_and(|m| m.contains("비 ASCII")));
+    }
+
+    #[tokio::test]
+    async fn 호스트_키_콜백은_폐기된_키와_모르는_호스트를_거부한다() {
+        let key = ed25519();
+        let (mut h, verdict) = handler(format!("@revoked example.com {}\n", line("", &key).trim_start()), "example.com");
+        assert!(!check(&mut h, &key).await);
+        assert!(verdict.lock().unwrap().as_deref().is_some_and(|m| m.contains("폐기")));
+        let (mut h, verdict) = handler(String::new(), "example.com");
+        assert!(!check(&mut h, &key).await);
+        assert!(verdict.lock().unwrap().as_deref().is_some_and(|m| m.contains("알 수 없는 호스트")));
+    }
+}

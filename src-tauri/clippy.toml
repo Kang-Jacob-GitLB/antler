@@ -24,4 +24,30 @@ disallowed-methods = [
   # reqwest 0.13 의 실제 이름(위 두 줄은 이전 이름이라 0.13 에서는 아무것도 막지 못한다)
   { path = "reqwest::ClientBuilder::tls_danger_accept_invalid_certs", reason = "인증서 검증을 끄지 않는다" },
   { path = "reqwest::ClientBuilder::tls_danger_accept_invalid_hostnames", reason = "호스트 이름 검증을 끄지 않는다" },
+  # SSH(src/git/exec/ssh): 연결·인증·포워딩 API 는 connection.rs·auth.rs 한 곳에서만, 허용된 것만 쓴다 — 호스트 키 검증(TOFU 없음)·인증 수단(키·agent 뿐)·
+  # 원격 명령(build_remote_command 만)을 우회하는 호출이 생기지 않게 한다. connection.rs 의 connect_stream·channel_open_direct_tcpip(ProxyJump) 만
+  # `#[allow(clippy::disallowed_methods)]` 와 이유를 단다. 시험 서버·날 클라이언트(tests/ssh/)는 같은 방식으로 allow 한다
+  { path = "russh::client::connect", reason = "SSH 연결은 ssh/connection.rs 에서만 맺는다(호스트 키 검증·시간 제한·방어)" },
+  { path = "russh::client::connect_stream", reason = "SSH 연결은 ssh/connection.rs 에서만 맺는다(호스트 키 검증·시간 제한·방어)" },
+  { path = "russh::client::Handle::authenticate_password", reason = "비밀번호 인증은 쓰지 않는다(키·agent 뿐)" },
+  { path = "russh::client::Handle::authenticate_keyboard_interactive_start", reason = "keyboard-interactive 인증은 쓰지 않는다(키·agent 뿐)" },
+  { path = "russh::client::Handle::authenticate_keyboard_interactive_respond", reason = "keyboard-interactive 인증은 쓰지 않는다(키·agent 뿐)" },
+  { path = "russh::client::Handle::authenticate_gssapi_with_mic", reason = "GSSAPI 인증은 쓰지 않는다(키·agent 뿐)" },
+  # known_hosts 는 우리 쪽 검증(verify_host_key_text)만 쓴다 — russh 의 함수는 사용자 홈의 파일을 읽고 learn 은 파일에 **쓴다**(TOFU)
+  { path = "russh::keys::known_hosts::learn_known_hosts", reason = "known_hosts 에 쓰지 않는다(TOFU 없음)" },
+  { path = "russh::keys::known_hosts::learn_known_hosts_path", reason = "known_hosts 에 쓰지 않는다(TOFU 없음)" },
+  { path = "russh::keys::known_hosts::check_known_hosts", reason = "호스트 키는 ssh/known_hosts.rs 의 판정만 쓴다" },
+  { path = "russh::keys::known_hosts::check_known_hosts_path", reason = "호스트 키는 ssh/known_hosts.rs 의 판정만 쓴다" },
+  # 포워딩·agent 전달·X11 요청 금지(클라이언트 쪽 요청 API)
+  { path = "russh::client::Handle::tcpip_forward", reason = "원격 포트 포워딩을 요청하지 않는다" },
+  { path = "russh::client::Handle::cancel_tcpip_forward", reason = "포트 포워딩을 쓰지 않는다" },
+  { path = "russh::client::Handle::streamlocal_forward", reason = "소켓 포워딩을 요청하지 않는다" },
+  { path = "russh::client::Handle::cancel_streamlocal_forward", reason = "소켓 포워딩을 쓰지 않는다" },
+  { path = "russh::client::Handle::channel_open_direct_tcpip", reason = "direct-tcpip 는 ProxyJump(ssh/connection.rs)에서만 연다" },
+  { path = "russh::client::Handle::channel_open_direct_streamlocal", reason = "소켓 포워딩을 쓰지 않는다" },
+  { path = "russh::client::Handle::channel_open_x11", reason = "X11 을 쓰지 않는다" },
+  { path = "russh::channels::Channel::agent_forward", reason = "agent 전달을 요청하지 않는다" },
+  { path = "russh::channels::Channel::request_x11", reason = "X11 전달을 요청하지 않는다" },
+  { path = "russh::channels::ChannelWriteHalf::agent_forward", reason = "agent 전달을 요청하지 않는다" },
+  { path = "russh::channels::ChannelWriteHalf::request_x11", reason = "X11 전달을 요청하지 않는다" },
 ]
