@@ -7661,7 +7661,7 @@ mod secret_store {
 // (GhCli 는 환경을 비우고 허용 목록만 넘기므로 임의의 환경 변수는 가짜에 닿지 않는다). 기록은 모두 exe 옆의 파일이다:
 //   gh.runs(실행마다 인자 한 줄, 탭으로 이음)·gh.env(받은 환경 변수)·gh.pid·gh.child.pid(손자)·executed.marker(`mark` 모드)
 // 모드: `token <값>`(값과 CRLF 출력) · `empty` · `big <n>`(x 를 n 바이트) · `flood`(끝없이 출력) · `hang` · `hang_tree`(손자 하나를 띄우고 멈춤)
-//       · `fail <코드>`(stdout·stderr 에 토큰 모양 문자열을 쓰고 그 코드로 종료) · `mark`(실행됐다는 표시 파일을 만든다)
+//       · `fail <코드>`(stdout·stderr 에 토큰 모양 문자열을 쓰고 그 코드로 종료) · `mark`(실행됐다는 표시 파일을 만든다) · `cwd`(자기 작업 디렉터리를 gh.cwd 에 적는다)
 #[cfg(windows)]
 mod fake_gh {
     use std::io::Write;
@@ -7755,6 +7755,13 @@ mod fake_gh {
                 eprint!("gho_STDERR_LEAK C:\\Users\\secret\\path");
                 std::process::exit(rest.parse().unwrap_or(1));
             }
+            "cwd" => {
+                // 자기 작업 디렉터리를 적고 토큰을 낸다
+                std::fs::write(dir.join("gh.cwd"), std::env::current_dir().expect("cwd").to_string_lossy().as_bytes()).expect("cwd");
+                let _ = write!(out, "gho_cwd");
+                let _ = out.flush();
+                std::process::exit(0);
+            }
             "mark" => {
                 std::fs::write(dir.join("executed.marker"), "x").expect("marker");
                 let _ = write!(out, "marked");
@@ -7803,8 +7810,10 @@ mod fake_gh {
             ]
         }
 
+        /// 시간 초과를 보는 시험이 아니면 제한을 넉넉히 둔다 — 새로 하드링크한 gh.exe 의 첫 실행은 백신 검사·부하로 수 초씩 늦어
+        /// 운영 값(10초)으로는 간헐 실패했다. 운영 값 자체는 상수(TIMEOUT)와 시간 초과 시험(cli_with)이 본다
         pub fn cli(&self) -> GhCli {
-            GhCli::new().with_env_for_test(self.source_env())
+            GhCli::new().with_env_for_test(self.source_env()).with_limits_for_test(Duration::from_secs(60), antler_lib::github::gh_cli::MAX_STDOUT)
         }
 
         /// 제한 시간·stdout 상한을 줄인 `GhCli`
@@ -8061,6 +8070,17 @@ mod gh_cli_run {
         assert!(text.contains("1 passed"), "자식이 시험을 돌리지 않았다:\n{text}");
         assert!(!trap.path.join("executed.marker").exists(), "cwd 의 gh.exe 가 실행됐다");
         assert!(trap.runs().is_empty());
+    }
+
+    #[tokio::test]
+    async fn gh_cli_는_자식의_작업_디렉터리를_gh_exe_폴더로_고정한다() {
+        let fake = Dir::new("cwd");
+        // 호출하는 쪽의 cwd 는 가짜가 든 폴더가 아니다(cwd 를 바꾸지 않고, 물려받았다면 다른 값이 보인다)
+        let mine = std::env::current_dir().unwrap();
+        assert_ne!(std::fs::canonicalize(&mine).unwrap(), std::fs::canonicalize(&fake.path).unwrap());
+        fake.cli().token().await.unwrap();
+        let seen = fake.read("gh.cwd").expect("가짜가 적은 cwd");
+        assert_eq!(std::fs::canonicalize(&seen).unwrap(), std::fs::canonicalize(&fake.path).unwrap(), "gh 의 cwd: {seen}");
     }
 
     #[tokio::test]

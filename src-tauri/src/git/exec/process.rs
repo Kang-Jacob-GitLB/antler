@@ -236,12 +236,12 @@ impl Drop for ChildGuard {
 #[cfg(windows)]
 fn attach_job(child: &mut Child, job: Option<super::job::Job>) -> Result<Option<super::job::Job>, ExecError> {
     let Some(job) = job else { return Ok(None) };
-    let Some(raw) = child.raw_handle() else {
+    if child.raw_handle().is_none() {
         let _ = child.start_kill();
         return Err(ExecError::SpawnFailed { message: "자식 프로세스의 핸들을 얻지 못했다".into() });
-    };
-    let attached = job.assign(raw).is_ok();
-    if let Err(e) = super::job::resume_process(raw) {
+    }
+    let attached = job.assign(child).is_ok();
+    if let Err(e) = super::job::resume_process(child) {
         if attached {
             job.terminate();
         } else {

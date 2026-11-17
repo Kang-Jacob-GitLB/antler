@@ -54,19 +54,21 @@ fn comparable(p: &Path) -> String {
 
 /// `path`(PATH 값)에서 실행할 `gh.exe` 의 절대 경로를 찾는다. 앞 항목이 우선이다.
 /// 빈 항목·절대 경로가 아닌 항목(`.`·`bin`·`C:foo`·`\foo` 는 모두 현재 디렉터리 기준으로 풀린다)과 `cwd` 와 같은 항목은 건너뛴다.
+/// 동기 파일 시스템 호출이라 비동기 문맥에서는 `spawn_blocking` 안에서 부른다. 파일이 있는 항목만 `cwd` 와 비교한다(canonicalize 가 비싸다).
 pub fn find_gh(path: &str, cwd: Option<&Path>) -> Option<PathBuf> {
     let cwd = cwd.map(comparable);
     for dir in std::env::split_paths(path) {
         if dir.as_os_str().is_empty() || !dir.is_absolute() {
             continue;
         }
+        let candidate = dir.join(GH_FILE);
+        if !candidate.is_file() {
+            continue;
+        }
         if cwd.as_deref().is_some_and(|c| comparable(&dir) == c) {
             continue;
         }
-        let candidate = dir.join(GH_FILE);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
+        return Some(candidate);
     }
     None
 }
@@ -134,23 +136,17 @@ impl GhCli {
         self
     }
 
-    fn env(&self) -> Vec<(String, String)> {
-        match &self.source_env {
-            Some(env) => gh_env(env),
-            None => {
-                let vars: Vec<(String, String)> = std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect();
-                gh_env(&vars)
-            }
-        }
-    }
-
-    /// gh 를 인자와 함께 실행해 stdout 을 돌려준다. 종료 코드가 0 이 아니면 실패
+    /// gh 를 인자와 함께 실행해 stdout 을 돌려준다. 종료 코드가 0 이 아니면 실패.
+    /// 환경 수집과 gh 탐색(동기 파일 시스템 호출)도 제한 시간 안에서 `spawn_blocking` 으로 돈다
     async fn run(&self, args: &[&str]) -> Result<Zeroizing<Vec<u8>>, Failure> {
-        let env = self.env();
-        let path = env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v.as_str()).unwrap_or_default();
-        let cwd = std::env::current_dir().ok();
-        let program = find_gh(path, cwd.as_deref()).ok_or(Failure::Missing)?;
-        match tokio::time::timeout(self.timeout, exec(&program, args, &env, self.max_stdout)).await {
+        let source_env = self.source_env.clone();
+        let max_stdout = self.max_stdout;
+        let work = async move {
+            let (env, program) = tokio::task::spawn_blocking(move || resolve(source_env)).await.map_err(|_| Failure::Failed)?;
+            let program = program.ok_or(Failure::Missing)?;
+            exec(&program, args, &env, max_stdout).await
+        };
+        match tokio::time::timeout(self.timeout, work).await {
             Ok(r) => r,
             // future 가 버려지며 Running 이 트리를 죽인다
             Err(_) => Err(Failure::Timeout),
@@ -186,11 +182,30 @@ impl ExternalTokenProvider for GhCli {
     }
 }
 
+/// gh 에 넘길 환경(TS 의 `env()`; 원본이 없으면 이 프로세스의 환경 — [`gh_env`] 로 걸러진다)과 실행할 gh 의 절대 경로. 동기 호출이다
+fn resolve(source_env: Option<Vec<(String, String)>>) -> (Vec<(String, String)>, Option<PathBuf>) {
+    let env = match source_env {
+        Some(env) => gh_env(&env),
+        None => {
+            let vars: Vec<(String, String)> = std::env::vars_os().filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?))).collect();
+            gh_env(&vars)
+        }
+    };
+    let path = env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")).map(|(_, v)| v.as_str()).unwrap_or_default();
+    let cwd = std::env::current_dir().ok();
+    let program = find_gh(path, cwd.as_deref());
+    (env, program)
+}
+
 /// gh 를 띄워 stdout 을 상한까지 읽고 종료를 기다린다
 async fn exec(program: &Path, args: &[&str], env: &[(String, String)], max_stdout: usize) -> Result<Zeroizing<Vec<u8>>, Failure> {
     // gh 를 띄우는 유일한 지점. 환경을 비우고 허용 목록만 넘긴다(git 실행기와 규칙이 달라 process.rs 를 쓰지 않는다)
     #[allow(clippy::disallowed_methods)]
     let mut cmd = tokio::process::Command::new(program);
+    // cwd 는 찾은 gh 의 폴더로 고정한다 — Antler 의 cwd(저장소 폴더일 수 있다)를 물려주지 않는다
+    if let Some(dir) = program.parent() {
+        cmd.current_dir(dir);
+    }
     cmd.args(args).env_clear().envs(env.iter().map(|(k, v)| (k, v))).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     // Job 은 spawn 전에 만든다. 못 만들면 gh 를 띄우지 않는다
     #[cfg(windows)]
@@ -206,9 +221,8 @@ async fn exec(program: &Path, args: &[&str], env: &[(String, String)], max_stdou
     // Running 이 버려지면 Job 이 닫히고 트리가 죽는다 — 할당·재개에 실패해도 정지된 gh 를 남기지 않는다
     #[cfg(windows)]
     {
-        let raw = running.child.raw_handle().ok_or(Failure::Failed)?;
-        running.job.assign(raw).map_err(|_| Failure::Failed)?;
-        crate::git::exec::job::resume_process(raw).map_err(|_| Failure::Failed)?;
+        running.job.assign(&running.child).map_err(|_| Failure::Failed)?;
+        crate::git::exec::job::resume_process(&running.child).map_err(|_| Failure::Failed)?;
     }
     let Some(mut stdout) = stdout else { return Err(Failure::Failed) };
 
