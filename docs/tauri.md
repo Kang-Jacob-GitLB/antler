@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소)·PR 5(Jira 서비스)·PR 6(Jira 연결: `jira:*` 를 Rust 가 처리, `ANTLER_RUST_API`)·PR 7(GitHub 서비스, 연결 안 함)·PR 8(gh CLI 토큰 가져오기, 연결 안 함) 완료, GitHub 는 아직 앱에 연결 안 됨(연결 9). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -438,7 +438,7 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
   Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
   `reqwest::Error` 의 Display 는 쓰지 않는다. 비밀은 `SecretString`(Display·Serialize 없음, Debug `***`)이고 오류 문구는 마지막에 `redact_secrets` 를 거친다.
 - **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버, 완료) → 4 SecretStore(키링·메모리, 완료) → 5 Jira 서비스(완료) →
-  6 Jira 연결(채널·`openExternal`, 완료) → 7 GitHub 서비스(완료) → 8 gh CLI(완료) → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
+  6 Jira 연결(채널·`openExternal`, 완료) → 7 GitHub 서비스(완료) → 8 gh CLI(완료) → 9 GitHub 연결·키체인·`ghToken`/`repoq`(완료).
 
 ### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
 
@@ -674,7 +674,7 @@ Tauri 판에서 `jira:*` 13개 채널을 Rust 가 처리한다(`API_CHANNELS`). 
 | `github/error.rs` | `GhError{code,status,message}` — 코드 순서는 `handlers.ts`(ABORTED → `GH_*` → ERROR) |
 
 - **포트**: 저장소 → owner/repo(`gh_repo`), remote 목록(`gh_remotes`), push 된 sha(`pushed_shas_by_author`), `githubClientId`, 등록된 저장소 ID 목록(`repo_ids` — TS 는 `config.repos`), remote 캐시 무효화(`invalidate_gh_remotes`)는 사이드카가 쥔다.
-  이 PR 은 트레이트와 시험용 가짜(`tests/net.rs` 의 `FakeRepos`)만 만들었고 실제 구현은 PR 9 의 `repoq` 질의다(**`repo_ids` 는 PR 9 의 op 목록(`ghRepo`·`ghRemotes`·`pushedShas`·`invalidateGhRemotes`·`githubClientId`)에 없다 — PR 9 가 op 를 더하거나 Rust 가 설정을 읽어야 한다**).
+  이 PR 은 트레이트와 시험용 가짜(`tests/net.rs` 의 `FakeRepos`)만 만들었고 실제 구현은 PR 9 의 `repoq` 질의다(`repo_ids` 는 PR 9 가 `repoIds` op 를 더해 풀었다).
   gh CLI 로 토큰 가져오기는 PR 8(`gh_cli.rs`): 서비스는 `ExternalTokenProvider`(`available`·`token`)만 알고 `import_cli_token`·`auth` 의 `cliAvailable` 이 그것을 쓴다.
 - **세대(epoch)**: 로그인·로그아웃·토큰 폐기가 `new_epoch` 를 부르면 그 세대의 `CancellationToken` 의 자식으로 돌던 조회가 모두 `ABORTED` 로 끝난다. 조회는 시작할 때 세대 id 를 잡고, 저장소를 묻는 동안 세대가 바뀌었으면(취소됐으면) 요청을 시작하지 않는다.
   저장된 토큰의 `/user` 검증(`validate`)은 `tokio::spawn` + `Shared` 로 돌고(기다리는 호출이 모두 떠나도 끝난다), 세대 교체와 같은 잠금 안에서 잡은 세대가 취소됐는지 보고 시작하며, 끝났을 때 세대가 바뀌었으면 결과를 쓰지 않는다.
@@ -688,8 +688,7 @@ Tauri 판에서 `jira:*` 13개 채널을 Rust 가 처리한다(`API_CHANNELS`). 
   낡은 세대의 저장된 토큰 검증이 거부돼도 새 로그인 유지, 서버가 되돌려 준 토큰의 가림, `import_cli_token`(가짜 `ExternalTokenProvider` — 성공·출처 없음·형식 오류·거부 안내), Device Flow 3xx 의 대상 연결 0. 대응표 `N/A: PR 7`(95개)을 **모두** Rust 테스트에 연결했다(남은 `N/A: PR n` 은 PR 8 의 18개뿐이었고 PR 8 이 모두 연결했다).
 
 **TS 와 다른 점(PR 7)**
-- **한도 해제 시각 표시(미해결)**: 운영 클라이언트는 UTC `HH:MM(UTC)` 로 표시한다. TS 는 ko-KR 로컬 시각이다. 새 크레이트 없이 로컬 시각을 만들 수 없어(Windows API 를 쓰려면 `windows` 크레이트의 기능을 더해야 한다) 주입 자리만 있다 —
-  `GitHubService::with_parts` 의 `make_client` 에서 `GitHubClient::with_format_time` 으로 넣는다. PR 9 가 정해야 한다.
+- **한도 해제 시각 표시(PR 9 에서 해결)**: 이 PR 의 운영 클라이언트는 UTC `HH:MM(UTC)` 로 표시했다(TS 는 ko-KR 로컬 시각). 주입 자리(`GitHubClient::with_format_time`)만 있었고, PR 9 가 `github/local_time.rs` 로 로컬 시각(`오전/오후 hh:mm`)을 넣었다.
 - 로그인은 키체인 저장이 실패하면(너무 긴 값 등) 세대를 바꾸기 전에 오류를 낸다(TS 는 세대를 먼저 바꾼다). 로그아웃은 키체인 삭제가 실패해도 연결을 끊고 그 오류를 돌려준다(`async`, "로그아웃했지만 안전 저장소에서 토큰을 지우지 못했습니다: …").
   저장된 토큰이 거부돼 버려질 때의 키체인 삭제 실패는 올릴 곳이 없어 삼킨다.
 - 로그인 검증이 로그아웃으로 취소된다(TS 는 취소되지 않아 로그아웃 뒤에 로그인이 되살아날 수 있다). Device Flow 시작도 세대 토큰의 자식이라 로그아웃이 취소한다.
@@ -745,6 +744,83 @@ gh 는 `gh auth token --hostname github.com`(가져오기)과 `gh --version`(`av
 - 아바타 needs-login 시험의 "묻는 횟수"는 TS 가 `≤7` 이지만 Rust 는 목 서버 응답 타이밍에 따라 8 이 관측돼 `1..=9`(전부 묻는 11번보다 적음)로 완화했다. 이후 새 작성자에 더 묻지 않음은 정확히(요청 수 불변) 단언한다.
 - unix 에서는 손자까지 죽이지 않는다(Windows 전용 보장 — macOS·Linux 는 Phase 6 에서 프로세스 그룹 필요).
 - 가짜 gh 는 시험마다 새 경로의 하드링크라 백신의 첫 실행 검사로 느릴 수 있다. `net` 시험 전체는 ~1분이다.
+
+### PR 9 — GitHub 연결·`ghToken`/`repoq`·한도 시각(Phase 4 마지막)
+
+Tauri 판에서 `gh:*` 23개 채널(`gh:repo` 제외)을 Rust 가 처리한다(`API_CHANNELS`). 이 PR 부터 앱이 GitHub 토큰을 Windows 자격 증명 관리자(Jira 와 같은 `Vault`)에 두고 읽는다.
+스위치는 PR 6 의 `ANTLER_RUST_API`(0 이면 끔)·`ANTLER_RUST_GIT=0` 과 같다: 꺼져 있으면 서비스도 키체인도 없고 사이드카가 지금처럼 `jira:*`·`gh:*` 를 전부 처리한다.
+
+- **`gh:repo` 는 사이드카에 남는다**(`API_SIDECAR_CHANNELS`, 사이드카의 `SIDECAR_KEPT_CHANNELS` — 두 목록은 `tests/api_route.rs` 가 대조한다). 저장소의 remote 를 읽는 일이라 git 실행기·60초 캐시·원격 전용 저장소 레코드를 쥔 `RepoService.ghRepo` 의 몫이다.
+  Rust 서비스는 같은 정보를 `repoq` 질의로 받는다(`gh:repo` 를 Rust 로 옮기면 git 호출·캐시를 두 곳에서 하게 된다).
+- **한 env, 두 서비스**: 사이드카의 `ANTLER_RUST_API=1` 하나가 `jira:*`·`gh:*` 를 함께 넘기므로 `lib.rs` 는 Jira·GitHub 서비스가 **둘 다** 만들어졌을 때만 둘 다 라우터에 주입한다. 하나라도 실패하면 둘 다 주입하지 않고 사이드카가 둘 다 처리한다(소스 검사가 이 분기를 고정한다).
+  Vault(보관소)는 하나이고 생성은 스위치가 켜진 분기 안 한 곳이다.
+- **소유 판정은 하나**: `Router::api_active()`(스위치 && Jira·GitHub **둘 다** 주입)가 사이드카 env(`lib.rs` 의 `claim_api()`)와 채널 라우팅을 함께 정한다. 한쪽만 있으면 둘 다 사이드카가 처리한다. `claim_api()` 로 env=1 을 정한 뒤 서비스가 없는 채널은 사이드카로 넘기지 않고 `ERROR` 봉투다(방어 — 지금 경로로는 닿지 않는다).
+- **`api_host::gh_envelope`**: 서비스의 `GhError{code,status,message}` 를 봉투로 옮긴다(코드 순서 ABORTED → `GH_*` → ERROR 는 서비스가 정해서 준다). 취소는 jira 처럼 바깥에서 future 를 버리지 않는다 — 로그인·아바타(취소돼도 부분 결과를 돌려준다)가 도중에 끊기면 상태가 어정쩡해지므로
+  서비스가 requestId 로 직접 취소한다(`req:cancel` → `GitHubService::cancel`, 라우터가 Jira 와 함께 부른다). requestId 자리는 서비스가 정한다(`devicePoll`·`launchpad`·`accessibleRepos` 0번, `avatars` 1번).
+  `gh:openExternal` 은 서비스의 `external_url`(`https://github.com` 만) 뒤에 Jira 와 **같은 열기 함수**(`open_href` → 앱이 주입한 `open_https`)를 쓴다.
+- **보안 수정(PR 6 과 같다)**: `gh:*` 도 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아닌 인자(`gh:loginPat` 의 토큰 포함 가능)는 서비스 검증이 거부하고 사이드카 stdin 으로 가지 않는다(`tests/api_route.rs` 의 회귀 테스트).
+- **서비스 조립**: `GitHubService::new(vault, SidecarRepos, GhCli, ServiceOptions{avatar_cache_file: <userData>/avatar-cache.json})`. 아바타 캐시 파일 이름은 Electron 판과 같지만 키가 sha256 이라 옛 파일의 항목은 버려진다(PR 7). 앱 종료(`RunEvent::Exit`)는 `Router::shutdown` 이 서비스 `dispose` 를 불러 2초 지연 쓰기를 비운다.
+
+**`repoq` — Rust → Node 질의(`src-tauri/src/repoq.rs`, `src/sidecar/repoQuery.ts`)**
+
+`RepoQuery` 트레이트의 실제 구현 `SidecarRepos` 가 전송(`QueryTransport` — 앱은 `sidecar.rs` 의 `SidecarQuery`, 시험은 가짜)으로 stdio JSON-lines 를 쓴다:
+`{t:"repoq",id,op,p}` → 사이드카가 `{t:"res",id,env}`(기존 `res` 재사용, 같은 `next_id`·`pending`)로 답한다. `id` 가 없으면 응답 없는 알림(`invalidateGhRemotes`)이다. 응답 전에 future 를 버리면(제한 시간·취소) `QueryGuard` 가 대기표를 지우고 `{t:"repoqCancel",id}` 를 보내 사이드카가 그 질의의 `AbortSignal` 을 끊는다.
+
+| op | 인자(`p`) | 응답 `data` | 사이드카의 처리 |
+|---|---|---|---|
+| `ghRepo` | `repoId` | `{owner,repo,remote}` \| null | `RepoService.ghRepo` |
+| `ghRemotes` | `repoId` | 위의 배열 | `RepoService.ghRemotes(id, signal)` |
+| `pushedShas` | `repoId`·`email`·`limit` | sha 문자열 배열 | `RepoService.pushedShasByAuthor(…, signal)` |
+| `invalidateGhRemotes` | 없음 | (알림) | `RepoService.invalidateGhRemotes()` |
+| `githubClientId` | 없음 | 문자열 \| null | `config.get().ui.githubClientId` 를 trim(TS `clientId()` 와 같다) |
+| `repoIds` | 없음 | 문자열 배열 | `config.get().repos` 의 ID — **PR 7 의 숙제**(`RepoQuery::repo_ids`)를 이 op 로 풀었다 |
+
+- **응답은 신뢰하지 않는다**: 응답 전체 1MB·`ghRemotes` 100개·`repoIds` 5000개·문자열 200자(클라이언트 ID 256자)·오류 문구 300자 상한, 모양이 틀리면 거부(`ghRepo`·`ghRemotes`)하거나 없는 것으로 줄인다(`repoIds`·`githubClientId`).
+  sha 는 소문자 hex 40/64 만 받고 물은 개수까지만 쓴다. owner/repo 의 최종 검증은 서비스의 `Slug::parse`(PR 7)다. 질의마다 제한 시간 30초(멈춘 시계 시험). 알 수 없는 op 는 Rust 가 보낼 수 없고(`Op` 닫힌 목록) 사이드카도 허용 목록(`REPOQ_OPS`)을 다시 검사한다 — 목록이 둘 다 같음은 테스트가 대조한다.
+  사이드카는 `ANTLER_RUST_API=1` 일 때만 `repoq` 를 받는다. 매개변수는 `p` 안에만 있어 `t`·`id`·`op` 를 덮을 수 없다. 동시 질의 64개 상한·같은 id 거부.
+
+**`ghToken` — Rust → Node 토큰 메모리 사본(`repoq.rs` 의 `gh_token_line`, `src/sidecar/ghToken.ts`)**
+
+사이드카에 남는 일(원격 전용 저장소의 git fetch 인증, `RepoService` 의 오류 문구 토큰 가림)이 GitHub 토큰을 필요로 한다. Rust 가 **`ANTLER_RUST_API=1` 일 때만** `{t:"ghToken",token}`(없으면 null)을 stdin 으로 보낸다:
+앱이 사이드카를 띄운 **직후 한 번**(저장된 로그인 복원분)과 **토큰이 바뀔 때마다**(`GitHubService::set_on_auth_changed` — 로그인·로그아웃·토큰 폐기). "토큰 읽기 → 쓰기"는 `Sidecar` 의 전용 뮤텍스 하나 안에서 해서 로그인 직후 로그아웃이 겹쳐도 낡은 토큰이 나중에 써지지 않는다.
+
+- **새지 않게**: 줄은 `json!`·`to_string` 을 거치지 않고 `Zeroizing<String>` 에 직접 만든다(손으로 이스케이프). 4096바이트를 넘거나 비면 `null`. env·인자·로그에 싣지 않는다(`tests/api_route.rs` 가 사이드카 env 가 이름 셋뿐임을 소스로 강제). 사이드카는 `GhTokenMirror`(private 필드, `toJSON`·`util.inspect` 가 가린다)에만 두고,
+  모양(`[\x21-\x7e]+`, 4096자)이 틀린 값은 버리고 **이전 사본도 비우며**(낡은 토큰을 남기지 않는다. Rust 도 Device Flow access_token 을 PAT 와 같은 `parse_pat_str` 로 검사해 통과한 것만 로그인한다) 로그에는 고정 문구만 적는다. `rustApi` 가 아니면 이 메시지를 무시한다. 사이드카의 `GitHubService` 는 `rustApi` 일 때 `avatarCacheFile` 없이 돈다(로그인하지 않는 서비스다).
+- 사이드카의 `githubToken`(`RepoService`)은 `rustApi ? 사본 : gh.gitToken()` 이다. 사본이 바뀌면 TS 의 `onAuthChanged` 와 같이 `fetcher.resumeGithubAuth()` 를 부른다(`IPC_EVENTS` 에 인증 이벤트는 없다 — 아래 "TS 와 다른 점").
+- `ANTLER_RUST_API=0`(또는 서비스를 못 만들었을 때)이면 이 메시지도 `repoq` 도 오가지 않고 사이드카가 GitHub 를 지금처럼 전부 처리한다.
+
+**한도 해제 시각(PR 7 의 미해결 해결)**: `github/local_time.rs` 가 TS `toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'})` 와 같은 `오전 09:05`·`오후 03:05`(12시간제, 0시는 오전 12·정오는 오후 12)를 만든다.
+로컬 변환은 새 크레이트 없이 이미 쓰는 `windows` 0.62 크레이트의 `Win32_System_Time` 기능(`SystemTimeToTzSpecificLocalTime`, 시간대 정보 `None` = 현재 시간대)을 켜서 쓴다(`Cargo.lock` 불변 확인). 서머타임은 OS 가 그 날짜에 맞춰 적용한다.
+epoch → 달력 날짜는 정수 연산(Hinnant 의 `civil_from_days`)이다. Windows 가 아니거나 연도가 `SYSTEMTIME` 범위(1601~30827) 밖이거나 변환이 실패하면 UTC `HH:MM(UTC)` 로 물러난다(macOS·Linux 는 Phase 6 에서 `localtime_r`). JS `Date` 범위를 넘는 값은 `Invalid Date`.
+renderer 쪽 포맷은 쓰지 않았다: 문구는 main(여기서는 Rust)이 `GH_RATE_LIMIT` 오류 메시지에 이미 박아 보내는 것이라 renderer 가 epoch 를 다시 포맷할 경로가 없다. 서비스 생성자(`GitHubService::new`)가 `with_format_time` 으로 넣는다.
+시험은 시간대마다 값이 다르므로 값 대신 성질(문구 모양, UTC 와 15분 단위로 어긋남)과 순수 함수(문구 표·날짜 변환 표)를 본다.
+
+**채널 골든(`tests/fixtures/net/github.scenarios.json` 71단계)**: TS(`tests/goldenGithubChannels.test.ts` — `src/main/ipc/github.ts` 핸들러 + `GitHubService`, `fetchImpl` 로 api.github.com·github.com 을 같은 루프백 서버로)와
+Rust(`src-tauri/tests/channels/github.rs` — `Router::route` → `api_host`, `*_for_test` 훅)가 같은 시나리오·같은 목 서버 규칙으로 돌려 `tests/golden/channels/github.json` 과 단계별 봉투(code)·**서버가 받은 요청 목록**이 같음을 본다.
+시나리오: 비로그인 조회·검증 실패·Device Flow(대기→느리게→승인)·PAT·gh 가져오기(성공·실패·거부)·재시작 복원·PR/이슈/댓글/필터/체크/워크플로/아바타(404 → push 된 커밋)/Launchpad/접근 가능 저장소·한도 초과·401 재검증(폐기/유지)·폴링 취소·로그아웃.
+23개 채널(`gh:repo` 제외)을 모두 다룬다. 시계에서 나오는 `fetchedAt` 만 `<time>` 으로 가린다. 목 서버·경로표·요청 정규화는 jira 골든과 `channels/mock.rs` 를 나눠 쓴다(404 기본 본문만 다르다).
+Device Flow 의 간격은 TS·Rust 모두 기다리지 않는 대기를 주입한다. 취소 시나리오는 목 서버가 폴링 요청을 받은 것을 확인한 뒤(시간이 아니라 도착을 기다린다) `req:cancel` 을 보내고, 응답 지연(3초)은 취소 전에 답이 오지 않게 하는 용도뿐이다.
+
+**시험**: `repoq.rs` 단위 13개(응답 검증·상한·시간 제한(멈춘 시계)·취소·op 목록 대조·메시지 줄·토큰 줄), `local_time.rs` 4개(비 Windows 는 UTC 폴백 1개 더), `tests/api_route.rs`(기존 jira 계열을 gh 포함으로 고치고 gh 전용 5개 추가: `gh:repo` 사이드카·계열별 주입·봉투·배열 아닌 인자·스위치 꺼짐·소스 검사),
+vitest `tests/sidecarGhToken.test.ts`(4)·`tests/sidecarRepoQuery.test.ts`(9)·`tests/sidecarApiOwns.test.ts`(4)·`tests/goldenGithubChannels.test.ts`(3).
+
+**TS 와 다른 점(PR 9)**
+- 로그인 상태가 바뀌어도 renderer 로 가는 이벤트는 없다 — TS 도 `onAuthChanged` 는 main 안의 `fetcher.resumeGithubAuth()` 일 뿐이고 `IPC_EVENTS` 에 인증 이벤트가 없다. Rust 판은 그 호출을 `ghToken` 메시지로 사이드카에 옮긴다. `src/shared/ipc.ts` 는 이 PR 에서 바뀌지 않았다.
+- `gh:*` 의 취소는 TS 와 같이 서비스가 requestId 로 한다(jira 처럼 레지스트리·`select!` 가 아니다). `req:cancel` 이 등록보다 먼저 오면 TS 처럼 놓친다(jira 는 tombstone 이 기억한다).
+- 아바타 캐시 키가 sha256 이라 Electron 판 `avatar-cache.json` 의 항목은 버려진다(PR 7). Electron 판 토큰은 옮기지 않는다 — 다시 로그인한다(Phase 6 전에 사용자 확인).
+- 한도 시각: `Win32_System_Time` 기능 추가(위). 비 Windows 는 UTC 표기.
+
+**사람이 확인해야 할 것(PR 9 — 실제 GitHub·키체인·gh 는 쓰지 않았다)**
+- 실제 GitHub 계정으로: PAT 로그인, Device Flow(설정에 OAuth Client ID)·승인 후 로그인, `gh auth login` 된 환경의 "gh 에서 가져오기", 로그아웃. PR·이슈·체크·Launchpad·접근 가능 저장소·아바타가 Electron 판과 같게 보이는지.
+- 재시작 뒤 로그인 복원(`gh:auth` 가 저장된 토큰을 검증), 자격 증명 관리자에 GitHub 항목 하나가 생기고 로그아웃하면 지워지는지.
+- 원격 전용 저장소(GitHub 탭으로 추가)의 fetch 가 로그인 상태로 되고, 로그아웃·재로그인 때 멈춤이 풀리는지(`ghToken` 사본).
+- `ANTLER_RUST_API=0` 으로 띄우면 GitHub·Jira 가 전부 사이드카로 처리돼 지금처럼 동작(토큰은 메모리뿐)하는지. 한도 초과 오류 문구의 해제 시각이 로컬 시간(오전/오후)인지.
+
+**남은 위험(PR 9)**
+- 앱 전체(WebView2 + 사이드카) 기동에서 `repoq`·`ghToken` 이 실제 파이프로 오가는지는 자동 시험하지 않았다(`Sidecar` 는 `AppHandle` 이 필요하다) — 메시지 줄·검증·사이드카 처리기는 각각 시험했다. 위 사람 확인 항목(Launchpad·원격 전용 저장소 fetch)이 이 경로를 지난다.
+- `gh_remotes` 를 취소해도 사이드카의 git 호출이 즉시 끝나는지는 `RepoService` 의 신호 처리에 달렸다(서비스는 대기를 즉시 버린다).
+- `ghToken` 은 사이드카 stdin 파이프로 가는 평문이다(같은 사용자의 프로세스 사이). 사이드카 메모리의 사본은 JS 문자열이라 덮어쓸 수 없다.
+- 골든의 취소 시나리오는 목 서버의 지연 응답 스레드가 3초 동안 남는다(테스트 프로세스가 끝나면 사라진다).
 
 ## Phase 0 에서 확인한 것
 

@@ -8,6 +8,7 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use futures_util::future::{BoxFuture, FutureExt};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -17,6 +18,8 @@ use crate::dialogs;
 use crate::git::fetch::service::{approve_message, ApprovalKind, FetchPrefs, FetchPrefsSink};
 use crate::git::log_service::NoteOp;
 use crate::mirror::RepoMirror;
+use crate::net::redact::SecretString;
+use crate::repoq::{cancel_line, gh_token_line, open_envelope, query_line, tell_line, Op, QueryTransport};
 use crate::router::{in_runtime_of, Router};
 
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>;
@@ -26,6 +29,8 @@ pub struct Sidecar {
     pending: Pending,
     next_id: AtomicU64,
     child: Mutex<Child>,
+    /// `ghToken` 을 "토큰 읽기 → 쓰기" 한 덩어리로 순서 있게 보낸다(낡은 토큰이 나중에 써지지 않게)
+    token_order: Mutex<()>,
 }
 
 fn error_env(msg: &str) -> Value {
@@ -36,7 +41,7 @@ impl Sidecar {
     /// `mirror` 는 사이드카가 보내는 `repos` 메시지로 채워진다(라우터가 같은 것을 읽는다).
     /// `fetch_kinds` 가 있으면 env `ANTLER_RUST_FETCH_KINDS` 로 넘겨 사이드카가 그 환경의 저장소를 fetch 하지 않게 한다(Rust 가 맡는다). 없으면 사이드카가 전부 맡는다.
     /// **`FetchPrefsSink` 를 먼저 manage 한 뒤에 불러야 한다** — 첫 fetchPrefs 가 ready 전에 한 번만 온다
-    /// `rust_api` 이면 env `ANTLER_RUST_API=1` 로 넘겨 사이드카가 `jira:*` 를 소유하지 않게 한다(Rust 가 처리한다). 아니면 부모 환경의 값도 지운다.
+    /// `rust_api` 이면 env `ANTLER_RUST_API=1` 로 넘겨 사이드카가 `jira:*`·`gh:*`(`gh:repo` 제외)를 소유하지 않게 한다(Rust 가 처리한다. GitHub 토큰은 env 가 아니라 [`Sidecar::push_gh_token`] 으로만 간다). 아니면 부모 환경의 값도 지운다.
     pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror, fetch_kinds: Option<&str>, rust_api: bool) -> Result<Self, String> {
         let node = std::env::var("ANTLER_NODE").unwrap_or_else(|_| "node".into());
         let script = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../out-tauri/sidecar/index.cjs"));
@@ -96,7 +101,7 @@ impl Sidecar {
             }
         });
 
-        Ok(Self { stdin, pending, next_id: AtomicU64::new(1), child: Mutex::new(child) })
+        Ok(Self { stdin, pending, next_id: AtomicU64::new(1), child: Mutex::new(child), token_order: Mutex::new(()) })
     }
 
     fn write(&self, msg: &Value) -> Result<(), String> {
@@ -128,6 +133,35 @@ impl Sidecar {
         let _ = self.write(&approve_message(kind, repo_id, fingerprint));
     }
 
+    /// 사이드카에 GitHub 토큰의 메모리 사본을 보낸다(`{t:"ghToken"}`). Rust 가 GitHub 를 처리할 때(`ANTLER_RUST_API=1`)만 부른다 —
+    /// 사이드카에 남는 원격 전용 저장소의 fetch 가 쓴다. 읽기와 쓰기를 한 잠금 안에서 해서, 로그인 직후 로그아웃이 겹쳐도 마지막 상태가 마지막에 간다.
+    /// 줄은 stdin 으로만 가고 env·인자·로그에 실리지 않는다
+    pub fn push_gh_token(&self, read: impl FnOnce() -> Option<SecretString>) {
+        let _order = self.token_order.lock().unwrap_or_else(|e| e.into_inner());
+        let token = read();
+        let line = gh_token_line(token.as_ref());
+        if write_raw(&self.stdin, &line).is_err() {
+            eprintln!("[sidecar] ghToken 을 보내지 못했다");
+        }
+    }
+
+    /// 저장소 정보 질의(`{t:"repoq",id,op,p}`)를 보내고 응답(`res`)의 `data` 를 기다린다.
+    /// 응답 전에 이 future 를 버리면(시간 초과·취소) 대기표를 지우고 사이드카에 `repoqCancel` 을 보낸다
+    async fn query(&self, op: Op, params: Value) -> Result<Value, String> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        let mut guard = QueryGuard { id, pending: self.pending.clone(), stdin: self.stdin.clone(), armed: true };
+        if let Err(e) = write_raw(&self.stdin, &format!("{}\n", query_line(id, op, &params))) {
+            self.pending.lock().unwrap().remove(&id);
+            guard.armed = false;
+            return Err(e);
+        }
+        let env = rx.await.map_err(|_| "사이드카 응답 대기가 끊겼습니다".to_string());
+        guard.armed = false;
+        open_envelope(&env?)
+    }
+
     pub fn set_focus(&self, focused: bool) {
         let _ = self.write(&json!({ "t": "focus", "focused": focused }));
     }
@@ -136,6 +170,50 @@ impl Sidecar {
         let mut child = self.child.lock().unwrap();
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+/// 응답 전에 버려진 질의의 뒷정리: 대기표를 지우고 사이드카에 취소를 알린다
+struct QueryGuard {
+    id: u64,
+    pending: Pending,
+    stdin: Arc<Mutex<ChildStdin>>,
+    armed: bool,
+}
+
+impl Drop for QueryGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id);
+            let _ = write_raw(&self.stdin, &format!("{}\n", cancel_line(self.id)));
+        }
+    }
+}
+
+/// [`QueryTransport`] 의 앱 구현. 사이드카는 서비스보다 늦게 만들어지므로 호출할 때 찾는다(없으면 오류)
+pub struct SidecarQuery {
+    app: AppHandle,
+}
+
+impl SidecarQuery {
+    pub fn new(app: AppHandle) -> Self {
+        Self { app }
+    }
+}
+
+impl QueryTransport for SidecarQuery {
+    fn ask(&self, op: Op, params: Value) -> BoxFuture<'_, Result<Value, String>> {
+        async move {
+            let Some(sidecar) = self.app.try_state::<Sidecar>() else { return Err("사이드카가 아직 준비되지 않았습니다".to_string()) };
+            sidecar.query(op, params).await
+        }
+        .boxed()
+    }
+
+    fn tell(&self, op: Op, params: Value) {
+        if let Some(sidecar) = self.app.try_state::<Sidecar>() {
+            let _ = write_raw(&sidecar.stdin, &format!("{}\n", tell_line(op, &params)));
+        }
     }
 }
 
@@ -149,6 +227,11 @@ fn write_line(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {
     let mut line = msg.to_string();
     line.push('\n');
     let mut w = stdin.lock().unwrap();
+    w.write_all(line.as_bytes()).and_then(|_| w.flush()).map_err(|e| format!("사이드카 쓰기 실패: {e}"))
+}
+
+fn write_raw(stdin: &Mutex<ChildStdin>, line: &str) -> Result<(), String> {
+    let mut w = stdin.lock().unwrap_or_else(|e| e.into_inner());
     w.write_all(line.as_bytes()).and_then(|_| w.flush()).map_err(|e| format!("사이드카 쓰기 실패: {e}"))
 }
 

@@ -6,8 +6,8 @@
 //! - core 한도를 추적한다(search 등 다른 resource 는 덮어쓰지 않는다).
 //!
 //! TS 와 다른 점: 리다이렉트는 origin 이 정확히 `https://api.github.com` 인 주소로만, 5번까지만 따라간다(TS 는 `fetch` 기본 — 전부 따른다). 응답 본문은 32MB 까지만 받고
-//! (TS 는 상한이 없다) 넘으면 `GH_HTTP`("GitHub 응답이 너무 큽니다"). 네트워크 오류 문구에 원인 문자열을 붙이지 않는다. 한도 해제 시각의 표시는 시간대 크레이트 없이는 ko-KR 로컬 시각을 만들 수 없어
-//! 생성자 주입이다([`GitHubClient::with_format_time`] — 기본은 UTC `HH:MM`).
+//! (TS 는 상한이 없다) 넘으면 `GH_HTTP`("GitHub 응답이 너무 큽니다"). 네트워크 오류 문구에 원인 문자열을 붙이지 않는다. 한도 해제 시각의 표시는 생성자 주입이다([`GitHubClient::with_format_time`] — 기본은 UTC `HH:MM`).
+//! 서비스가 로컬 시간대 표시(`local_time::format_epoch_sec`)를 넣는다.
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 

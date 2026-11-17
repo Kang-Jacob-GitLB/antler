@@ -44,7 +44,7 @@ jobs:
             '^src/main/services/RepoService\.ts$', '^src/main/services/ConfigStore\.ts$', '^src/main/ipc/handlers\.ts$',
             '^scripts/make-repo-fixtures\.mjs$', '^scripts/make-edge-fixtures\.mjs$', '^src/shared/', '^src/sidecar/',
             '^src/renderer/tauri/', '^tests/golden.*\.test\.ts$', '^\.github/workflows/tauri\.yml$',
-            '^src/main/ipc/confirmText\.ts$', '^src/main/ipc/jira\.ts$', '^scripts/gen-fetch-special\.mjs$', '^src/main/github/', '^src/main/jira/'
+            '^src/main/ipc/confirmText\.ts$', '^src/main/ipc/jira\.ts$', '^src/main/ipc/github\.ts$', '^scripts/gen-fetch-special\.mjs$', '^src/main/github/', '^src/main/jira/'
           )
           if ($env:EVENT -ne 'pull_request') { "run=true" >> $env:GITHUB_OUTPUT; exit 0 }
           $files = git diff --name-only "$env:BASE_SHA" HEAD
@@ -74,8 +74,9 @@ jobs:
       # fetch: fetch 실행(inspect_config·run_fetch)의 실제 git 통합 테스트 — 루프백(127.0.0.1) 가짜 서버만 쓰고 WSL 케이스는 배포판이 없으면 건너뛴다.
       # tests/fetch.test.ts 의 각 it 이 어느 Rust 테스트로 옮겨졌는지는 tests/golden/fetch/test-map.json(vitest 가 누락을 강제)
       # fetch_service: fetch 상태 기계(주기·백오프·승인 저장 프로토콜). fetch_route: git:fetch 라우팅·소유권·앱 배선 순서·승인 경로의 소스 검사(git 을 띄우지 않는다)
-      # api_route: jira:* 라우팅(스위치 ANTLER_RUST_API·서비스/키체인 생성 위치·사이드카 env·열기 경로의 소스 검사). 네트워크를 쓰지 않는다.
-      # channels 는 test-hooks 가 켜져 있으면 jira:* 채널 골든(tests/golden/channels/jira.json — 127.0.0.1 목 서버)도 돈다
+      # api_route: jira:*·gh:* 라우팅(스위치 ANTLER_RUST_API·서비스/키체인 생성 위치·사이드카 env·열기 경로의 소스 검사). 네트워크를 쓰지 않는다.
+      # channels 는 test-hooks 가 켜져 있으면 jira:*·gh:* 채널 골든(tests/golden/channels/jira.json·github.json — 127.0.0.1 목 서버)도 돈다
+      # lib 에는 repoq(Rust→Node 질의·ghToken 줄)·local_time(한도 해제 시각) 단위 테스트가 있다
       # net: GitHub·Jira 순수 로직(검증·URL 판정·응답 해석·Device Flow·ghEnv·토큰 가리기)이 tests/golden/net 골든과 같은지 + Rust 허용 ⇒ TS 허용 위반 0(네트워크·git 을 쓰지 않는다).
       # TS 테스트 대응표는 tests/golden/net/test-map.json(vitest 가 누락을 강제)
       # net 은 가짜 gh 도 띄운다(gh_cli_run): 테스트 바이너리를 gh.exe 로 하드링크해 gh CLI 토큰 가져오기(Job Object·제한 시간·cwd 의 gh.exe 무시)를 본다. 실제 gh 는 쓰지 않는다

@@ -5269,6 +5269,23 @@ mod live {
         }
 
         #[tokio::test]
+        async fn gh_device_poll_은_공백_든_토큰을_받으면_로그인하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| match path_of(r) {
+                "/login/oauth/access_token" => ok(json!({"access_token": "gho bad tok"})),
+                _ => device_handler(0, r),
+            });
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().with_client_id("cid"), 0);
+            e.svc.device_start().await.unwrap();
+            let err = failure(e.svc.device_poll(&json!("req-1")).await);
+            assert!(!err.message.contains("gho") && !err.message.contains("bad tok"), "{}", err.message);
+            assert!(e.vault.load_github().is_none());
+            assert!(e.svc.git_token().is_none());
+            assert!(!e.svc.auth().await.signed_in);
+            assert_eq!(count(&m, |r| path_of(r) == "/user"), 0, "모양이 틀린 토큰으로 GitHub 에 묻지 않는다");
+        }
+
+        #[tokio::test]
         async fn gh_서비스의_device_poll_은_cancel_request_id_로_취소된다() {
             let _g = Guard;
             let m = Mock::start(|_, r| if path_of(r) == "/login/device/code" { device_handler(0, r) } else { ok(json!({"error": "authorization_pending"})) });

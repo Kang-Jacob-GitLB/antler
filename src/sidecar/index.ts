@@ -20,8 +20,10 @@ import { rustOwnsApi, sidecarSkips } from './apiOwns'
 import { handleFetchApprove } from './fetchApprove'
 import { fetchOwner, parseRustFetchKinds } from './fetchOwns'
 import { FetchPrefsSender } from './fetchPrefs'
+import { GhTokenMirror, handleGhToken } from './ghToken'
 import { MirrorSender } from './mirror'
 import { handleNote } from './note'
+import { RepoQueryHandler } from './repoQuery'
 import { UNDEFINED_ARG, type FromSidecar, type ToSidecar } from './protocol'
 import { IPC_CHANNELS } from '@shared/ipc'
 
@@ -64,12 +66,16 @@ config.onChange = (c) => {
 }
 mirror.push(config.get())
 fetchPrefs.push(config.get())
+// Rust 가 jira:*·gh:*(gh:repo 제외)를 소유한다(env ANTLER_RUST_API=1). 라우터가 가로채므로 그 채널은 여기까지 오지 않아야 한다 — 오면 처리하지 않는다
+const rustApi = rustOwnsApi(process.env['ANTLER_RUST_API'])
+// rustApi 일 때 GitHub 토큰은 Rust 가 stdin(`ghToken`)으로 보낸 메모리 사본이다. 이 사이드카의 GitHubService 는 로그인하지 않는다(gh:* 를 받지 않는다)
+const ghMirror = new GhTokenMirror()
 let netConfig: readonly NetworkConfigEntry[] = []
 const netReady = readNetworkConfig().then((c) => {
   netConfig = c
 })
 
-const repos = new RepoService(config, { cacheDir, githubToken: () => gh.gitToken(), noHooksDir, netConfig: () => netConfig, netReady })
+const repos = new RepoService(config, { cacheDir, githubToken: () => (rustApi ? ghMirror.get() : gh.gitToken()), noHooksDir, netConfig: () => netConfig, netReady })
 const watcher = new RepoWatcher(repos, (repoId) => emit('repo:changed', { repoId }))
 const fetcher = new FetchService(
   config,
@@ -89,8 +95,11 @@ const gh: GitHubService = new GitHubService({
   store: new TokenStore(userData, noSafeStorage),
   cli: createGhCli(),
   onAuthChanged: () => fetcher.resumeGithubAuth(),
-  avatarCacheFile: join(userData, AVATAR_CACHE_FILE)
+  // Rust 가 GitHub 를 처리하면 아바타 캐시 파일도 Rust 의 것이다 — 이 서비스는 파일을 쓰지 않는다
+  ...(rustApi ? {} : { avatarCacheFile: join(userData, AVATAR_CACHE_FILE) })
 })
+// Rust 의 GitHub 서비스가 저장소 정보를 물으면(`repoq`) 여기서 답한다
+const repoQuery = new RepoQueryHandler(repos, config, (id, env) => out({ t: 'res', id, env }))
 const jira = new JiraService({
   store: new TokenStore(userData, noSafeStorage, process.platform, { token: JIRA_TOKEN_FILE, meta: JIRA_META_FILE }),
   allowInsecureLoopback: false
@@ -125,9 +134,6 @@ function decodeArgs(args: unknown[]): unknown[] {
   )
 }
 
-// Rust 가 jira:* 를 소유한다(env ANTLER_RUST_API=1). 라우터가 가로채므로 여기까지 오지 않아야 한다 — 오면 처리하지 않는다
-const rustApi = rustOwnsApi(process.env['ANTLER_RUST_API'])
-
 async function onRequest(id: number, ch: string, rawArgs: unknown[]): Promise<void> {
   const args = decodeArgs(rawArgs)
   const owned = sidecarSkips(ch, rustApi)
@@ -159,6 +165,14 @@ function onLine(line: string): void {
     } catch (err) {
       console.error('fetch 승인 저장 실패:', err)
     }
+  } else if (msg.t === 'repoq') {
+    // Rust 의 GitHub 서비스가 묻는 저장소 정보. Rust 가 GitHub 를 처리할 때(ANTLER_RUST_API=1)만 온다 — 아니면 무시한다
+    if (rustApi) repoQuery.handle(msg)
+  } else if (msg.t === 'repoqCancel') {
+    if (rustApi) repoQuery.cancel(msg.id)
+  } else if (msg.t === 'ghToken') {
+    // 토큰의 메모리 사본. 값은 어디에도 적지 않는다(로그·오류 포함). 바뀌면 원격 전용 저장소의 인증 실패 정지를 푼다(TS 의 onAuthChanged)
+    if (rustApi) handleGhToken(ghMirror, msg, () => fetcher.resumeGithubAuth())
   } else if (msg.t === 'focus') {
     // src/main/index.ts 의 win.on('focus'|'blur') 와 같다
     watcher.setFocused(msg.focused)
