@@ -1,0 +1,198 @@
+[
+  {
+    "kind": "dir",
+    "mode": "040000",
+    "name": "Adir",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/Adir"
+  },
+  {
+    "kind": "dir",
+    "mode": "040000",
+    "name": "zdir",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/zdir"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "--output=x.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/--output=x.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "-rf",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/-rf"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "A.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/A.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "a.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/a.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "AΣ",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/AΣ"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "aς",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/aς"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "B.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/B.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "b.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/b.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "bad-���",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/bad-���"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "istanbul",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/istanbul"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "istanbuz",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/istanbuz"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "İstanbul",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/İstanbul"
+  },
+  {
+    "kind": "symlink",
+    "mode": "120000",
+    "name": "link",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/link"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "more-fields",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/more-fields"
+  },
+  {
+    "kind": "file",
+    "mode": "100755",
+    "name": "run.sh",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/run.sh"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "sp ace",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/sp ace"
+  },
+  {
+    "kind": "submodule",
+    "mode": "160000",
+    "name": "sub",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/sub"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "truncated-last",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/truncated-last"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "with\ttab",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/with\ttab"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "ß.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/ß.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "ẞ.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/ẞ.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "ΣΣ",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/ΣΣ"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "가나다",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/가나다"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "한글.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/한글.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "𝒜.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/𝒜.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "～.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "src/sub/～.txt"
+  }
+]

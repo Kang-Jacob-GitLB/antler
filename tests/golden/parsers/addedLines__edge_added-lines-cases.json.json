@@ -1,0 +1,38 @@
+[
+  {
+    "in": "",
+    "out": ""
+  },
+  {
+    "in": "diff --no-index a b\n--- /dev/null\n+++ b/x\n@@ -0,0 +1,3 @@\n+a\n+b\n+c\n",
+    "out": "a\nb\nc"
+  },
+  {
+    "in": "+++ b/x\n+before hunk\n@@ -0,0 +1 @@\n+only\n",
+    "out": "only"
+  },
+  {
+    "in": "@@ -0,0 +1,2 @@\n+a\n-b\n c\n+d",
+    "out": "a\nd"
+  },
+  {
+    "in": "@@ x\n+\n+\n+",
+    "out": "\n\n"
+  },
+  {
+    "in": "@@ a @@\n++double\n+ spaced\n+\ttab\n",
+    "out": "+double\n spaced\n\ttab"
+  },
+  {
+    "in": "@@\r\n+crlf\r\n+x\r\n",
+    "out": "crlf\r\nx\r"
+  },
+  {
+    "in": "@@ -1 +1 @@\n\\ No newline at end of file\n+x",
+    "out": "x"
+  },
+  {
+    "in": "Binary files /dev/null and b/x differ",
+    "out": ""
+  }
+]

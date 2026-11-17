@@ -1,0 +1,23 @@
+[
+ "",
+ "*.psd filter=lfs diff=lfs merge=lfs -text\n",
+ "# *.psd filter=lfs\n",
+ "  # indented comment filter=lfs\n",
+ "*.bin\tfilter=lfs\r\n",
+ "filter=lfs",
+ "filter=lfs\n",
+ "*.a filter=lfsx\n*.b xfilter=lfs\n*.c filter=lfs2\n*.d filter=lfs-extra\n",
+ "*.a filter==lfs\n",
+ "*.a filter = lfs\n",
+ "*.a -filter=lfs\n",
+ "*.a filter=LFS\n",
+ "a filter=lfsx filter=lfs",
+ "*.afilter=lfs\n",
+ "*.a﻿filter=lfs \n",
+ "*.a filter=lfs　\n",
+ "# not trimmed so not a commentfilter=lfs\n",
+ "﻿# bom comment filter=lfs\n",
+ "x\n\n   \n# c\n*.z filter=lfs\n",
+ "*.a filter=lfs\n",
+ "*.a diff=lfs\n"
+]

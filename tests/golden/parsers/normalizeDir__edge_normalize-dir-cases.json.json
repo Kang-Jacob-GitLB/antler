@@ -1,0 +1,122 @@
+[
+  {
+    "in": "",
+    "out": ""
+  },
+  {
+    "in": "/",
+    "out": ""
+  },
+  {
+    "in": "///",
+    "out": ""
+  },
+  {
+    "in": "/a/",
+    "out": "a"
+  },
+  {
+    "in": "a/b",
+    "out": "a/b"
+  },
+  {
+    "in": "/src/a//",
+    "out": "src/a"
+  },
+  {
+    "error": "invalid path",
+    "in": "a//b"
+  },
+  {
+    "error": "invalid path",
+    "in": "a/./b"
+  },
+  {
+    "error": "invalid path",
+    "in": "a/../b"
+  },
+  {
+    "error": "invalid path",
+    "in": ".."
+  },
+  {
+    "error": "invalid path",
+    "in": "."
+  },
+  {
+    "error": "invalid path",
+    "in": "/./"
+  },
+  {
+    "error": "invalid path",
+    "in": "/../"
+  },
+  {
+    "error": "invalid path",
+    "in": "a/.."
+  },
+  {
+    "error": "invalid path",
+    "in": "../a"
+  },
+  {
+    "error": "invalid path",
+    "in": "a\u0000b"
+  },
+  {
+    "error": "invalid path",
+    "in": "\u0000"
+  },
+  {
+    "in": "한글/디렉터리",
+    "out": "한글/디렉터리"
+  },
+  {
+    "in": "a\\b",
+    "out": "a\\b"
+  },
+  {
+    "in": "a\\..\\b",
+    "out": "a\\..\\b"
+  },
+  {
+    "in": " ",
+    "out": " "
+  },
+  {
+    "in": " a ",
+    "out": " a "
+  },
+  {
+    "in": "a/ /b",
+    "out": "a/ /b"
+  },
+  {
+    "in": "...",
+    "out": "..."
+  },
+  {
+    "in": "..a",
+    "out": "..a"
+  },
+  {
+    "in": "a b/c d",
+    "out": "a b/c d"
+  },
+  {
+    "in": ".git",
+    "out": ".git"
+  },
+  {
+    "in": "a/.git/b",
+    "out": "a/.git/b"
+  },
+  {
+    "error": "invalid path",
+    "in": 5
+  },
+  {
+    "error": "invalid path",
+    "in": null
+  }
+]

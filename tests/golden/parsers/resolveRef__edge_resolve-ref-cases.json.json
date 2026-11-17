@@ -1,0 +1,174 @@
+[
+  {
+    "in": "HEAD",
+    "out": true
+  },
+  {
+    "in": "head",
+    "out": false
+  },
+  {
+    "in": "Head",
+    "out": false
+  },
+  {
+    "in": "HEAD~1",
+    "out": false
+  },
+  {
+    "in": "HEAD^",
+    "out": false
+  },
+  {
+    "in": "HEAD@{1}",
+    "out": false
+  },
+  {
+    "in": "main",
+    "out": false
+  },
+  {
+    "in": "abcd",
+    "out": true
+  },
+  {
+    "in": "ABCD",
+    "out": true
+  },
+  {
+    "in": "abc",
+    "out": false
+  },
+  {
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": true
+  },
+  {
+    "in": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "out": true
+  },
+  {
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": false
+  },
+  {
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": true
+  },
+  {
+    "in": "refs/heads/main",
+    "out": true
+  },
+  {
+    "in": "refs/heads/a/b",
+    "out": true
+  },
+  {
+    "in": "refs/heads/한글",
+    "out": true
+  },
+  {
+    "in": "refs/tags/v1.0",
+    "out": true
+  },
+  {
+    "in": "refs/remotes/origin/main",
+    "out": true
+  },
+  {
+    "in": "refs/remotes/origin/feature/x",
+    "out": true
+  },
+  {
+    "in": "refs/remotes/origin/*",
+    "out": false
+  },
+  {
+    "in": "refs/remotes/*",
+    "out": false
+  },
+  {
+    "in": "refs/heads/*",
+    "out": false
+  },
+  {
+    "in": "refs/heads/",
+    "out": false
+  },
+  {
+    "in": "refs/heads",
+    "out": false
+  },
+  {
+    "in": "refs/stash",
+    "out": false
+  },
+  {
+    "in": "refs/heads/x y",
+    "out": false
+  },
+  {
+    "in": "refs/heads/..",
+    "out": false
+  },
+  {
+    "in": "refs/heads/a..b",
+    "out": false
+  },
+  {
+    "in": "refs/heads/x.lock",
+    "out": false
+  },
+  {
+    "in": "refs/heads/@{x}",
+    "out": false
+  },
+  {
+    "in": "refs/heads/a//b",
+    "out": false
+  },
+  {
+    "in": "refs/heads/.hidden",
+    "out": false
+  },
+  {
+    "in": "refs/heads/x/",
+    "out": false
+  },
+  {
+    "in": "refs/heads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": true
+  },
+  {
+    "in": "refs/heads/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": true
+  },
+  {
+    "in": "--output=x",
+    "out": false
+  },
+  {
+    "in": "-x",
+    "out": false
+  },
+  {
+    "in": "--end-of-options",
+    "out": false
+  },
+  {
+    "in": "",
+    "out": false
+  },
+  {
+    "in": " HEAD",
+    "out": false
+  },
+  {
+    "in": "HEAD\n",
+    "out": false
+  },
+  {
+    "in": "HEAD\u0000",
+    "out": false
+  }
+]

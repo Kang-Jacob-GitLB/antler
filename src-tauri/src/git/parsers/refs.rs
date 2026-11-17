@@ -308,6 +308,15 @@ mod tests {
         assert_eq!(parse_remote_names(b"origin\r\n\r\nteam/upstream\nsolo"), ["origin", "team/upstream", "solo"]);
     }
 
+    /// tests/refs.test.ts 'parseRefs 태그 순서': 같은 시각이거나 시각이 없으면 이름 역순(자연 정렬)
+    #[test]
+    fn tag_ties_use_reverse_natural_name_order() {
+        let line = |name: &str, date: &str| format!("refs/tags/{name}\0{}\0\0 \0\0\0\0commit\0\0{date}", "a".repeat(40));
+        let input = [line("v1.2.0", "100"), line("v1.10.0", "100"), line("old", ""), line("new", "200")].join("\n");
+        let out = parse_refs(input.as_bytes(), &[]);
+        assert_eq!(out.tags.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["new", "v1.10.0", "v1.2.0", "old"]);
+    }
+
     #[test]
     fn natural_order_basics() {
         let mut v = vec!["v1.10.0", "v1.2.0", "b", "B", "a", "V1.3", "10", "9", "feature/2", "feature-2"];

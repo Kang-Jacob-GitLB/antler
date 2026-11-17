@@ -1,0 +1,198 @@
+[
+  {
+    "kind": "dir",
+    "mode": "040000",
+    "name": "Adir",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "Adir"
+  },
+  {
+    "kind": "dir",
+    "mode": "040000",
+    "name": "zdir",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "zdir"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "--output=x.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "--output=x.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "-rf",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "-rf"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "A.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "A.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "a.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "a.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "AΣ",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "AΣ"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "aς",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "aς"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "B.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "B.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "b.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "b.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "bad-���",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "bad-���"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "istanbul",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "istanbul"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "istanbuz",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "istanbuz"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "İstanbul",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "İstanbul"
+  },
+  {
+    "kind": "symlink",
+    "mode": "120000",
+    "name": "link",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "link"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "more-fields",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "more-fields"
+  },
+  {
+    "kind": "file",
+    "mode": "100755",
+    "name": "run.sh",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "run.sh"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "sp ace",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "sp ace"
+  },
+  {
+    "kind": "submodule",
+    "mode": "160000",
+    "name": "sub",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "sub"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "truncated-last",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "truncated-last"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "with\ttab",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "with\ttab"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "ß.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "ß.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "ẞ.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "ẞ.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "ΣΣ",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "ΣΣ"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "가나다",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "가나다"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "한글.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "한글.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "𝒜.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "𝒜.txt"
+  },
+  {
+    "kind": "file",
+    "mode": "100644",
+    "name": "～.txt",
+    "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "～.txt"
+  }
+]

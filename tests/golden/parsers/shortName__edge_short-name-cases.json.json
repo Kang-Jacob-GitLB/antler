@@ -1,0 +1,150 @@
+[
+  {
+    "in": "",
+    "out": false
+  },
+  {
+    "in": "GIT~1",
+    "out": true
+  },
+  {
+    "in": "a/GIT~1/config",
+    "out": true
+  },
+  {
+    "in": "x\\PROGRA~2\\y",
+    "out": true
+  },
+  {
+    "in": "foo~12",
+    "out": true
+  },
+  {
+    "in": "~1",
+    "out": true
+  },
+  {
+    "in": "a~0",
+    "out": true
+  },
+  {
+    "in": "a~",
+    "out": false
+  },
+  {
+    "in": "a~b",
+    "out": false
+  },
+  {
+    "in": "a~1b",
+    "out": false
+  },
+  {
+    "in": "~",
+    "out": false
+  },
+  {
+    "in": "a/b",
+    "out": false
+  },
+  {
+    "in": "x.git~",
+    "out": false
+  },
+  {
+    "in": "~１",
+    "out": false
+  },
+  {
+    "in": "a~1/",
+    "out": true
+  },
+  {
+    "in": "a~1\\",
+    "out": true
+  },
+  {
+    "in": "a/b~2/c",
+    "out": true
+  },
+  {
+    "in": "한글~1",
+    "out": true
+  },
+  {
+    "in": "a~ 1",
+    "out": false
+  },
+  {
+    "in": "a~1 ",
+    "out": true
+  },
+  {
+    "in": "GIT~1.",
+    "out": true
+  },
+  {
+    "in": "GIT~1 ",
+    "out": true
+  },
+  {
+    "in": "GIT~1./config",
+    "out": true
+  },
+  {
+    "in": "GIT~1 /config",
+    "out": true
+  },
+  {
+    "in": "a/GIT~1. ./c",
+    "out": true
+  },
+  {
+    "in": "GIT~1...",
+    "out": true
+  },
+  {
+    "in": "GIT~1\\ ",
+    "out": true
+  },
+  {
+    "in": "x\\GIT~12.\\y",
+    "out": true
+  },
+  {
+    "in": ".",
+    "out": false
+  },
+  {
+    "in": " ",
+    "out": false
+  },
+  {
+    "in": "~. ",
+    "out": false
+  },
+  {
+    "in": "~.",
+    "out": false
+  },
+  {
+    "in": "a~1.b",
+    "out": false
+  },
+  {
+    "in": "a~ .",
+    "out": false
+  },
+  {
+    "in": "a~1\t",
+    "out": false
+  },
+  {
+    "in": "a~1 ",
+    "out": false
+  },
+  {
+    "in": "a~1　",
+    "out": false
+  }
+]

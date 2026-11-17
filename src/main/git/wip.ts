@@ -80,8 +80,13 @@ export async function filterOverrides(exec: GitExecutor, repoPath: string, opts?
   // 1 = 해당 키 없음
   if (r.code === 1) return []
   if (r.code !== 0) throw new GitError(r.stderr.trim() || `git config exited with ${r.code}`, r.code, r.stderr, ['config'])
+  return filterOverrideArgs(r.stdout)
+}
+
+/** `git config -z --get-regexp '^filter\.'` 의 stdout 을 덮어쓰기 `-c` 인자로 바꾼다(순수 함수 — 골든이 이것을 부른다). 덮을 수 없으면 던진다 */
+export function filterOverrideArgs(stdout: Buffer): string[] {
   const out: string[] = []
-  for (const d of parseFilterDrivers(r.stdout)) {
+  for (const d of parseFilterDrivers(stdout)) {
     // required=true 면 빈 명령을 "필터 없음 → 실패"로 본다. 이번 실행에서만 끈다
     out.push('-c', `filter.${d}.clean=`, '-c', `filter.${d}.smudge=`, '-c', `filter.${d}.process=`, '-c', `filter.${d}.required=false`)
   }
@@ -104,7 +109,7 @@ export async function wipStatus(exec: GitExecutor, repoPath: string, opts?: RunO
  * renderer 가 보낸 저장소 상대 경로 검증. 절대 경로·상위 경로(..)·.git 안쪽은 거부한다 —
  * 추적 안 되는 파일 diff 는 `--no-index` 로 파일을 직접 읽으므로 저장소 밖 파일을 읽는 통로가 되면 안 된다.
  */
-function assertRelPath(p: unknown): asserts p is string {
+export function assertRelPath(p: unknown): asserts p is string {
   if (typeof p !== 'string' || p === '' || p.length > 4096 || p.includes('\0')) throw new Error('invalid path')
   if (/^([\\/]|[a-zA-Z]:)/.test(p)) throw new Error('invalid path')
   for (const seg of p.split(/[\\/]/)) {

@@ -5,6 +5,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use antler_lib::git::activity::{bucketize, TimeStreamParser};
+use antler_lib::git::code_browse::{image_mime, is_resolvable_ref, normalize_dir, normalize_file_path, parse_tree, CommitId};
+use antler_lib::git::lfs::{added_lines, gitattributes_uses_lfs, parse_check_attr_lfs, parse_gitflow_config, parse_lfs_pointer};
 use antler_lib::git::parsers::blame::parse_blame;
 use antler_lib::git::parsers::changes::{parse_changes, parse_name_status, parse_numstat};
 use antler_lib::git::parsers::commit::parse_commit_meta;
@@ -12,11 +15,13 @@ use antler_lib::git::parsers::diff::{DiffParseOpts, DiffParser};
 use antler_lib::git::parsers::file_history::parse_file_history;
 use antler_lib::git::parsers::log::parse_log;
 use antler_lib::git::parsers::nul_records::split_nul;
-use antler_lib::git::parsers::refs::{parse_refs, parse_remote_names};
+use antler_lib::git::parsers::refs::{parse_refs, parse_remote_names, Branch, RemoteGroup};
 use antler_lib::git::parsers::stash::parse_stashes;
 use antler_lib::git::parsers::submodule::{parse_gitlinks, parse_gitmodules, parse_probe};
 use antler_lib::git::parsers::wip_status::WipStatusParser;
 use antler_lib::git::parsers::worktree::parse_worktrees;
+use antler_lib::git::refs_service::{is_safe_submodule_path, pick_default_branch};
+use antler_lib::git::wip::{assert_rel_path, filter_driver_names, has_short_name_segment, FilterGuard};
 use serde_json::{json, Map, Value};
 
 fn repo_root() -> PathBuf {
@@ -51,6 +56,57 @@ fn summarize_diff(mut d: Value) -> Value {
         }
     }
     d
+}
+
+/// JSON 입력 목록(`[케이스, …]`)의 각 케이스를 `{in, out}`(오류면 `{in, error}`)로 바꾼다. TS `cases` 와 같은 모양이다
+fn cases(input: &[u8], f: impl Fn(&Value) -> Result<Value, String>) -> Value {
+    let list: Vec<Value> = serde_json::from_slice(input).expect("케이스 목록");
+    Value::Array(
+        list.into_iter()
+            .map(|c| match f(&c) {
+                Ok(out) => json!({ "in": c, "out": out }),
+                Err(error) => json!({ "in": c, "error": error }),
+            })
+            .collect(),
+    )
+}
+
+/// 케이스가 문자열이 아니면 TS 가 던지는 오류(`JSON.parse` 로 들어온 5·null 은 검증 함수가 거부한다)
+fn as_text<'a>(c: &'a Value, error: &str) -> Result<&'a str, String> {
+    c.as_str().ok_or_else(|| error.to_string())
+}
+
+/// filterOverrides 케이스를 바이트로 푼다: 문자열은 UTF-8, `{parts}` 는 조각(문자열 | `{hex}` | `{repeat: [단위, 횟수]}` — 단위의 `{i}` 는 0 부터의 번호)을 이어 붙인다
+fn case_bytes(c: &Value) -> Result<Vec<u8>, String> {
+    if let Some(s) = c.as_str() {
+        return Ok(s.as_bytes().to_vec());
+    }
+    let mut out = Vec::new();
+    for p in c["parts"].as_array().ok_or("parts")? {
+        if let Some(s) = p.as_str() {
+            out.extend_from_slice(s.as_bytes());
+        } else if let Some(h) = p["hex"].as_str() {
+            for i in (0..h.len()).step_by(2) {
+                out.push(u8::from_str_radix(&h[i..i + 2], 16).map_err(|e| e.to_string())?);
+            }
+        } else {
+            let unit = p["repeat"][0].as_str().ok_or("repeat 단위")?;
+            for i in 0..p["repeat"][1].as_u64().ok_or("repeat 횟수")? {
+                out.extend_from_slice(unit.replace("{i}", &i.to_string()).as_bytes());
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn sv<T: serde::Serialize>(v: T) -> Result<Value, String> {
+    serde_json::to_value(v).map_err(|e| e.to_string())
+}
+
+/// 케이스 JSON 의 브랜치(`{name, fullName, hash}`)
+fn branch_of(v: &Value) -> Branch {
+    let s = |k: &str| v[k].as_str().expect("브랜치 필드").to_string();
+    Branch { name: s("name"), full_name: s("fullName"), hash: s("hash"), upstream: None, ahead: None, behind: None, upstream_gone: None, is_head: false }
 }
 
 /// 파서 이름 → 실행. 구현하지 않은 이름은 None
@@ -108,6 +164,51 @@ fn run_parser(parser: &str, input: &[u8], args: &Value) -> Option<Value> {
         "gitlinks" => to_value(serde_json::to_value(parse_gitlinks(input))),
         "gitmodules" => to_value(serde_json::to_value(parse_gitmodules(input))),
         "probe" => to_value(serde_json::to_value(parse_probe(&String::from_utf8_lossy(input)))),
+        // ---- Phase 6a PR 1 ----
+        "tree" => to_value(serde_json::to_value(parse_tree(input, str_arg("dir").unwrap_or("")))),
+        "commitId" => cases(input, |c| CommitId::parse(as_text(c, "invalid commit hash")?).map(|_| json!(true)).map_err(str::to_string)),
+        "normalizeDir" => {
+            let file = str_arg("file").is_some();
+            cases(input, |c| {
+                let s = as_text(c, "invalid path")?;
+                let r = if file { normalize_file_path(s) } else { normalize_dir(s) };
+                r.map(Value::from).map_err(str::to_string)
+            })
+        }
+        "resolveRef" => cases(input, |c| Ok(json!(is_resolvable_ref(as_text(c, "invalid ref")?)))),
+        "imageMime" => cases(input, |c| Ok(json!(image_mime(as_text(c, "invalid path")?)))),
+        "lfsPointer" => cases(input, |c| sv(parse_lfs_pointer(as_text(c, "text")?))),
+        "checkAttrLfs" => cases(input, |c| sv(parse_check_attr_lfs(as_text(c, "text")?))),
+        "addedLines" => cases(input, |c| Ok(json!(added_lines(as_text(c, "text")?)))),
+        "gitattributes" => cases(input, |c| Ok(json!(gitattributes_uses_lfs(as_text(c, "text")?)))),
+        "gitflowConfig" => cases(input, |c| sv(parse_gitflow_config(as_text(c, "text")?))),
+        "timeStream" => {
+            let mut p = TimeStreamParser::new();
+            feed(input, num_arg(args, "chunk"), |c| p.push(c));
+            p.end();
+            json!({ "n": p.values().len(), "values": p.values() })
+        }
+        "bucketize" => cases(input, |c| {
+            let times: Vec<f64> = c["times"].as_array().expect("times").iter().map(|t| t.as_f64().expect("숫자")).collect();
+            sv(bucketize(&times, c["now"].as_f64().expect("now")))
+        }),
+        "defaultBranch" => cases(input, |c| {
+            let list = |v: &Value| v.as_array().expect("배열").iter().map(branch_of).collect::<Vec<_>>();
+            let remotes: Vec<RemoteGroup> =
+                c["remotes"].as_array().expect("remotes").iter().map(|g| RemoteGroup { name: g["name"].as_str().expect("name").to_string(), branches: list(&g["branches"]) }).collect();
+            sv(pick_default_branch(c["originHead"].as_str(), &list(&c["local"]), &remotes))
+        }),
+        "filterDrivers" => cases(input, |c| match filter_driver_names(&case_bytes(c)?) {
+            Ok(names) => sv(names),
+            Err(e) => Err(e.message().to_string()),
+        }),
+        "filterOverrides" =>cases(input, |c| match FilterGuard::from_config_output(&case_bytes(c)?) {
+            Ok(g) => sv(g.args()),
+            Err(e) => Err(e.message().to_string()),
+        }),
+        "relPath" => cases(input, |c| assert_rel_path(as_text(c, "invalid path")?).map(|()| json!(true)).map_err(str::to_string)),
+        "shortName" => cases(input, |c| Ok(json!(has_short_name_segment(as_text(c, "text")?)))),
+        "submodulePath" => cases(input, |c| Ok(json!(is_safe_submodule_path(as_text(c, "text")?)))),
         _ => return None,
     })
 }
@@ -170,4 +271,46 @@ fn rust_parsers_match_ts_golden() {
     skipped.dedup_by(|a, b| a == b);
     println!("골든 비교 {checked}개, 건너뜀 {}개(미이식 파서: {skipped:?})", manifest.len() - checked);
     assert!(failures.is_empty(), "골든 불일치 {}건\n  {}", failures.len(), failures.join("\n  "));
+}
+
+// ── Phase 6a 이식 대응표 ──────────────────────────────────────────────────────────────────────────
+
+/// `tests/golden/channels/test-map.json`(TS 테스트 → Rust 테스트 대응표)의 값이 거짓말이 아닌지 본다. TS 쪽(`tests/golden6a.test.ts`)이 "대상 it 이 빠짐없이 있는가"를,
+/// 이 테스트가 "가리키는 Rust 테스트가 있는가·값의 모양이 맞는가"를 본다(양쪽이 같은 규칙을 쓴다).
+#[test]
+fn phase6a_대응표가_가리키는_rust_테스트가_있다() {
+    let root = repo_root();
+    let map: Value = serde_json::from_slice(&fs::read(root.join("tests/golden/channels/test-map.json")).expect("test-map.json")).expect("대응표 형식");
+    let source_of = |file: &str| -> PathBuf {
+        let tests = root.join("src-tauri/tests");
+        let git = root.join("src-tauri/src/git");
+        match file {
+            "golden.rs" | "exec.rs" => tests.join(file),
+            "refs.rs" | "submodule.rs" => git.join("parsers").join(file),
+            "activity.rs" | "code_browse.rs" | "lfs.rs" | "link_guard.rs" | "refs_service.rs" | "wip.rs" => git.join(file),
+            other => panic!("알 수 없는 Rust 파일 {other}"),
+        }
+    };
+    let (mut ported, mut later, mut na) = (0, 0, 0);
+    for (title, v) in map.as_object().expect("대응표는 객체") {
+        let v = v.as_str().expect("값은 문자열");
+        if let Some(why) = v.strip_prefix("N/A: ") {
+            if let Some(pr) = why.strip_prefix("PR ") {
+                let ok = matches!(pr.as_bytes(), [b'2'..=b'8'] | [b'2'..=b'8', b'a' | b'b']);
+                assert!(ok, "{title}: 'N/A: PR 2'..'PR 8'(뒤에 a·b) 형식이어야 한다 → {v}");
+                later += 1;
+            } else {
+                assert!(why.chars().count() > 8, "{title}: N/A 사유가 비어 있다");
+                na += 1;
+            }
+            continue;
+        }
+        let (file, name) = v.split_once("::").unwrap_or_else(|| panic!("{title}: '<파일>.rs::<이름>' 이어야 한다 → {v}"));
+        let path = source_of(file);
+        let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert!(text.contains(&format!("fn {name}(")), "{title}: {file} 에 fn {name} 이 없다");
+        ported += 1;
+    }
+    println!("[6a 대응표] 이식 {ported}, 뒤 PR 몫 {later}, N/A {na}");
+    assert_eq!(ported + later + na, map.as_object().unwrap().len());
 }

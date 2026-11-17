@@ -1,0 +1,22 @@
+[
+ "",
+ "gitflow.branch.master\nmain\u0000gitflow.branch.develop\ndev\u0000gitflow.prefix.feature\nf/\u0000gitflow.prefix.release\nr/\u0000gitflow.prefix.hotfix\nh/\u0000gitflow.prefix.bugfix\nb/\u0000gitflow.prefix.support\ns/\u0000",
+ "GitFlow.Branch.Master\nM\u0000GITFLOW.PREFIX.FEATURE\nF/\u0000",
+ "gitflow.branch.master\na\u0000gitflow.branch.master\nb\u0000",
+ "gitflow.branch.master\na\u0000gitflow.branch.master\nbad\u0007\u0000",
+ "gitflow.prefix.nope\nx\u0000other.key\ny\u0000gitflow.branch\nz\u0000gitflow.prefix.\nz\u0000",
+ "gitflow.branch.master\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u0000",
+ "gitflow.branch.master\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\u0000",
+ "gitflow.branch.master\n가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가\u0000",
+ "gitflow.branch.master\n😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\u0000",
+ "gitflow.branch.master\n😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\u0000",
+ "gitflow.branch.master\na\nb\u0000gitflow.branch.develop\na\tb\u0000",
+ "gitflow.branch.master\na\u0000gitflow.branch.develop\na\u0000",
+ "gitflow.prefix.feature\na b\u0000gitflow.prefix.release\na b\u0000",
+ "gitflow.prefix.feature\nab\u0000gitflow.prefix.release\n \u0000gitflow.prefix.hotfix\n \u0000gitflow.prefix.bugfix\n﻿\u0000",
+ "gitflow.prefix.feature\n pad \u0000gitflow.prefix.release\na \u0000",
+ "gitflow.branch.master\n\u0000",
+ "gitflow.branch.master\u0000gitflow.branch.develop\nok\u0000no-newline",
+ "\n\u0000gitflow.branch.develop\nok\u0000",
+ "gitflow.branch.master\nno terminator"
+]
