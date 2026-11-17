@@ -155,6 +155,11 @@ impl GitHubClient {
         *self.rate.lock().unwrap()
     }
 
+    /// 한도 표시를 비운다(토큰을 버릴 때 — TS `client.rate = null`)
+    pub fn clear_rate(&self) {
+        *self.rate.lock().unwrap() = None;
+    }
+
     fn resolve_token(&self, choice: &TokenChoice) -> Option<SecretString> {
         match choice {
             TokenChoice::Stored => (self.token)(),
