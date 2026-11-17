@@ -5481,11 +5481,17 @@ mod live {
             gate.open();
             let err = failure(within(list).await.unwrap());
             assert_eq!(err.code, "ABORTED");
-            // 목록이 끝난 뒤에는 이어 도는 작업이 없으므로 요청 수가 더 늘지 않는다. 로그아웃 시점에 이미 나간 동시 요청(최대 6 PR × 3)뿐이다
-            let after = enrich.load(Ordering::SeqCst);
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            assert_eq!(enrich.load(Ordering::SeqCst), after);
-            assert!(after <= 18, "{after}");
+            // 목록이 끝난 뒤에는 이어 도는 작업이 없다. 로그아웃 시점에 이미 나간 동시 요청(최대 6 PR × 3)은 목 서버에 늦게 닿을 수 있으므로
+            // "더 늘지 않는다"를 순간 비교하지 않고, 잦아들 때까지 기다린 뒤 총수가 동시 상한 안인지 본다(이어 도는 작업이 있으면 12 PR × 3 = 36 까지 간다)
+            let mut last = usize::MAX;
+            for _ in 0..40 {
+                let now = enrich.load(Ordering::SeqCst);
+                if now == last { break }
+                last = now;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let total = enrich.load(Ordering::SeqCst);
+            assert!(total <= 18, "{total}");
         }
 
         // ── 경합·세대(리뷰가 짚은 것) ───────────────────────────────────────
