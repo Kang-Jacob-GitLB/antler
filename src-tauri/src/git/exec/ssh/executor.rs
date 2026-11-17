@@ -48,8 +48,8 @@ impl SshExecutor {
 
     /// 선읽기 상한을 바꾼다(시험 전용)
     #[cfg(feature = "test-hooks")]
-    pub fn set_stream_ahead_limit(&self, bytes: usize) {
-        self.conn.set_stream_ahead_limit(bytes);
+    pub fn set_stream_ahead_limit_for_test(&self, bytes: usize) {
+        self.conn.set_stream_ahead_limit_for_test(bytes);
     }
 
     /// 연결을 닫고 이후 호출을 거부한다

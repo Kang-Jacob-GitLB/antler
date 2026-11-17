@@ -25,6 +25,10 @@ use crate::git::parsers::js_trim;
 /// 소비자가 읽기 전에 쌓아 둘 수 있는 stdout 상한(16MB). 넘으면 원격을 죽이고 스트림이 [`ReadAheadExceeded`] 로 끝난다
 pub const STREAM_AHEAD_LIMIT: usize = 16 * 1024 * 1024;
 
+/// 큐에 들어가는 메시지 하나가 상한에 더하는 고정 오버헤드. 빈 데이터·1바이트 프레임을 무제한 보내 `Vec` 와 큐 노드만 쌓는 서버를 막는다
+/// (펌프가 더하고 소비자가 같은 값을 뺀다)
+pub(super) const EVENT_COST: usize = 64;
+
 const CONNECTION_LOST: &str = "SSH 연결이 끊겨 원격 git 이 끝나기 전에 종료되었습니다";
 
 /// 선읽기 상한을 넘어 원격을 죽였다는 읽기 오류의 원인. [`is_read_ahead_exceeded`] 로 알아본다
@@ -101,6 +105,12 @@ impl SshStream {
         }
     }
 
+    /// 큐에 쌓였지만 아직 꺼내지 않은 과금 바이트(시험 전용 — 소비하면 0 으로 돌아오는지 본다)
+    #[cfg(feature = "test-hooks")]
+    pub fn queued_for_test(&self) -> usize {
+        self.queued.load(Ordering::SeqCst)
+    }
+
     /// 끝(EOF)을 아직 받지 못했으면 true
     pub fn is_running(&mut self) -> bool {
         self.end.is_none()
@@ -170,7 +180,7 @@ impl AsyncRead for SshStream {
             match this.rx.poll_recv(cx) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Some(Event::Data(d))) => {
-                    this.queued.fetch_sub(d.len(), Ordering::SeqCst);
+                    this.queued.fetch_sub(d.len() + EVENT_COST, Ordering::SeqCst);
                     this.cur = d;
                     this.pos = 0;
                 }

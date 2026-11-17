@@ -25,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 use super::auth::{self, AgentSetting};
 use super::config::{load_ssh_config, resolve_host, Ctx, RealFs, ResolvedHost};
 use super::known_hosts::{known_host_key_algorithms, read_known_hosts, verify_host_key_text};
-use super::stream::{End, Event, SshStream, STREAM_AHEAD_LIMIT};
+use super::stream::{End, Event, SshStream, EVENT_COST, STREAM_AHEAD_LIMIT};
 use crate::git::exec::common::{to_strings, RunOpts, RunResult, DEFAULT_MAX_BUFFER, MAX_STDERR};
 use crate::git::exec::error::ExecError;
 use crate::git::parsers::js_trim;
@@ -627,21 +627,53 @@ async fn drain_until_closed(ch: &mut Channel<Msg>) {
 }
 
 /// 채널을 열고 명령을 exec 한다. 채널 열기와 exec 요청을 두 단계로 나눈다 — exec 단계가 실패·시간 초과하면 이미 열린 채널을
-/// KILL → close → 닫힘 확인으로 정리한 **뒤에** 오류를 돌려준다(슬롯은 호출자가 그 뒤에 돌려준다)
-async fn open_exec(live: &Live, command: &str) -> Result<Channel<Msg>, ExecError> {
-    let opened = tokio::time::timeout(OPEN_TIMEOUT, live.last().channel_open_session()).await;
-    let mut ch = match opened {
-        Ok(Ok(ch)) => ch,
-        Ok(Err(e)) => return Err(other(format!("원격 명령을 시작하지 못했습니다: {e}"))),
-        Err(_) => return Err(other("원격 명령을 시작하지 못했습니다: 시간 초과")),
+/// KILL → close → 닫힘 확인으로 정리한 **뒤에** 오류를 돌려준다(슬롯은 호출자가 그 뒤에 돌려준다).
+/// `stop`·`user` 가 취소되면 시작을 멈추고 `Aborted` 를 돌려준다 — 서버가 열기에 느리게 답해도 슬롯을 최대 `OPEN_TIMEOUT` 동안 쥐지 않는다.
+/// 채널 열기 대기를 버릴 때는 future 를 그냥 버리지 않고, 뒤늦게 열린 채널을 닫는 정리 태스크로 넘긴다(서버에 채널이 남지 않게)
+async fn open_exec(live: &Arc<Live>, command: &str, stop: &CancellationToken, user: &Option<CancellationToken>) -> Result<Channel<Msg>, ExecError> {
+    let mut opening = {
+        let live = live.clone();
+        tokio::spawn(async move { tokio::time::timeout(OPEN_TIMEOUT, live.last().channel_open_session()).await })
+    };
+    let joined = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        () = cancelled(user) => None,
+        r = &mut opening => Some(r),
+    };
+    let Some(joined) = joined else {
+        // 열기는 `OPEN_TIMEOUT` 안에 끝나므로 정리 태스크도 그 안에 끝난다
+        tokio::spawn(async move {
+            if let Ok(Ok(Ok(mut ch))) = opening.await {
+                kill_channel(&ch).await;
+                drain_until_closed(&mut ch).await;
+            }
+        });
+        return Err(ExecError::Aborted);
+    };
+    let mut ch = match joined {
+        Ok(Ok(Ok(ch))) => ch,
+        Ok(Ok(Err(e))) => return Err(other(format!("원격 명령을 시작하지 못했습니다: {e}"))),
+        Ok(Err(_)) => return Err(other("원격 명령을 시작하지 못했습니다: 시간 초과")),
+        Err(_) => return Err(other("SSH 실행 작업이 중단되었습니다")),
     };
     // 원격 명령 실행은 이 파일(프로브·open_exec)에서만 요청한다(clippy.toml)
     #[allow(clippy::disallowed_methods)]
-    let sent = tokio::time::timeout(OPEN_TIMEOUT, ch.exec(true, command)).await;
+    let sent = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        () = cancelled(user) => None,
+        r = tokio::time::timeout(OPEN_TIMEOUT, ch.exec(true, command)) => Some(r),
+    };
     let start_error = match sent {
-        Ok(Ok(())) => return Ok(ch),
-        Ok(Err(e)) => format!("{e}"),
-        Err(_) => "시간 초과".to_string(),
+        None => {
+            kill_channel(&ch).await;
+            drain_until_closed(&mut ch).await;
+            return Err(ExecError::Aborted);
+        }
+        Some(Ok(Ok(()))) => return Ok(ch),
+        Some(Ok(Err(e))) => format!("{e}"),
+        Some(Err(_)) => "시간 초과".to_string(),
     };
     kill_channel(&ch).await;
     drain_until_closed(&mut ch).await;
@@ -668,7 +700,7 @@ struct Job {
 impl Job {
     /// 채널을 열어 명령을 실행하고 끝까지 읽는다. **슬롯은 이 함수가 끝난 뒤(닫힘 확인 뒤)** 호출자가 돌려준다
     async fn run(self, token: CancellationToken) -> Result<RunResult, ExecError> {
-        let mut ch = open_exec(&self.live, &self.command).await?;
+        let mut ch = open_exec(&self.live, &self.command, &token, &None).await?;
         let mut stdout: Vec<u8> = Vec::new();
         let mut stderr: Vec<u8> = Vec::new();
         let outcome = self.read_all(&mut ch, &token, &mut stdout, &mut stderr).await;
@@ -762,11 +794,35 @@ enum PumpExit {
     Kill,
 }
 
+/// 데이터 프레임 하나의 처리
+#[derive(Debug, PartialEq, Eq)]
+enum Admit {
+    /// 빈 프레임 — 버린다(큐에 노드만 쌓는 서버를 막는다)
+    Skip,
+    /// 상한을 넘는다
+    Overflow,
+    /// 큐에 넣는다(과금했다)
+    Queue,
+}
+
+/// 프레임을 큐에 넣을지 정하고 넣으면 과금한다. 비용은 페이로드 + 메시지당 고정 [`EVENT_COST`] 이며 소비자가 같은 값을 뺀다
+fn admit(queued: &AtomicUsize, cap: usize, len: usize) -> Admit {
+    if len == 0 {
+        return Admit::Skip;
+    }
+    let cost = len + EVENT_COST;
+    if queued.load(Ordering::SeqCst) + cost > cap {
+        return Admit::Overflow;
+    }
+    queued.fetch_add(cost, Ordering::SeqCst);
+    Admit::Queue
+}
+
 /// 채널을 소유해 **소비자와 무관하게 즉시 비우는** 태스크. 채널을 읽는 쪽이 느리면 russh 의 세션 루프가 멈추므로(docs/tauri.md R1)
 /// 소비자는 이 태스크가 채운 큐에서 가져간다. 큐가 상한을 넘으면 원격을 죽이고 소비자에게 `Overflow` 를 알린다
 async fn pump(p: Pump) {
     let Pump { live, command, slot, tx, queued, cap, stop, user, started } = p;
-    let mut ch = match open_exec(&live, &command).await {
+    let mut ch = match open_exec(&live, &command, &stop, &user).await {
         Ok(ch) => ch,
         Err(e) => {
             let _ = started.send(Err(e));
@@ -790,16 +846,18 @@ async fn pump(p: Pump) {
             break PumpExit::Ended;
         };
         match msg {
-            ChannelMsg::Data { data } => {
-                if queued.load(Ordering::SeqCst) + data.len() > cap {
+            ChannelMsg::Data { data } => match admit(&queued, cap, data.len()) {
+                Admit::Skip => {}
+                Admit::Overflow => {
                     let _ = tx.send(Event::Overflow);
                     break PumpExit::Kill;
                 }
-                queued.fetch_add(data.len(), Ordering::SeqCst);
-                if tx.send(Event::Data(data.to_vec())).is_err() {
-                    break PumpExit::Kill;
+                Admit::Queue => {
+                    if tx.send(Event::Data(data.to_vec())).is_err() {
+                        break PumpExit::Kill;
+                    }
                 }
-            }
+            },
             ChannelMsg::ExtendedData { data, ext: 1 } => {
                 let room = MAX_STDERR.saturating_sub(stderr.len());
                 stderr.extend_from_slice(&data[..data.len().min(room)]);
@@ -959,7 +1017,7 @@ impl Connection {
 
     /// 선읽기 상한을 바꾼다(시험 전용 — 16MB 를 실제로 보내지 않으려고)
     #[cfg(feature = "test-hooks")]
-    pub(super) fn set_stream_ahead_limit(&self, bytes: usize) {
+    pub(super) fn set_stream_ahead_limit_for_test(&self, bytes: usize) {
         self.inner.stream_ahead.store(bytes, Ordering::SeqCst);
     }
 
@@ -1039,5 +1097,31 @@ mod tests {
         let (mut h, verdict) = handler(String::new(), "example.com");
         assert!(!check(&mut h, &key).await);
         assert!(verdict.lock().unwrap().as_deref().is_some_and(|m| m.contains("알 수 없는 호스트")));
+    }
+
+    // russh 서버 API 는 빈 CHANNEL_DATA 를 보내지 못한다(하네스로 만들 수 없다) — 악성 서버가 보낼 수 있는 프레임을 직접 먹여 본다
+    #[test]
+    fn 빈_데이터_프레임은_큐에_쌓이지_않고_상한에도_걸리지_않는다() {
+        let queued = AtomicUsize::new(0);
+        for _ in 0..100_000 {
+            assert_eq!(admit(&queued, 1024, 0), Admit::Skip);
+        }
+        assert_eq!(queued.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn 작은_프레임은_메시지마다_고정_비용으로_상한에_걸린다() {
+        let (queued, cap) = (AtomicUsize::new(0), 64 * EVENT_COST);
+        let mut accepted = 0;
+        // 페이로드만 세면 1바이트 프레임 64개(64바이트)가 들어가지만, 메시지당 비용을 더하면 훨씬 일찍 걸린다
+        while admit(&queued, cap, 1) == Admit::Queue {
+            accepted += 1;
+            assert!(accepted <= 64, "상한에 걸리지 않는다");
+        }
+        assert_eq!(accepted, cap / (1 + EVENT_COST));
+        assert_eq!(queued.load(Ordering::SeqCst), accepted * (1 + EVENT_COST));
+        // 걸린 프레임은 과금하지 않는다
+        assert_eq!(admit(&queued, cap, 1), Admit::Overflow);
+        assert_eq!(queued.load(Ordering::SeqCst), accepted * (1 + EVENT_COST));
     }
 }

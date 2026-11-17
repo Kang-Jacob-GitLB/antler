@@ -938,7 +938,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - **점프 호스트의 ProxyJump(중첩)는 거부한다**(`<별칭>: 점프 호스트의 ProxyJump(중첩)는 지원하지 않습니다`). TS 는 조용히 무시했지만 그러면 의도하지 않은 경로로 접속하므로 더 엄격하게 막았다. 대상의 `ProxyJump` 에 홉을 나열해야 한다.
 - **시작 실패 정리**: 채널 열기와 exec 요청을 두 단계로 나눠, exec 단계가 실패·시간 초과하면 KILL → close → 닫힘 확인 뒤에 슬롯을 돌려준다. exec 거부(`Failure`)도 닫힘을 확인한 뒤 슬롯을 돌려준다(하네스의 거부 모드로 시험). exec 요청 전송 자체의 실패·시간 초과는 로컬 큐가 막혀야 일어나 루프백 시험으로 재현하지 못했다.
 - **재키 시 호스트 키 재검사 없음**: 호스트 키는 접속 때 한 번만 known_hosts 로 판정한다. 재키(rekey)에서 서버가 다른 호스트 키를 내밀어도 다시 검사하지 않는다 — russh 가 재키마다 `check_server_key` 를 부르는지·부르면 같은 판정이 되는지 확인하지 않았고, OpenSSH 와 다른 점이다.
-- **협상 목록**: `kex`·`cipher`·`mac` 에 `none` 이 없음을 단위 시험이 고정한다(russh 를 올릴 때 깨지면 목록을 명시로 고정). clippy 금지 목록에 `Handle`·`client::Session` 의 포워딩·전역 요청과 `Channel`·`ChannelWriteHalf` 의 `exec`(프로브·`Job::run` 만 allow)·`request_shell`·`set_env` 를 더했다.
+- **협상 목록**: `kex`·`cipher`·`mac` 에 `none` 이 없음을 단위 시험이 고정한다(russh 를 올릴 때 깨지면 목록을 명시로 고정). clippy 금지 목록에 `Handle`·`client::Session` 의 포워딩·전역 요청과 `Channel`·`ChannelWriteHalf` 의 `exec`(프로브·`open_exec`(`run`·`stream` 공용)만 allow)·`request_shell`·`set_env` 를 더했다.
 - **Windows 에서 `SSH_AUTH_SOCK`**: TS 처럼 보지 않는다(`IdentityAgent` 에 파이프 경로를 줄 때만). 유닉스 소켓 경로는 Windows 에서 "지원하지 않는 agent 종류" 로 안내한다. `cfg(unix)` 분기는 이 환경에서 컴파일하지 못했다.
 
 **사람이 확인해야 할 것**(2a)
@@ -960,31 +960,32 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 | `exec/mod.rs` | `GitExecutor::Ssh`(`kind`="ssh", `cache_key`=`ssh:<host_spec>`), `run` 이 Ssh 로 디스패치, **`stream` 이 async**. Local·WSL 은 실행기 안에서 `spawn_blocking`(CreateProcess 가 느려 런타임 스레드를 막지 않게 — 예전 `log_service` 의 `spawn_blocking` 을 옮겼다), SSH 는 원격 명령이 시작될 때까지 기다린다 |
 | `exec/process.rs` | `GitStream` 이 **enum**(`Process(Box<ProcessStream>)`·`Ssh(SshStream)`). `AsyncRead`·`finish`·`pid`·`is_running`·Drop 의미는 그대로(Local·WSL 은 Job Object 종료). `Local/WslExecutor::stream` 은 여전히 동기 |
 | `exec/ssh/stream.rs` | `SshStream`(소비자 쪽 `AsyncRead`), `ReadAheadExceeded`·`is_read_ahead_exceeded`, `STREAM_AHEAD_LIMIT`(16MB) |
-| `exec/ssh/connection.rs` | `Connection::stream`, 펌프 태스크 `pump`, 채널 열기+exec 를 `open_exec` 한 곳으로 묶음(`run`·`stream` 공용 — clippy allow 는 늘지 않았다), 시험 훅 `set_stream_ahead_limit`(`test-hooks`) |
+| `exec/ssh/connection.rs` | `Connection::stream`, 펌프 태스크 `pump`, 채널 열기+exec 를 `open_exec` 한 곳으로 묶음(`run`·`stream` 공용 — clippy allow 는 늘지 않았다), 시험 훅 `set_stream_ahead_limit_for_test`(`test-hooks`) |
 | `git/log_service.rs`·`git/file_channels.rs` | `stream(..).await` 로 호출. `LogCursor` 가 선읽기 상한 초과를 처리(아래) |
 
 - **펌프(세션 정지 R1 방지)**: `stream` 은 채널·슬롯을 소유한 태스크를 띄워 **소비자와 무관하게 즉시 비운다**. 소비자는 무제한 큐(`mpsc`)에서 가져가고, 큐에 쌓인(아직 꺼내지 않은) 바이트가 16MB 를 넘으면 펌프가 `Overflow` 를 큐 끝에 넣고 원격에 KILL → close 를 보낸 뒤 **남은 출력은 버린다**(닫힘 확인 뒤 슬롯 반환).
   소비자는 이미 쌓인 데이터를 모두 읽은 **뒤에** `io::Error`(원인 `ReadAheadExceeded`, `is_read_ahead_exceeded(&e)` 로 판별)를 받는다. 취소·연결 오류와 구별되고, 같은 오류가 반복되며, `finish()` 는 `Aborted` 다(정상 종료로 보이지 않는다).
-- **Drop·취소**: 스트림을 버리면(`DropGuard`) 펌프가 KILL → close → 닫힘 확인(3초 상한) 뒤 슬롯을 돌려준다. `RunOpts.cancel` 은 펌프도 보므로(읽는 중이 아니어도) 즉시 KILL 한다. 읽기는 `GitStream` 과 같이 취소를 먼저 보고 오류로 깨어난다. 시작(`stream` 호출) 중에 취소·future 버림도 같다.
-- **`LogCursor` 의 처리**: 상한 초과는 **오류가 아니다**. 읽기 태스크가 그 커서를 `overflowed`(재사용 불가, 실패 아님)로 표시하고 지금까지 읽은 만큼만 낸다(`has_more` 참 — 비어 있어도). 앵커(마지막으로 낸 커밋의 위치·해시)는 남기므로(`anchorable`) 다음 페이지는 기존 STALE 경로 그대로
-  새 커서가 `--skip=<위치-1>` + 앵커 확인(`verify_then_read`)으로 이어 읽는다. 확인 커밋을 받기 전에 끊기면 아무것도 내지 않고 앵커를 유지한다(불일치로 오판해 STALE 을 내지 않는다). STALE 알림(`logStale`)도 가지 않는다.
+- **Drop·취소**: 스트림을 버리면(`DropGuard`) 펌프가 KILL → close → 닫힘 확인(3초 상한) 뒤 슬롯을 돌려준다. `RunOpts.cancel` 은 펌프도 보므로(읽는 중이 아니어도) 즉시 KILL 한다. 읽기는 `GitStream` 과 같이 취소를 먼저 보고 오류로 깨어난다. 시작(`stream` 호출) 중에 취소·future 버림도 같다 — **채널 열기 대기도 취소를 본다**(`open_exec` 가 `stop`·호출자 토큰을 받아, 응답이 느린 서버가 슬롯을 최대 15초 쥐지 못하게 한다. 열기 future 는 버리지 않고 정리 태스크가 넘겨받아 뒤늦게 열린 채널을 KILL·close 한다. 그 사이 서버 `MaxSessions` 를 잠깐 넘을 수 있다). `run`(`Job::run`)도 같은 함수를 쓴다.
+- **`LogCursor` 의 처리**: 상한 초과는 **오류가 아니다**. 읽기 태스크가 그 커서를 `overflowed`(재사용 불가, 실패 아님)로 표시하고 지금까지 읽은 만큼만 낸다(`has_more` 참). **커밋을 하나도 받지 못하면(진척 0) 빈 페이지가 아니라 오류**(`SSH 선읽기 상한으로 첫 커밋을 받지 못했습니다`)로 끝난다 — 빈 페이지는 renderer 가 백오프 없이 되풀이한다. 앵커(마지막으로 낸 커밋의 위치·해시)는 남기므로(`anchorable`) 다음 페이지는 기존 STALE 경로 그대로
+  새 커서가 `--skip=<위치-1>` + 앵커 확인(`verify_then_read`)으로 이어 읽는다. 확인 커밋을 받기 전에 끊기면 위 오류로 끝내되 기존 앵커는 유지한다(불일치로 오판해 STALE 을 내지 않는다). STALE 알림(`logStale`)도 가지 않는다.
   `file_channels::file_diff` 는 상한 초과를 오류(`ExecError::Other`)로 돌려준다.
 
 **TS 와 다른 점(2b)**
 - **원격은 backpressure 로 멈추지 않는다.** TS(`ssh2`)는 읽는 쪽이 느리면 윈도우가 차서 원격이 멈췄고, 소비자가 읽지 않으면 같은 연결의 다른 채널도 멈출 수 있었다(R1). Rust 는 펌프가 16MB 까지 먼저 읽고, **넘으면 원격을 죽이고 읽기를 상한 초과로 끝낸다**(사용자 결정 D3).
   Local·WSL 은 그대로 파이프 backpressure(상한 없음)다. 소비가 느려 상한을 넘는 일은 `git log` 커서를 오래 쉬게 둔 경우(수 MB 의 출력이 이미 쌓인 상태)에 생기며, 로그는 위 앵커 경로로 투명하게 이어진다.
-- 상한은 **쌓인 바이트** 기준이라 느린 소비자가 천천히라도 계속 읽으면 넘지 않는다. 한 번 넘으면 그 스트림은 못 쓴다(재개 없음).
-- 시험 훅 `set_stream_ahead_limit`(`test-hooks`)만 상한을 바꾼다 — 운영 경로에 설정 수단이 없다.
+- 상한은 **쌓인 바이트** 기준이라 느린 소비자가 천천히라도 계속 읽으면 넘지 않는다. 한 번 넘으면 그 스트림은 못 쓴다(재개 없음). **메시지당 고정 비용 64바이트**(`EVENT_COST`)를 페이로드에 더해 과금하고(펌프가 더하고 소비자가 같은 값을 뺀다), **빈 데이터 프레임은 버린다** — 빈·1바이트 프레임을 무제한 보내 큐 노드만 쌓는 서버를 막는다.
+- 시험 훅 `set_stream_ahead_limit_for_test`(`test-hooks`)만 상한을 바꾼다 — 운영 경로에 설정 수단이 없다.
 
 **시험**(`cargo test --features test-hooks --test ssh`, 약 50초) — `ssh.rs` 에 새 시험 16개(상한을 줄이는 3개는 `test-hooks` 가 있을 때만 컴파일된다)
 - TS `stream` `it` 5개 이식(`test-map.json` 의 `N/A: PR 2` 를 전부 전환): 큰 출력·느린 소비자(첫 청크만 읽고 같은 연결의 `run` 이 끝남)·비정상 종료의 git 오류·중간 취소(`Aborted`·원격 자식 0·슬롯 반환·연결 재사용)·소비자 이탈·슬롯 수보다 많은 반복.
 - 추가: 읽지 않는 스트림(512B 패킷 8192개) 옆에서 같은 연결의 `run` 5개가 끝남(세션 정지 없음), `hold` 스트림 drop·읽는 중 취소 뒤 서버 자식 0·슬롯 반환, 이미 취소된 토큰(연결도 안 맺음), 서버의 exec 거부, **상한 초과**(상한을 256KB 로 줄임 — 신호·원격 KILL·연결 계속 사용·`flooded < 4MB`),
   상한 안에서 끝난 출력은 초과가 아님, `LogCursor`·`LogService` 의 SSH 대상 시나리오(페이지 이어 붙임 = 전체 log, 확인 읽기 불일치, 취소 뒤 커서·원격 자식·슬롯 정리, **상한(32KB)으로 끊긴 커서가 오류 없이 앵커로 다시 열려 중복·누락 없이 이어짐**).
   16MB 를 실제로 보내지 않는다. 시간 의존은 `wait_for`·`timeout` 뿐이다.
+- 보안 리뷰 반영(2b): 작은(1바이트) 프레임이 메시지 비용으로 상한에 걸림·소비 뒤 큐 비용이 0 으로 복귀, 빈 프레임 무시(russh 서버 API 가 빈 프레임을 못 보내 `admit` 단위 시험), 열기 응답을 미룬 서버에서 `stream`·`run` 취소 시 슬롯이 먼저 돌아오고 늦게 열린 채널이 닫힘(하네스 `hold_opens`), 진척 0 이면 오류·앵커 유지(`log_ssh_상한으로_…`)·페이지마다 진척 단언.
 
 **남은 위험(2b)**
-- `file_diff`(전체 diff 보기 등)는 SSH 에서 상한 초과를 이어 읽지 못하고 **오류**로 끝낸다. 소비자(파서)가 네트워크보다 16MB 이상 느릴 때만 생기며 실제 sshd·큰 diff 로 확인하지 않았다.
-- 펌프는 데이터마다 `Vec` 를 한 번 복사한다(`CryptoVec` → `Vec<u8>`). 큐는 바이트로만 한도를 걸어 작은 패킷이 많으면 메시지 수는 많아질 수 있다(16MB / 작은 패킷 — 메모리는 데이터 크기 + 메시지 오버헤드).
+- `file_diff`(전체 diff 보기 등)는 SSH 에서 상한 초과를 이어 읽지 못하고 **오류**로 끝낸다. 소비자(파서)가 네트워크보다 16MB 이상 느릴 때만 생기며 실제 sshd·큰 diff 로 확인하지 않았다. **Local 은 되는 일이 SSH 에서는 안 되는 기능 차이다**(Local 은 파이프 backpressure 라 상한이 없다).
+- 펌프는 데이터마다 `Vec` 를 한 번 복사한다(`CryptoVec` → `Vec<u8>`). 메시지당 고정 비용을 상한에 더해 작은 패킷도 메시지 수가 상한(16MB / 65)으로 묶인다.
 - `stream` 을 쓰는 호출부는 `log_service`·`file_diff` 둘뿐이다. 라우팅(PR 3)에서 SSH 로 연결할 때 `file_diff` 의 상한 초과 처리를 다시 본다.
 - 실제 sshd 지연·패킷 손실 아래의 상한 동작은 루프백으로만 봤다.
 

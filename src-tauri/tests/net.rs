@@ -3301,7 +3301,7 @@ mod live {
     /// 테스트 훅의 정의(`Rewrite`·`Profile::Test` 변형·net/github/jira 의 `*_for_test`·`insecure_loopback_for_test`)와, 그 위 속성·문서 줄에
     /// `#[cfg(feature = "test-hooks")]` 가 없는 것. 반환은 (정의 수, 속성이 빠진 정의들)
     fn unguarded_hooks(rel: &str, text: &str) -> (usize, Vec<String>) {
-        let in_net_area = ["net/", "github/", "jira/"].iter().any(|d| rel.starts_with(d));
+        let in_net_area = ["net/", "github/", "jira/", "git/exec/ssh/"].iter().any(|d| rel.starts_with(d));
         let lines: Vec<&str> = text.lines().map(str::trim_start).collect();
         let (mut defs, mut bad) = (0, Vec::new());
         for (i, t) in lines.iter().enumerate() {

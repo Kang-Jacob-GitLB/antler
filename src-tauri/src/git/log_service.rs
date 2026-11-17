@@ -15,6 +15,8 @@
 //! SSH 대상(Phase 5): 원격 스트림은 파이프 backpressure 가 없다 — 채널을 펌프가 즉시 비우고 선읽기 상한(16MB)을 넘으면 원격 `git log` 를 죽인다.
 //! 읽기가 [`is_read_ahead_exceeded`] 로 끝나면 **오류가 아니라** 그 커서를 못 쓰게(`overflowed`) 하고 지금까지 읽은 만큼만 낸다(`has_more` 는 참).
 //! 앵커(마지막으로 낸 커밋의 위치·해시)는 남으므로 다음 페이지는 기존 STALE 경로(`--skip` + 앵커 확인)로 새 커서를 연다.
+//! 단 **커밋을 하나도 받지 못하고** 끊기면(진척 0) 빈 페이지(`has_more` 참)를 내지 않고 오류로 끝낸다 — 빈 페이지는 renderer 가 백오프 없이 다시 요청하게 만든다.
+//! 이때 커서만 실패로 닫고 기존 앵커는 그대로 둔다.
 //! 인자 주입 방어는 `scope.rs`(solo·hide 형식)와 `parse_query`(숫자만)에 있다.
 
 use std::collections::{HashMap, VecDeque};
@@ -428,7 +430,7 @@ async fn serve(reader: &mut Reader, meta: &Mutex<Meta>, req: &Req) -> Result<Log
         commit_progress(meta, reader, 1, &head);
         // 확인용 커밋을 받기 전에 상한으로 끊겼다 — 확인하지 못했으니 아무것도 내지 않는다(앵커는 그대로라 다음 요청이 다시 확인한다)
         if head.is_empty() && reader.overflowed {
-            return Ok(LogPage { commits: Vec::new(), has_more: true });
+            return Err(no_progress());
         }
         if head.first().map(|c| c.hash.as_str()) != Some(expected.as_str()) {
             return Err(CursorError::Mismatch);
@@ -436,7 +438,15 @@ async fn serve(reader: &mut Reader, meta: &Mutex<Meta>, req: &Req) -> Result<Log
     }
     let (commits, has_more) = reader.take(req.count).await.map_err(CursorError::Exec)?;
     commit_progress(meta, reader, req.count, &commits);
+    if commits.is_empty() && reader.overflowed {
+        return Err(no_progress());
+    }
     Ok(LogPage { commits, has_more })
+}
+
+/// 선읽기 상한으로 커밋을 하나도 받지 못했다(빈 페이지로 내면 renderer 가 백오프 없이 되풀이한다)
+fn no_progress() -> CursorError {
+    CursorError::Exec(ExecError::Other { message: "SSH 선읽기 상한으로 첫 커밋을 받지 못했습니다".into() })
 }
 
 /// 읽기 태스크. 요청을 도착 순서대로 하나씩 처리한다. 오류가 나면 커서를 실패로 표시하고 끝낸다 — 끝나며 `Reader`(= 스트림)가 버려진다
