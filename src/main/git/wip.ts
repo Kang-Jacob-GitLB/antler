@@ -2,6 +2,7 @@
 import type { FileDiff, WipDiffRequest, WipStatus } from '@shared/types'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { DIFF_FULL_MAX_BYTES, DIFF_MAX_BYTES } from './commands'
+import { assertNoLinkEscape } from './linkGuard'
 import { DiffParser } from './parsers/diff'
 import { WIP_STATUS_ARGS, WipStatusParser } from './parsers/wipStatus'
 
@@ -89,6 +90,16 @@ export async function wipFileDiff(
   const parser = new DiffParser(req.path, req.oldPath, req.full ? { maxLines: Infinity, maxBytes: DIFF_FULL_MAX_BYTES } : { maxBytes: DIFF_MAX_BYTES })
   // 추적 안 되는 폴더(중첩 저장소)는 파일이 아니라 내용을 비교할 수 없다
   if (req.area === 'untracked' && /[\\/]$/.test(req.path)) return parser.finish()
+
+  if (req.area !== 'staged') {
+    // unstaged: 조작된 index 의 `GIT~1/config` 항목이 작업 트리 diff 로 .git/config 를 읽게 하는 8.3 짧은 이름을 구성 요소 모양(`~숫자`)으로 거부한다.
+    // 정상 파일 이름에도 드물게 있는 형태(`foo~1`)라 오탐을 허용한다 — .git 안을 읽는 쪽이 더 나쁘다. (untracked 는 허용 목록이 이미 막는다)
+    if (req.area === 'unstaged' && req.path.split(/[\\/]/).some((seg) => /~\d+$/.test(seg))) throw new Error('invalid path')
+    // 정션·symlink 로 .git 이나 저장소 밖을 읽는 우회: 로컬 파일 시스템일 때만 열기 직전에 확인한다.
+    // WSL·SSH 는 Node 가 파일 시스템을 볼 수 없어 하지 않는다 — Linux git 의 status 는 디렉터리 symlink 를 따라 들어가지 않고 링크 자체를
+    // 하나의 항목으로 보고하므로 `j/config` 형태의 경로가 허용 목록에 들어오지 않는다고 본다(미확인: 실측하지 않았다. docs/security.md 참고).
+    if (exec.kind === 'local') await assertNoLinkEscape(repoPath, req.path, req.area === 'unstaged')
+  }
 
   // --no-index 는 저장소 속성을 읽지 않지만, 작업 트리·인덱스 diff 는 clean 필터를 돈다
   const guard = req.area === 'untracked' ? [] : await filterOverrides(exec, repoPath, opts)

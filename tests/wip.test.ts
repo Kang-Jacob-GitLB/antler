@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, mkdtempSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -216,6 +216,67 @@ describe('untracked diff 허용 목록', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  describe.runIf(process.platform === 'win32')('정션(mklink /J) 우회', () => {
+    const junctions: string[] = []
+    let dir: string
+    let gitJ: string
+    let outJ: string
+    beforeAll(() => {
+      dir = join(root, 'jrepo')
+      const outside = join(root, 'jout')
+      mkdirSync(dir)
+      mkdirSync(outside)
+      writeFileSync(join(outside, 'secret.txt'), 'secret\n')
+      execFileSync('git', ['init', '-q', dir])
+      writeFileSync(join(dir, 'plain.txt'), 'p\n')
+      mkdirSync(join(dir, 'sub'))
+      writeFileSync(join(dir, 'sub', 'ok.txt'), 'ok\n')
+      gitJ = join(dir, 'gitj')
+      outJ = join(dir, 'outj')
+      for (const [link, target] of [[gitJ, join(dir, '.git')], [outJ, outside]] as const) {
+        execFileSync('cmd', ['/c', 'mklink', '/J', link, target], { stdio: 'ignore' })
+        junctions.push(link)
+      }
+    })
+    // 정션부터 지운다(rmdir 은 링크만 지우고 원본을 따라가지 않는다). rm -r 을 정션에 쓰지 않는다
+    afterAll(() => {
+      for (const j of junctions) {
+        try {
+          rmdirSync(j)
+        } catch {
+          /* 이미 없음 */
+        }
+      }
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(join(root, 'jout'), { recursive: true, force: true })
+    })
+
+    it('Node 는 정션을 symlink 로 본다', () => {
+      expect(lstatSync(gitJ).isSymbolicLink()).toBe(true)
+      expect(lstatSync(outJ).isSymbolicLink()).toBe(true)
+    })
+
+    it('정션 아래 경로는 untracked·unstaged diff 모두 거부한다(.git/config·저장소 밖 파일)', async () => {
+      const allow = new Set([...(await untrackedOf(dir)), 'gitj/config', 'outj/secret.txt'])
+      for (const p of ['gitj/config', 'outj/secret.txt', 'gitj\\config']) {
+        await expect(wipFileDiff(exec, dir, { area: 'untracked', path: p }, undefined, allow), p).rejects.toThrow('invalid path')
+        await expect(wipFileDiff(exec, dir, { area: 'unstaged', path: p }), p).rejects.toThrow('invalid path')
+      }
+    })
+
+    it('정션 옆의 정상 파일·하위 디렉터리 파일은 계속 열린다', async () => {
+      const allow = await untrackedOf(dir)
+      for (const p of ['plain.txt', 'sub/ok.txt']) {
+        expect(allow.has(p), p).toBe(true)
+        expect((await wipFileDiff(exec, dir, { area: 'untracked', path: p }, undefined, allow)).hunks.length, p).toBe(1)
+      }
+    })
+  })
+
+  it('unstaged 경로의 8.3 모양(~숫자) 구성 요소는 거부한다', async () => {
+    for (const p of ['GIT~1/config', 'a/GIT~1/config', 'x\\GIT~12\\config']) await expect(wipFileDiff(exec, repo, { area: 'unstaged', path: p })).rejects.toThrow('invalid path')
   })
 
   it('RepoService: wipStatus 전에는 거부하고, 이후엔 보고된 경로만 연다', async () => {
