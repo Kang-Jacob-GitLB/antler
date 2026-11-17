@@ -76,9 +76,33 @@ export function parseWslList(buf: Buffer): string[] {
     .filter((s) => s.length > 0 && !s.startsWith('docker-desktop'))
 }
 
-/** 설치된 WSL 배포판 목록. Windows 가 아니거나 wsl.exe 가 없거나 멈추면(8초) 빈 배열. */
-export function listWslDistros(): Promise<string[]> {
-  if (process.platform !== 'win32') return Promise.resolve([])
+/** `reg query …\Lxss /s /v DistributionName` 출력에서 배포판 이름만 뽑는다. */
+export function parseLxssQuery(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((l) => /^\s*DistributionName\s+REG_SZ\s+(.*?)\s*$/.exec(l)?.[1] ?? '')
+    .filter((s) => s.length > 0)
+}
+
+/**
+ * 레지스트리(`HKCU\…\Lxss\{GUID}\DistributionName`)에 등록된 배포판이 있는지. wsl.exe 를 띄우지 않는다 —
+ * WSL 을 지운 PC 에도 system32 의 wsl.exe 스텁이 남아, 부르기만 하면 "WSL 설치" 창(키를 누르면 설치 시작)이 뜬다.
+ */
+function hasRegisteredWslDistro(): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(
+      'reg.exe',
+      ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss', '/s', '/v', 'DistributionName'],
+      { timeout: LIST_TIMEOUT_MS, windowsHide: true },
+      (err, stdout) => resolve(!err && parseLxssQuery(String(stdout)).length > 0)
+    )
+  })
+}
+
+/** 설치된 WSL 배포판 목록. Windows 가 아니거나 등록된 배포판이 없거나 wsl.exe 가 없거나 멈추면(8초) 빈 배열. */
+export async function listWslDistros(): Promise<string[]> {
+  if (process.platform !== 'win32') return []
+  if (!(await hasRegisteredWslDistro())) return []
   return new Promise((resolve) => {
     execFile(
       'wsl.exe',

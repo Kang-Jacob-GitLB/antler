@@ -1280,7 +1280,27 @@ mod wsl {
         }
     }
 
+    /// 등록된 WSL 배포판 이름(레지스트리 `HKCU\…\Lxss\{GUID}\DistributionName`). wsl.exe 를 띄우지 않는다 —
+    /// WSL 을 지운 PC 에도 system32 의 wsl.exe 스텁이 남아, 부르기만 하면 사용자 화면에 "WSL 설치" 창(키를 누르면 설치 시작)이 뜬다
+    fn registered_distros() -> Vec<String> {
+        let mut c = raw("reg.exe");
+        c.args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss", "/s", "/v", "DistributionName"]);
+        let Some(o) = output_with_timeout(c, Duration::from_secs(8)) else { return Vec::new() };
+        if !o.status.success() {
+            return Vec::new();
+        }
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("DistributionName")?.trim_start().strip_prefix("REG_SZ").map(|v| v.trim().to_string()))
+            .filter(|n| !n.is_empty())
+            .collect()
+    }
+
+    /// 레지스트리에 배포판이 없으면 wsl.exe 를 부르지 않고 None(위 설명)
     fn first_distro() -> Option<String> {
+        if !registered_distros().iter().any(|n| !n.starts_with("docker-desktop")) {
+            return None;
+        }
         let mut c = raw("wsl.exe");
         c.args(["-l", "-q"]).env("WSL_UTF8", "1");
         let o = output_with_timeout(c, Duration::from_secs(8))?;
