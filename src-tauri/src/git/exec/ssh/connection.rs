@@ -13,11 +13,11 @@
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use russh::client::{self, Handle, Msg};
+use russh::client::{self, ChannelOpenHandle, Handle, Msg, Session};
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PublicKeyOrCertificate};
-use russh::{Channel, ChannelMsg, Preferred, Sig};
+use russh::{Channel, ChannelMsg, ChannelOpenFailure, Preferred, Sig};
 use tokio::net::TcpStream;
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -42,6 +42,8 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
 const KILL_TIMEOUT: Duration = Duration::from_secs(2);
 /// KILL 뒤 서버가 채널을 닫기를 기다리는 시간(그 뒤에야 슬롯을 돌려준다)
 const CLOSE_WAIT: Duration = Duration::from_secs(3);
+/// 연결 실패를 이 시간 동안 다음 호출과 공유한다(잠금을 얻은 직후 이보다 최근 실패가 있으면 다시 맺지 않고 그 오류로 돌려준다)
+const FAILURE_SHARE: Duration = Duration::from_secs(5);
 /// 한 연결에서 sshd `MaxSessions`(기본 10)보다 안쪽으로 유지할 동시 채널 수
 pub const DEFAULT_MAX_CHANNELS: usize = 6;
 
@@ -136,6 +138,81 @@ impl client::Handler for HostKeyHandler {
             }
         }
     }
+
+    // 서버가 여는 채널은 전부 거부한다(ssh2 처럼). russh 의 기본 구현은 accept 해서 채널 맵에 쌓이고, 포워딩·agent·X11 데이터가 들어올 길이 열린다.
+    // 우리는 포워딩·agent 전달·X11 을 요청하지 않으므로 정상 서버는 이런 채널을 열 이유가 없다
+    async fn server_channel_open_session(&mut self, _channel: Channel<Msg>, reply: ChannelOpenHandle, _session: &mut Session) -> Result<(), Self::Error> {
+        reject_server_channel(reply).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn server_channel_open_direct_tcpip(
+        &mut self,
+        _channel: Channel<Msg>,
+        _host_to_connect: &str,
+        _port_to_connect: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel(reply).await
+    }
+
+    async fn server_channel_open_direct_streamlocal(
+        &mut self,
+        _channel: Channel<Msg>,
+        _socket_path: &str,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel(reply).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        _channel: Channel<Msg>,
+        _connected_address: &str,
+        _connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel(reply).await
+    }
+
+    async fn server_channel_open_forwarded_streamlocal(
+        &mut self,
+        _channel: Channel<Msg>,
+        _socket_path: &str,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel(reply).await
+    }
+
+    async fn server_channel_open_agent_forward(&mut self, _channel: Channel<Msg>, reply: ChannelOpenHandle, _session: &mut Session) -> Result<(), Self::Error> {
+        reject_server_channel(reply).await
+    }
+
+    async fn server_channel_open_x11(
+        &mut self,
+        _channel: Channel<Msg>,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        reject_server_channel(reply).await
+    }
+}
+
+/// 서버가 연 채널을 거부한다(`AdministrativelyProhibited`)
+async fn reject_server_channel(reply: ChannelOpenHandle) -> Result<(), russh::Error> {
+    reply.reject(ChannelOpenFailure::AdministrativelyProhibited).await;
+    Ok(())
 }
 
 type ClientHandle = Handle<HostKeyHandler>;
@@ -162,6 +239,8 @@ struct Inner {
     live: Mutex<Option<Arc<Live>>>,
     /// 연결을 동시에 한 번만 맺는다(기다리던 호출은 맺어진 연결을 쓴다)
     connect_lock: tokio::sync::Mutex<()>,
+    /// 가장 최근 연결 실패(시각, 문구). 잠금을 기다리던 호출이 같은 실패를 `FAILURE_SHARE` 동안 공유한다 — 거부하는 서버에 호출 수만큼 재연결·재인증하지 않는다
+    last_failure: Mutex<Option<(Instant, String)>>,
     disposed: AtomicBool,
     /// 유휴 타이머 세대. 슬롯을 잡으면 올라가 이미 걸린 타이머를 무효로 만든다
     idle_gen: AtomicU64,
@@ -263,7 +342,19 @@ impl Inner {
         if self.disposed.load(Ordering::SeqCst) {
             return Err(other(DISPOSED));
         }
-        let live = Arc::new(self.do_connect().await?);
+        if let Some((at, message)) = &*self.last_failure.lock().unwrap_or_else(PoisonError::into_inner) {
+            if at.elapsed() < FAILURE_SHARE {
+                return Err(other(message.clone()));
+            }
+        }
+        let live = match self.do_connect().await {
+            Ok(l) => Arc::new(l),
+            Err(e) => {
+                *self.last_failure.lock().unwrap_or_else(PoisonError::into_inner) = Some((Instant::now(), e.to_string()));
+                return Err(e);
+            }
+        };
+        *self.last_failure.lock().unwrap_or_else(PoisonError::into_inner) = None;
         if self.disposed.load(Ordering::SeqCst) {
             disconnect_in_background(live);
             return Err(other(DISPOSED));
@@ -292,6 +383,10 @@ impl Inner {
                     n.alias
                 )));
             }
+        }
+        // 점프 호스트 자신의 ProxyJump(중첩)는 따르지 않는다. TS 는 조용히 무시하지만 그러면 사용자가 의도한 경로가 아닌 곳으로 접속하게 되므로 거부한다
+        if let Some(n) = nodes[..hop_count].iter().find(|n| !n.proxy_jump.is_empty()) {
+            return Err(other(format!("{}: 점프 호스트의 ProxyJump(중첩)는 지원하지 않습니다 — 대상의 ProxyJump 에 홉을 나열하세요", n.alias)));
         }
         let mut chain: Vec<ClientHandle> = Vec::new();
         let result = self.connect_chain(&nodes, hop_count, &mut chain).await;
@@ -354,10 +449,7 @@ impl Inner {
 
         let verdict = Arc::new(Mutex::new(None));
         let handler = HostKeyHandler { known_hosts, name, port: kh_port, verdict: verdict.clone() };
-        let mut preferred = Preferred::default();
-        if !algorithms.is_empty() {
-            preferred.key = Cow::Owned(algorithms);
-        }
+        let preferred = build_preferred(algorithms);
         let config = Arc::new(client::Config {
             keepalive_interval: Some(self.opts.timeouts.keepalive),
             keepalive_max: 3,
@@ -400,6 +492,15 @@ impl Inner {
             Err(e) => Err(fail(e, &plan.notes)),
         }
     }
+}
+
+/// 협상 알고리즘. 기본값에 호스트 키 종류 제한만 얹는다. kex 에 `none` 이 없음은 시험이 고정한다
+fn build_preferred(host_key_algorithms: Vec<Algorithm>) -> Preferred {
+    let mut preferred = Preferred::default();
+    if !host_key_algorithms.is_empty() {
+        preferred.key = Cow::Owned(host_key_algorithms);
+    }
+    preferred
 }
 
 /// known_hosts 에 등록된 키 종류 이름 → russh 알고리즘. 알 수 없는 이름(`sk-…` 등)은 건너뛴다
@@ -464,7 +565,10 @@ async fn check_posix_shell(handle: &ClientHandle, limit: Duration) -> Result<(),
             .await
             .map_err(|_| other("원격 셸을 확인하지 못했습니다: 채널을 열지 못했습니다"))?
             .map_err(|e| other(format!("원격 셸을 확인하지 못했습니다: {e}")))?;
-        ch.exec(true, SHELL_PROBE).await.map_err(|e| other(format!("원격 셸을 확인하지 못했습니다: {e}")))?;
+        // 원격 명령 실행은 이 파일(프로브·Job::run)에서만 요청한다(clippy.toml)
+        #[allow(clippy::disallowed_methods)]
+        let sent = ch.exec(true, SHELL_PROBE).await;
+        sent.map_err(|e| other(format!("원격 셸을 확인하지 못했습니다: {e}")))?;
         let mut out: Vec<u8> = Vec::new();
         let (mut eof, mut exited) = (false, false);
         while let Some(msg) = ch.wait().await {
@@ -539,16 +643,26 @@ struct Job {
 impl Job {
     /// 채널을 열어 명령을 실행하고 끝까지 읽는다. **슬롯은 이 함수가 끝난 뒤(닫힘 확인 뒤)** 호출자가 돌려준다
     async fn run(self, token: CancellationToken) -> Result<RunResult, ExecError> {
-        let start = async {
-            let ch = self.live.last().channel_open_session().await.map_err(|e| format!("{e}"))?;
-            ch.exec(true, self.command.as_str()).await.map_err(|e| format!("{e}"))?;
-            Ok::<_, String>(ch)
-        };
-        let mut ch = match tokio::time::timeout(OPEN_TIMEOUT, start).await {
+        // 채널 열기와 exec 요청을 두 단계로 나눈다 — exec 단계가 실패·시간 초과하면 이미 열린 채널을 KILL → close → 닫힘 확인으로 정리한 뒤에 슬롯을 돌려준다
+        let opened = tokio::time::timeout(OPEN_TIMEOUT, self.live.last().channel_open_session()).await;
+        let mut ch = match opened {
             Ok(Ok(ch)) => ch,
             Ok(Err(e)) => return Err(other(format!("원격 명령을 시작하지 못했습니다: {e}"))),
             Err(_) => return Err(other("원격 명령을 시작하지 못했습니다: 시간 초과")),
         };
+        // 원격 명령 실행은 이 파일(프로브·Job::run)에서만 요청한다(clippy.toml)
+        #[allow(clippy::disallowed_methods)]
+        let sent = tokio::time::timeout(OPEN_TIMEOUT, ch.exec(true, self.command.as_str())).await;
+        let start_error = match sent {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(format!("{e}")),
+            Err(_) => Some("시간 초과".to_string()),
+        };
+        if let Some(why) = start_error {
+            kill_channel(&ch).await;
+            drain_until_closed(&mut ch).await;
+            return Err(other(format!("원격 명령을 시작하지 못했습니다: {why}")));
+        }
         let mut stdout: Vec<u8> = Vec::new();
         let mut stderr: Vec<u8> = Vec::new();
         let outcome = self.read_all(&mut ch, &token, &mut stdout, &mut stderr).await;
@@ -567,6 +681,7 @@ impl Job {
             }
             Outcome::Rejected => {
                 let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
+                drain_until_closed(&mut ch).await;
                 Err(other("원격 명령을 시작하지 못했습니다: 서버가 exec 요청을 거부했습니다"))
             }
             Outcome::Aborted => {
@@ -625,6 +740,7 @@ impl Connection {
                 opts,
                 live: Mutex::new(None),
                 connect_lock: tokio::sync::Mutex::new(()),
+                last_failure: Mutex::new(None),
                 disposed: AtomicBool::new(false),
                 idle_gen: AtomicU64::new(0),
                 idle_timer: Mutex::new(None),
@@ -712,6 +828,19 @@ mod tests {
 
     async fn check(h: &mut HostKeyHandler, key: &russh::keys::PublicKey) -> bool {
         h.check_server_key(&PublicKeyOrCertificate::PublicKey { key: key.clone(), hash_alg: None }).await.unwrap()
+    }
+
+    #[test]
+    fn 협상_목록에_none_이_없다_호스트_키_제한은_기본값_위에_얹는다() {
+        // kex·cipher·mac 에 `none` 이 끼면 협상이 무결성·기밀성 없는 연결로 내려갈 수 있다. russh 를 올릴 때 이 단언이 깨지면 목록을 명시로 고정한다
+        let p = build_preferred(vec![]);
+        assert!(!p.kex.is_empty() && !p.cipher.is_empty() && !p.mac.is_empty());
+        assert!(!p.kex.iter().any(|n| n.as_ref() == "none"), "kex: {:?}", p.kex);
+        assert!(!p.cipher.iter().any(|n| n.as_ref() == "none"), "cipher: {:?}", p.cipher);
+        assert!(!p.mac.iter().any(|n| n.as_ref() == "none"), "mac: {:?}", p.mac);
+        // 호스트 키 종류를 주면 그것만 남고, 비어 있으면 기본값을 그대로 쓴다
+        assert_eq!(build_preferred(vec![Algorithm::Ed25519]).key.as_ref(), &[Algorithm::Ed25519]);
+        assert_eq!(build_preferred(vec![]).key, Preferred::default().key);
     }
 
     #[tokio::test]

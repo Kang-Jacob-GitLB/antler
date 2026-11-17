@@ -932,7 +932,13 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - **키 교환·암호**: russh 기본 목록(압축 없음 — `flate2` 를 껐다, `dsa` 없음). `ssh2` 가 받던 오래된 알고리즘만 되는 서버는 "SSH 연결에 실패했습니다" 로 보일 수 있다. 호스트 인증서(`*-cert-v01`)는 광고하지 않고 서버가 내밀면 거부한다.
 - **오류 문구**: 연결 거부·이름 못 찾음·시간 초과·호스트 키 거부·인증 실패 문구는 TS 와 같고, 그 밖의 핸드셰이크 실패는 russh 의 오류 문장이 들어간다.
 - **keepalive**: `keepalive_max = 3` 은 응답 없는 keepalive 가 3번을 **넘으면** 끊는다(ssh2 `keepaliveCountMax` 와 ±1 차이 가능). 시험하지 않았다(주입 가능한 간격만 있다).
-- **IdentitiesOnly 필터**: TS 는 agent 를 감싸 키 목록을 걸렀고 Rust 는 agent 에서 목록을 받아 같은 규칙으로 걸러 시도한다. 공개키는 `<IdentityFile>.pub` → 개인키 파일의 공개 부분(암호화된 OpenSSH 키도 공개 부분은 평문) 순으로 읽는다.
+- **IdentitiesOnly 필터**: TS 는 agent 를 감싸 키 목록을 걸렀고 Rust 는 agent 에서 목록을 받아 같은 규칙으로 걸러 시도한다. 공개키는 `<IdentityFile>.pub` → `IdentityFile` 자체가 `.pub` 인 경우 그 파일 → 개인키 파일의 공개 부분(암호화된 OpenSSH 키도 공개 부분은 평문) 순으로 읽는다.
+- **서버가 여는 채널은 전부 거부한다**(session·direct-tcpip·direct-streamlocal·forwarded-tcpip·forwarded-streamlocal·auth-agent·x11 → `AdministrativelyProhibited`). russh 의 기본 핸들러는 accept 해서 채널 맵에 쌓이므로 7개 콜백을 모두 구현했다(ssh2 는 전부 거부). 루프백 서버가 인증 뒤 7종을 열어 거부 응답을 받는 시험이 있다. 클라이언트 쪽 채널 맵 크기는 공개 API 가 없어 직접 보지 못하고, 서버가 받은 거부 응답으로 갈음한다.
+- **연결 실패 공유**: 연결 잠금을 얻은 직후 최근 5초 안의 실패가 있으면 다시 맺지 않고 그 오류로 돌려준다(인증을 거부하는 서버에 대기 호출 수만큼 재접속·재인증하지 않는다). 설정을 고친 뒤 5초 안에 다시 호출하면 이전 실패 문구가 한 번 더 나올 수 있다.
+- **점프 호스트의 ProxyJump(중첩)는 거부한다**(`<별칭>: 점프 호스트의 ProxyJump(중첩)는 지원하지 않습니다`). TS 는 조용히 무시했지만 그러면 의도하지 않은 경로로 접속하므로 더 엄격하게 막았다. 대상의 `ProxyJump` 에 홉을 나열해야 한다.
+- **시작 실패 정리**: 채널 열기와 exec 요청을 두 단계로 나눠, exec 단계가 실패·시간 초과하면 KILL → close → 닫힘 확인 뒤에 슬롯을 돌려준다. exec 거부(`Failure`)도 닫힘을 확인한 뒤 슬롯을 돌려준다(하네스의 거부 모드로 시험). exec 요청 전송 자체의 실패·시간 초과는 로컬 큐가 막혀야 일어나 루프백 시험으로 재현하지 못했다.
+- **재키 시 호스트 키 재검사 없음**: 호스트 키는 접속 때 한 번만 known_hosts 로 판정한다. 재키(rekey)에서 서버가 다른 호스트 키를 내밀어도 다시 검사하지 않는다 — russh 가 재키마다 `check_server_key` 를 부르는지·부르면 같은 판정이 되는지 확인하지 않았고, OpenSSH 와 다른 점이다.
+- **협상 목록**: `kex`·`cipher`·`mac` 에 `none` 이 없음을 단위 시험이 고정한다(russh 를 올릴 때 깨지면 목록을 명시로 고정). clippy 금지 목록에 `Handle`·`client::Session` 의 포워딩·전역 요청과 `Channel`·`ChannelWriteHalf` 의 `exec`(프로브·`Job::run` 만 allow)·`request_shell`·`set_env` 를 더했다.
 - **Windows 에서 `SSH_AUTH_SOCK`**: TS 처럼 보지 않는다(`IdentityAgent` 에 파이프 경로를 줄 때만). 유닉스 소켓 경로는 Windows 에서 "지원하지 않는 agent 종류" 로 안내한다. `cfg(unix)` 분기는 이 환경에서 컴파일하지 못했다.
 
 **사람이 확인해야 할 것**
@@ -946,7 +952,6 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - 2a 의 `run` 은 읽기 루프가 펌프라 정지가 없지만, 2b 의 `stream` 이 소비자가 느릴 때 같은 정지를 일으키지 않는지는 2b 의 시험 몫이다(위 스파이크로 재현 조건은 확보).
 - 실제 원격(지연·패킷 손실)에서의 keepalive·재연결·유휴 종료 경계는 루프백 시험으로만 봤다. **keepalive 는 시험하지 않았고**, `cfg(unix)` 분기·실제 agent·`cargo audit` 도 확인하지 못했다.
 - CI(`tauri.yml` `timeout-minutes: 20`)는 새 크레이트 89개가 더해진 **콜드 빌드**(이 환경에서 시험 포함 첫 빌드 4분 12초, `-j 2`)를 감당하는지 첫 PR 실행에서 값을 확인한다.
-- `Failure`(exec 거부)는 "원격 명령을 시작하지 못했습니다" 로 나가지만 시험하지 않았다(서버 하네스에 거부 모드가 없다).
 
 ## Phase 0 에서 확인한 것
 

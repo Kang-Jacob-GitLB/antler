@@ -24,7 +24,7 @@ mod server;
 mod spike;
 
 use common::{known_hosts_line, make_repo, openssh_no_comment, wait_for, Home, TempDir};
-use server::{new_key, unquote, Opts, Shell, TestServer};
+use server::{new_key, unquote, ExecMode, Opts, Shell, TestServer};
 
 /// 테스트 프로세스 환경 격리(`tests/exec.rs` 의 `isolate` 와 같다). 서버 쪽 git 과 저장소 준비용 git 이 사용자의 전역 설정을 읽지 않게 한다
 // unsafe: main 이전 코드는 Rust 런타임 초기화 전에 돈다 — 여기서는 환경 변수만 넣고 다른 것에 기대지 않는다
@@ -329,6 +329,23 @@ async fn 서버가_모르는_클라이언트_키는_인증_오류() {
 }
 
 #[tokio::test]
+async fn 인증을_거부하는_서버에_동시_호출이_몰려도_연결과_인증은_한_번이고_실패는_공유된다() {
+    let e = Env::new().await;
+    let home = Home::new(&new_key());
+    home.write_config(&Env::host_block("test", e.server.port, &home, ""));
+    home.write_known_hosts(&known_hosts_line(e.server.port, &e.server.host_key));
+    let ex = home.executor("test");
+    let rs = futures_util::future::join_all((0..6).map(|_| run(&ex, &e.repo, &["rev-parse", "HEAD"]))).await;
+    let messages: Vec<String> = rs.into_iter().map(message).collect();
+    assert!(messages[0].contains("인증에 실패"), "{}", messages[0]);
+    assert!(messages.iter().all(|m| *m == messages[0]), "대기하던 호출은 같은 실패를 받는다: {messages:?}");
+    assert_eq!(e.server.connections(), 1, "호출 수만큼 다시 맺지 않는다");
+    assert_eq!(e.server.auth_attempts(), 1, "호출 수만큼 다시 인증하지 않는다");
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
 async fn 인증_수단이_전혀_없으면_키_없음_agent_없음_즉시_안내한다() {
     let e = Env::new().await;
     let home = Home::new(&e.client);
@@ -508,6 +525,25 @@ async fn 점프_호스트의_unsupported_설정도_거부한다() {
     let m = message(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await);
     assert!(m.starts_with("jump: 지원하지 않는 ssh 설정") && m.contains("ProxyCommand"), "{m}");
     assert_eq!(jump.connections() + e.server.connections(), 0);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn 점프_호스트_자신의_proxy_jump_중첩은_연결_전에_거부한다() {
+    let e = Env::new().await;
+    let jump = TestServer::start(Opts::new(vec![e.client.public_key().clone()])).await;
+    let home = Home::new(&e.client);
+    home.write_config(&format!(
+        "{}{}",
+        Env::host_block("jump", jump.port, &home, "  ProxyJump bastion
+"),
+        Env::host_block("target", e.server.port, &home, "  ProxyJump jump
+")
+    ));
+    let ex = home.executor("target");
+    let m = message(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await);
+    assert!(m.starts_with("jump: 점프 호스트의 ProxyJump(중첩)는 지원하지 않습니다"), "{m}");
+    assert_eq!(jump.connections() + e.server.connections(), 0, "무시하고 접속하지 않는다");
     ex.dispose();
 }
 
@@ -791,7 +827,7 @@ fn russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다() 
     let mut files = Vec::new();
     rust_sources(&src, &mut files);
     // (이름, 허용되는 파일 이름들) — 빈 목록이면 어디에도 쓰지 않는다
-    let rules: [(&str, &[&str]); 12] = [
+    let rules: [(&str, &[&str]); 15] = [
         ("connect_stream", &["connection.rs"]),
         ("client::connect(", &[]),
         ("channel_open_direct_tcpip", &["connection.rs"]),
@@ -804,16 +840,99 @@ fn russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다() 
         ("agent_forward", &[]),
         ("request_x11", &[]),
         ("channel_open_x11", &[]),
+        ("channel_open_direct_streamlocal", &[]),
+        ("gssapi", &[]),
+        ("send_global_request", &[]),
     ];
     for f in &files {
         let name = f.file_name().unwrap().to_string_lossy().into_owned();
         let text = std::fs::read_to_string(f).unwrap();
         for (api, allowed) in rules {
             // 주석·문서에서 이름을 언급하는 것은 막지 않는다(코드 줄만 본다)
-            let used = text.lines().filter(|l| !l.trim_start().starts_with("//")).any(|l| l.contains(api));
+            let used = text.lines().filter(|l| !l.trim_start().starts_with("//")).any(|l| mentions(l, api));
             assert!(!used || allowed.contains(&name.as_str()), "{} 에서 {api} 를 쓴다 — 허용된 파일: {allowed:?}", f.display());
         }
+        assert!(!imports_russh_connect(&text), "{} 가 russh 의 connect 를 이름으로 들여온다(`use russh::client::connect;` 후 `connect(` 로 clippy 규칙·위 검사를 피할 수 있다)", f.display());
     }
+}
+
+/// 줄에 `api` 가 식별자 경계에서 시작하는가(핸들러 콜백 `server_channel_open_x11` 같은 이름은 `channel_open_x11` 호출로 보지 않는다)
+fn mentions(line: &str, api: &str) -> bool {
+    line.match_indices(api).any(|(at, _)| !line[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_'))
+}
+
+#[test]
+fn 소스_검사의_이름_일치는_식별자_경계에서_시작한다() {
+    assert!(mentions("h.channel_open_x11(a)", "channel_open_x11"));
+    assert!(mentions("Session::channel_open_x11", "channel_open_x11"));
+    assert!(!mentions("async fn server_channel_open_x11(", "channel_open_x11"));
+    assert!(mentions("x.agent_forward(true)", "agent_forward"));
+    assert!(!mentions("fn server_channel_open_agent_forward(", "agent_forward"));
+}
+
+/// `use russh::…;` 문이 `connect` 를 이름으로 들여오거나(`{connect, …}`·`as`) `client` 를 통째로(`client::*`)·다른 이름으로 들여오는가
+fn imports_russh_connect(text: &str) -> bool {
+    let code: String = text.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("
+");
+    code.match_indices("use russh").any(|(at, _)| {
+        let stmt = &code[at..code[at..].find(';').map_or(code.len(), |e| at + e)];
+        let tokens: Vec<&str> = stmt.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+        tokens.contains(&"connect") || stmt.contains("client::*") || stmt.contains("client as")
+    })
+}
+
+#[test]
+fn russh_connect_들여오기_검사는_흔한_우회_형태를_잡는다() {
+    for bad in [
+        "use russh::client::connect;",
+        "use russh::client::{self, connect, Handle};",
+        "use russh::client::{
+    Handle,
+    connect,
+};",
+        "use russh::client::connect as c;",
+        "use russh::client::*;",
+        "use russh::client as ssh;",
+    ] {
+        assert!(imports_russh_connect(bad), "{bad}");
+    }
+    for good in ["use russh::client::{self, Handle, Msg};", "use russh::client::connect_stream;", "// use russh::client::connect;
+use russh::Channel;", "let r = tcp_connect(a);"] {
+        // connect_stream 은 별도 규칙(허용 파일 제한)이 본다
+        assert!(!imports_russh_connect(good), "{good}");
+    }
+}
+
+#[tokio::test]
+async fn 서버가_인증_뒤에_여는_채널은_종류를_가리지_않고_모두_거부한다() {
+    let e = Env::with(|o| o.open_server_channels = true).await;
+    let ex = e.ex();
+    assert_eq!(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0);
+    wait_for("서버가 연 채널 7종의 결과", || e.server.server_opens().len() == 7).await;
+    let opens = e.server.server_opens();
+    let kinds: Vec<&str> = opens.iter().map(|(k, _)| k.as_str()).collect();
+    for k in ["auth-agent", "session", "direct-tcpip", "direct-streamlocal", "forwarded-tcpip", "forwarded-streamlocal", "x11"] {
+        assert!(kinds.contains(&k), "{k} 를 시험하지 않았다: {kinds:?}");
+    }
+    assert!(opens.iter().all(|(_, r)| r == "AdministrativelyProhibited"), "클라이언트가 받아들였다: {opens:?}");
+    // 거부한 뒤에도 같은 연결이 정상으로 쓰인다
+    assert_eq!(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0);
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn 서버가_exec_를_거부하면_채널을_닫고_닫힘을_확인한_뒤_슬롯을_돌려준다() {
+    let e = Env::with(|o| o.exec = ExecMode::Reject).await;
+    let ex = e.ex();
+    for _ in 0..8 {
+        let m = message(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await);
+        assert!(m.contains("거부"), "{m}");
+    }
+    wait_for("거부된 채널이 서버에서 닫힘", || e.server.lingering_channels() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
 }
 
 // ── 실제 sshd(수동) ────────────────────────────────────────────────────────────

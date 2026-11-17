@@ -7,7 +7,7 @@
 
 #![allow(dead_code)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -92,17 +92,29 @@ pub enum Shell {
     Cmd,
 }
 
+/// 프로브가 아닌 exec 요청에 서버가 어떻게 답하는가
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ExecMode {
+    Normal,
+    /// 요청을 거부한다(channel_failure). 채널은 클라이언트가 닫을 때까지 서버에 남는다
+    Reject,
+}
+
 pub struct Opts {
     pub authorized: Vec<PublicKey>,
     pub host_key: Option<PrivateKey>,
     pub shell: Shell,
     /// 서버가 채널마다 내주는 윈도우(바이트). 작으면 흐름 제어가 빨리 걸린다
     pub window: u32,
+    /// 인증이 끝나면 서버가 클라이언트에게 채널 7종(agent·session·direct-tcpip·direct-streamlocal·forwarded-tcpip·forwarded-streamlocal·x11)을 연다.
+    /// 결과는 [`TestServer::server_opens`] 로 본다(클라이언트가 거부해야 한다)
+    pub open_server_channels: bool,
+    pub exec: ExecMode,
 }
 
 impl Opts {
     pub fn new(authorized: Vec<PublicKey>) -> Self {
-        Opts { authorized, host_key: None, shell: Shell::Posix, window: 2 * 1024 * 1024 }
+        Opts { authorized, host_key: None, shell: Shell::Posix, window: 2 * 1024 * 1024, open_server_channels: false, exec: ExecMode::Normal }
     }
 }
 
@@ -124,6 +136,12 @@ struct Shared {
     exec_log: Mutex<Vec<String>>,
     /// 받은 direct-tcpip 요청(`host:port`)
     tunnels: Mutex<Vec<String>>,
+    /// 공개키 인증을 시도한 연결 수(연결당 한 번만 센다)
+    auth_attempts: AtomicUsize,
+    /// exec 를 거부했는데 아직 클라이언트가 닫지 않은 채널 수(서버가 먼저 닫는 채널은 핸들러가 불리지 않아 세지 않는다)
+    lingering_channels: AtomicUsize,
+    /// 서버가 연 채널의 결과(종류, 결과). `accepted` 이면 클라이언트가 받아들인 것이다
+    server_opens: Mutex<Vec<(String, String)>>,
 }
 
 pub struct TestServer {
@@ -152,7 +170,8 @@ impl TestServer {
         let shared = Arc::new(Shared::default());
         let socket = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
         let port = socket.local_addr().expect("addr").port();
-        let mut srv = Srv { shared: shared.clone(), authorized: Arc::new(opts.authorized), shell: opts.shell };
+        let mut srv =
+            Srv { shared: shared.clone(), authorized: Arc::new(opts.authorized), shell: opts.shell, open_server_channels: opts.open_server_channels, exec: opts.exec };
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let running = srv.run_on_socket(Arc::new(config), &socket);
@@ -188,6 +207,21 @@ impl TestServer {
         self.shared.exec_log.lock().unwrap().clone()
     }
 
+    /// 공개키 인증을 시도한 연결 수
+    pub fn auth_attempts(&self) -> usize {
+        self.shared.auth_attempts.load(Ordering::SeqCst)
+    }
+
+    /// exec 를 거부했는데 아직 클라이언트가 닫지 않은 채널 수(`ExecMode::Reject`)
+    pub fn lingering_channels(&self) -> usize {
+        self.shared.lingering_channels.load(Ordering::SeqCst)
+    }
+
+    /// 서버가 클라이언트에게 연 채널의 결과들(`open_server_channels`)
+    pub fn server_opens(&self) -> Vec<(String, String)> {
+        self.shared.server_opens.lock().unwrap().clone()
+    }
+
     /// 서버가 받은 direct-tcpip 목적지들
     pub fn tunnels(&self) -> Vec<String> {
         self.shared.tunnels.lock().unwrap().clone()
@@ -216,6 +250,8 @@ struct Srv {
     shared: Arc<Shared>,
     authorized: Arc<Vec<PublicKey>>,
     shell: Shell,
+    open_server_channels: bool,
+    exec: ExecMode,
 }
 
 impl server::Server for Srv {
@@ -223,7 +259,18 @@ impl server::Server for Srv {
     fn new_client(&mut self, _peer: Option<SocketAddr>) -> Conn {
         self.shared.connections.fetch_add(1, Ordering::SeqCst);
         self.shared.open.fetch_add(1, Ordering::SeqCst);
-        Conn { shared: self.shared.clone(), authorized: self.authorized.clone(), shell: self.shell, channels: HashMap::new(), tokens: HashMap::new(), conn: CancellationToken::new() }
+        Conn {
+            shared: self.shared.clone(),
+            authorized: self.authorized.clone(),
+            shell: self.shell,
+            open_server_channels: self.open_server_channels,
+            exec: self.exec,
+            auth_counted: false,
+            opened: HashSet::new(),
+            channels: HashMap::new(),
+            tokens: HashMap::new(),
+            conn: CancellationToken::new(),
+        }
     }
 }
 
@@ -231,6 +278,11 @@ struct Conn {
     shared: Arc<Shared>,
     authorized: Arc<Vec<PublicKey>>,
     shell: Shell,
+    open_server_channels: bool,
+    exec: ExecMode,
+    auth_counted: bool,
+    /// exec 를 거부한 채널 id(`lingering_channels` 장부)
+    opened: HashSet<ChannelId>,
     channels: HashMap<ChannelId, Channel<Msg>>,
     tokens: HashMap<ChannelId, CancellationToken>,
     /// 이 연결이 끝나면 취소된다(sshd 처럼 연결이 끊기면 세션 프로세스도 정리한다)
@@ -241,6 +293,7 @@ impl Drop for Conn {
     fn drop(&mut self) {
         self.conn.cancel();
         self.shared.open.fetch_sub(1, Ordering::SeqCst);
+        self.shared.lingering_channels.fetch_sub(self.opened.len(), Ordering::SeqCst);
     }
 }
 
@@ -248,11 +301,42 @@ impl server::Handler for Conn {
     type Error = russh::Error;
 
     async fn auth_publickey(&mut self, _user: &str, key: VerifiedPublicKey<'_>) -> Result<Auth, Self::Error> {
+        if !std::mem::replace(&mut self.auth_counted, true) {
+            self.shared.auth_attempts.fetch_add(1, Ordering::SeqCst);
+        }
         if self.authorized.iter().any(|k| k.key_data() == key.public_key.key_data()) {
             Ok(Auth::Accept)
         } else {
             Ok(Auth::reject())
         }
+    }
+
+    /// 인증 뒤 서버 쪽에서 채널을 연다(클라이언트가 거부하는지 보는 시험용). 열고 결과만 적는다 — 받아들여진 채널은 바로 버린다
+    async fn auth_succeeded(&mut self, session: &mut Session) -> Result<(), Self::Error> {
+        if !self.open_server_channels {
+            return Ok(());
+        }
+        let (handle, shared) = (session.handle(), self.shared.clone());
+        tokio::spawn(async move {
+            let results = [
+                ("auth-agent", handle.channel_open_agent().await),
+                ("session", handle.channel_open_session().await),
+                ("direct-tcpip", handle.channel_open_direct_tcpip("127.0.0.1", 1, "127.0.0.1", 2).await),
+                ("direct-streamlocal", handle.channel_open_direct_streamlocal("/tmp/x").await),
+                ("forwarded-tcpip", handle.channel_open_forwarded_tcpip("127.0.0.1", 1, "127.0.0.1", 2).await),
+                ("forwarded-streamlocal", handle.channel_open_forwarded_streamlocal("/tmp/x").await),
+                ("x11", handle.channel_open_x11("127.0.0.1", 3).await),
+            ];
+            for (kind, r) in results {
+                let text = match r {
+                    Ok(_) => "accepted".to_string(),
+                    Err(russh::Error::ChannelOpenFailure(reason)) => format!("{reason:?}"),
+                    Err(e) => format!("error {e:?}"),
+                };
+                shared.server_opens.lock().unwrap().push((kind.to_string(), text));
+            }
+        });
+        Ok(())
     }
 
     async fn channel_open_session(&mut self, channel: Channel<Msg>, reply: server::ChannelOpenHandle, session: &mut Session) -> Result<(), Self::Error> {
@@ -263,6 +347,14 @@ impl server::Handler for Conn {
     }
 
     async fn exec_request(&mut self, id: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
+        if self.exec == ExecMode::Reject && data != SHELL_PROBE.as_bytes() {
+            session.channel_failure(id)?;
+            // 거부한 채널은 클라이언트가 닫을 때(channel_close)까지 남는다 — 그 수를 센다
+            if self.opened.insert(id) {
+                self.shared.lingering_channels.fetch_add(1, Ordering::SeqCst);
+            }
+            return Ok(());
+        }
         let Some(channel) = self.channels.remove(&id) else {
             session.channel_failure(id)?;
             return Ok(());
@@ -291,6 +383,9 @@ impl server::Handler for Conn {
             t.cancel();
         }
         self.channels.remove(&id);
+        if self.opened.remove(&id) {
+            self.shared.lingering_channels.fetch_sub(1, Ordering::SeqCst);
+        }
         Ok(())
     }
 

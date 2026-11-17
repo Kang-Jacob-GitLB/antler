@@ -1,8 +1,7 @@
 //! 세션 정지(R1) 스파이크: **같은 연결에서 채널 A 의 출력을 읽지 않는 동안 채널 B 의 실행이 끝나는가.**
 //! russh 는 받은 데이터를 채널마다 유한한 큐로 넘기고(`chan.send(..).await`) 윈도우도 받은 바이트로 조정하므로,
 //! 읽지 않는 채널이 세션 루프 전체를 멈출 수 있다는 것이 소스 읽기로 예상한 바다. 이 시험이 그것을 실측하고 펌프(읽는 쪽이 항상 비운다)로 풀리는지 본다.
-//! 날 russh 클라이언트를 쓰는 유일한 시험이라 연결·인증 함수를 직접 부른다(제품 코드는 connection.rs 만 부른다).
-#![allow(clippy::disallowed_methods)]
+//! 날 russh 클라이언트를 쓰는 유일한 시험이라 연결·exec 를 직접 부른다(제품 코드는 connection.rs 만 부른다) — 금지 목록 예외는 그 두 함수에만 단다.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,12 +20,14 @@ impl client::Handler for AcceptAll {
     }
 }
 
+#[allow(clippy::disallowed_methods)]
 async fn connect(server: &TestServer, key: russh::keys::PrivateKey) -> client::Handle<AcceptAll> {
     let mut h = client::connect(Arc::new(client::Config::default()), ("127.0.0.1", server.port), AcceptAll).await.unwrap();
     assert!(h.authenticate_publickey("t", PrivateKeyWithHashAlg::new(Arc::new(key), None)).await.unwrap().success());
     h
 }
 
+#[allow(clippy::disallowed_methods)]
 async fn exec(h: &client::Handle<AcceptAll>, cmd: &str) -> Channel<client::Msg> {
     let ch = h.channel_open_session().await.unwrap();
     ch.exec(true, cmd).await.unwrap();

@@ -127,7 +127,7 @@ fn base_name(p: &str) -> String {
     Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string())
 }
 
-/// 공개키만 읽는다(`<파일>.pub` → 개인키 파일의 공개 부분 순). 암호화된 OpenSSH 개인키도 공개 부분은 평문이다
+/// 공개키만 읽는다(`<파일>.pub` → 파일 자체가 공개키(`IdentityFile` 이 `.pub`) → 개인키 파일의 공개 부분 순). 암호화된 OpenSSH 개인키도 공개 부분은 평문이다
 fn public_key_of(file: &str) -> Option<PublicKey> {
     if let Ok(text) = std::fs::read_to_string(format!("{file}.pub")) {
         if let Ok(k) = PublicKey::from_openssh(text.trim()) {
@@ -135,6 +135,9 @@ fn public_key_of(file: &str) -> Option<PublicKey> {
         }
     }
     let text = std::fs::read_to_string(file).ok()?;
+    if let Ok(k) = PublicKey::from_openssh(text.trim()) {
+        return Some(k);
+    }
     PrivateKey::from_openssh(text.as_bytes()).ok().map(|k| k.public_key().clone())
 }
 
@@ -203,4 +206,75 @@ pub(super) async fn authenticate<H: client::Handler>(handle: &mut client::Handle
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use russh::keys::ssh_key::LineEnding;
+    use russh::keys::Algorithm;
+
+    use super::super::config::{load_ssh_config, resolve_host, Ctx, RealFs};
+    use super::*;
+
+    struct Dir(std::path::PathBuf);
+
+    impl Dir {
+        fn new() -> Dir {
+            static N: AtomicU32 = AtomicU32::new(0);
+            let p = std::env::temp_dir().join(format!("antler-auth-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+            std::fs::create_dir_all(&p).unwrap();
+            Dir(p)
+        }
+    }
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn key() -> PrivateKey {
+        PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap()
+    }
+
+    #[test]
+    fn 공개키_읽기는_pub_파일_자체_개인키_순서로_본다() {
+        let d = Dir::new();
+        let k = key();
+        let line = k.public_key().to_openssh().unwrap();
+        // IdentityFile 이 `.pub` 자체인 경우(옆에 `.pub.pub` 은 없다)
+        let only_pub = d.0.join("only.pub");
+        std::fs::write(&only_pub, format!("{line}\n")).unwrap();
+        assert_eq!(public_key_of(&only_pub.to_string_lossy()).unwrap().key_data(), k.public_key().key_data());
+        // 개인키 파일(옆의 .pub 없음)
+        let private = d.0.join("id");
+        std::fs::write(&private, k.to_openssh(LineEnding::LF).unwrap().as_bytes()).unwrap();
+        assert_eq!(public_key_of(&private.to_string_lossy()).unwrap().key_data(), k.public_key().key_data());
+        // 공개키도 개인키도 아닌 파일·없는 파일
+        let junk = d.0.join("junk");
+        std::fs::write(&junk, "not a key").unwrap();
+        assert!(public_key_of(&junk.to_string_lossy()).is_none());
+        assert!(public_key_of(&d.0.join("missing").to_string_lossy()).is_none());
+    }
+
+    #[test]
+    fn identities_only_이고_identity_file_이_pub_이면_agent_필터가_그_공개키를_쓴다() {
+        let d = Dir::new();
+        let k = key();
+        let pub_path = d.0.join("work.pub");
+        std::fs::write(&pub_path, format!("{}\n", k.public_key().to_openssh().unwrap())).unwrap();
+        let cfg_path = d.0.join("config");
+        std::fs::write(&cfg_path, format!("Host h\n  HostName 127.0.0.1\n  IdentityFile {}\n  IdentitiesOnly yes\n", pub_path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))).unwrap();
+        let home = d.0.to_string_lossy().into_owned();
+        let config = load_ssh_config(&cfg_path.to_string_lossy(), &home, &RealFs);
+        let env = |_: &str| None;
+        let node = resolve_host(&config, "h", &Ctx { local_user: "t", env: &env });
+        // agent 는 경로만 주면 켜진 것으로 본다(여기서는 접속하지 않는다)
+        let plan = build_plan(&node, &home, &AgentSetting::Path("/nonexistent/agent.sock".to_string()), &env);
+        let allowed = plan.allowed.expect("IdentitiesOnly + agent 면 필터가 있다");
+        assert_eq!(allowed.len(), 1, "공개키 파일이 필터에 들어가야 한다");
+        assert_eq!(allowed[0].key_data(), k.public_key().key_data());
+    }
 }
