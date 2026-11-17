@@ -21,6 +21,7 @@ import { knownHostsLine, makeHome, newKeyPair, startServer, type TestServer } fr
 //  - tests/golden/channels/log.json: git:log 시나리오(tests/fixtures/repos/log.scenarios.json — 다단계: 페이지·범위·저장소 조작). logArgs.json: logArgs 의 argv(logArgs.cases.json)
 //  - tests/golden/channels/{compare,fileDiff,fileHistory,blame}.json: 파일 단위 채널 시나리오(tests/fixtures/repos/files.scenarios.json)
 //  - tests/golden/channels/{resolveRev,tree,blob,onRemote}.json: 코드 탐색기 채널 시나리오(tests/fixtures/repos/code.scenarios.json — 한 서비스 인스턴스가 순서대로 돌아 캐시 적중도 본다. 큰 파일은 setup 으로 시험 시점에 만든다)
+//  - tests/golden/channels/{refs,refsDetails}.json: 사이드바 ref 채널 시나리오(tests/fixtures/repos/refs.scenarios.json — 다단계: 저장소 조작 뒤 조회. knownDiff 는 정렬 근사 때문에 Rust 가 다른 순서를 내는 알려진 차이)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 //  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
@@ -406,6 +407,84 @@ describe('코드 탐색기 채널 골든(channels/{resolveRev,tree,blob,onRemote
       check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: results }))
     }
     await svc.dispose()
+  }, 180_000)
+})
+
+// ── 사이드바 ref 채널: git:refs · git:refsDetails ────────────────
+
+type RefsStep = { git: unknown[]; in?: string } | { mkdir: string } | { refs: true } | { refsDetails: true }
+interface RefsScenario {
+  name: string
+  repo: string
+  steps: RefsStep[]
+  knownDiff?: { rustLocal: string[] }
+}
+
+/** 시나리오의 git 단계가 쓰는 고정 작성자·시각 — 커밋·스태시 해시가 TS·Rust 에서 같다. Rust 테스트(channels.rs 의 `refs_git`)도 같은 값이다 */
+const REFS_STEP_ENV = {
+  GIT_AUTHOR_NAME: '홍길동',
+  GIT_AUTHOR_EMAIL: 'dev@example.com',
+  GIT_AUTHOR_DATE: '1700000000 +0900',
+  GIT_COMMITTER_NAME: '홍길동',
+  GIT_COMMITTER_EMAIL: 'dev@example.com',
+  GIT_COMMITTER_DATE: '1700000000 +0900'
+}
+
+/** 결과의 문자열에 든 시험 루트 경로(`/`·`\` 두 모양)를 <ROOT> 로 바꾼다 — 작업 트리 경로가 시험 디렉터리마다 다르다. Rust 테스트(channels.rs 의 `scrub_root`)도 같은 규칙이다 */
+function scrubRoot(v: unknown, root: string): unknown {
+  const fwd = root.replace(/\\/g, '/')
+  if (typeof v === 'string') return v.split(fwd).join('<ROOT>').split(root).join('<ROOT>')
+  if (Array.isArray(v)) return v.map((x) => scrubRoot(x, root))
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, scrubRoot(x, root)]))
+  return v
+}
+
+describe('사이드바 ref 채널 골든(channels/{refs,refsDetails}.json)', () => {
+  const scenarios = (JSON.parse(readFileSync(join(FIXTURES, 'refs.scenarios.json'), 'utf8')) as { scenarios: RefsScenario[] }).scenarios
+  let root: string
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, ...REFS_STEP_ENV, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chanrefs-'))
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const out: Record<'refs' | 'refsDetails', unknown[]> = { refs: [], refsDetails: [] }
+    for (const [si, sc] of scenarios.entries()) {
+      const dir = join(root, `s${si}`, 'repo')
+      mkdirSync(dir, { recursive: true })
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${sc.repo}.fi`)))
+      const config = new ConfigStore(join(root, `s${si}.config.json`))
+      const id = config.addRepo({ sourceId: 'local', path: dir, name: sc.repo }).id
+      const svc = new RepoService(config)
+      // '@rev:<경로>::<식>' 은 그 하위 저장소의 rev-parse 다
+      const rev = (expr: string): string => {
+        const [sub, e] = expr.includes('::') ? expr.split('::') : [undefined, expr]
+        return git(sub ? join(dir, sub) : dir, ['rev-parse', e!])
+      }
+      for (const [i, step] of sc.steps.entries()) {
+        if ('mkdir' in step) {
+          mkdirSync(join(dir, step.mkdir), { recursive: true })
+        } else if ('git' in step) {
+          git(step.in ? join(dir, step.in) : dir, expand(step.git, rev) as string[])
+        } else {
+          const channel = 'refs' in step ? 'refs' : 'refsDetails'
+          let result: Record<string, unknown>
+          try {
+            const data = JSON.parse(JSON.stringify(await svc[channel](id))) as unknown
+            result = { ok: true, data: scrubRoot(data, root) }
+          } catch (err) {
+            result = { ok: false, code: codeOf(err) }
+          }
+          out[channel].push({ name: sc.name, step: i, result })
+        }
+      }
+      await svc.dispose()
+    }
+    for (const channel of ['refs', 'refsDetails'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
   }, 180_000)
 })
 

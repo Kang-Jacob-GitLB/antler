@@ -127,6 +127,8 @@ pub fn parse_probe(stdout: &str) -> Probe {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SubmoduleStatus {
+    /// 작업 트리에 체크아웃되지 않음(`submodule_status` 가 아니라 확인 쪽이 정한다 — `refs_service::submodules`)
+    Uninitialized,
     Clean,
     Modified,
     Unknown,

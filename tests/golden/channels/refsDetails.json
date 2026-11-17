@@ -1,0 +1,139 @@
+{
+  "scenarios": [
+    {
+      "name": "basic: 로컬 브랜치 둘·origin/HEAD 없음(기본 브랜치는 로컬 main)",
+      "result": {
+        "data": {
+          "submodules": [],
+          "tracking": {}
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "branchy: 태그·리모트 추적 ref(리모트 설정 없음 — 첫 '/' 앞이 그룹 이름)",
+      "result": {
+        "data": {
+          "submodules": [],
+          "tracking": {}
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "branchy: 리모트 설정·업스트림·gone·origin/HEAD·이름에 / 가 든 리모트",
+      "result": {
+        "data": {
+          "submodules": [],
+          "tracking": {
+            "refs/heads/dev": {
+              "ahead": 1
+            },
+            "refs/heads/main": {
+              "ahead": 10
+            },
+            "refs/heads/topic": {
+              "upstreamGone": true
+            }
+          }
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "name": "branchy: detached HEAD",
+      "result": {
+        "data": {
+          "submodules": [],
+          "tracking": {}
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "name": "basic: 커밋 없는 브랜치를 가리키는 HEAD",
+      "result": {
+        "data": {
+          "submodules": [],
+          "tracking": {}
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "name": "empty: 빈 저장소",
+      "result": {
+        "data": {
+          "submodules": [],
+          "tracking": {}
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "code: 태그(annotated·lightweight)·가지 둘",
+      "result": {
+        "data": {
+          "submodules": [],
+          "tracking": {}
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "서브모듈: clean·modified·uninitialized(없는 디렉터리·빈 디렉터리)·.gitmodules 이름·한글·공백 경로",
+      "result": {
+        "data": {
+          "submodules": [
+            {
+              "name": "libs/empty",
+              "path": "libs/empty",
+              "recorded": "9aee3baca49f55d94ef3d3e82816ea24911edd54",
+              "status": "uninitialized"
+            },
+            {
+              "name": "libs/gone",
+              "path": "libs/gone",
+              "recorded": "9aee3baca49f55d94ef3d3e82816ea24911edd54",
+              "status": "uninitialized"
+            },
+            {
+              "head": "9aee3baca49f55d94ef3d3e82816ea24911edd54",
+              "name": "libs/ok",
+              "path": "libs/ok",
+              "recorded": "9aee3baca49f55d94ef3d3e82816ea24911edd54",
+              "status": "clean",
+              "url": "../lib"
+            },
+            {
+              "head": "d90579d8bddc0c85b137d140020d1a76e3f0fdd0",
+              "name": "한글 이름",
+              "path": "libs/한글 모듈",
+              "recorded": "d90579d8bddc0c85b137d140020d1a76e3f0fdd0",
+              "status": "clean"
+            },
+            {
+              "branch": "main",
+              "head": "f9f9cea105909c40132494998d9587054560fe0a",
+              "name": "vendor/mod",
+              "path": "vendor/mod",
+              "recorded": "0396ca535274e15ccb460c860161a901e993cfce",
+              "status": "modified",
+              "url": "https://example.com/m.git"
+            }
+          ],
+          "tracking": {}
+        },
+        "ok": true
+      },
+      "step": 20
+    }
+  ]
+}

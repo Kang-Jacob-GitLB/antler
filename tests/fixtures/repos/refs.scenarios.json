@@ -1,0 +1,99 @@
+{
+  "_": "git:refs·git:refsDetails 채널 패리티 시나리오. TS(tests/goldenChannels.test.ts → RepoService.refs·refsDetails)와 Rust(src-tauri/tests/channels.rs → Router::route)가 시나리오마다 <repo>.fi 를 <루트>/s<번호>/repo 에 import 해 steps 를 순서대로 돈다. 단계: { git: [인자…], in?: 하위 경로 }(그 저장소(또는 in)에서 날 git 실행 — 작성자·시각은 고정 환경이라 해시가 결정적이다), { mkdir: 경로 }, { refs: true }, { refsDetails: true }. 인자 안의 '@rev:<식>' 은 git rev-parse 결과 해시로(<경로>::<식> 이면 그 하위 저장소에서), { '$cat': [조각…] } 은 이어 붙인 문자열로 바뀐다. 결과의 문자열에 든 시험 루트 경로는 <ROOT> 로 바꾼다(작업 트리 경로). knownDiff: 정렬 근사 때문에 Rust 가 TS(ICU localeCompare)와 다른 순서를 내는 것을 기록한다 — Rust 는 local 의 순서만 rustLocal 이어야 하고(TS 골든의 순서와 달라야 한다) 나머지는 같아야 한다.",
+  "scenarios": [
+    { "name": "basic: 로컬 브랜치 둘·origin/HEAD 없음(기본 브랜치는 로컬 main)", "repo": "basic", "steps": [{ "refs": true }, { "refsDetails": true }] },
+    { "name": "branchy: 태그·리모트 추적 ref(리모트 설정 없음 — 첫 '/' 앞이 그룹 이름)", "repo": "branchy", "steps": [{ "refs": true }, { "refsDetails": true }] },
+    {
+      "name": "branchy: 리모트 설정·업스트림·gone·origin/HEAD·이름에 / 가 든 리모트",
+      "repo": "branchy",
+      "steps": [
+        { "git": ["config", "remote.origin.url", "../origin"] },
+        { "git": ["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"] },
+        { "git": ["config", "remote.team/alice.url", "../alice"] },
+        { "git": ["config", "remote.team/alice.fetch", "+refs/heads/*:refs/remotes/team/alice/*"] },
+        { "git": ["branch", "--set-upstream-to=origin/main", "main"] },
+        { "git": ["branch", "--set-upstream-to=origin/dev", "dev"] },
+        { "git": ["config", "branch.topic.remote", "origin"] },
+        { "git": ["config", "branch.topic.merge", "refs/heads/vanished"] },
+        { "git": ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"] },
+        { "refs": true },
+        { "refsDetails": true }
+      ]
+    },
+    {
+      "name": "branchy: detached HEAD",
+      "repo": "branchy",
+      "steps": [{ "git": ["update-ref", "--no-deref", "HEAD", "@rev:main"] }, { "refs": true }, { "refsDetails": true }]
+    },
+    {
+      "name": "basic: 커밋 없는 브랜치를 가리키는 HEAD",
+      "repo": "basic",
+      "steps": [{ "git": ["symbolic-ref", "HEAD", "refs/heads/orphan-x"] }, { "refs": true }, { "refsDetails": true }]
+    },
+    { "name": "empty: 빈 저장소", "repo": "empty", "steps": [{ "refs": true }, { "refsDetails": true }] },
+    { "name": "code: 태그(annotated·lightweight)·가지 둘", "repo": "code", "steps": [{ "refs": true }, { "refsDetails": true }] },
+    {
+      "name": "스태시 둘(한글 메시지)",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "git": ["rm", "-q", "a.txt"] },
+        { "git": ["stash", "push", "-q", "-m", "첫 번째 wip"] },
+        { "git": ["rm", "-q", "img.bin"] },
+        { "git": ["stash", "push", "-q", "-m", "두 번째"] },
+        { "refs": true }
+      ]
+    },
+    {
+      "name": "작업 트리(브랜치·detached·잠금·한글 경로)",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "git": ["worktree", "add", "-q", "../wt", "-b", "wtb"] },
+        { "git": ["worktree", "add", "-q", "--detach", "../wt2"] },
+        { "git": ["worktree", "lock", "../wt2"] },
+        { "git": ["worktree", "add", "-q", "--detach", "../한글 작업"] },
+        { "refs": true }
+      ]
+    },
+    {
+      "name": "서브모듈: clean·modified·uninitialized(없는 디렉터리·빈 디렉터리)·.gitmodules 이름·한글·공백 경로",
+      "repo": "basic",
+      "steps": [
+        { "git": ["init", "-q", "-b", "main", "libs/ok"] },
+        { "git": ["commit", "-q", "--allow-empty", "-m", "lib 1"], "in": "libs/ok" },
+        { "git": ["init", "-q", "-b", "main", "libs/한글 모듈"] },
+        { "git": ["commit", "-q", "--allow-empty", "-m", "한글 1"], "in": "libs/한글 모듈" },
+        { "git": ["init", "-q", "-b", "main", "vendor/mod"] },
+        { "git": ["commit", "-q", "--allow-empty", "-m", "mod 1"], "in": "vendor/mod" },
+        { "git": ["update-index", "--add", "--cacheinfo", { "$cat": ["160000,", "@rev:vendor/mod::HEAD", ",vendor/mod"] }] },
+        { "git": ["commit", "-q", "--allow-empty", "-m", "mod 2"], "in": "vendor/mod" },
+        { "git": ["update-index", "--add", "--cacheinfo", { "$cat": ["160000,", "@rev:libs/ok::HEAD", ",libs/ok"] }] },
+        { "git": ["update-index", "--add", "--cacheinfo", { "$cat": ["160000,", "@rev:libs/한글 모듈::HEAD", ",libs/한글 모듈"] }] },
+        { "git": ["update-index", "--add", "--cacheinfo", { "$cat": ["160000,", "@rev:libs/ok::HEAD", ",libs/gone"] }] },
+        { "mkdir": "libs/empty" },
+        { "git": ["update-index", "--add", "--cacheinfo", { "$cat": ["160000,", "@rev:libs/ok::HEAD", ",libs/empty"] }] },
+        { "git": ["config", "-f", ".gitmodules", "submodule.libs/ok.path", "libs/ok"] },
+        { "git": ["config", "-f", ".gitmodules", "submodule.libs/ok.url", "../lib"] },
+        { "git": ["config", "-f", ".gitmodules", "submodule.vendor/mod.path", "vendor/mod"] },
+        { "git": ["config", "-f", ".gitmodules", "submodule.vendor/mod.url", "https://example.com/m.git"] },
+        { "git": ["config", "-f", ".gitmodules", "submodule.vendor/mod.branch", "main"] },
+        { "git": ["config", "-f", ".gitmodules", "submodule.한글 이름.path", "libs/한글 모듈"] },
+        { "refs": true },
+        { "refsDetails": true }
+      ]
+    },
+    {
+      "name": "알려진 차이: 악센트 문자가 든 브랜치 이름의 정렬(TS 는 ICU 라 é 가 e 와 f 사이, Rust 근사는 코드 포인트라 z 뒤)",
+      "repo": "basic",
+      "knownDiff": { "rustLocal": ["eagle", "feature", "fzzz", "main", "zebra", "éclair"] },
+      "steps": [
+        { "git": ["branch", "éclair", "main"] },
+        { "git": ["branch", "zebra", "main"] },
+        { "git": ["branch", "eagle", "main"] },
+        { "git": ["branch", "fzzz", "main"] },
+        { "refs": true }
+      ]
+    }
+  ]
+}
