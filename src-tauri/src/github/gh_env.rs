@@ -1,5 +1,5 @@
 //! `src/main/github/ghCli.ts` 의 `ghEnv`: gh 에 넘기는 최소 환경 — 실행 파일 탐색과 gh 설정·자격 증명 위치를 찾는 데 필요한 것만.
-//! gh 를 실행하는 코드(자식 프로세스 생성)는 뒤 PR 의 몫이고, 여기는 거르는 규칙만 있다.
+//! gh 를 실행하는 코드(자식 프로세스 생성)는 `gh_cli.rs` 에 있고, 여기는 거르는 규칙만 있다.
 use std::collections::HashSet;
 
 use crate::git::fetch::js_to_lowercase;

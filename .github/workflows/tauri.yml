@@ -78,6 +78,7 @@ jobs:
       # channels 는 test-hooks 가 켜져 있으면 jira:* 채널 골든(tests/golden/channels/jira.json — 127.0.0.1 목 서버)도 돈다
       # net: GitHub·Jira 순수 로직(검증·URL 판정·응답 해석·Device Flow·ghEnv·토큰 가리기)이 tests/golden/net 골든과 같은지 + Rust 허용 ⇒ TS 허용 위반 0(네트워크·git 을 쓰지 않는다).
       # TS 테스트 대응표는 tests/golden/net/test-map.json(vitest 가 누락을 강제)
+      # net 은 가짜 gh 도 띄운다(gh_cli_run): 테스트 바이너리를 gh.exe 로 하드링크해 gh CLI 토큰 가져오기(Job Object·제한 시간·cwd 의 gh.exe 무시)를 본다. 실제 gh 는 쓰지 않는다
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
         run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net

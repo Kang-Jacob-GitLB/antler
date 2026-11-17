@@ -23,7 +23,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
-| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소)·PR 5(Jira 서비스)·PR 6(Jira 연결: `jira:*` 를 Rust 가 처리, `ANTLER_RUST_API`)·PR 7(GitHub 서비스, 연결 안 함) 완료, GitHub 는 아직 앱에 연결 안 됨(gh CLI 8, 연결 9). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
+| 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 진행 중 — PR 1(순수 로직·골든)·PR 2(응답 매퍼·골든)·PR 3(HTTP 코어·Jira/GitHub 클라이언트)·PR 4(토큰 저장소)·PR 5(Jira 서비스)·PR 6(Jira 연결: `jira:*` 를 Rust 가 처리, `ANTLER_RUST_API`)·PR 7(GitHub 서비스, 연결 안 함)·PR 8(gh CLI 토큰 가져오기, 연결 안 함) 완료, GitHub 는 아직 앱에 연결 안 됨(연결 9). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
@@ -438,7 +438,7 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github �
   Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
   `reqwest::Error` 의 Display 는 쓰지 않는다. 비밀은 `SecretString`(Display·Serialize 없음, Debug `***`)이고 오류 문구는 마지막에 `redact_secrets` 를 거친다.
 - **PR 순서**: 1 순수 로직·골든(완료) → 2 응답 매퍼(api·checks·launchpad·accessibleRepos·adf, 완료) → 3 HTTP 코어·두 클라이언트(루프백 목 서버, 완료) → 4 SecretStore(키링·메모리, 완료) → 5 Jira 서비스(완료) →
-  6 Jira 연결(채널·`openExternal`, 완료) → 7 GitHub 서비스(완료) → 8 gh CLI → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
+  6 Jira 연결(채널·`openExternal`, 완료) → 7 GitHub 서비스(완료) → 8 gh CLI(완료) → 9 GitHub 연결·키체인·`ghToken`/`repoq`.
 
 ### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
 
@@ -675,7 +675,7 @@ Tauri 판에서 `jira:*` 13개 채널을 Rust 가 처리한다(`API_CHANNELS`). 
 
 - **포트**: 저장소 → owner/repo(`gh_repo`), remote 목록(`gh_remotes`), push 된 sha(`pushed_shas_by_author`), `githubClientId`, 등록된 저장소 ID 목록(`repo_ids` — TS 는 `config.repos`), remote 캐시 무효화(`invalidate_gh_remotes`)는 사이드카가 쥔다.
   이 PR 은 트레이트와 시험용 가짜(`tests/net.rs` 의 `FakeRepos`)만 만들었고 실제 구현은 PR 9 의 `repoq` 질의다(**`repo_ids` 는 PR 9 의 op 목록(`ghRepo`·`ghRemotes`·`pushedShas`·`invalidateGhRemotes`·`githubClientId`)에 없다 — PR 9 가 op 를 더하거나 Rust 가 설정을 읽어야 한다**).
-  gh CLI 로 토큰 가져오기는 PR 8: 서비스는 `ExternalTokenProvider`(`available`·`token`)만 알고 `import_cli_token`·`auth` 의 `cliAvailable` 이 그것을 쓴다.
+  gh CLI 로 토큰 가져오기는 PR 8(`gh_cli.rs`): 서비스는 `ExternalTokenProvider`(`available`·`token`)만 알고 `import_cli_token`·`auth` 의 `cliAvailable` 이 그것을 쓴다.
 - **세대(epoch)**: 로그인·로그아웃·토큰 폐기가 `new_epoch` 를 부르면 그 세대의 `CancellationToken` 의 자식으로 돌던 조회가 모두 `ABORTED` 로 끝난다. 조회는 시작할 때 세대 id 를 잡고, 저장소를 묻는 동안 세대가 바뀌었으면(취소됐으면) 요청을 시작하지 않는다.
   저장된 토큰의 `/user` 검증(`validate`)은 `tokio::spawn` + `Shared` 로 돌고(기다리는 호출이 모두 떠나도 끝난다), 세대 교체와 같은 잠금 안에서 잡은 세대가 취소됐는지 보고 시작하며, 끝났을 때 세대가 바뀌었으면 결과를 쓰지 않는다.
   토큰·세대 상태는 `std::sync::Mutex` 하나(`inner`)와 클라이언트가 읽는 토큰 칸(`token`, 잠금 순서 inner → token)이고 `.await` 너머로 들고 가지 않는다.
@@ -685,7 +685,7 @@ Tauri 판에서 `jira:*` 13개 채널을 Rust 가 처리한다(`API_CHANNELS`). 
 - **아바타**: 조회는 `tokio::spawn` + `Shared`(같은 작성자의 동시 요청은 한 번만, 호출자가 떠나도 세마포어 슬롯을 물고 멈추지 않는다), 동시 3개, 한도 여유 10 미만이면 멈춘다. 파일 캐시의 키는 이메일의 **sha256**(TS 는 sha1)이고 `2초` 뒤 몰아 쓴다(`flush`·`dispose` 가 바로 쓴다).
 - **시험**: `tests/net.rs` 의 `live::github_service`(루프백 목 서버·메모리 보관소, `start_paused` 없음). "응답이 오기 전/후"는 시간이 아니라 `Gate`·`wait_for` 로 만들고(로그아웃과 겹치는 보강·로그인·저장소 조회·접근 가능 저장소 취소), 시계(`Clock`)·대기(`Sleeper`)는 가짜를 넣는다.
   서비스·조회 future(채널 메서드 전부)가 `Send` 인지 컴파일로 증명하는 시험이 있다(PR 9 에서 tauri command 에 올릴 때 터지지 않게). 대응표에 없는 추가 시험: 로그인 검증 중 로그아웃, 동시 로그인의 키체인·메모리 일치, 저장소를 묻는 동안 세대 교체,
-  낡은 세대의 저장된 토큰 검증이 거부돼도 새 로그인 유지, 서버가 되돌려 준 토큰의 가림, `import_cli_token`(가짜 `ExternalTokenProvider` — 성공·출처 없음·형식 오류·거부 안내), Device Flow 3xx 의 대상 연결 0. 대응표 `N/A: PR 7`(95개)을 **모두** Rust 테스트에 연결했다(남은 `N/A: PR n` 은 PR 8 의 18개뿐).
+  낡은 세대의 저장된 토큰 검증이 거부돼도 새 로그인 유지, 서버가 되돌려 준 토큰의 가림, `import_cli_token`(가짜 `ExternalTokenProvider` — 성공·출처 없음·형식 오류·거부 안내), Device Flow 3xx 의 대상 연결 0. 대응표 `N/A: PR 7`(95개)을 **모두** Rust 테스트에 연결했다(남은 `N/A: PR n` 은 PR 8 의 18개뿐이었고 PR 8 이 모두 연결했다).
 
 **TS 와 다른 점(PR 7)**
 - **한도 해제 시각 표시(미해결)**: 운영 클라이언트는 UTC `HH:MM(UTC)` 로 표시한다. TS 는 ko-KR 로컬 시각이다. 새 크레이트 없이 로컬 시각을 만들 수 없어(Windows API 를 쓰려면 `windows` 크레이트의 기능을 더해야 한다) 주입 자리만 있다 —
@@ -709,6 +709,41 @@ Tauri 판에서 `jira:*` 13개 채널을 Rust 가 처리한다(`API_CHANNELS`). 
 - 실제 GitHub·gh CLI·키체인·`repoq` 는 쓰지 않았다(외부 접속 금지) — 연결 PR(9)에서 사람이 확인한다. 공개 사진 호스트(`avatars.githubusercontent.com`)는 주소 규칙만 시험했다(이 PR 은 이미지를 받지 않고 주소만 돌려준다).
 - 아바타의 동시성 상한(3)과 목록 보강의 동시성 상한(6×3)은 목 서버가 센 최대 동시 연결 수로 확인했다. Launchpad 의 remote 읽기 동시 8개는 시험하지 않았다(상수만 TS 와 같다). 느린 CI 에서 `Gate`·`wait_for`(최대 10초)가 모자랄 수 있다.
 - `GitHubClient` 의 `rate`·ETag 캐시는 토큰을 버릴 때만 비우고 로그인할 때는 비우지 않는다(TS 와 같다 — 캐시 키에 토큰 해시가 들어 있다).
+
+### PR 8 — gh CLI 토큰 가져오기(`src-tauri/src/github/gh_cli.rs`; 앱에는 연결하지 않는다 — 연결은 PR 9)
+
+`GhCli` 가 `ExternalTokenProvider` 의 실제 구현이다(`available`·`token`). `GitHubService::new` 의 `cli` 자리에 `Some(Arc::new(GhCli::new()))` 를 넣으면 `import_cli_token`·`auth` 의 `cliAvailable` 이 실제 gh 를 쓴다(PR 9 가 넣는다).
+gh 는 `gh auth token --hostname github.com`(가져오기)과 `gh --version`(`available`, 결과를 `OnceCell` 로 캐시해 동시 호출도 한 번만 실행)만 띄운다.
+
+- **환경**: `env_clear` 뒤 PR 1 의 `gh_env` 허용 목록만 넘기고 `GH_PROMPT_DISABLED=1`·`NO_COLOR=1` 을 붙인다. 토큰·프록시 변수(`GH_TOKEN`·`GITHUB_TOKEN`·`HTTPS_PROXY` 등)는 가지 않는다.
+- **실행 파일 탐색(`find_gh`)**: 이름(`gh`)만 넘기면 Windows 의 프로세스 생성(`CreateProcess` 계열)이 현재 작업 디렉터리의 `gh.exe` 를 집을 수 있는 함정이 있어, **걸러진 환경의 PATH 를 직접 풀어 절대 경로로** 띄운다.
+  빈 항목·절대 경로가 아닌 항목(`.`·`bin`·`C:foo`·`\foo`)·**현재 디렉터리와 같은 절대 경로 항목**은 건너뛰고 `gh.exe` 만 찾는다(셸 없이는 `.cmd`·`.bat` 을 못 띄운다 — PATHEXT 를 따르지 않는다). 못 찾으면 프로세스를 만들지 않고 "설치되어 있지 않습니다".
+- **Job Object**: 프로세스마다 `KILL_ON_JOB_CLOSE` Job 을 만들어 `CREATE_SUSPENDED` → 할당 → 재개 순서로 띄운다(git 실행기의 `job.rs` 를 `pub(crate)` 로 열어 재사용). 끝났든 제한 시간으로 버려졌든 Job 이 닫히면 손자까지 죽는다 —
+  git 실행기와 달리 루트가 스스로 끝나도 남은 자손을 두지 않는다. Job 을 만들거나 넣지 못하면 **실행하지 않고** 실패한다(taskkill 폴백 없음).
+- **제한**: stdout 64KB(읽는 중에 적용 — 넘는 청크를 받는 순간 중단하고 죽인다, 정확히 64KB 는 받는다), 띄우기·읽기·종료 대기 전체에 10초. stderr 는 `null` 이라 보관하지 않는다.
+- **토큰 다루기**: 읽는 버퍼(`Vec<u8>`)와 읽기 청크는 `Zeroizing`, `from_utf8` → `js_trim` → `SecretString::new` 로만 옮긴다(`from_utf8_lossy` 사본 없음). tokio 파이프 내부 버퍼는 덮을 수 없다.
+- **오류 문구**는 고정 문장이다(stdout·stderr·경로·토큰이 실리지 않는다): 없음 `MSG_MISSING`, 10초 `MSG_TIMEOUT`, 그 밖(비 0 종료·빈 출력·UTF-8 아님) `MSG_NOT_LOGGED_IN`, 64KB 초과 `MSG_TOO_LARGE`.
+- **시험 훅**(`test-hooks`): `with_env_for_test`(환경 원본 주입 — `gh_env` 필터는 그대로 거친다)·`with_limits_for_test`(제한 시간·stdout 상한). 운영 빌드에는 없다.
+- **시험(`tests/net.rs` 의 `fake_gh`·`gh_cli_run`)**: 테스트 바이너리를 `gh.exe` 로 하드링크(안 되면 복사)해 두면 그 이름으로 시작된 프로세스는 ctor 에서 가짜 gh 로 동작한다(동작은 exe 옆 `gh.mode` 파일 — `GhCli` 는 환경을 비우므로 환경 변수로는 못 넘긴다.
+  가짜가 받은 환경·인자·pid 도 exe 옆 파일에 남긴다). 정상 토큰(CRLF·앞 공백 trim)·빈 출력·64KB 경계·무한 출력(읽는 중 중단 + 프로세스 사망)·시간 초과(300ms 제한)·호출 future 를 버리면(제한 시간 만료와 같은 경로 — 가짜와 손자가 뜬 것을 확인한 뒤 버린다) 루트와 손자가 모두 죽음·비 0 종료(stdout·stderr 에 토큰 모양 문자열 — 메시지에 없음)·환경 허용 목록·인자 고정·`available` 한 번 실행·공백이 든 경로,
+  그리고 **현재 작업 디렉터리의 가짜 `gh.exe` 가 실행되지 않음**: cwd 는 프로세스 전역이라 시험 바이너리를 자식 프로세스로 다시 띄워(cwd = 가짜가 든 폴더, 시험 하나만) PATH 가 `.`·빈 항목·절대 경로 cwd 일 때 "없음"이 되는지 보고, 표시 파일이 없음을 확인한다. 대조군으로 PATH 의 절대 경로에 있으면 표시가 생긴다.
+  서비스 시험: 실제 `GhCli` 를 물린 `import_cli_token`(gh 없음 → `cliAvailable=false`·설치 안내·저장 없음, 가짜 gh 의 토큰으로 `gh-cli` 로그인). 대응표 `N/A: PR 8`(18개)을 **모두** Rust 테스트에 연결했다 —
+  gh 실행 6개, `importCliToken` 6개(PR 7 의 가짜 포트 시험 + 위 실제 구현체 시험), `AvatarResolver` 차단 사유 5개(새 시험: needs-login·공개 저장소 404·rate-limited 의 `resetAt`·session-cap(40번 조회)·로그인 시 초기화), 비로그인 단기 캐시 1개(PR 3 의 시험). 이제 `N/A: PR n` 은 없다.
+
+**TS 와 다른 점(PR 8)**
+- **PATH 를 직접 풀어 절대 경로로 띄운다**(TS 는 `execFile('gh')` 에 이름만 넘긴다). 이 환경의 Node 로 cwd 에 `zzfake.exe` 를 두고 이름만으로 `execFile` 해 봤을 때는 cwd 에서 찾지 않고 `ENOENT` 였다(`cwd` 옵션·부모 cwd 둘 다) —
+  즉 TS 와 동작이 갈리는 곳은 없고 Rust 쪽의 추가 방어다(Node 버전·Windows 에 따라 달라질 수 있어 가정하지 않았다). PATH 의 상대 경로·빈 항목·**현재 디렉터리와 같은 절대 경로 항목**도 건너뛴다
+  (PATH 에 절대 경로로 든 저장소 폴더의 `gh.exe` 는 현재 디렉터리가 아니면 실행된다 — 사용자가 PATH 에 넣은 것이다). `.cmd`·`.bat` 은 찾지 않는다(TS 도 셸 없이는 못 띄운다).
+- **64KB 초과**는 별도 문구(`MSG_TOO_LARGE`)다. TS 는 maxBuffer 초과 오류(`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`, `killed` 없음 — 확인함)가 "로그인되어 있지 않습니다" 로 떨어진다. `available` 은 TS 처럼 실패면 모두 `false` 다.
+- 종료 코드가 0 이어도 stdout 이 UTF-8 이 아니면 "로그인되어 있지 않습니다"(TS 는 깨진 문자열이 형식 검증에서 걸린다).
+- stderr 는 읽지 않고 버린다(TS 도 메시지에 싣지 않지만 받아 둔다). 오류 코드(`GH_CLI_MISSING` 등)는 포트가 문구만 돌려주므로 서비스에 전달되지 않는다(TS 도 서비스가 `message` 만 쓴다).
+- Job 을 못 만들면 실행하지 않는다(git 실행기는 taskkill 로 물러난다). 환경은 호출마다 이 프로세스의 것을 읽는다(TS `env()` 와 같다). UTF-8 이 아닌 환경 변수는 건너뛴다.
+
+**남은 위험(PR 8)**
+- 실제 gh·실제 로그인은 쓰지 않았다(실행 금지) — 연결 PR(9)에서 사람이 확인한다: 설치된 gh 로 "gh 에서 가져오기", gh 가 없거나 로그아웃된 상태의 안내 문구, `GH_CONFIG_DIR` 를 쓰는 환경, Windows 에서 gh 를 `gh.exe` 가 아닌 shim(scoop 의 `.cmd` 만 있는 경우 등)으로만 설치한 환경은 "설치되어 있지 않습니다" 가 된다.
+- 손자까지 죽는지의 시험은 제한 시간으로 끊지 않고 가짜가 뜬 것을 확인한 뒤 호출을 버린다(처음에는 2.5초·5초 제한으로 썼다가 부하 큰 러너에서 가짜가 pid 를 적기 전에 끊겨 간헐 실패해 바꿨다). pid 가 안 생기면 최대 30초 기다린 뒤 실패한다.
+- 아바타 needs-login 시험의 "묻는 횟수"는 TS 가 `≤7` 이지만 Rust 는 목 서버 응답 타이밍에 따라 8 이 관측돼 `1..=9`(전부 묻는 11번보다 적음)로 완화했다. 이후 새 작성자에 더 묻지 않음은 정확히(요청 수 불변) 단언한다.
+- 가짜 gh 는 시험마다 새 경로의 하드링크라 백신의 첫 실행 검사로 느릴 수 있다. `net` 시험 전체는 ~1분이다.
 
 ## Phase 0 에서 확인한 것
 
