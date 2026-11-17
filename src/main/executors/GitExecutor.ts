@@ -48,6 +48,8 @@ export class AbortError extends Error {
  * 모든 git 호출에 공통으로 붙는 전역 옵션.
  * core.fsmonitor=false: 저장소 설정의 fsmonitor 명령은 index 를 읽는 명령에서 실행된다(악성 저장소 RCE 경로).
  * 지금은 index 를 읽지 않지만 앞으로 status 등을 더해도 안전하도록 미리 끈다.
+ * core.protectNTFS=true: Windows 기본값이지만 저장소 로컬 설정이 false 로 꺼 NTFS 위험 경로(`.git.`·`::$INDEX_ALLOCATION`·8.3) 보호를
+ * 풀 수 있어 `-c` 로 고정한다. 모든 플랫폼의 git 이 인식하고(true 면 그런 경로만 거부), 모르는 core 키는 무시하므로 WSL·SSH 의 Linux git 에도 무해하다.
  */
 export const GIT_GLOBAL_ARGS = [
   '-c',
@@ -57,7 +59,9 @@ export const GIT_GLOBAL_ARGS = [
   '-c',
   'log.showSignature=false',
   '-c',
-  'core.fsmonitor=false'
+  'core.fsmonitor=false',
+  '-c',
+  'core.protectNTFS=true'
 ]
 
 /**

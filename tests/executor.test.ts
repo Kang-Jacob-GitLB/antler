@@ -1,4 +1,7 @@
-import { resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AbortError, GitError } from '../src/main/executors/GitExecutor'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
@@ -31,6 +34,18 @@ describe('LocalExecutor', () => {
     const ac = new AbortController()
     ac.abort()
     await expect(exec.run(repoRoot, ['status'], { signal: ac.signal })).rejects.toBeInstanceOf(AbortError)
+  })
+
+  it('저장소 로컬 설정이 core.protectNTFS=false 여도 실행되는 git 은 true 로 본다', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'antler-ntfs-'))
+    try {
+      execFileSync('git', ['init', '-q', root])
+      execFileSync('git', ['-C', root, 'config', 'core.protectNTFS', 'false'])
+      const r = await exec.run(root, ['config', '--get', 'core.protectNTFS'])
+      expect(r.stdout.toString().trim()).toBe('true')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 
