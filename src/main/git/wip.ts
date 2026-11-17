@@ -9,7 +9,61 @@ import { WIP_STATUS_ARGS, WipStatusParser } from './parsers/wipStatus'
 const AREAS = new Set(['staged', 'unstaged', 'untracked'])
 
 /** 덮어쓸 수 없는 필터 드라이버가 있어 작업 트리 조회를 거부할 때의 메시지 */
-export const UNSAFE_FILTER_MSG = '이 저장소의 filter 드라이버 이름에 "=" 가 있어 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.'
+export const UNSAFE_FILTER_MSG =
+  '이 저장소의 filter 드라이버(이름에 "=" 나 잘못된 UTF-8 이 있거나 개수가 너무 많음)를 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.'
+
+/**
+ * 드라이버 수 상한. 드라이버마다 `-c` 4쌍(약 90자 + 이름 길이 ×4)이 붙는데 Windows 명령줄은 32767자까지라
+ * 256개면 이름이 짧아도 한계에 가깝다. 정상 저장소의 드라이버는 한두 개다. 총 길이 상한(MAX_OVERRIDE_CHARS)도 함께 둔다.
+ */
+const MAX_FILTER_DRIVERS = 256
+const MAX_OVERRIDE_CHARS = 24000
+
+const unsafeFilter = (): GitError => new GitError(UNSAFE_FILTER_MSG, 1, UNSAFE_FILTER_MSG, ['config'])
+
+/**
+ * `git config -z --get-regexp '^filter\.'` 출력(바이트)에서 덮어써야 할 드라이버 이름을 뽑는다.
+ * 키를 바이트 단위로 UTF-8 검증한다: 잘못된 바이트(`\xff`)가 든 이름은 문자열로 바꾸면 U+FFFD 가 돼 `-c` 가 실제 드라이버를 덮지 못하고,
+ * Windows 는 argv 가 UTF-16 이라 원래 바이트로 `-c` 를 만들 수도 없다 — 그런 이름은 무력화할 수 없으니 던진다.
+ * 접미사(.clean/.smudge/.process) 판정은 git 정규식(로캘 의존)이 아니라 여기서 한다.
+ */
+export function parseFilterDrivers(stdout: Buffer): string[] {
+  const strict = new TextDecoder('utf-8', { fatal: true })
+  const drivers = new Set<string>()
+  let start = 0
+  while (start < stdout.length) {
+    let end = stdout.indexOf(0, start)
+    if (end < 0) end = stdout.length
+    const entry = stdout.subarray(start, end)
+    start = end + 1
+    if (entry.length === 0) continue
+    const nl = entry.indexOf(0x0a)
+    const keyBytes = nl < 0 ? entry : entry.subarray(0, nl)
+    let key: string
+    try {
+      key = strict.decode(keyBytes)
+    } catch {
+      throw unsafeFilter()
+    }
+    if (key.includes('�')) throw unsafeFilter()
+    const m = /^filter\.(.+)\.(clean|smudge|process)$/s.exec(key)
+    if (!m) continue
+    const value = nl < 0 ? '' : entry.subarray(nl + 1).toString('utf8')
+    if (SAFE_FILTER_CMDS.has(value.trim())) continue
+    const d = m[1]!
+    // git 은 `-c` 인자를 첫 '=' 에서 키와 값으로 자른다. 이름에 '=' 가 든 드라이버(gitattributes 에서 `filter=a=b` 로 쓸 수 있다)는
+    // `-c filter.a=b.clean=` 이 `filter.a` = `b.clean=` 으로 읽혀 덮어쓰기가 조용히 실패한다 — 그런 저장소는 작업 트리를 읽지 않는다
+    if (d.includes('=')) throw unsafeFilter()
+    drivers.add(d)
+    if (drivers.size > MAX_FILTER_DRIVERS) throw unsafeFilter()
+  }
+  return [...drivers]
+}
+
+/** 8.3 짧은 이름 모양(`GIT~1`) 구성 요소인가. NTFS 는 끝의 `.`·공백을 떼므로 `GIT~1.`·`GIT~1 ` 도 같은 이름이다 */
+export function hasShortNameSegment(p: string): boolean {
+  return p.split(/[\\/]/).some((seg) => /~\d+$/.test(seg.replace(/[. ]+$/, '')))
+}
 
 /** 그대로 실행을 허용하는 필터 명령(git-lfs 기본 설치값과 정확히 같을 때만) */
 const SAFE_FILTER_CMDS = new Set(['git-lfs clean -- %f', 'git-lfs smudge -- %f', 'git-lfs smudge --skip -- %f', 'git-lfs filter-process', 'git-lfs filter-process --skip'])
@@ -21,27 +75,17 @@ const SAFE_FILTER_CMDS = new Set(['git-lfs clean -- %f', 'git-lfs smudge -- %f',
  * 그 파일은 "수정됨"으로 보일 수 있지만 명령을 실행하는 것보다 낫다.
  */
 export async function filterOverrides(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<string[]> {
-  const r = await exec.run(repoPath, ['config', '-z', '--get-regexp', '^filter\\..+\\.(clean|smudge|process)$'], opts)
+  // 정규식은 git 의 로캘·바이트 처리에 기대지 않도록 `^filter\.` 로만 좁히고 접미사는 parseFilterDrivers 가 판정한다
+  const r = await exec.run(repoPath, ['config', '-z', '--get-regexp', '^filter\\.'], opts)
   // 1 = 해당 키 없음
   if (r.code === 1) return []
   if (r.code !== 0) throw new GitError(r.stderr.trim() || `git config exited with ${r.code}`, r.code, r.stderr, ['config'])
-  const drivers = new Set<string>()
-  for (const entry of r.stdout.toString('utf8').split('\0')) {
-    if (!entry) continue
-    const nl = entry.indexOf('\n')
-    const key = nl < 0 ? entry : entry.slice(0, nl)
-    const value = nl < 0 ? '' : entry.slice(nl + 1)
-    const m = /^filter\.(.+)\.(clean|smudge|process)$/s.exec(key)
-    if (m && !SAFE_FILTER_CMDS.has(value.trim())) drivers.add(m[1]!)
-  }
   const out: string[] = []
-  for (const d of drivers) {
-    // git 은 `-c` 인자를 첫 '=' 에서 키와 값으로 자른다. 이름에 '=' 가 든 드라이버(gitattributes 에서 `filter=a=b` 로 쓸 수 있다)는
-    // `-c filter.a=b.clean=` 이 `filter.a` = `b.clean=` 으로 읽혀 덮어쓰기가 조용히 실패한다 — 그런 저장소는 작업 트리를 읽지 않는다
-    if (d.includes('=')) throw new GitError(UNSAFE_FILTER_MSG, 1, UNSAFE_FILTER_MSG, ['config'])
+  for (const d of parseFilterDrivers(r.stdout)) {
     // required=true 면 빈 명령을 "필터 없음 → 실패"로 본다. 이번 실행에서만 끈다
     out.push('-c', `filter.${d}.clean=`, '-c', `filter.${d}.smudge=`, '-c', `filter.${d}.process=`, '-c', `filter.${d}.required=false`)
   }
+  if (out.reduce((n, a) => n + a.length + 1, 0) > MAX_OVERRIDE_CHARS) throw unsafeFilter()
   return out
 }
 
@@ -94,7 +138,7 @@ export async function wipFileDiff(
   if (req.area !== 'staged') {
     // unstaged: 조작된 index 의 `GIT~1/config` 항목이 작업 트리 diff 로 .git/config 를 읽게 하는 8.3 짧은 이름을 구성 요소 모양(`~숫자`)으로 거부한다.
     // 정상 파일 이름에도 드물게 있는 형태(`foo~1`)라 오탐을 허용한다 — .git 안을 읽는 쪽이 더 나쁘다. (untracked 는 허용 목록이 이미 막는다)
-    if (req.area === 'unstaged' && req.path.split(/[\\/]/).some((seg) => /~\d+$/.test(seg))) throw new Error('invalid path')
+    if (req.area === 'unstaged' && hasShortNameSegment(req.path)) throw new Error('invalid path')
     // 정션·symlink 로 .git 이나 저장소 밖을 읽는 우회: 로컬 파일 시스템일 때만 열기 직전에 확인한다.
     // WSL·SSH 는 Node 가 파일 시스템을 볼 수 없어 하지 않는다 — Linux git 의 status 는 디렉터리 symlink 를 따라 들어가지 않고 링크 자체를
     // 하나의 항목으로 보고하므로 `j/config` 형태의 경로가 허용 목록에 들어오지 않는다고 본다(미확인: 실측하지 않았다. docs/security.md 참고).
