@@ -365,7 +365,8 @@ async fn 사이드카로_가야_하는_요청은_건드리지_않는다() {
     let dir = import(&tmp.0, "basic");
     let router = Router::new(true, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(router.route("git:commit", &json!(["unknown-id", "abcd1234"])).await, Routed::Sidecar));
-    assert!(matches!(router.route("git:lfsPaths", &json!(["basic"])).await, Routed::Sidecar));
+    // 사이드카에 남는 비 git 채널(PR 6·7 까지 남는 git 채널은 피한다)
+    assert!(matches!(router.route("config:get", &json!(["basic"])).await, Routed::Sidecar));
     let off = Router::new(false, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(off.route("git:commit", &json!(["basic", "abcd1234"])).await, Routed::Sidecar));
     assert_eq!(router.rust_handled() + off.rust_handled(), 0);
@@ -2077,6 +2078,315 @@ async fn 활동_요청은_합쳐지고_큐_한도보다_많아도_서로_막지_
         }
         mode.finish();
     }
+}
+
+// ── LFS·gitflow: git:repoExtras · git:lfsPaths ────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lfs_gitflow_시나리오가_ts_골든과_같다() {
+    extras_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lfs_gitflow_시나리오가_ssh_에서도_ts_골든과_같다() {
+    extras_scenarios(&Mode::ssh().await).await;
+}
+
+/// 골든에 남기는 인자: 요청의 paths 가 20개를 넘으면 `{count, first, last}`(`tests/goldenChannels.test.ts` 의 `summarizeLfsArgs` 와 같다)
+fn summarize_lfs_args(list: &Value) -> Value {
+    let mut list = list.as_array().expect("args").clone();
+    if let Some(paths) = list.first().and_then(|r| r["paths"].as_array()).filter(|p| p.len() > 20).cloned() {
+        list[0]["paths"] = json!({ "count": paths.len(), "first": paths[0], "last": paths[paths.len() - 1] });
+    }
+    Value::Array(list)
+}
+
+async fn extras_scenarios(mode: &Mode) {
+    let all = read_json("tests/fixtures/repos/extras.scenarios.json");
+    let scenarios = all["scenarios"].as_array().expect("scenarios");
+    let golden = [read_json("tests/golden/channels/repoExtras.json"), read_json("tests/golden/channels/lfsPaths.json")];
+    let tmp = TempDir::new("extras");
+    let mut cursor = [0usize; 2];
+    let mut diffs = Vec::new();
+    for (si, sc) in scenarios.iter().enumerate() {
+        let name = sc["name"].as_str().unwrap();
+        // 시나리오마다 새 디렉터리에 import 한다(저장소·작업 트리를 바꾸는 단계가 다른 시나리오에 번지지 않게)
+        let dir = import_at(tmp.0.join(format!("s{si}")), sc["repo"].as_str().unwrap());
+        let id = format!("s{si}");
+        let router = mode.router(&[(id.as_str(), dir.as_path())]);
+        let rev = |expr: &str| rev_parse(&dir, expr);
+        for (i, step) in sc["steps"].as_array().unwrap().iter().enumerate() {
+            if let Some(args) = step.get("git") {
+                let args = expand(args, &rev);
+                let args: Vec<&str> = args.as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+                assert!(refs_git(&dir).args(&args).status().unwrap().success(), "{name}: git {args:?}");
+                continue;
+            }
+            if let Some(w) = step.get("write") {
+                let w = expand(w, &rev);
+                let target = dir.join(w[0].as_str().unwrap());
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                fs::write(target, w[1].as_str().unwrap()).unwrap();
+                continue;
+            }
+            if step.get("extras").is_some() {
+                let env = envelope(router.route("git:repoExtras", &json!([id])).await);
+                let got = if env["ok"] == true { json!({ "ok": true, "data": env["data"] }) } else { json!({ "ok": false, "code": env["code"] }) };
+                let g = &golden[0]["scenarios"][cursor[0]];
+                cursor[0] += 1;
+                assert_eq!((&g["name"], &g["step"]), (&json!(name), &json!(i)), "{name}/repoExtras: 골든의 순서가 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+                if norm_numbers(&got) != norm_numbers(&g["result"]) {
+                    diffs.push(format!("{name} / repoExtras 단계 {i}: 골든과 다르다\n  Rust: {}\n  TS  : {}", short(&got), short(&g["result"])));
+                }
+                continue;
+            }
+            // 인자 자리: (요청, requestId). 비어 있는 자리는 bridge 가 보내는 표식이다
+            let list = expand(&step["lfsPaths"], &rev);
+            let mut args = vec![json!(id)];
+            args.extend(list.as_array().unwrap().iter().cloned());
+            while args.len() < 2 {
+                args.push(json!({ UNDEFINED_ARG: true }));
+            }
+            args.push(json!(format!("req-{si}-{i}")));
+            let env = envelope(router.route("git:lfsPaths", &Value::Array(args)).await);
+            let got = if env["ok"] == true {
+                let data = env["data"].as_array().expect("paths").clone();
+                let data = if data.len() > 20 { json!({ "count": data.len(), "first": data[0], "last": data[data.len() - 1] }) } else { Value::Array(data) };
+                json!({ "ok": true, "data": data })
+            } else if step.get("msg") == Some(&json!(true)) {
+                json!({ "ok": false, "code": env["code"], "error": env["error"] })
+            } else {
+                json!({ "ok": false, "code": env["code"] })
+            };
+            let g = &golden[1]["scenarios"][cursor[1]];
+            cursor[1] += 1;
+            assert_eq!((&g["name"], &g["step"]), (&json!(name), &json!(i)), "{name}/lfsPaths: 골든의 순서가 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+            assert_eq!(norm_numbers(&g["args"]), norm_numbers(&summarize_lfs_args(&list)), "{name}/lfsPaths 단계 {i}: 인자가 골든과 다르다");
+            if norm_numbers(&got) != norm_numbers(&g["result"]) {
+                diffs.push(format!("{name} / lfsPaths 단계 {i}: 골든과 다르다\n  인자: {}\n  Rust: {}\n  TS  : {}", short(&summarize_lfs_args(&list)), short(&got), short(&g["result"])));
+            }
+        }
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+    assert_eq!([golden[0]["scenarios"].as_array().unwrap().len(), golden[1]["scenarios"].as_array().unwrap().len()], cursor, "골든 항목 수가 시나리오와 다르다");
+    mode.finish();
+}
+
+/// 검증에 걸린 요청은 git 을 띄우지도(저장소 경로가 없는 곳 — 띄웠다면 GIT 오류가 난다) 취소 레지스트리를 쓰지도 `rust_handled` 에 세지도 않는다.
+/// 요청의 앞 1000개만 검증한다(TS 는 `slice` 한 뒤 검사한다) — 1001번째 항목은 보지 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 적대적_lfs_요청은_git_을_띄우지_않는다() {
+    let router = Router::new(true, false, mirror_of(&[("a", Path::new("/nonexistent-antler-lfs"))]));
+    for (args, want) in [
+        (json!(["a"]), "invalid request"),
+        (json!(["a", null]), "invalid request"),
+        (json!(["a", { UNDEFINED_ARG: true }]), "invalid request"),
+        (json!(["a", "x"]), "invalid paths"),
+        (json!(["a", { "paths": "a" }]), "invalid paths"),
+        (json!(["a", { "paths": [""] }]), "invalid path"),
+        (json!(["a", { "paths": ["a\u{0}b"] }]), "invalid path"),
+        (json!(["a", { "paths": [5] }]), "invalid path"),
+        (json!(["a", { "rev": "--help", "paths": ["a"] }]), "invalid commit hash"),
+        (json!(["a", { "rev": "--output=pwned.txt", "paths": ["a"] }]), "invalid commit hash"),
+        (json!(["a", { "rev": null, "paths": ["a"] }]), "invalid commit hash"),
+        (json!(["a", { "rev": "abc", "paths": 5 }]), "invalid commit hash"),
+    ] {
+        let env = envelope(router.route("git:lfsPaths", &args).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone(), env["error"].clone()), (json!(false), json!("ERROR"), json!(want)), "{args}");
+    }
+    assert_eq!(router.rust_handled(), 0, "거부된 요청은 처리한 것으로 세지 않는다");
+    assert!(!Path::new("pwned.txt").exists());
+    // 1001번째 항목은 검증하지 않는다 → 검증은 통과하고 git 이 실패한다(경로가 없다)
+    let mut paths: Vec<Value> = (0..1000).map(|i| json!(format!("f{i}"))).collect();
+    paths.push(json!(""));
+    let env = envelope(router.route("git:lfsPaths", &json!(["a", { "paths": paths }])).await);
+    assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("GIT")), "{env}");
+    assert_eq!(router.rust_handled(), 1);
+}
+
+/// `repoExtras` 는 조회가 모두 실패해도(저장소 경로가 없다) 오류가 아니라 `{lfs:false, gitflow:null}` 이다(TS 의 `.catch(() => false)`). `lfsPaths` 의 git 실패는 GIT 이다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn repo_extras_는_git_실패를_삼키고_lfs_paths_는_git_오류를_낸다() {
+    let router = Router::new(true, false, mirror_of(&[("a", Path::new("/nonexistent-antler-lfs"))]));
+    let env = envelope(router.route("git:repoExtras", &json!(["a"])).await);
+    assert_eq!((env["ok"].clone(), env["data"].clone()), (json!(true), json!({ "lfs": false, "gitflow": null })));
+    let env = envelope(router.route("git:lfsPaths", &json!(["a", { "paths": ["a.psd"] }])).await);
+    assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("GIT")), "{env}");
+    assert_eq!(router.rust_handled(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lfs_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카() {
+    let m = RepoMirror::default();
+    m.apply(
+        1,
+        vec![
+            MirrorRepo { id: "a".into(), kind: "local".into(), path: "/nonexistent-antler-lfs".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "g".into(), kind: "github".into(), path: "/cache".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "s".into(), kind: "ssh".into(), path: "/srv".into(), distro: None, ssh_host: Some("devbox".into()) },
+            MirrorRepo { id: "unc".into(), kind: "local".into(), path: "\\\\evil\\share\\repo".into(), distro: None, ssh_host: None },
+        ],
+    );
+    let router = Router::new(true, false, m.clone());
+    let off = Router::new(false, false, m);
+    for (ch, tail) in [("git:repoExtras", json!([])), ("git:lfsPaths", json!([{ "paths": ["a"] }]))] {
+        let call = |id: &Value| {
+            let mut v = vec![id.clone()];
+            v.extend(tail.as_array().unwrap().iter().cloned());
+            Value::Array(v)
+        };
+        for id in ["nope", "g", "s"] {
+            assert!(matches!(router.route(ch, &call(&json!(id))).await, Routed::Sidecar), "{id} {ch}");
+        }
+        for id in [json!(null), json!(5)] {
+            assert!(matches!(router.route(ch, &call(&id)).await, Routed::Sidecar), "{ch} {id}");
+        }
+        assert!(matches!(router.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
+        assert!(matches!(off.route(ch, &call(&json!("a"))).await, Routed::Sidecar), "{ch}");
+        let env = envelope(router.route(ch, &call(&json!("unc"))).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+    }
+    assert_eq!(router.rust_handled() + off.rust_handled(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 등록_전에_온_cancel_은_lfs_paths_를_git_없이_취소한다() {
+    let router = Router::new(true, false, mirror_of(&[("a", Path::new("/nonexistent-antler-lfs"))]));
+    assert!(matches!(router.route("req:cancel", &json!(["early"])).await, Routed::Sidecar));
+    // git 을 띄웠다면 경로가 없어 GIT 이 난다 — ABORTED 면 띄우지 않은 것이다
+    let env = envelope(router.route("git:lfsPaths", &json!(["a", { "paths": ["a.psd"] }, "early"])).await);
+    assert_eq!(env["code"], "ABORTED", "{env}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 진행_중_lfs_paths_를_취소해도_멈추지_않는다() {
+    let tmp = TempDir::new("lfscancel");
+    let dir = import(&tmp.0, "basic");
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("b", dir.as_path())])));
+    // 묶음이 여러 개(1000개 × 긴 경로)라 취소가 묶음 사이에도 닿아야 한다
+    let paths: Vec<Value> = (0..1000).map(|i| json!(format!("dir/{}{i}", "y".repeat(60)))).collect();
+    let r = router.clone();
+    let task = tokio::spawn(async move { envelope(r.route("git:lfsPaths", &json!(["b", { "paths": paths }, "slow"])).await) });
+    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+    assert!(matches!(router.route("req:cancel", &json!(["slow"])).await, Routed::Sidecar));
+    let env = tokio::time::timeout(std::time::Duration::from_secs(60), task).await.expect("취소 뒤에도 끝나야 한다").unwrap();
+    // 타이밍에 따라 이미 끝났을 수도 있다 — 어느 쪽이든 형식이 맞아야 한다
+    match env["ok"].as_bool() {
+        Some(true) => {}
+        _ => assert_eq!(env["code"], "ABORTED", "{env}"),
+    }
+    // 취소한 뒤에도 같은 요청을 다시 받을 수 있다(슬롯이 풀렸다)
+    let again = envelope(router.route("git:lfsPaths", &json!(["b", { "paths": ["a.psd"] }])).await);
+    assert_eq!((again["ok"].clone(), again["data"].clone()), (json!(true), json!([])));
+}
+
+/// 악성 저장소: `check-attr`·`ls-tree`·`cat-file blob` 길(lfsPaths 와 repoExtras 의 커밋된 속성 읽기)은 저장소 설정의 filter·textconv 를 실행하지 않는다.
+/// 작업 트리·info/attributes 를 읽는 `diff --no-index` 는 이 시험이 아니라 `no_index_*` 시험들이 덮는다(규칙이 `.gitattributes` 자체에 맞아야 실행되므로 `*` 규칙을 쓴다)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 악성_저장소의_필터는_lfs_paths_가_실행하지_않는다() {
+    let tmp = TempDir::new("lfsevil");
+    let dir = import(&tmp.0, "basic");
+    let marker = tmp.0.join("lfs-evil-ran");
+    let m = marker.to_string_lossy().replace('\\', "/");
+    assert!(raw_git(&dir).args(["checkout", "-q", "-f", "main"]).status().unwrap().success());
+    fs::write(dir.join(".gitattributes"), "* filter=evil diff=evil\n*.psd filter=lfs\n").unwrap();
+    fs::write(dir.join("a.psd"), "x").unwrap();
+    assert!(raw_git(&dir).args(["add", "-A"]).status().unwrap().success());
+    assert!(refs_git(&dir).args(["commit", "-q", "-m", "evil"]).status().unwrap().success());
+    let cmd = format!("sh -c \"echo x > '{m}'; cat\" --");
+    for key in ["diff.evil.textconv", "filter.evil.smudge", "filter.evil.clean", "filter.evil.process"] {
+        assert!(raw_git(&dir).args(["config", key, &cmd]).status().unwrap().success());
+    }
+    let head = rev_parse(&dir, "HEAD");
+    let router = Router::new(true, false, mirror_of(&[("e", dir.as_path())]));
+    for req in [json!({ "rev": head, "paths": ["a.psd", ".gitattributes"] }), json!({ "paths": ["a.psd", ".gitattributes"] })] {
+        let env = envelope(router.route("git:lfsPaths", &json!(["e", req])).await);
+        assert_eq!(env["data"], json!(["a.psd"]), "{env}");
+    }
+    assert!(!marker.exists(), "저장소가 심은 명령이 실행됐다");
+}
+
+// ── `git diff --no-index` 의 filter 실행 차단(`tests/noIndexFilter.test.ts` 의 repoExtras 쪽 대응) ──
+
+/// 표지 filter 를 심는 저장소: `driver` 드라이버의 clean 이 표지 파일을 만드는 명령(임시 디렉터리 안에만 쓴다). 표지 파일 경로를 돌려준다
+fn plant_filter(tmp: &Path, dir: &Path, driver: &str, tag: &str) -> PathBuf {
+    let marker = tmp.join(format!("MARK-{tag}"));
+    let m = marker.to_string_lossy().replace('\\', "/");
+    let cmd = format!("sh -c \"echo x > '{m}'; cat\" --");
+    assert!(raw_git(dir).args(["config", &format!("filter.{driver}.clean"), &cmd]).status().unwrap().success());
+    marker
+}
+
+async fn extras_lfs(router: &Router, id: &str) -> Value {
+    let env = envelope(router.route("git:repoExtras", &json!([id])).await);
+    assert_eq!(env["ok"], json!(true), "{env}");
+    env["data"]["lfs"].clone()
+}
+
+async fn no_index_scenarios(mode: &Mode) {
+    let tmp = TempDir::new("noindex");
+    // 대조군: 가드 없이 --no-index 를 돌리면 심어 둔 명령이 실행된다(시험이 의미 있음을 확인)
+    let dir = import_at(tmp.0.join("control"), "basic");
+    let marker = plant_filter(&tmp.0, &dir, "evil", "control");
+    fs::write(dir.join(".gitattributes"), ".gitattributes filter=evil\n").unwrap();
+    let st = raw_git(&dir).args(["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", "/dev/null", ".gitattributes"]).output().unwrap();
+    assert_eq!(st.status.code(), Some(1));
+    assert!(marker.exists(), "대조군: 가드 없는 --no-index 가 표지 명령을 실행하지 않았다 — 시험이 의미가 없다");
+
+    // 작업 트리 .gitattributes 규칙이 filter 에 맞아도 실행하지 않고 LFS 판정은 그대로다
+    let dir = import_at(tmp.0.join("worktree"), "basic");
+    let marker = plant_filter(&tmp.0, &dir, "evil", "worktree");
+    fs::write(dir.join(".gitattributes"), ".gitattributes filter=evil\n*.bin filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+    let router = mode.router(&[("w", dir.as_path())]);
+    assert_eq!(extras_lfs(&router, "w").await, json!(true));
+    assert!(!marker.exists(), "작업 트리 .gitattributes 읽기가 저장소가 심은 명령을 실행했다");
+
+    // .git/info/attributes 도 마찬가지다
+    let dir = import_at(tmp.0.join("info"), "basic");
+    let marker = plant_filter(&tmp.0, &dir, "evil", "info");
+    let info = raw_git(&dir).args(["rev-parse", "--path-format=absolute", "--git-path", "info/attributes"]).output().unwrap();
+    let info = PathBuf::from(String::from_utf8(info.stdout).unwrap().trim());
+    fs::create_dir_all(info.parent().unwrap()).unwrap();
+    fs::write(&info, "attributes filter=evil\n*.bin filter=lfs\n").unwrap();
+    let router = mode.router(&[("i", dir.as_path())]);
+    assert_eq!(extras_lfs(&router, "i").await, json!(true));
+    assert!(!marker.exists(), "info/attributes 읽기가 저장소가 심은 명령을 실행했다");
+
+    // 무력화할 수 없는 저장소(드라이버 이름에 `=`)는 파일을 읽지 않고 lfs:false 다
+    let dir = import_at(tmp.0.join("eq"), "basic");
+    let marker = plant_filter(&tmp.0, &dir, "a=b", "eq");
+    fs::write(dir.join(".gitattributes"), ".gitattributes filter=a\n*.bin filter=lfs\n").unwrap();
+    let router = mode.router(&[("e", dir.as_path())]);
+    assert_eq!(extras_lfs(&router, "e").await, json!(false));
+    assert!(!marker.exists(), "무력화할 수 없는 저장소인데 표지 명령이 실행됐다");
+    mode.finish();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_index_읽기는_저장소가_심은_filter_를_실행하지_않는다() {
+    no_index_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn no_index_읽기는_ssh_에서도_저장소가_심은_filter_를_실행하지_않는다() {
+    no_index_scenarios(&Mode::ssh().await).await;
+}
+
+#[test]
+fn lfs_argv_는_상수_뒤_검증된_값뿐이고_작업_트리_읽기는_한_곳이다() {
+    // 파일 내용은 `cat-file blob`·`diff --no-index` 로만 읽는다 — `git show`·`--textconv`·`--filters` 인자는 없다.
+    // `no_index_args(` 의 호출은 `read_worktree_attributes` 안 한 곳뿐이고, 그 함수는 가드(`&FilterGuard`)를 필수 인자로 받는다(가드 없이 `--no-index` argv 를 만들 수 없다)
+    let src = fs::read_to_string(repo_root().join("src-tauri/src/git/lfs.rs")).unwrap().replace("\r\n", "\n");
+    let body = src.split("#[cfg(test)]").next().unwrap();
+    for banned in ["\"show\"", "\"--textconv\"", "\"--filters\"", "\"hash-object\"", "\"submodule\""] {
+        assert!(!body.contains(banned), "lfs.rs 가 {banned} 를 쓴다");
+    }
+    assert_eq!(body.matches("no_index_args(").count(), 2, "정의 하나와 호출 하나");
+    assert_eq!(body.matches("\"--no-index\"").count(), 1, "--no-index 인자는 no_index_args 한 곳에만 있다");
+    assert!(body.contains("pub fn no_index_args(guard: &FilterGuard, "), "no_index_args 는 가드를 필수 인자로 받아야 한다");
+    assert!(body.contains("fn read_worktree_attributes(exec: &GitExecutor, repo_path: &str, path: &str, guard: &FilterGuard, "), "read_worktree_attributes 는 가드를 필수 인자로 받아야 한다");
+    let call = body.split("async fn read_worktree_attributes").nth(1).expect("read_worktree_attributes");
+    assert!(call.split("\n}\n").next().unwrap().contains("no_index_args(guard, "), "호출이 read_worktree_attributes 밖에 있거나 가드를 넘기지 않는다");
 }
 
 // ── git:fetch ──────────────────────────────────────────

@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -268,7 +268,7 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
   상한을 넘기고 세기도 끝났으면 스트림을 버려 git 을 끊고, EOF 까지 읽었으면 `finish()` 로 종료 코드를 확인한다(없는 해시는 `GIT`). `full` 은 JS 참 거짓으로 읽는다(`1`·`"no"` 는 참, `0`·`""`·`null` 은 거짓).
   blame 은 512KiB 가 넘는 파일이면 blame 하지 않고 `tooLarge`, 그 시점에 경로가 없거나 파일이 아니면(`cat-file -s` 실패) `missing`, 출력에 NUL 이 있으면 `binary`, HEAD 를 풀 수 없으면 `no commits yet`(ERROR).
   fileHistory 는 `skip` 이 10만 이상이면 git 을 부르지 않고 `{entries:[], hasMore:false}`, 커밋 없는 저장소도 같다(`rev` 키 없음).
-- **LFS·lenient·캐시 비우기**: 이 네 채널의 TS 코드(`commands.ts`·`fileInsight.ts`)에는 LFS 처리가 없어 그대로 옮겼다(LFS 판정은 `git:blob`·`git:lfsPaths` 쪽이다 — `git:blob` 은 Phase 6a PR 2 에서 옮겼고 `git:lfsPaths` 는 아직 사이드카에 남는다).
+- **LFS·lenient·캐시 비우기**: 이 네 채널의 TS 코드(`commands.ts`·`fileInsight.ts`)에는 LFS 처리가 없어 그대로 옮겼다(LFS 판정은 `git:blob`·`git:lfsPaths` 쪽이다 — `git:blob` 은 Phase 6a PR 2, `git:lfsPaths` 는 PR 5 에서 옮겼다).
   TS 의 `lenient`(blob 을 못 받아도 목록만 돌려주기)는 GitHub 원격 전용 저장소용이라 옮기지 않았다 — 그 저장소는 사이드카로 간다.
   TS 는 `RepoService.dispose` 에서만 compare·diff 캐시를 비우고(해시 기준 불변) Rust 도 `git:commit` 캐시와 마찬가지로 앱 수명 동안 둔다.
 - **검증(보안 경계)** — renderer 값이 argv 에 들어가는 길은 둘뿐이고 둘 다 검증된 newtype 이다:
@@ -1100,7 +1100,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 | 2 | 코드 탐색기 4채널(`resolveRev`·`tree`·`blob`·`onRemote`) | 있음 | **완료** |
 | 3a / 3b | 3a: 공유 상태(첫 페이지 문·ref 시그니처 저장소, `signature.rs` 추출, note 팬아웃). 3b: `refs`·`refsDetails`(서브모듈 확인 포함) | 3a 없음 / 3b 있음 | 3a·3b **완료** |
 | 4 | `search`·`activity` | 있음 | **완료** |
-| 5 | `repoExtras`·`lfsPaths` | 있음 | |
+| 5 | `repoExtras`·`lfsPaths` | 있음 | **완료(코드)** — 작업 트리 `--no-index` 읽기는 #121 의 `FilterGuard` 로 필터를 무력화한다(아래 "필터 실행 차단") |
 | 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | |
 | 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | |
 | 8 | `gh:repo`·repoq 의 git 조회 | 있음 | |
@@ -1421,6 +1421,69 @@ TS 하네스는 `git` 단계 뒤에 `svc.noteLog('logStale', id)` 를 부른다 
 - **SSH 선읽기 초과 분기(검색 병합·활동 집계)는 실행된 적이 없다** — 소비가 빨라 시험에서 상한(16MB, 시험 훅으로 줄일 수 있다)에 닿게 만들지 못했다. 코드는 `log_service` 의 같은 분기를 따랐을 뿐이다. 취소 시험은 2ms 뒤 취소라 스트림 도중에 끊겼는지는 알 수 없다(어느 쪽이든 ABORTED 이거나 정상 끝이어야 하고 슬롯·합치기 표가 풀려 다음 요청이 받아지는 것만 본다).
 - 합치기 큐(`joins`)의 키 표는 버려진 요청의 항목을 다음 요청이 넣을 때 치운다(`ProcessQueue` 의 기존 동작) — 저장소·범위 조합 수에 비례한 작은 표다.
 - 해시 갈래의 `rev-parse` 가 모호한 짧은 해시(여러 객체에 일치)에서 실패하면 조용히 갈래가 비는 것은 TS 와 같다.
+
+### PR 5 — `git:repoExtras`·`git:lfsPaths`(앱에 연결한다)
+
+`git:repoExtras(repoId)`·`git:lfsPaths(repoId, {rev?, paths}, requestId?)` 를 Rust 가 처리한다(local·WSL·SSH 세 실행기 — 라우팅·미러·취소·envelope 는 앞 채널들과 같다). TS: `RepoService.repoExtras`·`lfsPaths` + `src/main/git/repoExtras.ts`.
+소유 판정은 새로 만든 것이 없다 — 한 술어 `RepoMirror::resolve` 와 스위치 `ANTLER_RUST_GIT`·`ANTLER_RUST_SSH` 뿐이다(github 소스는 미러가 사이드카로 보낸다).
+
+| 파일 | 내용 |
+|---|---|
+| `git/lfs.rs` | PR 1 의 파서 아래에 git 호출을 더했다: `repo_extras`·`lfs_paths`·`LfsPathsRequest`(검증)·argv 빌더 6개·`RepoExtras`(응답). `code_browse::field` 가 `pub(crate)` 로 바뀌었다(요청 객체의 필드 읽기 재사용) |
+| `router.rs` | `RUST_CHANNELS` 에 두 채널, `git_extras_channel`·`extras_job`·`ExtrasJob` |
+
+| 채널 | git(상수 + 검증된 값) | 큐 | 취소 |
+|---|---|---|---|
+| `git:repoExtras` | 동시: `ls-tree -r -z --name-only --full-tree HEAD`(16MB) → `.gitattributes` 마다 `cat-file blob HEAD:<n>`(최대 20개, 각 256KB, 이름은 git 출력) · `config -z --get-regexp ^filter\.`(저장소당 한 번 — 필터 가드) → `<가드 -c…> diff --no-index --no-ext-diff --no-textconv --no-color -- /dev/null .gitattributes`(512KB) · `rev-parse --path-format=absolute --git-path info/attributes` → 그 경로에 같은 `diff --no-index`(같은 가드) · `config --local --null --get-regexp ^gitflow\.`(256KB). **어느 하나가 실패해도 `lfs:false`·`gitflow:null` 로 삼킨다**(TS `.catch`). 종료 코드 1 이 `--no-index` 의 정상이다 | 슬롯 하나 안에서 전부(합치지 않는다·캐시 없다) | 없다 |
+| `git:lfsPaths` | `check-attr [--source=<rev>] -z filter -- <경로…>` — rev 는 `HexHash`(대소문자 보존), 경로는 전부 `--` 뒤, UTF-16 6000 단위로 묶음. `--source` 를 모르는 옛 git(`unknown option`·`unrecognized option`·`usage: git check-attr`, ASCII 대소문자 무시)이면 그 묶음과 이후 묶음을 `--source` 없이 다시 한다. 그 밖의 실패는 GIT(`git check-attr failed (<코드>)` 또는 stderr) | 슬롯 하나 | requestId 로 프로세스에 바로 닿는다(`queue.run(None, Some(token))`) |
+
+**검증(보안)**: `lfsPaths` 의 renderer 값은 둘이다. ①`rev`: 있으면(`null` 도 있는 것) `HexHash`(16진수 4~64자 — `-` 로 시작할 수 없다) `invalid commit hash` ②`paths`: 배열이어야 하고(`invalid paths`) **앞 1000개로 자른 뒤** 각 항목이 비어 있지 않은 NUL 없는 문자열이어야 한다(`invalid path`) —
+1001번째부터는 거부가 아니라 버려지고 검사도 받지 않는다(TS 와 같다). 순서도 TS 와 같다(rev → paths → 항목). 검증에 걸리면 git 도 취소 레지스트리도 건드리지 않고 `rust_handled` 에도 세지 않는다. 요청이 `null`·인자 없음이면 TS 는 TypeError 라 Rust 는 `invalid request`(code ERROR)다 — 문구만 다르다.
+`repoExtras` 는 인자가 저장소 id 뿐이다. git 인자에 들어가는 저장소발 값은 `HEAD:<ls-tree 가 준 이름>`(한 인자, 접두가 있어 옵션이 될 수 없다)과 `rev-parse` 가 준 절대 경로(`--` 뒤)뿐이다.
+
+**필터 실행 차단(#121) — `git diff --no-index` 는 저장소의 `filter.*.clean|process` 를 실행하므로 `FilterGuard` 로 무력화한다**
+- `--no-ext-diff`·`--no-textconv` 는 외부 diff·textconv 만 끈다. **`--no-index` 도 `-C` 저장소의 설정·`.gitattributes`·`info/attributes` 를 읽어** 파일에 맞는 규칙이 있으면 `filter.<이름>.clean`·`.process` 를 실행한다
+  (git 2.49.0 windows 실측. 최소 재현: `R/.gitattributes` 에 `.gitattributes filter=evil`, `git -C R config filter.evil.clean "sh -c 'echo x > MARK; cat' --"` 뒤 `git -C R diff --no-index --no-ext-diff --no-textconv --no-color -- /dev/null .gitattributes` 가 `MARK` 를 만든다.
+  `info/attributes` 규칙·`process` 만 있는 경우·일반 파일도 같다). 닿는 곳은 `repoExtras` 의 작업 트리 `.gitattributes`·`info/attributes` 읽기(저장소를 열 때마다)다. `lfsPaths`(`check-attr`)·`ls-tree`·`cat-file blob`·`config` 는 필터를 돌리지 않는다.
+- Rust 의 처리(TS `repoExtras.ts` `usesLfs`·`fileUsesLfs` 와 같다): `wip::filter_overrides` 가 저장소당 한 번 `git config -z --get-regexp ^filter\.`(종료 코드 1 = 빈 가드) 를 조회해 `FilterGuard::from_config_output` 로 가드를 만들고, 두 읽기(작업 트리 `.gitattributes`·`rev-parse` 가 준 `info/attributes`)가 같은 가드를 쓴다.
+  `-c filter.<이름>.clean= … smudge= … process= … required=false` 는 `diff` 앞(전역 옵션 자리)에 붙는다. 조회는 다른 읽기(`ls-tree`·`rev-parse`)와 동시에 시작하고(`futures` `Shared`), 두 `--no-index` 는 조회가 끝난 뒤에 돈다.
+  **무력화할 수 없으면**(`UnsafeFilterName`: 이름에 `=`·잘못된 UTF-8·개수/길이 상한 초과, 또는 `git config` 가 0·1 이 아닌 코드/실행 실패) 그 파일은 읽지 않는다 — 두 읽기 모두 건너뛰어 `lfs` 는 커밋된 `.gitattributes`(HEAD 트리) 만으로 판정한다(저장소에 커밋된 규칙이 있으면 true 일 수 있다. TS 와 같다).
+- **가드 없이 `--no-index` 를 돌릴 수 없다**: `no_index_args(&FilterGuard, path)`·`read_worktree_attributes(…, &FilterGuard, …)` 가 가드를 필수 인자로 받고, 소스 검사 시험(`lfs_argv_는_상수_뒤_검증된_값뿐이고_작업_트리_읽기는_한_곳이다`)이 `"--no-index"` 리터럴이 `no_index_args` 한 곳뿐이고 호출이 `read_worktree_attributes` 안에서 `no_index_args(guard, …)` 로만 일어남을 강제한다.
+- **`wipDiff` 의 untracked 도 같은 `--no-index` 다 — TS 는 #121 에서 가드를 걸었고, Rust 는 PR 6 이 `filter_overrides` 로 같게 건다**(PR 6 이 이 사실을 알고 시작해야 한다. `filter_overrides` 는 이 PR 이 `wip.rs` 에 두었다).
+
+**골든**: `tests/fixtures/repos/extras.scenarios.json`(시나리오 12개 — 기존 `basic`·`empty` 저장소에 단계를 더한다)를 TS(`goldenChannels.test.ts` → `RepoService.repoExtras·lfsPaths`)와 Rust(`channels.rs` → `Router::route`)가 시나리오마다 새 저장소에서 순서대로 돌아 `tests/golden/channels/{repoExtras,lfsPaths}.json` 과 비교한다(local·SSH 127.0.0.1 하네스, 끝에 `connections()==1`).
+새 단계 `{write: [경로, 내용]}`(작업 트리·`.git/info/attributes` 파일 쓰기)를 두 하네스에 더했다(PR 6 이 이어 쓴다). 경우: 규칙 없음·커밋 없는 저장소·커밋된 루트/하위 `.gitattributes` 와 작업 트리의 차이·`info/attributes` 만·토큰 경계(주석·`filter=lfsx`·`myfilter=lfs`·탭·CRLF)·
+속성 파일 크기 한계(커밋본 256KB 이상은 안 읽고, 작업 트리 읽기는 출력 512KB 에서 끊긴다)·gitflow(안전한 값만·제어 문자 탭·100/101자·`$(…)`·쓸 만한 키 없음 → null)·요청 검증 24개(비객체·`null`·잘못된 rev·잘못된 paths 항목·rev 가 paths 보다 먼저)·특수 경로(`-weird.psd`·`--help.psd`·`--output=x.psd`·`:(top)…`·`:!…`·공백·한글·이모지·개행·`*`·`dir/../a`·저장소 밖 `../outside.psd` → GIT)·
+묶음(1500개 중 앞 1000개, 긴 경로라 여러 묶음). 결과 배열이 20개를 넘으면 `{count, first, last}` 로 줄이고 골든의 `args` 도 같은 규칙이다(`summarizeLfsArgs`·`summarize_lfs_args`).
+골든 시나리오에는 **저장소가 심은 필터를 둔 것이 없다**(결과가 아니라 "표지 명령이 실행되지 않았는가"가 관심사라 `channels.rs` 의 `no_index_*` 시험이 실제 저장소로 맡는다). TS 의 "전역 설정의 gitflow.* 는 무시한다"는 전역 설정을 바꾸지 않는 원칙(위 "골든 테스트")상 argv 시험(`--local` 고정)으로 옮겼다.
+
+**그 밖의 시험**: `channels.rs` — `적대적_lfs_요청은_git_을_띄우지_않는다`(검증 순서·문구·`rust_handled` 0·1001번째는 검사하지 않음), `repo_extras_는_git_실패를_삼키고_lfs_paths_는_git_오류를_낸다`, `lfs_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카`,
+`등록_전에_온_cancel_은_lfs_paths_를_git_없이_취소한다`, `진행_중_lfs_paths_를_취소해도_멈추지_않는다`, `악성_저장소의_필터는_lfs_paths_가_실행하지_않는다`(`*` 규칙 + `filter.evil.*`·`diff.evil.textconv` — `check-attr` 길만 본다),
+`lfs_argv_는_상수_뒤_검증된_값뿐이고_작업_트리_읽기는_한_곳이다`(소스 검사). `lfs.rs` 단위 6개: argv 가 TS 와 바이트까지 같음·요청 검증 순서·앞 1000개만 검증·묶음 경계(합 정확히 6000·한글/이모지 단위)·옛 git 판정. `router.rs` 단위 `lfs_채널의_소유는_다른_git_채널과_같은_한_술어다`, `ssh_route.rs` 의 두 표에 두 채널이 더해졌다.
+"사이드카로 가는 다른 채널" 예시(`api_route.rs`·`channels.rs`·`router.rs` 단위)는 `git:lfsPaths` 에서 `config:get` 으로 바꿨다(PR 6·7 에서 옮겨질 git 채널 대신 6b 까지 남는 비 git 채널).
+
+**대응표**(`test-map.json`): `N/A: PR 5` 9개를 전부 Rust 대응으로 바꿨다 — `lfsGitflow` 의 실제 git `it` 8개는 `channels.rs::lfs_gitflow_시나리오가_ts_골든과_같다`(LFS 사용·gitflow·하위·info·커밋 없음·묶음),
+필터 미실행은 `악성_저장소의_필터는_lfs_paths_가_실행하지_않는다`(`check-attr` 길)·`no_index_읽기는_…`(작업 트리 읽기), rev·NUL 검증은 `적대적_lfs_요청은_git_을_띄우지_않는다`, 전역 gitflow 무시는 `lfs.rs::argv_는_ts_와_바이트까지_같다`(argv `--local`). 이 PR 뒤 `N/A: PR n` 은 PR 6(wip 계열)·7b(repoWatcher)·8 분만 남는다.
+`tests/noIndexFilter.test.ts`(#121)도 대응 대상에 넣었다(`golden6a.test.ts` `TARGET_TESTS`): `repoExtras` 쪽 4개 `it` 는 `channels.rs::no_index_읽기는_…`(local)·`…ssh_에서도_…`(루프백 SSH)로, `wipFileDiff(untracked)` 2개는 `N/A: PR 6`.
+`no_index_*` 시험: 실제 저장소에 표지 명령(`sh -c "echo x > <임시>/MARK-…; cat"`)을 심은 `filter.evil.clean` 을 두고 **대조군**(가드 없는 `git diff --no-index` 가 표지를 만든다)·작업 트리 `.gitattributes`·`info/attributes`·이름에 `=` 인 드라이버(`lfs:false`)를 `git:repoExtras`(라우터 경유)로 불러 표지가 없고 lfs 판정이 TS 와 같음을 본다. 가드를 빼면(`no_index_args(&FilterGuard::none(), …)`) 두 시험이 실패함을 확인했다.
+
+**TS 와 다른 점**
+- 요청이 `null`·인자 없음일 때 문구가 `invalid request` 다(TS 는 TypeError 문구). code 는 같은 ERROR 이고 골든은 이 입력의 문구를 비교하지 않는다.
+- 검증이 큐 슬롯 **앞**이다(TS 는 슬롯 안에서 던진다). 결과·code 는 같고, 거부된 요청이 슬롯을 기다리지 않는다.
+- `repoExtras` 는 `Aborted` 까지 삼킨다(TS `.catch` 와 같다 — 이 채널에는 취소 신호가 없어 닿지 않는다).
+- 옛 git 판정(`OLD_GIT_RE`)은 ASCII 대소문자만 무시한다(패턴이 ASCII 라 JS `/i` 와 결과가 같다).
+
+**사람 확인(자동화 불가·실환경)**
+- `pnpm tauri:build:cdp` 뒤 `ANTLER_ROUTE_LOG=1 ANTLER_DRIVE_DEBUG=1 node scripts/drive.mjs <저장소> --tauri …` 로 두 채널이 `-> rust` 인지 보고(저장소를 열 때 `git:repoExtras`, 변경 파일 목록·WIP 패널·상세 패널을 열 때 `git:lfsPaths`),
+  `ANTLER_RUST_GIT=0`(사이드카)·Electron 과 같은지 비교한다: LFS 배지(상태 표시줄)·gitflow 배지·LFS 로 추적되는 파일 표시(`.gitattributes` 가 하위 폴더·`info/attributes` 에 있는 저장소 포함), git-lfs 가 설치된 저장소(`filter.lfs.*` 가 있는 일반 저장소)에서 같은 표시.
+- 필터 차단: 최소 재현의 저장소(`.gitattributes filter=evil` + `filter.evil.clean` 이 표식 파일을 만드는 명령)를 앱으로 열어도 표식이 생기지 않는지(Rust·사이드카). 자동 시험이 이미 보지만 앱 경로(`ANTLER_ROUTE_LOG` 로 `-> rust`)에서 한 번 더 본다.
+- WSL 저장소·실제 sshd 의 SSH 저장소: 같은 배지·표시, 호스트당 연결 하나(원격 `ss`/`who`). 이 PC 에는 WSL 이 없어 **WSL 은 실행해 보지 않았다**(경로·rev 는 `wsl.exe` argv 에 한 인자로 실린다 — argv 단위 시험과 기존 `tests/exec.rs` 의 `wsl_통합` 이 덮는다).
+
+**남은 위험**
+- `repoExtras` 는 저장소를 열 때마다 `git config` 조회가 하나 더 돈다(TS 도 같다). 조회가 실패하는 저장소는 작업 트리 속성 파일을 읽지 않아 커밋되지 않은 `.gitattributes` 만으로 LFS 를 쓰는 저장소는 `lfs:false` 로 보인다(안전 쪽 실패, TS 와 같다).
+- `wipDiff` untracked 의 가드는 PR 6 의 몫이다(`filter_overrides` 는 준비돼 있다).
+- `lfsPaths` 의 `--source` 폴백은 실제 옛 git(2.40 미만)으로 돌려 본 적이 없다 — 판정 함수만 단위 시험했다(TS 도 같다).
+- 골든이 TS 와 같다는 것은 시나리오(`repoExtras` 19단계·`lfsPaths` 41단계)의 범위만큼만 보장한다. 이름에 NUL 아닌 비 UTF-8 바이트가 든 `.gitattributes` 경로는 `U+FFFD` 로 바뀐 이름으로 `cat-file` 이 실패해 그 파일만 건너뛴다(TS 와 같다 — 시험하지 않았다).
 
 ## Phase 0 에서 확인한 것
 

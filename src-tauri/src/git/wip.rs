@@ -10,6 +10,7 @@
 
 use std::collections::HashSet;
 
+use crate::git::exec::{ExecError, GitExecutor, RunOpts};
 use crate::git::fetch::js_to_lowercase;
 
 /// 덮어쓸 수 없는 필터 드라이버가 있어 작업 트리 조회를 거부할 때의 메시지
@@ -81,6 +82,30 @@ impl FilterGuard {
 
     pub fn is_empty(&self) -> bool {
         self.args.is_empty()
+    }
+}
+
+/// [`filter_overrides`] 가 가드를 만들지 못한 이유
+#[derive(Debug)]
+pub enum FilterGuardError {
+    /// 덮어쓸 수 없는 드라이버가 있다
+    Unsafe(UnsafeFilterName),
+    /// `git config` 조회가 실패했다(코드 1 = 키 없음은 실패가 아니다)
+    Git(ExecError),
+    /// `git config` 가 0·1 이 아닌 코드로 끝났다
+    Config(i32),
+}
+
+/// `git -C <repo> config -z --get-regexp ^filter\.` 로 저장소의 filter 드라이버를 조회해 가드를 만든다(TS `filterOverrides`, argv 가 같다).
+/// 종료 코드 1(해당 키 없음)은 빈 가드다. 그 밖의 실패·덮을 수 없는 이름은 오류 — 호출부는 **해당 작업 트리 읽기를 하지 않는다**.
+pub async fn filter_overrides(exec: &GitExecutor, repo_path: &str, opts: &RunOpts) -> Result<FilterGuard, FilterGuardError> {
+    // 정규식은 git 의 로캘·바이트 처리에 기대지 않도록 `^filter\.` 로만 좁히고 접미사는 `filter_driver_names` 가 판정한다
+    let args = ["config", "-z", "--get-regexp", "^filter\\."];
+    let r = exec.run(repo_path, &args, opts).await.map_err(FilterGuardError::Git)?;
+    match r.code {
+        1 => Ok(FilterGuard::none()),
+        0 => FilterGuard::from_config_output(&r.stdout).map_err(FilterGuardError::Unsafe),
+        c => Err(FilterGuardError::Config(c)),
     }
 }
 
