@@ -80,6 +80,11 @@ fn is_visible_ascii(s: &str) -> bool {
 /// PAT: 앞뒤 공백을 자르고, 보이는 ASCII 만(공백·제어 문자 없음) 255자까지
 pub fn parse_pat(v: &Value) -> Res<SecretString> {
     let Some(s) = v.as_str() else { return err("토큰이 올바르지 않습니다") };
+    parse_pat_str(s)
+}
+
+/// [`parse_pat`] 의 문자열 판 — 밖의 출처(gh CLI)가 준 토큰을 `Value` 로 한 번 더 복사하지 않고 검사한다
+pub fn parse_pat_str(s: &str) -> Res<SecretString> {
     let t = js_trim(s);
     if t.is_empty() || utf16_len(t) > MAX_PAT_LEN || !is_visible_ascii(t) {
         return err("토큰 형식이 올바르지 않습니다(공백 없이 255자 이하)");

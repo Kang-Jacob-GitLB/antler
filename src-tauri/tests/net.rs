@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use antler_lib::github::{accessible_repos, api_map, checks_map, launchpad_map};
 use antler_lib::github::device_rules::{interpret_start, DeviceError, PollState, PollStep, EXPIRED_MESSAGE};
 use antler_lib::github::gh_env::gh_env;
+use antler_lib::github::queries::{reviews_page, soft_checks};
 use antler_lib::github::validate as gh;
 use antler_lib::jira::validate::{self as jira, SiteOptions};
 use antler_lib::jira::{adf, api_map as jira_map, auth_header, JiraKind};
@@ -17,7 +18,7 @@ use antler_lib::net::http_error::{
     github_body_message, github_http_error, has_next_link, jira_body_message, jira_http_error, parse_http_date, parse_rate, parse_retry_after, RateHeaders,
 };
 use antler_lib::net::js_date::{iso_string, parse_date_ms, to_epoch};
-use antler_lib::net::js_value::{field, must_arr, obj, stringify, truthy, MapError, MapResult};
+use antler_lib::net::js_value::{field, must_arr, obj, stringify, MapError, MapResult};
 use antler_lib::net::json::{self, js_number, js_number_string, Json, MAX_DEPTH};
 use antler_lib::net::redact::{redact_token, usable_token, SecretString};
 use antler_lib::net::url_rules::{self, in_site, is_public_avatar_host, parse_url, ImageStep, ImageWalk};
@@ -1037,11 +1038,6 @@ fn st(v: &str) -> Json {
     Json::Str(v.to_string())
 }
 
-/// `getPull`·`listPulls` 의 체크 보강: 헤드 sha 가 있을 때만 묻고, 변환이 던지면(TS `soft`) 없는 것으로 본다
-fn soft_checks(summary: &Json, runs: &Json, status: &Json) -> Option<Vec<Json>> {
-    truthy(summary.get("headSha")).then(|| api_map::check_runs_of(runs, status).ok()).flatten()
-}
-
 fn sha_n(k: usize) -> String {
     format!("{k:040x}")
 }
@@ -1088,10 +1084,7 @@ fn run_gh_case(f: &str, a: &[Json]) -> MapResult<Json> {
             let mut out = Vec::new();
             for raw in must_arr(Some(one(0)))? {
                 let mut item = api_map::map_pull(raw)?;
-                let reviews = match one(1) {
-                    Json::Arr(r) => Some(r.as_slice()),
-                    _ => None,
-                };
+                let reviews = reviews_page(one(1));
                 let checks = soft_checks(&item, one(2), one(3));
                 api_map::enrich_list_item(raw, &mut item, reviews, checks.as_deref())?;
                 out.push(item);
@@ -3372,14 +3365,14 @@ mod live {
 
         // ── 도우미 ──────────────────────────────────────────────────────────
 
-        struct FakeClock(AtomicU64);
+        pub(super) struct FakeClock(AtomicU64);
 
         impl FakeClock {
-            fn at(ms: u64) -> Arc<Self> {
+            pub(super) fn at(ms: u64) -> Arc<Self> {
                 Arc::new(Self(AtomicU64::new(ms)))
             }
 
-            fn set(&self, ms: u64) {
+            pub(super) fn set(&self, ms: u64) {
                 self.0.store(ms, Ordering::SeqCst);
             }
         }
@@ -3390,7 +3383,7 @@ mod live {
             }
         }
 
-        fn new_vault() -> Arc<Vault> {
+        pub(super) fn new_vault() -> Arc<Vault> {
             Arc::new(Vault::new(Arc::new(MemoryStore::standing_in_for_keychain())))
         }
 
@@ -3452,7 +3445,7 @@ mod live {
         }
 
         /// 조건이 참이 될 때까지 기다린다(최대 `WAIT_LIMIT`)
-        async fn wait_for(f: impl Fn() -> bool) {
+        pub(super) async fn wait_for(f: impl Fn() -> bool) {
             let t = Instant::now();
             while !f() {
                 assert!(t.elapsed() < WAIT_LIMIT, "조건이 되지 않았다");
@@ -3463,20 +3456,20 @@ mod live {
         /// 목 응답을 테스트가 직접 푸는 문. 처리기가 `wait` 로 응답을 붙들고, 테스트가 `open` 으로 놓아 준다.
         /// 시간이 아니라 순서로 "응답이 오기 전/후"를 만든다. 열리지 않아도 처리기 스레드가 영원히 남지 않게 `GATE_LIMIT` 뒤에는 풀린다
         #[derive(Clone, Default)]
-        struct Gate(Arc<(Mutex<bool>, std::sync::Condvar)>);
+        pub(super) struct Gate(Arc<(Mutex<bool>, std::sync::Condvar)>);
 
         const GATE_LIMIT: Duration = Duration::from_secs(30);
         /// 테스트가 기다리는 최대 시간(조건이 되지 않아 걸리는 경우에만 쓰인다. 정상이면 곧바로 끝난다)
-        const WAIT_LIMIT: Duration = Duration::from_secs(10);
+        pub(super) const WAIT_LIMIT: Duration = Duration::from_secs(10);
 
         impl Gate {
-            fn wait(&self) {
+            pub(super) fn wait(&self) {
                 let (lock, cv) = &*self.0;
                 let g = lock.lock().unwrap();
                 let _ = cv.wait_timeout_while(g, GATE_LIMIT, |open| !*open).unwrap();
             }
 
-            fn open(&self) {
+            pub(super) fn open(&self) {
                 let (lock, cv) = &*self.0;
                 *lock.lock().unwrap() = true;
                 cv.notify_all();
@@ -3484,11 +3477,11 @@ mod live {
         }
 
         /// 문이 닫힌 채로 끝나야 하는 비동기 작업을 기다린다(상한 안에 안 끝나면 실패)
-        async fn within<T>(f: impl std::future::Future<Output = T>) -> T {
+        pub(super) async fn within<T>(f: impl std::future::Future<Output = T>) -> T {
             tokio::time::timeout(WAIT_LIMIT, f).await.expect("상한 안에 끝나지 않았다")
         }
 
-        fn count(m: &Mock, f: impl Fn(&Req) -> bool) -> usize {
+        pub(super) fn count(m: &Mock, f: impl Fn(&Req) -> bool) -> usize {
             m.requests().iter().filter(|r| f(r)).count()
         }
 
@@ -4858,6 +4851,2274 @@ mod live {
             assert_eq!(svc.avatar(&json!(42)).await, None);
             assert_eq!(svc.avatar(&json!(format!("{}/secure/useravatar?x={}", m.base(), "a".repeat(3000)))).await, None);
             assert_eq!(m.requests().len(), before);
+        }
+    }
+
+    // ── GitHub 서비스(PR 7) ─────────────────────────────────────────────────
+    //
+    // 루프백 목 서버(127.0.0.1)와 메모리 보관소만 쓴다. `start_paused` 는 쓰지 않는다. "응답이 오기 전/후"는 시간이 아니라 `Gate`·`wait_for` 로 만든다.
+    // 사이드카가 쥔 정보(`RepoQuery`)는 가짜(`FakeRepos`)로 채운다 — 실제 구현은 PR 9 다.
+    mod github_service {
+        use std::collections::BTreeMap;
+
+        use antler_lib::github::device_flow::{DeviceFlow, DeviceSession};
+        use antler_lib::github::device_rules::MISSING_CLIENT_ID_MESSAGE;
+        use antler_lib::github::ports::{ExternalTokenError, ExternalTokenProvider, GhRepoRef, RepoQuery};
+        use antler_lib::github::queries::{self, Slug};
+        use antler_lib::github::avatars::{self as av, Avatar, AvatarResolver, Fallback};
+        use antler_lib::github::checks::{self, CheckStateCache, TTL_DONE_MS, TTL_NONE_MS, TTL_PENDING_MS};
+        use antler_lib::github::service::{GitHubService, ServiceOptions};
+        use antler_lib::github::validate::{AvatarQuery, GhListQuery};
+        use antler_lib::net::js_date::parse_date_ms;
+        use antler_lib::jira::service::{Clock, Sleeper};
+        use antler_lib::secret::memory::MemoryStore;
+        use antler_lib::secret::{GithubMethod, Vault};
+        use futures_util::future::{BoxFuture, FutureExt};
+        use serde_json::{json, Value};
+
+        use super::service::{count, new_vault, wait_for, within, FakeClock, Gate, WAIT_LIMIT};
+        use super::*;
+
+        // ── 도우미 ──────────────────────────────────────────────────────────
+
+        fn ok(v: Value) -> Resp {
+            Resp::new(200).json(&v.to_string())
+        }
+
+        fn status(code: u16, v: Value) -> Resp {
+            Resp::new(code).json(&v.to_string())
+        }
+
+        fn path_of(r: &Req) -> &str {
+            r.target.split('?').next().unwrap_or("")
+        }
+
+        fn qmap(r: &Req) -> BTreeMap<String, String> {
+            url::Url::parse(&format!("http://x{}", r.target)).unwrap().query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect()
+        }
+
+        fn jv(j: &json::Json) -> Value {
+            serde_json::from_str(&stringify(j)).unwrap()
+        }
+
+        fn rate(r: Resp, remaining: u32) -> Resp {
+            r.header("x-ratelimit-remaining", &remaining.to_string()).header("x-ratelimit-limit", "5000").header("x-ratelimit-reset", "1900000000")
+        }
+
+        fn user_ok() -> Resp {
+            ok(json!({"login": "me", "avatar_url": "https://a/me.png"}))
+        }
+
+        const NEXT: &str = "<https://api.github.com/x?page=2>; rel=\"next\"";
+
+        /// Launchpad 가 저장소의 remote 를 읽는 결과: 목록 / 읽기 실패 / 응답 없음(취소될 때까지)
+        #[derive(Clone)]
+        enum Remotes {
+            List(Vec<GhRepoRef>),
+            Fail,
+            Hang,
+        }
+
+        /// 사이드카가 쥔 저장소 정보의 가짜. `hold` 를 켜면 `gh_repo` 가 `gate` 가 열릴 때까지 멈춘다(세대 교체와 겹치는 경합을 만들 때)
+        #[derive(Clone)]
+        struct FakeRepos {
+            repo: Arc<Mutex<Option<GhRepoRef>>>,
+            client_id: Arc<Mutex<Option<String>>>,
+            hold: Arc<AtomicBool>,
+            entered: Arc<AtomicUsize>,
+            gate: Arc<tokio::sync::Notify>,
+            /// 등록된 저장소 ID → 그 저장소의 remote 읽기 결과(등록 순서)
+            remotes: Arc<Mutex<Vec<(String, Remotes)>>>,
+            /// 같은 작성자의 push 된 커밋 sha(대체 조회용)와 물어본 이메일
+            pushed: Arc<Mutex<Vec<String>>>,
+            asked: Arc<Mutex<Vec<String>>>,
+            invalidated: Arc<AtomicUsize>,
+            /// `hold_client_id` 를 켜면 `github_client_id` 가 `client_id_gate` 가 열릴 때까지 멈춘다(로그인 계열의 첫 await 와 로그아웃이 겹치는 경합)
+            hold_client_id: Arc<AtomicBool>,
+            client_id_entered: Arc<AtomicUsize>,
+            client_id_gate: Arc<tokio::sync::Notify>,
+        }
+
+        impl FakeRepos {
+            fn new() -> Self {
+                let repo = GhRepoRef { owner: "octo".into(), repo: "hello".into(), remote: "origin".into() };
+                Self {
+                    repo: Arc::new(Mutex::new(Some(repo))),
+                    client_id: Arc::new(Mutex::new(None)),
+                    hold: Arc::new(AtomicBool::new(false)),
+                    entered: Arc::new(AtomicUsize::new(0)),
+                    gate: Arc::new(tokio::sync::Notify::new()),
+                    remotes: Arc::new(Mutex::new(Vec::new())),
+                    pushed: Arc::new(Mutex::new(Vec::new())),
+                    asked: Arc::new(Mutex::new(Vec::new())),
+                    invalidated: Arc::new(AtomicUsize::new(0)),
+                    hold_client_id: Arc::new(AtomicBool::new(false)),
+                    client_id_entered: Arc::new(AtomicUsize::new(0)),
+                    client_id_gate: Arc::new(tokio::sync::Notify::new()),
+                }
+            }
+
+            fn with_remotes<S: AsRef<str>>(self, list: Vec<(S, Remotes)>) -> Self {
+                *self.remotes.lock().unwrap() = list.into_iter().map(|(id, r)| (id.as_ref().to_string(), r)).collect();
+                self
+            }
+
+            fn no_repo(self) -> Self {
+                *self.repo.lock().unwrap() = None;
+                self
+            }
+
+            fn with_client_id(self, id: &str) -> Self {
+                *self.client_id.lock().unwrap() = Some(id.to_string());
+                self
+            }
+        }
+
+        impl RepoQuery for FakeRepos {
+            fn gh_repo<'a>(&'a self, _repo_id: &'a str) -> BoxFuture<'a, Result<Option<GhRepoRef>, String>> {
+                async move {
+                    self.entered.fetch_add(1, Ordering::SeqCst);
+                    if self.hold.load(Ordering::SeqCst) {
+                        self.gate.notified().await;
+                    }
+                    Ok(self.repo.lock().unwrap().clone())
+                }
+                .boxed()
+            }
+
+            fn gh_remotes<'a>(&'a self, repo_id: &'a str, cancel: CancellationToken) -> BoxFuture<'a, Result<Vec<GhRepoRef>, String>> {
+                async move {
+                    let spec = self.remotes.lock().unwrap().iter().find(|(id, _)| id == repo_id).map(|(_, r)| r.clone());
+                    match spec {
+                        Some(Remotes::List(l)) => Ok(l),
+                        Some(Remotes::Hang) => {
+                            cancel.cancelled().await;
+                            Err("aborted".to_string())
+                        }
+                        Some(Remotes::Fail) | None => Err("unreachable".to_string()),
+                    }
+                }
+                .boxed()
+            }
+
+            fn pushed_shas_by_author<'a>(&'a self, _repo_id: &'a str, email: &'a str, _limit: usize, _cancel: CancellationToken) -> BoxFuture<'a, Result<Vec<String>, String>> {
+                async move {
+                    self.asked.lock().unwrap().push(email.to_string());
+                    Ok(self.pushed.lock().unwrap().clone())
+                }
+                .boxed()
+            }
+
+            fn invalidate_gh_remotes(&self) {
+                self.invalidated.fetch_add(1, Ordering::SeqCst);
+            }
+
+            fn github_client_id(&self) -> BoxFuture<'_, Option<String>> {
+                async move {
+                    self.client_id_entered.fetch_add(1, Ordering::SeqCst);
+                    if self.hold_client_id.load(Ordering::SeqCst) {
+                        self.client_id_gate.notified().await;
+                    }
+                    self.client_id.lock().unwrap().clone()
+                }
+                .boxed()
+            }
+
+            fn repo_ids(&self) -> BoxFuture<'_, Vec<String>> {
+                async move { self.remotes.lock().unwrap().iter().map(|(id, _)| id.clone()).collect() }.boxed()
+            }
+        }
+
+        /// 기다림을 기록한다. `clock` 이 있으면 그만큼 시계를 앞으로 돌려 기다리지 않고 시간이 흐른 것처럼 만든다. `pace_ms` 는 실제로 쉬는 시간(요청이 쏟아지지 않게)
+        struct StepSleeper {
+            waits: Mutex<Vec<u64>>,
+            clock: Option<Arc<FakeClock>>,
+            pace_ms: u64,
+        }
+
+        impl StepSleeper {
+            fn new(clock: Option<Arc<FakeClock>>, pace_ms: u64) -> Arc<Self> {
+                Arc::new(Self { waits: Mutex::new(Vec::new()), clock, pace_ms })
+            }
+
+            fn waits(&self) -> Vec<u64> {
+                self.waits.lock().unwrap().clone()
+            }
+        }
+
+        impl Sleeper for StepSleeper {
+            fn sleep(&self, d: Duration) -> BoxFuture<'static, ()> {
+                let ms = d.as_millis() as u64;
+                self.waits.lock().unwrap().push(ms);
+                if let Some(c) = &self.clock {
+                    c.set(c.now_ms() as u64 + ms);
+                }
+                let pace = Duration::from_millis(self.pace_ms);
+                async move {
+                    if !pace.is_zero() {
+                        tokio::time::sleep(pace).await;
+                    }
+                }
+                .boxed()
+            }
+        }
+
+        /// 대기에 들어가는 순간 주어진 토큰을 취소하고 곧바로 돌아오는 대기
+        struct CancelOnSleep(CancellationToken);
+
+        impl Sleeper for CancelOnSleep {
+            fn sleep(&self, _d: Duration) -> BoxFuture<'static, ()> {
+                self.0.cancel();
+                async {}.boxed()
+            }
+        }
+
+        const CLOCK0: u64 = 1_000_000;
+
+        struct Env {
+            svc: GitHubService,
+            vault: Arc<Vault>,
+            repos: FakeRepos,
+        }
+
+        fn flow_on(base: &str, sleeper: Arc<dyn Sleeper>, clock: Arc<FakeClock>) -> DeviceFlow {
+            DeviceFlow::new_for_test(base, Duration::from_secs(5), sleeper, clock).unwrap()
+        }
+
+        fn env_on(base: &str, vault: Arc<Vault>, repos: FakeRepos, pace_ms: u64) -> Env {
+            env_opts(base, vault, repos, pace_ms, ServiceOptions::default())
+        }
+
+        fn env_opts(base: &str, vault: Arc<Vault>, repos: FakeRepos, pace_ms: u64, opts: ServiceOptions) -> Env {
+            env_full(base, vault, repos, pace_ms, opts, None)
+        }
+
+        fn env_full(base: &str, vault: Arc<Vault>, repos: FakeRepos, pace_ms: u64, opts: ServiceOptions, cli: Option<Arc<dyn ExternalTokenProvider>>) -> Env {
+            let clock = FakeClock::at(CLOCK0);
+            let sleeper = StepSleeper::new(None, pace_ms);
+            let flow = flow_on(base, sleeper.clone(), clock.clone());
+            let base = base.to_string();
+            let svc = GitHubService::with_parts(
+                vault.clone(),
+                Arc::new(repos.clone()),
+                cli,
+                move |p| GitHubClient::new_for_test(p, &base, Duration::from_secs(5), Duration::ZERO),
+                flow,
+                clock,
+                opts,
+            )
+            .unwrap();
+            Env { svc, vault, repos }
+        }
+
+        fn env(m: &Mock) -> Env {
+            env_on(&m.base(), new_vault(), FakeRepos::new(), 0)
+        }
+
+        fn signed_in_env(m: &Mock, token: &str, method: GithubMethod) -> Env {
+            let vault = new_vault();
+            vault.save_github(&SecretString::new(token), method).unwrap();
+            env_on(&m.base(), vault, FakeRepos::new(), 0)
+        }
+
+        fn failure<T: std::fmt::Debug>(r: Result<T, antler_lib::github::error::GhError>) -> antler_lib::github::error::GhError {
+            r.expect_err("오류여야 한다")
+        }
+
+        fn slug() -> Slug {
+            Slug::parse("octo", "hello").unwrap()
+        }
+
+        fn query(state: &str, label: Option<&str>, assignee: Option<&str>, page: u32) -> GhListQuery {
+            GhListQuery { state: state.into(), label: label.map(Into::into), assignee: assignee.map(Into::into), page }
+        }
+
+        fn state_json(s: &antler_lib::github::service::GhAuthState) -> Value {
+            serde_json::to_value(s).unwrap()
+        }
+
+        // ── 인증(ghService) ─────────────────────────────────────────────────
+
+        #[tokio::test]
+        async fn gh_서비스_pat_로그인은_user_로_검증하고_저장하며_토큰은_상태에_없다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                if r.header("authorization") == Some("Bearer ghp_good") {
+                    rate(user_ok(), 4999)
+                } else {
+                    status(401, json!({"message": "Bad credentials"}))
+                }
+            });
+            let e = env(&m);
+            let changed = Arc::new(AtomicUsize::new(0));
+            let c2 = changed.clone();
+            e.svc.set_on_auth_changed(move || {
+                c2.fetch_add(1, Ordering::SeqCst);
+            });
+
+            let bad = failure(e.svc.login_pat(&json!("ghp_bad")).await);
+            assert!(bad.message.contains("올바르지 않"), "{bad}");
+            assert!(e.vault.load_github().is_none());
+            assert!(!e.svc.auth().await.signed_in);
+
+            let state = e.svc.login_pat(&json!("  ghp_good  ")).await.unwrap();
+            let text = serde_json::to_string(&state).unwrap();
+            // 상태에는 토큰 필드가 없다: 값과 키 목록, 직렬화 문자열을 모두 본다
+            assert_eq!(
+                serde_json::from_str::<Value>(&text).unwrap(),
+                json!({"signedIn": true, "user": {"login": "me", "avatarUrl": "https://a/me.png"}, "method": "pat", "rateRemaining": 4999, "rateLimit": 5000, "rateReset": 1900000000u64})
+            );
+            let mut keys: Vec<String> = state_json(&state).as_object().unwrap().keys().cloned().collect();
+            keys.sort_unstable();
+            assert_eq!(keys, ["method", "rateLimit", "rateRemaining", "rateReset", "signedIn", "user"]);
+            assert!(!text.contains("ghp_good") && !text.to_lowercase().contains("token"));
+            let stored = e.vault.load_github().unwrap();
+            assert_eq!((stored.token.expose(), stored.method), ("ghp_good", GithubMethod::Pat));
+            assert_eq!(m.requests().last().unwrap().target, "/user");
+
+            let out = e.svc.logout().await.unwrap();
+            assert_eq!(state_json(&out), json!({"signedIn": false}));
+            assert!(e.vault.load_github().is_none());
+            assert_eq!(changed.load(Ordering::SeqCst), 2, "로그인·로그아웃마다 알린다");
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_저장된_토큰을_첫_auth_에서_한_번만_검증한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| user_ok());
+            let e = signed_in_env(&m, "ghp_saved", GithubMethod::Device);
+            assert_eq!(m.requests().len(), 0);
+            let (a, b) = tokio::join!(e.svc.auth(), e.svc.auth());
+            e.svc.auth().await;
+            assert_eq!(m.requests().len(), 1);
+            assert_eq!((a.signed_in, a.method, a.user.as_ref().map(|u| u.login.as_str())), (true, Some("device"), Some("me")));
+            assert_eq!(a, b);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_저장된_토큰이_거부되면_버리고_로그아웃_상태로_보인다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| status(401, json!({"message": "Bad credentials"})));
+            let e = signed_in_env(&m, "ghp_old", GithubMethod::Pat);
+            assert!(!e.svc.auth().await.signed_in);
+            assert!(e.vault.load_github().is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_네트워크_오류로_검증하지_못하면_로그인_상태를_유지한다() {
+            let _g = Guard;
+            let vault = new_vault();
+            vault.save_github(&SecretString::new("ghp_saved"), GithubMethod::Pat).unwrap();
+            let e = env_on(&format!("http://{}", closed_addr()), vault, FakeRepos::new(), 0);
+            let s = e.svc.auth().await;
+            assert_eq!(state_json(&s), json!({"signedIn": true, "method": "pat"}));
+            assert!(e.vault.load_github().is_some());
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_저장소가_못_남기는_환경이면_storage_unavailable_을_알린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| user_ok());
+            let e = env_on(&m.base(), Arc::new(Vault::new(Arc::new(MemoryStore::new()))), FakeRepos::new(), 0);
+            assert!(e.svc.login_pat(&json!("ghp_x")).await.unwrap().storage_unavailable);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_client_id_가_없으면_device_flow_시작을_거부한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({})));
+            let e = env(&m);
+            assert!(failure(e.svc.device_start().await).message.contains("Client ID"));
+            assert!(failure(e.svc.device_poll(&json!("r1")).await).message.contains("진행 중인 로그인이 없습니다"));
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        fn device_handler(_: usize, r: &Req) -> Resp {
+            match path_of(r) {
+                "/login/device/code" => ok(json!({"device_code": "dc", "user_code": "U-1", "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5})),
+                "/login/oauth/access_token" => ok(json!({"access_token": "gho_tok"})),
+                "/user" => user_ok(),
+                _ => status(404, json!({})),
+            }
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_device_flow_전체를_돌려_로그인한다() {
+            let _g = Guard;
+            let m = Mock::start(device_handler);
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().with_client_id(" cid "), 0);
+            let code = e.svc.device_start().await.unwrap();
+            let text = serde_json::to_string(&code).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), json!({"userCode": "U-1", "verificationUri": "https://github.com/login/device", "expiresIn": 900, "interval": 5}));
+            // device_code 는 renderer 용 값에 없다
+            assert!(!text.contains("dc") && !text.contains("device_code"), "{text}");
+            let body: Value = serde_json::from_str(&m.requests()[0].text()).unwrap();
+            assert_eq!(body, json!({"client_id": "cid", "scope": "repo read:org"}));
+
+            let state = e.svc.device_poll(&json!("req-1")).await.unwrap();
+            assert_eq!((state.signed_in, state.method, state.user.as_ref().map(|u| u.login.as_str())), (true, Some("device"), Some("me")));
+            assert!(!serde_json::to_string(&state).unwrap().contains("gho_tok"));
+            let stored = e.vault.load_github().unwrap();
+            assert_eq!((stored.token.expose(), stored.method), ("gho_tok", GithubMethod::Device));
+            // 끝난 세션은 다시 쓸 수 없다
+            assert!(failure(e.svc.device_poll(&json!("req-2")).await).message.contains("진행 중인 로그인이 없습니다"));
+        }
+
+        #[tokio::test]
+        async fn gh_서비스의_device_poll_은_cancel_request_id_로_취소된다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r) == "/login/device/code" { device_handler(0, r) } else { ok(json!({"error": "authorization_pending"})) });
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().with_client_id("cid"), 5);
+            e.svc.device_start().await.unwrap();
+            let svc = e.svc.clone();
+            let poll = tokio::spawn(async move { svc.device_poll(&json!("req-2")).await });
+            // 폴링이 실제로 요청을 보내기 시작한 뒤에 취소한다(등록 전에 취소하는 경합이 없다)
+            wait_for(|| count(&m, |r| path_of(r) == "/login/oauth/access_token") >= 1).await;
+            e.svc.cancel("req-2");
+            let err = failure(within(poll).await.unwrap());
+            assert_eq!(err.code, "ABORTED");
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_github_저장소가_아니면_조회를_거부한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().no_repo(), 0);
+            let err = failure(e.svc.pulls(&json!("r"), &json!({"state": "open"})).await);
+            assert!(err.message.contains("GitHub"), "{err}");
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스의_저장소_조회는_owner_repo_를_경로에_쓴다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let e = env(&m);
+            e.svc.issues(&json!("r"), &json!({"state": "open"})).await.unwrap();
+            assert_eq!(path_of(&m.requests()[0]), "/repos/octo/hello/issues");
+        }
+
+        fn bad_credentials() -> Resp {
+            status(401, json!({"message": "Bad credentials"}))
+        }
+
+        /// 밖의 토큰 출처(gh CLI)의 가짜: 쓸 수 있는지와 돌려줄 토큰(또는 실패 문구)
+        struct FakeCli {
+            available: bool,
+            token: Result<String, String>,
+        }
+
+        impl ExternalTokenProvider for FakeCli {
+            fn available(&self) -> BoxFuture<'_, bool> {
+                async move { self.available }.boxed()
+            }
+
+            fn token(&self) -> BoxFuture<'_, Result<SecretString, ExternalTokenError>> {
+                async move { self.token.clone().map(SecretString::new).map_err(|message| ExternalTokenError { message }) }.boxed()
+            }
+        }
+
+        fn cli_env(m: &Mock, cli: Option<FakeCli>) -> Env {
+            env_full(&m.base(), new_vault(), FakeRepos::new(), 0, ServiceOptions::default(), cli.map(|c| Arc::new(c) as Arc<dyn ExternalTokenProvider>))
+        }
+
+        #[tokio::test]
+        async fn gh_cli_토큰_가져오기는_검증해서_로그인하고_gh_cli_방식으로_저장하며_토큰은_상태에_없다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if r.header("authorization") == Some("Bearer ghp_fromcli") { user_ok() } else { bad_credentials() });
+            let e = cli_env(&m, Some(FakeCli { available: true, token: Ok(" ghp_fromcli ".into()) }));
+            // 로그인 전 상태에도 cliAvailable 이 실린다
+            assert_eq!(state_json(&e.svc.auth().await), json!({"signedIn": false, "cliAvailable": true}));
+            let state = e.svc.import_cli_token().await.unwrap();
+            let text = serde_json::to_string(&state).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), json!({"signedIn": true, "user": {"login": "me", "avatarUrl": "https://a/me.png"}, "method": "gh-cli", "cliAvailable": true}));
+            assert!(!text.contains("ghp_fromcli"));
+            let stored = e.vault.load_github().unwrap();
+            assert_eq!((stored.token.expose(), stored.method), ("ghp_fromcli", GithubMethod::GhCli));
+        }
+
+        #[tokio::test]
+        async fn gh_cli_토큰_가져오기는_출처가_없거나_실패하거나_형식이_틀리면_요청_없이_거절한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| user_ok());
+            let none = cli_env(&m, None);
+            assert!(failure(none.svc.import_cli_token().await).message.contains("GitHub CLI 로그인 가져오기를 쓸 수 없습니다"));
+            assert_eq!(state_json(&none.svc.auth().await), json!({"signedIn": false}));
+            let broken = cli_env(&m, Some(FakeCli { available: false, token: Err("gh 에 로그인되어 있지 않습니다".into()) }));
+            assert_eq!(failure(broken.svc.import_cli_token().await).message, "gh 에 로그인되어 있지 않습니다");
+            let bad_format = cli_env(&m, Some(FakeCli { available: true, token: Ok("has space".into()) }));
+            let err = failure(bad_format.svc.import_cli_token().await);
+            assert!(err.message.contains("토큰 형식이 올바르지 않습니다") && !err.message.contains("has space"), "{err}");
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_cli_토큰이_github_에서_거부되면_gh_auth_login_안내를_덧붙이고_저장하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| bad_credentials());
+            let e = cli_env(&m, Some(FakeCli { available: true, token: Ok("ghp_stale".into()) }));
+            let err = failure(e.svc.import_cli_token().await);
+            assert!(err.message.contains("올바르지 않거나 만료") && err.message.contains("gh auth login"), "{err}");
+            assert!(!err.message.contains("ghp_stale"));
+            assert!(e.vault.load_github().is_none());
+            assert!(!e.svc.auth().await.signed_in);
+        }
+
+        #[tokio::test]
+        async fn gh_낡은_세대의_저장된_토큰_검증이_거부돼도_새_로그인은_유지된다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let m = Mock::start(move |_, r| {
+                if r.header("authorization") == Some("Bearer ghp_a") {
+                    g2.wait();
+                    bad_credentials()
+                } else {
+                    user_ok()
+                }
+            });
+            let e = signed_in_env(&m, "ghp_a", GithubMethod::Pat);
+            let svc = e.svc.clone();
+            // 저장된 토큰 A 의 /user 검증이 응답을 기다리는 동안 토큰 B 로 로그인한다
+            let first = tokio::spawn(async move { svc.auth().await });
+            wait_for(|| !m.requests().is_empty()).await;
+            e.svc.login_pat(&json!("ghp_b")).await.unwrap();
+            gate.open();
+            let state = within(first).await.unwrap();
+            assert!(state.signed_in);
+            assert_eq!(e.svc.git_token().unwrap().expose(), "ghp_b");
+            assert_eq!(e.vault.load_github().unwrap().token.expose(), "ghp_b");
+            assert!(e.svc.auth().await.signed_in);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_데이터_호출이_401_이고_user_도_401_이면_토큰을_버리고_원래_오류를_돌려준다() {
+            let _g = Guard;
+            let m = Mock::start(|n, r| if path_of(r) == "/user" && n == 0 { user_ok() } else { bad_credentials() });
+            let e = signed_in_env(&m, "ghp_revoked", GithubMethod::Pat);
+            assert!(e.svc.auth().await.signed_in);
+            let err = failure(e.svc.pulls(&json!("r"), &json!({"state": "open"})).await);
+            assert_eq!(err.code, "GH_AUTH");
+            assert_eq!(count(&m, |r| path_of(r) == "/user"), 2);
+            assert!(!e.svc.auth().await.signed_in);
+            assert!(e.vault.load_github().is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_user_는_통과하면_저장소_권한_문제로_보고_토큰을_유지한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r) == "/user" { user_ok() } else { bad_credentials() });
+            let e = signed_in_env(&m, "ghp_ok", GithubMethod::Pat);
+            assert_eq!(failure(e.svc.issue(&json!("r"), &json!(1)).await).code, "GH_AUTH");
+            assert!(e.svc.auth().await.signed_in);
+            assert!(e.vault.load_github().is_some());
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_토큰이_없을_때의_401_은_재검증하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| bad_credentials());
+            let e = env(&m);
+            assert_eq!(failure(e.svc.issue(&json!("r"), &json!(1)).await).code, "GH_AUTH");
+            assert_eq!(m.requests().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스는_로그아웃하면_진행_중이던_목록_보강_요청이_멈춘다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let enrich = Arc::new(AtomicUsize::new(0));
+            let e2 = enrich.clone();
+            let m = Mock::start(move |_, r| {
+                if path_of(r).ends_with("/pulls") {
+                    return ok(Value::Array((0..12).map(|i| json!({"number": i + 1, "head": {"sha": format!("s{i}")}})).collect()));
+                }
+                e2.fetch_add(1, Ordering::SeqCst);
+                g2.wait();
+                ok(json!([]))
+            });
+            let e = signed_in_env(&m, "ghp_x", GithubMethod::Pat);
+            let svc = e.svc.clone();
+            let list = tokio::spawn(async move { svc.pulls(&json!("r"), &json!({"state": "open"})).await });
+            // 보강 요청이 나가 응답을 기다리는 동안 로그아웃한다
+            wait_for(|| enrich.load(Ordering::SeqCst) >= 1).await;
+            e.svc.logout().await.unwrap();
+            gate.open();
+            let err = failure(within(list).await.unwrap());
+            assert_eq!(err.code, "ABORTED");
+            // 목록이 끝난 뒤에는 이어 도는 작업이 없으므로 요청 수가 더 늘지 않는다. 로그아웃 시점에 이미 나간 동시 요청(최대 6 PR × 3)뿐이다
+            let after = enrich.load(Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert_eq!(enrich.load(Ordering::SeqCst), after);
+            assert!(after <= 18, "{after}");
+        }
+
+        // ── 경합·세대(리뷰가 짚은 것) ───────────────────────────────────────
+
+        #[tokio::test]
+        async fn gh_로그인_검증_도중_로그아웃하면_그_로그인은_취소되고_되살아나지_않는다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let m = Mock::start(move |_, _| {
+                g2.wait();
+                user_ok()
+            });
+            let e = env(&m);
+            let svc = e.svc.clone();
+            let login = tokio::spawn(async move { svc.login_pat(&json!("ghp_late")).await });
+            wait_for(|| !m.requests().is_empty()).await;
+            assert!(!e.svc.logout().await.unwrap().signed_in);
+            gate.open();
+            assert_eq!(failure(within(login).await.unwrap()).code, "ABORTED");
+            assert!(!e.svc.auth().await.signed_in);
+            assert!(e.vault.load_github().is_none());
+            assert!(e.svc.git_token().is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_client_id_를_기다리는_사이_로그아웃하면_로그인하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(device_handler);
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().with_client_id("cid"), 0);
+            e.svc.device_start().await.unwrap();
+            e.repos.hold_client_id.store(true, Ordering::SeqCst);
+            let entered = e.repos.client_id_entered.load(Ordering::SeqCst);
+            let svc = e.svc.clone();
+            let poll = tokio::spawn(async move { svc.device_poll(&json!("p1")).await });
+            wait_for(|| e.repos.client_id_entered.load(Ordering::SeqCst) > entered).await;
+            e.svc.logout().await.unwrap();
+            e.repos.hold_client_id.store(false, Ordering::SeqCst);
+            e.repos.client_id_gate.notify_one();
+            assert_eq!(failure(within(poll).await.unwrap()).code, "ABORTED");
+            assert!(e.vault.load_github().is_none());
+            assert!(e.svc.git_token().is_none());
+            assert!(!e.svc.auth().await.signed_in);
+            assert_eq!(count(&m, |r| path_of(r) == "/login/oauth/access_token" || path_of(r) == "/user"), 0);
+        }
+
+        /// 토큰을 `gate` 가 열릴 때까지 붙잡는 gh CLI 가짜
+        struct GatedCli {
+            entered: Arc<AtomicUsize>,
+            gate: Arc<tokio::sync::Notify>,
+        }
+
+        impl ExternalTokenProvider for GatedCli {
+            fn available(&self) -> BoxFuture<'_, bool> {
+                async { true }.boxed()
+            }
+
+            fn token(&self) -> BoxFuture<'_, Result<SecretString, ExternalTokenError>> {
+                async move {
+                    self.entered.fetch_add(1, Ordering::SeqCst);
+                    self.gate.notified().await;
+                    Ok(SecretString::new("ghp_fromcli"))
+                }
+                .boxed()
+            }
+        }
+
+        #[tokio::test]
+        async fn gh_cli_토큰_가져오기는_토큰을_기다리는_사이_로그아웃하면_로그인하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| user_ok());
+            let (entered, gate) = (Arc::new(AtomicUsize::new(0)), Arc::new(tokio::sync::Notify::new()));
+            let cli: Arc<dyn ExternalTokenProvider> = Arc::new(GatedCli { entered: entered.clone(), gate: gate.clone() });
+            let e = env_full(&m.base(), new_vault(), FakeRepos::new(), 0, ServiceOptions::default(), Some(cli));
+            let svc = e.svc.clone();
+            let import = tokio::spawn(async move { svc.import_cli_token().await });
+            wait_for(|| entered.load(Ordering::SeqCst) >= 1).await;
+            e.svc.logout().await.unwrap();
+            gate.notify_one();
+            assert_eq!(failure(within(import).await.unwrap()).code, "ABORTED");
+            assert!(e.vault.load_github().is_none());
+            assert!(e.svc.git_token().is_none());
+            assert!(!e.svc.auth().await.signed_in);
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_같은_request_id_로_다른_요청이_등록돼도_로그아웃이_멈춘다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r) == "/login/device/code" { device_handler(0, r) } else { ok(json!({"error": "authorization_pending"})) });
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().with_client_id("cid"), 5);
+            e.svc.device_start().await.unwrap();
+            let svc = e.svc.clone();
+            let poll = tokio::spawn(async move { svc.device_poll(&json!("x")).await });
+            wait_for(|| count(&m, |r| path_of(r) == "/login/oauth/access_token") >= 1).await;
+            // 같은 id 의 다른 채널 호출이 맵의 항목을 덮어쓰고 끝나면서 지운다
+            e.svc.launchpad(&json!("x"), &json!(false)).await.unwrap();
+            e.svc.logout().await.unwrap();
+            assert_eq!(failure(within(poll).await.unwrap()).code, "ABORTED");
+        }
+
+        #[tokio::test]
+        async fn gh_저장소_이름이_slug_규칙에_어긋나면_요청_없이_거부한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            let sha = "a".repeat(40);
+            for (owner, repo) in [("x", ".."), ("..", "user"), (".", "a"), ("a", "."), ("-a", "r"), ("a/b", "r"), ("a", "r/s"), ("", "r"), ("a", ""), ("a_", "r%2f"), ("o".repeat(40).as_str(), "r"), ("o", "r".repeat(101).as_str())] {
+                *e.repos.repo.lock().unwrap() = Some(GhRepoRef { owner: owner.into(), repo: repo.into(), remote: "origin".into() });
+                let id = json!("r");
+                let errs = [
+                    e.svc.issues(&id, &json!({"state": "open"})).await.map(|_| ()),
+                    e.svc.pulls_for_key(&id, &json!("ABC-1")).await.map(|_| ()),
+                    e.svc.commit_checks(&id, &json!([sha])).await.map(|_| ()),
+                    e.svc.runs(&id, &json!(1)).await.map(|_| ()),
+                ];
+                for r in errs {
+                    let err = failure(r);
+                    assert!(err.message.contains("GitHub"), "{owner}/{repo}: {err}");
+                }
+                assert_eq!(m.requests().len(), 0, "{owner}/{repo}");
+            }
+            // 규칙에 맞는 값은 그대로 쓴다
+            *e.repos.repo.lock().unwrap() = Some(GhRepoRef { owner: "a-b_1".into(), repo: "r.s_t-1".into(), remote: "origin".into() });
+            e.svc.issues(&json!("r"), &json!({"state": "open"})).await.unwrap();
+            assert_eq!(path_of(&m.requests()[0]), "/repos/a-b_1/r.s_t-1/issues");
+            assert!(Slug::parse("o", "r").is_some() && Slug::parse("o".repeat(39).as_str(), "r".repeat(100).as_str()).is_some());
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_응답을_기다리는_사이_캐시가_비워지면_그_결과를_넣지_않는다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let inner = graphql_handler(rollups(&[(1, Some("SUCCESS"))]));
+            let m = Mock::start(move |n, r| {
+                g2.wait();
+                inner(n, r)
+            });
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            let cache = cache(FakeClock::at(CLOCK0));
+            let shas = [sha(1)];
+            // 취소되지 않는 토큰: 응답이 온 뒤 캐시에 넣기 직전의 경합만 본다
+            let cancel = CancellationToken::new();
+            let sl = slug();
+            let (first, _) = tokio::join!(checks::fetch_commit_checks(&c, &sl, &shas, &cache, &cancel), async {
+                wait_for(|| !m.requests().is_empty()).await;
+                cache.clear();
+                gate.open();
+            });
+            assert_eq!(jv(&first.unwrap()), json!({sha(1): "success"}));
+            // 낡은 결과가 캐시에 없으니 다시 묻는다
+            checks::fetch_commit_checks(&c, &slug(), &shas, &cache, &cancel).await.unwrap();
+            assert_eq!(m.requests().len(), 2);
+        }
+
+        #[tokio::test]
+        async fn gh_동시에_로그인해도_키체인과_메모리의_토큰이_같다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| user_ok());
+            let e = env(&m);
+            let (ta, tb) = (json!("ghp_aaa"), json!("ghp_bbb"));
+            let (a, b) = tokio::join!(e.svc.login_pat(&ta), e.svc.login_pat(&tb));
+            a.unwrap();
+            b.unwrap();
+            let held = e.svc.git_token().unwrap();
+            assert_eq!(e.vault.load_github().unwrap().token.expose(), held.expose());
+        }
+
+        #[tokio::test]
+        async fn gh_조회는_저장소를_묻는_동안_세대가_바뀌면_요청을_시작하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let e = env(&m);
+            e.repos.hold.store(true, Ordering::SeqCst);
+            let svc = e.svc.clone();
+            let list = tokio::spawn(async move { svc.issues(&json!("r"), &json!({"state": "open"})).await });
+            wait_for(|| e.repos.entered.load(Ordering::SeqCst) >= 1).await;
+            e.svc.logout().await.unwrap();
+            e.repos.gate.notify_one();
+            assert_eq!(failure(within(list).await.unwrap()).code, "ABORTED");
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_오류_문구에는_서버가_되돌려_준_토큰이_없다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| status(500, json!({"message": format!("boom {}", r.header("authorization").unwrap_or(""))})));
+            let e = signed_in_env(&m, "ghp_leaky_token_value", GithubMethod::Pat);
+            let err = failure(e.svc.issue(&json!("r"), &json!(1)).await);
+            assert!(!err.message.contains("ghp_leaky_token_value"), "{err}");
+            assert_eq!(err.code, "GH_HTTP");
+        }
+
+        fn assert_send<T: Send>(_: &T) {}
+
+        #[tokio::test]
+        async fn gh_서비스의_조회_future_는_send_이다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let e = env(&m);
+            let (id, q, n, rid) = (json!("r"), json!({"state": "open"}), json!(1), json!("req"));
+            assert_send(&e.svc.pulls(&id, &q));
+            assert_send(&e.svc.pull(&id, &n));
+            assert_send(&e.svc.issues(&id, &q));
+            assert_send(&e.svc.filters(&id));
+            assert_send(&e.svc.auth());
+            assert_send(&e.svc.login_pat(&rid));
+            assert_send(&e.svc.device_start());
+            assert_send(&e.svc.device_poll(&rid));
+            assert_send(&e.svc.logout());
+            let (shas, one_sha, authors) = (json!([sha(1)]), json!(sha(1)), json!([{"email": "a@x.io", "sha": sha(1)}]));
+            assert_send(&e.svc.pull_files(&id, &n));
+            assert_send(&e.svc.pull_commits(&id, &n));
+            assert_send(&e.svc.comments(&id, &n));
+            assert_send(&e.svc.pulls_for_key(&id, &json!("ABC-1")));
+            assert_send(&e.svc.commit_checks(&id, &shas));
+            assert_send(&e.svc.commit_check_runs(&id, &one_sha));
+            assert_send(&e.svc.runs(&id, &n));
+            assert_send(&e.svc.run_jobs(&id, &n));
+            assert_send(&e.svc.avatars(&id, &rid, &authors));
+            assert_send(&e.svc.launchpad(&rid, &Value::Null));
+            assert_send(&e.svc.accessible_repos(&rid, &Value::Null));
+            assert_send(&e.svc.import_cli_token());
+        }
+
+        // ── Device Flow(ghDevice) ───────────────────────────────────────────
+
+        fn session_at(clock: &FakeClock, interval: f64, expires_in_ms: f64) -> DeviceSession {
+            DeviceSession { device_code: SecretString::new("dc"), interval, expires_at_ms: clock.now_ms() + expires_in_ms }
+        }
+
+        fn flow_with(m: &Mock, advance: bool, pace_ms: u64) -> (DeviceFlow, Arc<StepSleeper>, Arc<FakeClock>) {
+            let clock = FakeClock::at(0);
+            let sleeper = StepSleeper::new(advance.then(|| clock.clone()), pace_ms);
+            (flow_on(&m.base(), sleeper.clone(), clock.clone()), sleeper, clock)
+        }
+
+        #[tokio::test]
+        async fn gh_device_start_는_device_code_로_client_id_와_scope_를_보낸다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"device_code": "dc", "user_code": "ABCD-1234", "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5})));
+            let (flow, _, _) = flow_with(&m, false, 0);
+            let (code, session) = flow.start("cid", &CancellationToken::new()).await.unwrap();
+            let r = &m.requests()[0];
+            assert_eq!((r.method.as_str(), r.target.as_str(), r.header("accept"), r.header("user-agent")), ("POST", "/login/device/code", Some("application/json"), Some("Antler")));
+            assert_eq!(serde_json::from_str::<Value>(&r.text()).unwrap(), json!({"client_id": "cid", "scope": "repo read:org"}));
+            let text = serde_json::to_string(&code).unwrap();
+            assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), json!({"userCode": "ABCD-1234", "verificationUri": "https://github.com/login/device", "expiresIn": 900, "interval": 5}));
+            assert!(!text.contains("dc\""), "device_code 는 renderer 용 결과에 없다: {text}");
+            assert_eq!(session.device_code.expose(), "dc");
+        }
+
+        #[tokio::test]
+        async fn gh_device_start_는_client_id_가_없으면_안내_문구로_실패하고_요청하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({})));
+            let (flow, _, _) = flow_with(&m, false, 0);
+            assert_eq!(failure(flow.start("", &CancellationToken::new()).await).message, MISSING_CLIENT_ID_MESSAGE);
+            assert!(MISSING_CLIENT_ID_MESSAGE.contains("Device Flow") && MISSING_CLIENT_ID_MESSAGE.contains("PAT"));
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_device_start_는_device_flow_가_꺼진_앱을_안내한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"error": "device_flow_disabled"})));
+            let (flow, _, _) = flow_with(&m, false, 0);
+            assert!(failure(flow.start("cid", &CancellationToken::new()).await).message.contains("Enable Device Flow"));
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_pending_slow_down_성공_순으로_간격을_늘린다() {
+            let _g = Guard;
+            let steps = [json!({"error": "authorization_pending"}), json!({"error": "slow_down"}), json!({"error": "authorization_pending"}), json!({"access_token": "gho_abc"})];
+            let m = Mock::start(move |n, _| ok(steps[n].clone()));
+            let (flow, sleeper, clock) = flow_with(&m, false, 0);
+            let token = flow.poll("cid", &session_at(&clock, 5.0, 900_000.0), &CancellationToken::new()).await.unwrap();
+            assert_eq!(token.expose(), "gho_abc");
+            assert_eq!(sleeper.waits(), [5000, 5000, 10_000, 10_000]);
+            assert_eq!(m.requests()[0].target, "/login/oauth/access_token");
+            assert_eq!(serde_json::from_str::<Value>(&m.requests()[0].text()).unwrap(), json!({"client_id": "cid", "device_code": "dc", "grant_type": "urn:ietf:params:oauth:grant-type:device_code"}));
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_만료_거부_기타_오류를_한국어_문구로_끝낸다() {
+            let _g = Guard;
+            for (body, want) in [(json!({"error": "expired_token"}), "만료"), (json!({"error": "access_denied"}), "거부"), (json!({"error": "incorrect_client_credentials", "error_description": "bad client"}), "bad client")] {
+                let m = Mock::start(move |_, _| ok(body.clone()));
+                let (flow, _, clock) = flow_with(&m, false, 0);
+                let err = failure(flow.poll("cid", &session_at(&clock, 5.0, 900_000.0), &CancellationToken::new()).await);
+                assert!(err.message.contains(want), "{err}");
+                assert_eq!(err.code, "ERROR");
+            }
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_세션_만료_시각이_지나면_요청_없이_만료로_끝낸다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"error": "authorization_pending"})));
+            let (flow, _, clock) = flow_with(&m, true, 0);
+            let err = failure(flow.poll("cid", &session_at(&clock, 5.0, 12_000.0), &CancellationToken::new()).await);
+            assert!(err.message.contains("만료"), "{err}");
+            assert_eq!(m.requests().len(), 2);
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_일시_오류를_재시도하고_간격에_backoff_를_더한다() {
+            let _g = Guard;
+            let m = Mock::start(|n, _| match n {
+                // 본문 도중에 끊긴 응답(네트워크 오류), 502, JSON 이 아닌 본문, 정상 pending, 성공
+                0 => Resp::new(200).claim_len(64),
+                1 => status(502, json!({"message": "bad gateway"})),
+                2 => Resp::new(200).body("<html>oops</html>"),
+                3 => ok(json!({"error": "authorization_pending"})),
+                _ => ok(json!({"access_token": "gho_ok"})),
+            });
+            let (flow, sleeper, clock) = flow_with(&m, false, 0);
+            let token = flow.poll("cid", &session_at(&clock, 5.0, 900_000.0), &CancellationToken::new()).await.unwrap();
+            assert_eq!(token.expose(), "gho_ok");
+            assert_eq!(m.requests().len(), 5);
+            // 연속 실패마다 +2초, 정상 응답이 오면 초기화
+            assert_eq!(sleeper.waits(), [5000, 7000, 9000, 11_000, 5000]);
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_일시_오류만_이어지면_세션_만료로_끝난다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| status(503, json!({})));
+            let (flow, _, clock) = flow_with(&m, true, 0);
+            let err = failure(flow.poll("cid", &session_at(&clock, 5.0, 30_000.0), &CancellationToken::new()).await);
+            assert!(err.message.contains("만료"), "{err}");
+            assert!(m.requests().len() > 1);
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_기다리는_중_취소하면_aborted_이고_요청하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"error": "authorization_pending"})));
+            let cancel = CancellationToken::new();
+            let clock = FakeClock::at(0);
+            let flow = flow_on(&m.base(), Arc::new(CancelOnSleep(cancel.clone())), clock.clone());
+            let err = failure(flow.poll("cid", &session_at(&clock, 5.0, 900_000.0), &cancel).await);
+            assert_eq!(err.code, "ABORTED");
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_요청_중_취소해도_aborted_이다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let m = Mock::start(move |_, _| {
+                g2.wait();
+                ok(json!({"error": "authorization_pending"}))
+            });
+            let (flow, _, clock) = flow_with(&m, false, 0);
+            let cancel = CancellationToken::new();
+            let (c2, s) = (cancel.clone(), session_at(&clock, 5.0, 900_000.0));
+            let poll = tokio::spawn(async move { flow.poll("cid", &s, &c2).await });
+            wait_for(|| !m.requests().is_empty()).await;
+            cancel.cancel();
+            assert_eq!(failure(within(poll).await.unwrap()).code, "ABORTED");
+            gate.open();
+        }
+
+        #[tokio::test]
+        async fn gh_device_flow_는_리다이렉트를_따르지_않고_대상에_연결하지_않는다() {
+            let _g = Guard;
+            let target = Mock::start(|_, _| ok(json!({"access_token": "stolen"})));
+            let to = format!("{}/stolen", target.base());
+            let m = Mock::start(move |_, _| Resp::new(302).header("Location", &to));
+            let (flow, _, clock) = flow_with(&m, true, 0);
+            let err = failure(flow.poll("cid", &session_at(&clock, 5.0, 12_000.0), &CancellationToken::new()).await);
+            assert!(err.message.contains("만료"), "3xx 는 해석할 수 없는 응답이라 일시 오류다: {err}");
+            assert_eq!(target.connections(), 0);
+        }
+
+        // ── 조회(ghApi) ─────────────────────────────────────────────────────
+
+        fn user(login: &str) -> Value {
+            json!({"login": login, "avatar_url": format!("https://a/{login}.png")})
+        }
+
+        fn merged(mut base: Value, extra: Value) -> Value {
+            if let (Some(o), Some(e)) = (base.as_object_mut(), extra.as_object()) {
+                for (k, v) in e {
+                    o.insert(k.clone(), v.clone());
+                }
+            }
+            base
+        }
+
+        fn pull(n: u64, extra: Value) -> Value {
+            merged(
+                json!({
+                    "number": n, "title": format!("PR {n}"), "state": "open", "draft": false, "merged_at": null, "user": user("alice"),
+                    "labels": [{"name": "bug", "color": "ff0000"}], "assignees": [user("bob")], "requested_reviewers": [],
+                    "head": {"ref": format!("feat-{n}"), "sha": format!("sha{n}")}, "base": {"ref": "main"},
+                    "updated_at": "2026-01-02T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": format!("https://github.com/octo/hello/pull/{n}")
+                }),
+                extra,
+            )
+        }
+
+        fn issue(n: u64, extra: Value) -> Value {
+            merged(
+                json!({"number": n, "title": format!("I{n}"), "state": "open", "user": user("a"), "labels": [], "assignees": [], "comments": 0, "updated_at": "2026-01-01T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "u"}),
+                extra,
+            )
+        }
+
+        #[tokio::test]
+        async fn gh_list_pulls_비로그인은_pulls_만_부르고_merged_상태를_해석한다() {
+            let _g = Guard;
+            let body = json!([pull(1, json!({})), pull(2, json!({"state": "closed", "merged_at": "2026-01-03T00:00:00Z"})), pull(3, json!({"state": "closed"})), pull(4, json!({"draft": true, "user": null}))]);
+            let m = Mock::start(move |_, _| ok(body.clone()).header("link", NEXT));
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::list_pulls(&c, &slug(), &query("all", None, None, 2), &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().len(), 1);
+            assert_eq!(path_of(&m.requests()[0]), "/repos/octo/hello/pulls");
+            let want: BTreeMap<String, String> = [("state", "all"), ("per_page", "30"), ("page", "2"), ("sort", "updated"), ("direction", "desc")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            assert_eq!(qmap(&m.requests()[0]), want);
+            assert_eq!(res["hasMore"], json!(true));
+            let items = res["items"].as_array().unwrap();
+            assert_eq!(items.iter().map(|p| p["state"].as_str().unwrap()).collect::<Vec<_>>(), ["open", "merged", "closed", "open"]);
+            assert_eq!((items[3]["draft"].clone(), items[3]["author"]["login"].clone()), (json!(true), json!("ghost")));
+            let first = &items[0];
+            assert_eq!(
+                (first["number"].clone(), first["headRef"].clone(), first["baseRef"].clone(), first["headSha"].clone(), first["updatedAt"].clone(), first["createdAt"].clone()),
+                (json!(1), json!("feat-1"), json!("main"), json!("sha1"), json!(1767312000), json!(1767225600))
+            );
+            assert_eq!(first["labels"], json!([{"name": "bug", "color": "ff0000"}]));
+            assert_eq!(first["assignees"], json!([{"login": "bob", "avatarUrl": "https://a/bob.png"}]));
+            assert!(first.get("review").is_none() && first.get("checks").is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_list_pulls_로그인은_리뷰_체크를_동시_6개_이하로_보강한다() {
+            let _g = Guard;
+            let (active, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+            let (a, p) = (active.clone(), peak.clone());
+            let m = Mock::start(move |_, r| {
+                let path = path_of(r);
+                if path.ends_with("/pulls") {
+                    return ok(Value::Array((1..=12).map(|i| pull(i, if i == 1 { json!({"requested_reviewers": [user("r")]}) } else { json!({}) })).collect()));
+                }
+                let now = a.fetch_add(1, Ordering::SeqCst) + 1;
+                p.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(2));
+                a.fetch_sub(1, Ordering::SeqCst);
+                if let Some(rest) = path.strip_suffix("/reviews") {
+                    let approved = rest.ends_with("/pulls/2");
+                    return ok(if approved { json!([{"user": user("x"), "state": "APPROVED", "submitted_at": "2026-01-01T00:00:00Z"}]) } else { json!([]) });
+                }
+                if path.ends_with("/check-runs") {
+                    return ok(json!({"check_runs": if path.contains("/commits/sha3/") { json!([{"name": "ci", "status": "completed", "conclusion": "failure"}]) } else { json!([]) }}));
+                }
+                ok(json!({"state": "pending", "total_count": 0, "statuses": []}))
+            });
+            let c = gh(&m.base(), Some("tok"), 5000, 0);
+            let res = jv(&queries::list_pulls(&c, &slug(), &query("open", None, None, 1), &CancellationToken::new()).await.unwrap());
+            let items = res["items"].as_array().unwrap();
+            assert_eq!((items[0]["review"].clone(), items[0]["checks"].clone()), (json!("pending"), json!("none")));
+            assert_eq!(items[1]["review"], json!("approved"));
+            assert_eq!(items[2]["checks"], json!("failure"));
+            // PR 당 reviews + check-runs + status
+            assert_eq!(m.requests().len(), 1 + 12 * 3);
+            assert!(peak.load(Ordering::SeqCst) <= 6 * 3, "동시 {}개", peak.load(Ordering::SeqCst));
+            assert!(m.requests().iter().all(|r| r.header("authorization") == Some("Bearer tok")));
+        }
+
+        #[tokio::test]
+        async fn gh_list_pulls_는_보강이_실패해도_목록은_돌려준다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r).ends_with("/pulls") { ok(json!([pull(1, json!({}))])) } else { status(500, json!({"message": "boom"})) });
+            let c = gh(&m.base(), Some("tok"), 5000, 0);
+            let res = jv(&queries::list_pulls(&c, &slug(), &query("open", None, None, 1), &CancellationToken::new()).await.unwrap());
+            assert_eq!(res["items"].as_array().unwrap().len(), 1);
+            assert!(res["items"][0].get("review").is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_list_pulls_는_라벨_담당자_필터면_issues_엔드포인트에서_pr_만_남기고_보강하지_않는다() {
+            let _g = Guard;
+            let pr = json!({"number": 7, "title": "S", "state": "closed", "draft": false, "user": user("a"), "labels": [{"name": "bug", "color": "f00"}], "assignees": [], "comments": 3, "updated_at": "2026-01-02T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "u", "pull_request": {"merged_at": "2026-01-02T00:00:00Z"}});
+            let plain = json!({"number": 8, "title": "그냥 이슈", "state": "closed", "user": user("a"), "labels": [], "assignees": [], "comments": 0, "updated_at": "2026-01-02T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "u"});
+            let body = json!([pr, plain]);
+            let m = Mock::start(move |_, _| ok(body.clone()));
+            let c = gh(&m.base(), Some("tok"), 5000, 0);
+            let res = jv(&queries::list_pulls(&c, &slug(), &query("closed", Some("good \"first\""), Some("none"), 3), &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().len(), 1);
+            assert_eq!(path_of(&m.requests()[0]), "/repos/octo/hello/issues");
+            let q = qmap(&m.requests()[0]);
+            assert_eq!(
+                (q["state"].as_str(), q["labels"].as_str(), q["assignee"].as_str(), q["per_page"].as_str(), q["page"].as_str(), q["sort"].as_str(), q["direction"].as_str()),
+                ("closed", "good \"first\"", "none", "30", "3", "updated", "desc")
+            );
+            let items = res["items"].as_array().unwrap();
+            assert_eq!(items.iter().map(|i| i["number"].clone()).collect::<Vec<_>>(), [json!(7)]);
+            assert_eq!((items[0]["state"].clone(), items[0]["comments"].clone(), items[0]["headSha"].clone()), (json!("merged"), json!(3), json!("")));
+        }
+
+        #[tokio::test]
+        async fn gh_list_pulls_의_필터된_목록은_pr_이_없는_쪽을_건너뛰고_끝나면_next_page_가_없다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let page: u64 = qmap(r)["page"].parse().unwrap();
+                let raw = merged(issue(page, json!({})), if page == 3 { json!({"pull_request": {}}) } else { json!({}) });
+                let resp = ok(json!([raw]));
+                if page == 3 { resp } else { resp.header("link", "<x>; rel=\"next\"") }
+            });
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::list_pulls(&c, &slug(), &query("open", Some("bug"), None, 1), &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().iter().map(|r| qmap(r)["page"].clone()).collect::<Vec<_>>(), ["1", "2", "3"]);
+            assert_eq!(res["items"].as_array().unwrap().iter().map(|p| p["number"].clone()).collect::<Vec<_>>(), [json!(3)]);
+            assert_eq!(res["hasMore"], json!(false));
+            assert!(res.get("nextPage").is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_list_pulls_의_라벨_이름은_검색_쿼리_언어로_해석되지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let c = gh(&m.base(), None, 5000, 0);
+            queries::list_pulls(&c, &slug(), &query("all", Some("x\" repo:other/repo"), None, 1), &CancellationToken::new()).await.unwrap();
+            let r = &m.requests()[0];
+            assert_eq!(path_of(r), "/repos/octo/hello/issues");
+            assert_eq!(qmap(r)["labels"], "x\" repo:other/repo");
+            assert!(!m.requests().iter().any(|r| path_of(r) == "/search/issues"));
+        }
+
+        #[tokio::test]
+        async fn gh_get_pull_은_상세_리뷰_체크를_합친다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let p = path_of(r);
+                if p.ends_with("/pulls/5") {
+                    return ok(pull(5, json!({"body_html": "<p>hi</p>", "mergeable": true, "additions": 3, "deletions": 1, "changed_files": 2, "comments": 4, "requested_reviewers": [user("rev")]})));
+                }
+                if p.ends_with("/reviews") {
+                    return ok(json!([{"user": user("x"), "state": "CHANGES_REQUESTED", "submitted_at": "2026-01-02T00:00:00Z"}, {"user": user("y"), "state": "PENDING"}]));
+                }
+                if p.ends_with("/check-runs") {
+                    return ok(json!({"check_runs": [{"name": "ci", "status": "completed", "conclusion": "success", "html_url": "https://c/1"}]}));
+                }
+                if p.ends_with("/status") {
+                    return ok(json!({"statuses": [{"context": "lint", "state": "pending", "target_url": null}]}));
+                }
+                status(404, json!({}))
+            });
+            let c = gh(&m.base(), None, 5000, 0);
+            let d = jv(&queries::get_pull(&c, &slug(), 5, &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests()[0].header("accept"), Some("application/vnd.github.html+json"));
+            for (k, v) in [("bodyHtml", json!("<p>hi</p>")), ("mergeable", json!(true)), ("additions", json!(3)), ("deletions", json!(1)), ("changedFiles", json!(2)), ("comments", json!(4)), ("review", json!("changes_requested")), ("checks", json!("pending"))] {
+                assert_eq!(d[k], v, "{k}");
+            }
+            assert_eq!(d["reviews"], json!([{"author": {"login": "x", "avatarUrl": "https://a/x.png"}, "state": "changes_requested", "submittedAt": 1767312000}]));
+            assert_eq!(d["checkRuns"], json!([{"name": "ci", "state": "success", "url": "https://c/1"}, {"name": "lint", "state": "pending"}]));
+            assert_eq!(d["requestedReviewers"], json!([{"login": "rev", "avatarUrl": "https://a/rev.png"}]));
+        }
+
+        #[tokio::test]
+        async fn gh_get_pull_의_리뷰_목록은_dismissed_를_보이고_집계는_판정을_취소한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let p = path_of(r);
+                if p.ends_with("/pulls/6") {
+                    return ok(pull(6, json!({})));
+                }
+                if p.ends_with("/reviews") {
+                    return ok(json!([{"user": user("x"), "state": "CHANGES_REQUESTED", "submitted_at": "2026-01-01T00:00:00Z"}, {"user": user("x"), "state": "DISMISSED", "submitted_at": "2026-01-02T00:00:00Z"}]));
+                }
+                ok(json!({"check_runs": [], "statuses": []}))
+            });
+            let c = gh(&m.base(), None, 5000, 0);
+            let d = jv(&queries::get_pull(&c, &slug(), 6, &CancellationToken::new()).await.unwrap());
+            assert_eq!(d["reviews"].as_array().unwrap().iter().map(|r| r["state"].clone()).collect::<Vec<_>>(), [json!("changes_requested"), json!("dismissed")]);
+            assert_eq!(d["review"], json!("commented"));
+        }
+
+        #[tokio::test]
+        async fn gh_get_pull_files_는_link_를_따라_이어_받는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let page: u64 = qmap(r)["page"].parse().unwrap();
+                let mut files = vec![json!({"filename": format!("f{page}.ts"), "status": "modified", "additions": 1, "deletions": 2, "patch": "@@"})];
+                if page == 2 {
+                    files.push(json!({"filename": "new.ts", "previous_filename": "old.ts", "status": "renamed", "additions": 0, "deletions": 0}));
+                }
+                let resp = ok(Value::Array(files));
+                if page < 2 { resp.header("link", "<x>; rel=\"next\"") } else { resp }
+            });
+            let c = gh(&m.base(), None, 5000, 0);
+            let files = jv(&queries::get_pull_files(&c, &slug(), 9, &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().iter().map(|r| qmap(r)["page"].clone()).collect::<Vec<_>>(), ["1", "2"]);
+            assert_eq!(qmap(&m.requests()[0])["per_page"], "100");
+            let paths: Vec<&str> = files.as_array().unwrap().iter().map(|f| f["path"].as_str().unwrap()).collect();
+            assert_eq!(paths, ["f1.ts", "f2.ts", "new.ts"]);
+            assert_eq!(files[2], json!({"path": "new.ts", "oldPath": "old.ts", "status": "renamed", "additions": 0, "deletions": 0}));
+            assert_eq!(files[0]["patch"], json!("@@"));
+        }
+
+        #[tokio::test]
+        async fn gh_get_pull_files_는_30쪽에서_멈춘다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])).header("link", "<x>; rel=\"next\""));
+            let c = gh(&m.base(), None, 5000, 0);
+            queries::get_pull_files(&c, &slug(), 9, &CancellationToken::new()).await.unwrap();
+            assert_eq!(m.requests().len(), 30);
+        }
+
+        #[tokio::test]
+        async fn gh_get_pull_commits_는_250개까지_받는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let page: u64 = qmap(r)["page"].parse().unwrap();
+                let commits: Vec<Value> = (0..100).map(|i| json!({"sha": format!("c{page}-{i}"), "commit": {"message": "m", "author": {"name": "N", "date": "2026-01-01T00:00:00Z"}}, "author": if i == 0 { user("al") } else { Value::Null }})).collect();
+                ok(Value::Array(commits)).header("link", "<x>; rel=\"next\"")
+            });
+            let c = gh(&m.base(), None, 5000, 0);
+            let commits = jv(&queries::get_pull_commits(&c, &slug(), 9, &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().len(), 3);
+            assert_eq!(commits.as_array().unwrap().len(), 250);
+            assert_eq!(commits[0], json!({"sha": "c1-0", "message": "m", "authorName": "N", "author": {"login": "al", "avatarUrl": "https://a/al.png"}, "date": 1767225600}));
+            assert!(commits[1].get("author").is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_get_comments_는_html_accept_로_받는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([{"user": user("c"), "body_html": "<p>x</p>", "created_at": "2026-01-01T00:00:00Z", "html_url": "u"}])));
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::get_comments(&c, &slug(), 3, &CancellationToken::new()).await.unwrap());
+            assert_eq!(path_of(&m.requests()[0]), "/repos/octo/hello/issues/3/comments");
+            assert_eq!(m.requests()[0].header("accept"), Some("application/vnd.github.html+json"));
+            assert_eq!(res, json!([{"author": {"login": "c", "avatarUrl": "https://a/c.png"}, "bodyHtml": "<p>x</p>", "createdAt": 1767225600, "htmlUrl": "u"}]));
+        }
+
+        #[tokio::test]
+        async fn gh_get_filters_는_라벨과_담당_가능_사용자를_함께_받는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r).ends_with("/labels") { ok(json!([{"name": "bug", "color": "f00"}])) } else { ok(json!([user("bob")])) });
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::get_filters(&c, &slug(), &CancellationToken::new()).await.unwrap());
+            let mut paths: Vec<String> = m.requests().iter().map(|r| path_of(r).to_string()).collect();
+            paths.sort();
+            assert_eq!(paths, ["/repos/octo/hello/assignees", "/repos/octo/hello/labels"]);
+            assert_eq!(res, json!({"labels": [{"name": "bug", "color": "f00"}], "assignees": [{"login": "bob", "avatarUrl": "https://a/bob.png"}]}));
+        }
+
+        #[tokio::test]
+        async fn gh_list_issues_는_pr_을_거르고_has_more_는_link_로_판단한다() {
+            let _g = Guard;
+            let body = json!([issue(1, json!({})), issue(2, json!({"pull_request": {"url": "x"}})), issue(3, json!({"state": "closed"}))]);
+            let m = Mock::start(move |_, _| ok(body.clone()).header("link", "<x>; rel=\"next\""));
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::list_issues(&c, &slug(), &query("all", Some("bug"), Some("none"), 2), &CancellationToken::new()).await.unwrap());
+            let want: BTreeMap<String, String> = [("state", "all"), ("labels", "bug"), ("assignee", "none"), ("per_page", "30"), ("page", "2"), ("sort", "updated"), ("direction", "desc")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+            assert_eq!(qmap(&m.requests()[0]), want);
+            assert_eq!(res["items"].as_array().unwrap().iter().map(|i| i["number"].clone()).collect::<Vec<_>>(), [json!(1), json!(3)]);
+            assert_eq!(res["items"][1]["state"], json!("closed"));
+            // 30개 미만이어도 Link 가 있으면 더 있다
+            assert_eq!(res["hasMore"], json!(true));
+        }
+
+        #[tokio::test]
+        async fn gh_list_issues_는_전부_pr_인_쪽도_link_가_없으면_끝이다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([issue(1, json!({"pull_request": {}}))])));
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::list_issues(&c, &slug(), &query("open", None, None, 1), &CancellationToken::new()).await.unwrap());
+            assert_eq!(res, json!({"items": [], "hasMore": false}));
+        }
+
+        #[tokio::test]
+        async fn gh_list_issues_는_pr_만_있는_쪽이_비면_항목이_나올_때까지_읽고_next_page_를_알린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let page: u64 = qmap(r)["page"].parse().unwrap();
+                let body = if page < 4 { json!([issue(page, json!({"pull_request": {}}))]) } else { json!([issue(9, json!({}))]) };
+                ok(body).header("link", "<x>; rel=\"next\"")
+            });
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::list_issues(&c, &slug(), &query("open", None, None, 2), &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().iter().map(|r| qmap(r)["page"].clone()).collect::<Vec<_>>(), ["2", "3", "4"]);
+            assert_eq!(res["items"].as_array().unwrap().iter().map(|i| i["number"].clone()).collect::<Vec<_>>(), [json!(9)]);
+            assert_eq!((res["hasMore"].clone(), res["nextPage"].clone()), (json!(true), json!(5)));
+        }
+
+        #[tokio::test]
+        async fn gh_list_issues_는_계속_비어_있어도_추가_5쪽에서_멈춘다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([issue(1, json!({"pull_request": {}}))])).header("link", "<x>; rel=\"next\""));
+            let c = gh(&m.base(), None, 5000, 0);
+            let res = jv(&queries::list_issues(&c, &slug(), &query("open", None, None, 1), &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().len(), 6);
+            assert_eq!(res, json!({"items": [], "hasMore": true, "nextPage": 7}));
+        }
+
+        #[tokio::test]
+        async fn gh_get_issue_는_html_본문과_closed_at_을_돌려준다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(issue(4, json!({"state": "closed", "body_html": "<p>b</p>", "closed_at": "2026-01-02T00:00:00Z"}))));
+            let c = gh(&m.base(), None, 5000, 0);
+            let d = jv(&queries::get_issue(&c, &slug(), 4, &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests()[0].header("accept"), Some("application/vnd.github.html+json"));
+            assert_eq!((d["number"].clone(), d["bodyHtml"].clone(), d["closedAt"].clone(), d["state"].clone()), (json!(4), json!("<p>b</p>"), json!(1767312000), json!("closed")));
+        }
+
+        // ── 아바타(avatars) ─────────────────────────────────────────────────
+
+        fn sha_of(c: char) -> String {
+            c.to_string().repeat(40)
+        }
+
+        fn rate_headers(r: Resp, remaining: u32, reset: u64) -> Resp {
+            r.header("x-ratelimit-remaining", &remaining.to_string()).header("x-ratelimit-limit", "60").header("x-ratelimit-reset", &reset.to_string())
+        }
+
+        fn commit(sha: &str, author: Value) -> Resp {
+            rate_headers(ok(json!([{"sha": sha, "author": author}])), 50, 1_900_000_000)
+        }
+
+        fn sha_query(r: &Req) -> String {
+            qmap(r).get("sha").cloned().unwrap_or_default()
+        }
+
+        fn query_of(email: &str, sha: &str) -> AvatarQuery {
+            AvatarQuery { email: email.into(), sha: sha.into() }
+        }
+
+        fn resolver(base: &str, token: Option<&str>, clock: Arc<FakeClock>, file: Option<std::path::PathBuf>) -> AvatarResolver {
+            AvatarResolver::new(Arc::new(gh(base, token, 5000, 0)), file, clock)
+        }
+
+        /// 시험용 임시 폴더(끝나면 지운다)
+        struct TempDir(std::path::PathBuf);
+
+        impl TempDir {
+            fn new(tag: &str) -> Self {
+                static N: AtomicUsize = AtomicUsize::new(0);
+                let p = std::env::temp_dir().join(format!("antler-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+                std::fs::create_dir_all(&p).unwrap();
+                Self(p)
+            }
+        }
+
+        impl Drop for TempDir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+
+        fn avatar(login: &str, url: &str) -> Option<Avatar> {
+            Some(Avatar { login: login.into(), url: url.into() })
+        }
+
+        #[test]
+        fn gh_parse_noreply_는_id_와_로그인을_읽는다() {
+            let n = av::parse_noreply("12345+octocat@users.noreply.github.com").unwrap();
+            assert_eq!((n.login.as_str(), n.id), ("octocat", Some(12345)));
+        }
+
+        #[test]
+        fn gh_parse_noreply_는_옛_형식을_id_없이_읽는다() {
+            let n = av::parse_noreply("octocat@users.noreply.github.com").unwrap();
+            assert_eq!((n.login.as_str(), n.id), ("octocat", None));
+        }
+
+        #[test]
+        fn gh_parse_noreply_는_대소문자_공백을_허용하고_봇은_id_가_있어야_한다() {
+            let n = av::parse_noreply(" 7+Foo-Bar@Users.Noreply.GitHub.com ").unwrap();
+            assert_eq!((n.login.as_str(), n.id), ("Foo-Bar", Some(7)));
+            let b = av::parse_noreply("49699333+dependabot[bot]@users.noreply.github.com").unwrap();
+            assert_eq!((b.login.as_str(), b.id), ("dependabot[bot]", Some(49_699_333)));
+            assert_eq!(av::parse_noreply("dependabot[bot]@users.noreply.github.com"), None);
+        }
+
+        #[test]
+        fn gh_parse_noreply_는_다른_도메인과_잘못된_로그인을_거부한다() {
+            for bad in ["me@example.com", "me@users.noreply.github.com.evil.com", "evil@x@users.noreply.github.com", "-bad@users.noreply.github.com", "a/b@users.noreply.github.com", "@users.noreply.github.com", "5+me+x@users.noreply.github.com", "1234567890123+me@users.noreply.github.com"] {
+                assert_eq!(av::parse_noreply(bad), None, "{bad}");
+            }
+        }
+
+        #[test]
+        fn gh_아바타_기본_주소는_id_가_있으면_u_id_없으면_로그인이다() {
+            assert_eq!(av::avatar_base_url("octocat", Some(5)), "https://avatars.githubusercontent.com/u/5");
+            assert_eq!(av::avatar_base_url("octocat", None), "https://avatars.githubusercontent.com/octocat");
+        }
+
+        #[test]
+        fn gh_api_avatar_url_은_호스트를_고정하고_쿼리를_버린다() {
+            let u9 = Some("https://avatars.githubusercontent.com/u/9?v=4");
+            assert_eq!(av::normalize_avatar_url(u9, "x", Some(9)).as_deref(), Some("https://avatars.githubusercontent.com/u/9"));
+            assert_eq!(av::normalize_avatar_url(u9, "x", None).as_deref(), Some("https://avatars.githubusercontent.com/u/9"));
+            assert_eq!(av::normalize_avatar_url(Some("https://evil.example/u/9"), "x", Some(9)), None);
+            assert_eq!(av::normalize_avatar_url(Some("http://avatars.githubusercontent.com/u/9"), "x", Some(9)), None);
+            assert_eq!(av::normalize_avatar_url(Some("https://user:pw@avatars.githubusercontent.com/u/9"), "x", Some(9)), None);
+            assert_eq!(av::normalize_avatar_url(Some(&format!("https://avatars.githubusercontent.com/u/{}", "9".repeat(300))), "x", None), None);
+            assert_eq!(av::normalize_avatar_url(None, "x", None), None);
+        }
+
+        #[test]
+        fn gh_아바타_요청_크기는_몇_단계로_묶인다() {
+            assert_eq!((av::avatar_px(18.0, 1.0), av::avatar_px(18.0, 2.0), av::avatar_px(32.0, 2.0), av::avatar_px(500.0, 1.0)), (32, 48, 64, 192));
+            assert_eq!(av::avatar_src("https://avatars.githubusercontent.com/u/1", 48), "https://avatars.githubusercontent.com/u/1?s=48");
+            assert_eq!(av::avatar_src("https://x/y?a=1", 48), "https://x/y?a=1&s=48");
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_noreply_를_네트워크_없이_풀고_github_저장소가_아니어도_동작한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| status(404, json!({})));
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let out = r.lookup_authors(None, &[query_of("12+me@users.noreply.github.com", &sha_of('a')), query_of("x@y.io", &sha_of('b'))], &CancellationToken::new(), None).await;
+            assert_eq!(out, vec![("12+me@users.noreply.github.com".to_string(), avatar("me", "https://avatars.githubusercontent.com/u/12"))]);
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_sha_로_login_을_찾고_author_null_은_null_이며_이메일은_보내지_않는다() {
+            let _g = Guard;
+            let (a, b) = (sha_of('a'), sha_of('b'));
+            let (a2, b2) = (a.clone(), b.clone());
+            let m = Mock::start(move |_, r| {
+                let sha = sha_query(r);
+                if sha == a2 {
+                    commit(&a2, json!({"login": "octocat", "id": 583231, "avatar_url": "https://avatars.githubusercontent.com/u/583231?v=4"}))
+                } else if sha == b2 {
+                    commit(&b2, Value::Null)
+                } else {
+                    status(404, json!({}))
+                }
+            });
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let out = r.lookup_authors(Some(&slug()), &[query_of("octo@corp.io", &a), query_of("ghost@corp.io", &b)], &CancellationToken::new(), None).await;
+            assert_eq!(out, vec![("octo@corp.io".to_string(), avatar("octocat", "https://avatars.githubusercontent.com/u/583231")), ("ghost@corp.io".to_string(), None)]);
+            assert_eq!(m.requests().len(), 2);
+            for c in m.requests() {
+                assert_eq!(path_of(&c), "/repos/octo/hello/commits");
+                assert_eq!(qmap(&c)["per_page"], "1");
+                assert!(!c.target.contains("corp.io") && !c.target.contains("%40"), "{}", c.target);
+            }
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_캐시_적중이면_다시_부르지_않고_파일_캐시는_재시작_뒤에도_쓴다_이메일은_해시로만_저장한다() {
+            let _g = Guard;
+            let dir = TempDir::new("avatar");
+            let file = dir.0.join("avatar-cache.json");
+            let a = sha_of('a');
+            let a2 = a.clone();
+            let m = Mock::start(move |_, _| commit(&a2, json!({"login": "octocat", "id": 1, "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4"})));
+            let cancel = CancellationToken::new();
+            let r1 = resolver(&m.base(), None, FakeClock::at(CLOCK0), Some(file.clone()));
+            r1.lookup_authors(Some(&slug()), &[query_of("octo@corp.io", &a)], &cancel, None).await;
+            r1.lookup_authors(Some(&slug()), &[query_of("OCTO@corp.io", &a)], &cancel, None).await;
+            assert_eq!(m.requests().len(), 1);
+            r1.flush();
+            let text = std::fs::read_to_string(&file).unwrap();
+            assert!(!text.contains("corp.io"), "{text}");
+            // 키는 이메일(소문자)의 sha256 16진수 64자다
+            assert!(serde_json::from_str::<Value>(&text).unwrap()["e"].as_object().unwrap().keys().all(|k| k.len() == 64));
+
+            let again = Mock::start(|_, _| status(404, json!({})));
+            let r2 = resolver(&again.base(), None, FakeClock::at(CLOCK0), Some(file));
+            let out = r2.lookup_authors(Some(&slug()), &[query_of("octo@corp.io", &a)], &cancel, None).await;
+            assert_eq!(out[0].1.as_ref().map(|v| v.login.as_str()), Some("octocat"));
+            assert_eq!(again.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_부정은_7일_긍정은_30일_뒤_다시_조회한다() {
+            let _g = Guard;
+            let (a, b) = (sha_of('a'), sha_of('b'));
+            let (a2, b2) = (a.clone(), b.clone());
+            let m = Mock::start(move |_, r| if sha_query(r) == a2 { commit(&a2, Value::Null) } else { commit(&b2, json!({"login": "me", "id": 2, "avatar_url": ""})) });
+            let t0: u64 = 1_000_000_000_000;
+            let clock = FakeClock::at(t0);
+            let r = resolver(&m.base(), None, clock.clone(), None);
+            let authors = [query_of("n@x.io", &a), query_of("p@x.io", &b)];
+            let cancel = CancellationToken::new();
+            let day = 86_400_000;
+            r.lookup_authors(Some(&slug()), &authors, &cancel, None).await;
+            assert_eq!(m.requests().len(), 2);
+            clock.set(t0 + 6 * day);
+            r.lookup_authors(Some(&slug()), &authors, &cancel, None).await;
+            assert_eq!(m.requests().len(), 2);
+            clock.set(t0 + 8 * day);
+            r.lookup_authors(Some(&slug()), &authors, &cancel, None).await;
+            assert_eq!(m.requests().len(), 3);
+            clock.set(t0 + 33 * day);
+            r.lookup_authors(Some(&slug()), &authors, &cancel, None).await;
+            assert_eq!(m.requests().len(), 5);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_미푸시_커밋_404_를_기록하지_않고_결과에서_빼며_잠시_뒤_다시_묻는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| rate_headers(status(404, json!({"message": "Not Found"})), 50, 1_900_000_000));
+            let t0: u64 = 1_000_000_000_000;
+            let clock = FakeClock::at(t0);
+            let r = resolver(&m.base(), None, clock.clone(), None);
+            let a = [query_of("x@corp.io", &sha_of('a'))];
+            let cancel = CancellationToken::new();
+            assert_eq!(r.lookup_authors(Some(&slug()), &a, &cancel, None).await, vec![]);
+            r.lookup_authors(Some(&slug()), &a, &cancel, None).await;
+            assert_eq!(m.requests().len(), 1);
+            clock.set(t0 + 11 * 60_000);
+            r.lookup_authors(Some(&slug()), &a, &cancel, None).await;
+            assert_eq!(m.requests().len(), 2);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_고른_커밋이_404_면_같은_작성자의_push_된_커밋으로_다시_묻는다() {
+            let _g = Guard;
+            let (a, b, c) = (sha_of('a'), sha_of('b'), sha_of('c'));
+            let c2 = c.clone();
+            let m = Mock::start(move |_, r| {
+                if sha_query(r) == c2 {
+                    commit(&c2, json!({"login": "dev", "id": 7, "avatar_url": "https://avatars.githubusercontent.com/u/7?v=4"}))
+                } else {
+                    rate_headers(status(404, json!({"message": "Not Found"})), 50, 1_900_000_000)
+                }
+            });
+            let asked = Arc::new(Mutex::new(Vec::<String>::new()));
+            let (asked2, list) = (asked.clone(), vec![a.clone(), b.clone(), c.clone()]);
+            // 원래 sha(a)는 빼고 앞에서 2개(b, c)까지 쓴다
+            let fallback: Fallback = Arc::new(move |email: String| {
+                asked2.lock().unwrap().push(email);
+                let list = list.clone();
+                async move { list }.boxed()
+            });
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let out = r.lookup_authors(Some(&slug()), &[query_of("dev@corp.io", &a)], &CancellationToken::new(), Some(fallback)).await;
+            assert_eq!(out, vec![("dev@corp.io".to_string(), avatar("dev", "https://avatars.githubusercontent.com/u/7"))]);
+            assert_eq!(*asked.lock().unwrap(), ["dev@corp.io"]);
+            assert_eq!(m.requests().iter().map(sha_query).collect::<Vec<_>>(), [a, b, c]);
+            // 이메일은 로컬 대체 조회에만 쓰이고 GitHub 요청에는 실리지 않는다
+            assert!(m.requests().iter().all(|r| !r.target.contains("corp.io")));
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_404_가_아닌_결과면_대체_조회를_하지_않고_대체_후보도_2개까지만_쓴다() {
+            let _g = Guard;
+            let (a, b) = (sha_of('a'), sha_of('b'));
+            let a2 = a.clone();
+            let m = Mock::start(move |_, r| {
+                if sha_query(r) == a2 {
+                    commit(&a2, Value::Null)
+                } else {
+                    rate_headers(status(404, json!({"message": "Not Found"})), 50, 1_900_000_000)
+                }
+            });
+            let calls = Arc::new(AtomicUsize::new(0));
+            let c2 = calls.clone();
+            let fallback: Fallback = Arc::new(move |_email: String| {
+                c2.fetch_add(1, Ordering::SeqCst);
+                async { vec![sha_of('d'), sha_of('e'), sha_of('f')] }.boxed()
+            });
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let out = r.lookup_authors(Some(&slug()), &[query_of("none@corp.io", &a), query_of("gone@corp.io", &b)], &CancellationToken::new(), Some(fallback)).await;
+            assert_eq!(out, vec![("none@corp.io".to_string(), None)]);
+            // none: 1회(대체 없음) · gone: 원래 1회 + 대체 2회
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+            assert_eq!(count(&m, |r| path_of(r) == "/repos/octo/hello/commits"), 4);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_남은_호출이_10_미만이면_멈추고_reset_이후_재개한다() {
+            let _g = Guard;
+            let reset: u64 = 1_900_000_000;
+            let m = Mock::start(move |n, r| rate_headers(ok(json!([{"sha": sha_query(r), "author": {"login": format!("u{n}"), "id": n + 1, "avatar_url": ""}}])), 9, reset));
+            let clock = FakeClock::at(reset * 1000 - 3_600_000);
+            let r = resolver(&m.base(), None, clock.clone(), None);
+            let cancel = CancellationToken::new();
+            let first = r.lookup_authors(Some(&slug()), &[query_of("1@x.io", &sha_of('a')), query_of("2@x.io", &sha_of('b')), query_of("3@x.io", &sha_of('c'))], &cancel, None).await;
+            // 동시성 3 이라 첫 묶음은 모두 나갈 수 있다. 중요한 것은 이후 새 요청이 한도 때문에 막힌다는 점
+            let n = m.requests().len();
+            assert!(n > 0);
+            let again = [query_of("9@x.io", &sha_of('d'))];
+            assert_eq!(r.lookup_authors(Some(&slug()), &again, &cancel, None).await, vec![]);
+            assert_eq!(m.requests().len(), n);
+            assert_eq!(first.len(), n);
+            clock.set((reset + 1) * 1000);
+            r.lookup_authors(Some(&slug()), &again, &cancel, None).await;
+            assert_eq!(m.requests().len(), n + 1);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_한도_초과_응답이면_일시_중지한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| rate_headers(status(403, json!({"message": "rate limited"})), 0, 1_900_000_000));
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let cancel = CancellationToken::new();
+            assert_eq!(r.lookup_authors(Some(&slug()), &[query_of("1@x.io", &sha_of('a'))], &cancel, None).await, vec![]);
+            r.lookup_authors(Some(&slug()), &[query_of("2@x.io", &sha_of('b'))], &cancel, None).await;
+            assert_eq!(m.requests().len(), 1);
+            let block = r.blocked_for(Some(&slug())).unwrap();
+            assert_eq!((block.reason, block.signed_in), ("rate-limited", false));
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_동시_호출을_3개로_제한하고_같은_작성자의_동시_요청은_합친다() {
+            let _g = Guard;
+            let (active, peak) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+            let (a, p) = (active.clone(), peak.clone());
+            let m = Mock::start(move |_, r| {
+                let now = a.fetch_add(1, Ordering::SeqCst) + 1;
+                p.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(15));
+                a.fetch_sub(1, Ordering::SeqCst);
+                let sha = sha_query(r);
+                commit(&sha, json!({"login": "u", "id": 1, "avatar_url": ""}))
+            });
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let authors: Vec<AvatarQuery> = (0..8).map(|i| query_of(&format!("u{i}@x.io"), &i.to_string().repeat(40))).collect();
+            let cancel = CancellationToken::new();
+            let sl = slug();
+            tokio::join!(r.lookup_authors(Some(&sl), &authors, &cancel, None), r.lookup_authors(Some(&sl), &authors, &cancel, None));
+            assert!(peak.load(Ordering::SeqCst) <= 3, "동시 {}개", peak.load(Ordering::SeqCst));
+            assert_eq!(m.requests().len(), 8);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_취소되면_더_호출하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| status(404, json!({})));
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let cancel = CancellationToken::new();
+            cancel.cancel();
+            assert_eq!(r.lookup_authors(Some(&slug()), &[query_of("a@x.io", &sha_of('a'))], &cancel, None).await, vec![]);
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스_아바타는_remote_가_있으면_sha_로_조회하고_토큰과_이메일이_새지_않는다() {
+            let _g = Guard;
+            let a = sha_of('a');
+            let a2 = a.clone();
+            let m = Mock::start(move |_, _| ok(json!([{"sha": a2, "author": {"login": "octocat", "id": 1, "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4"}}])));
+            let e = env(&m);
+            let res = e.svc.avatars(&json!("r1"), &json!("req-1"), &json!([{"email": "o@corp.io", "sha": a}])).await.unwrap();
+            assert_eq!(jv(&res), json!({"github": true, "avatars": {"o@corp.io": {"login": "octocat", "url": "https://avatars.githubusercontent.com/u/1"}}}));
+            assert_eq!(m.requests().len(), 1);
+            assert!(!m.requests()[0].target.contains("corp.io"));
+        }
+
+        #[tokio::test]
+        async fn gh_서비스_아바타는_github_저장소가_아니면_github_false_이고_noreply_는_풀린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| status(404, json!({})));
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().no_repo(), 0);
+            let res = e.svc.avatars(&json!("r1"), &json!("req-2"), &json!([{"email": "3+me@users.noreply.github.com", "sha": sha_of('a')}, {"email": "o@corp.io", "sha": sha_of('b')}])).await.unwrap();
+            let v = jv(&res);
+            assert_eq!(v["github"], json!(false));
+            assert_eq!(v["avatars"].as_object().unwrap().keys().collect::<Vec<_>>(), ["3+me@users.noreply.github.com"]);
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        // ── 접근 가능한 저장소(ghAccessibleRepos) ───────────────────────────
+
+        fn repo_raw(owner: &str, name: &str, pushed: &str, extra: Value) -> Value {
+            merged(
+                json!({
+                    "name": name, "full_name": format!("{owner}/{name}"), "owner": {"login": owner, "type": "User"}, "private": false, "fork": false, "archived": false,
+                    "default_branch": "main", "description": null, "pushed_at": pushed, "html_url": format!("https://github.com/{owner}/{name}")
+                }),
+                extra,
+            )
+        }
+
+        fn page_of(r: &Req) -> u64 {
+            qmap(r).get("page").and_then(|p| p.parse().ok()).unwrap_or(1)
+        }
+
+        const NEXT_REPOS: &str = "<https://api.github.com/user/repos?page=2>; rel=\"next\"";
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_응답을_매핑하고_pushed_at_내림차순으로_정렬하며_이상한_항목은_건너뛴다() {
+            let _g = Guard;
+            let body = json!([
+                repo_raw("me", "old", "2026-01-01T00:00:00Z", json!({"description": "옛것"})),
+                null,
+                {"name": "noowner", "html_url": "https://github.com/x/noowner"},
+                repo_raw("acme", "new", "2026-03-01T00:00:00Z", json!({"private": true, "fork": true, "archived": true, "default_branch": "trunk", "owner": {"login": "acme", "type": "Organization"}}))
+            ]);
+            let m = Mock::start(move |_, _| ok(body.clone()));
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            let res = jv(&e.svc.accessible_repos(&json!("r1"), &json!(false)).await.unwrap());
+            assert_eq!((res["needsLogin"].clone(), res["truncated"].clone()), (json!(false), json!(false)));
+            assert_eq!(res["repos"].as_array().unwrap().iter().map(|r| r["fullName"].clone()).collect::<Vec<_>>(), [json!("acme/new"), json!("me/old")]);
+            let pushed = parse_date_ms("2026-03-01T00:00:00Z").unwrap();
+            assert_eq!(
+                res["repos"][0],
+                json!({"owner": "acme", "repo": "new", "fullName": "acme/new", "ownerType": "Organization", "private": true, "fork": true, "archived": true, "defaultBranch": "trunk", "description": null, "pushedAt": pushed as u64, "htmlUrl": "https://github.com/acme/new"})
+            );
+            assert_eq!((res["repos"][1]["ownerType"].clone(), res["repos"][1]["description"].clone()), (json!("User"), json!("옛것")));
+            let q = &m.requests()[0];
+            assert_eq!(path_of(q), "/user/repos");
+            assert_eq!((qmap(q)["affiliation"].as_str(), qmap(q)["per_page"].as_str()), ("owner,collaborator,organization_member", "100"));
+            assert_eq!(q.header("authorization"), Some("Bearer ghp_tok"));
+        }
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_link_next_가_있으면_다음_쪽까지_읽어_합친다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if page_of(r) == 1 { ok(json!([repo_raw("me", "a", "2026-01-01T00:00:00Z", json!({}))])).header("link", NEXT_REPOS) } else { ok(json!([repo_raw("me", "b", "2026-02-01T00:00:00Z", json!({}))])) });
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            let res = jv(&e.svc.accessible_repos(&json!("r1"), &json!(false)).await.unwrap());
+            assert_eq!(m.requests().len(), 2);
+            assert_eq!(res["repos"].as_array().unwrap().iter().map(|r| r["repo"].clone()).collect::<Vec<_>>(), [json!("b"), json!("a")]);
+            assert_eq!(res["truncated"], json!(false));
+        }
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_쪽_수_상한에_걸리면_거기까지만_돌려주고_truncated_로_알린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| ok(json!([repo_raw("me", &format!("r{}", page_of(r)), "2026-01-01T00:00:00Z", json!({}))])).header("link", NEXT_REPOS));
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            let res = jv(&e.svc.accessible_repos(&json!("r1"), &json!(false)).await.unwrap());
+            assert_eq!(m.requests().len(), 20);
+            assert_eq!(res["repos"].as_array().unwrap().len(), 20);
+            assert_eq!(res["truncated"], json!(true));
+        }
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_로그인하지_않았으면_조회_없이_needs_login() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let e = env(&m);
+            let res = jv(&e.svc.accessible_repos(&json!("r1"), &json!(false)).await.unwrap());
+            assert_eq!((res["repos"].clone(), res["needsLogin"].clone(), res["truncated"].clone()), (json!([]), json!(true), json!(false)));
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_5분_캐시를_쓰고_fresh_면_다시_읽는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([repo_raw("me", "a", "2026-01-01T00:00:00Z", json!({}))])));
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            e.svc.accessible_repos(&json!("r1"), &json!(false)).await.unwrap();
+            e.svc.accessible_repos(&json!("r2"), &json!(false)).await.unwrap();
+            assert_eq!(m.requests().len(), 1);
+            e.svc.accessible_repos(&json!("r3"), &json!(true)).await.unwrap();
+            assert_eq!(m.requests().len(), 2);
+        }
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_로그아웃하면_캐시를_버린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([repo_raw("me", "a", "2026-01-01T00:00:00Z", json!({}))])));
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            e.svc.accessible_repos(&json!("r1"), &json!(false)).await.unwrap();
+            e.svc.logout().await.unwrap();
+            let res = jv(&e.svc.accessible_repos(&json!("r2"), &json!(false)).await.unwrap());
+            assert_eq!(res["needsLogin"], json!(true));
+            assert_eq!(m.requests().len(), 1);
+        }
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_요청을_취소하면_aborted_로_끝나고_캐시에_남기지_않는다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let m = Mock::start(move |_, r| {
+                if page_of(r) == 1 {
+                    g2.wait();
+                    ok(json!([repo_raw("me", "a", "2026-01-01T00:00:00Z", json!({}))])).header("link", NEXT_REPOS)
+                } else {
+                    ok(json!([]))
+                }
+            });
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            let svc = e.svc.clone();
+            let first = tokio::spawn(async move { svc.accessible_repos(&json!("r1"), &json!(false)).await });
+            wait_for(|| !m.requests().is_empty()).await;
+            e.svc.cancel("r1");
+            assert_eq!(failure(within(first).await.unwrap()).code, "ABORTED");
+            gate.open();
+            let res = jv(&e.svc.accessible_repos(&json!("r2"), &json!(false)).await.unwrap());
+            assert_eq!(res["repos"].as_array().unwrap().len(), 1);
+            // 취소된 호출의 결과가 캐시에 남았다면 두 번째 호출은 네트워크를 타지 않는다
+            assert!(m.requests().len() >= 2);
+        }
+
+        #[tokio::test]
+        async fn gh_접근_가능한_저장소는_401_이면_user_로_다시_확인해_거부된_토큰을_버린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| bad_credentials());
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            assert_eq!(failure(e.svc.accessible_repos(&json!("r1"), &json!(false)).await).code, "GH_AUTH");
+            assert!(e.svc.git_token().is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_git_token_은_로그인_토큰을_돌려주고_로그인하지_않았으면_none_이다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            assert_eq!(signed_in_env(&m, "ghp_tok", GithubMethod::Pat).svc.git_token().unwrap().expose(), "ghp_tok");
+            assert!(env(&m).svc.git_token().is_none());
+        }
+
+        // ── 체크(ghChecks) ──────────────────────────────────────────────────
+
+        const TOKEN: &str = "ghp_supersecrettoken";
+
+        fn sha(n: u64) -> String {
+            format!("{n:040x}")
+        }
+
+        /// GraphQL 요청에서 (변수 o{i} → sha) 를 읽어 sha 별 응답을 만든다
+        fn graphql_handler(rollups: Arc<Mutex<BTreeMap<String, Option<&'static str>>>>) -> impl Fn(usize, &Req) -> Resp + Send + Sync + 'static {
+            move |_, r| {
+                if !path_of(r).ends_with("/graphql") {
+                    return status(404, json!({}));
+                }
+                let body: Value = serde_json::from_str(&r.text()).unwrap();
+                let vars = body["variables"].as_object().unwrap();
+                let mut repository = serde_json::Map::new();
+                let mut i = 0;
+                while let Some(s) = vars.get(&format!("o{i}")).and_then(Value::as_str) {
+                    let v = match rollups.lock().unwrap().get(s) {
+                        None => Value::Null,
+                        Some(state) => json!({"statusCheckRollup": state.map(|st| json!({"state": st}))}),
+                    };
+                    repository.insert(format!("c{i}"), v);
+                    i += 1;
+                }
+                ok(json!({"data": {"repository": repository}}))
+            }
+        }
+
+        fn rollups(list: &[(u64, Option<&'static str>)]) -> Arc<Mutex<BTreeMap<String, Option<&'static str>>>> {
+            Arc::new(Mutex::new(list.iter().map(|(n, s)| (sha(*n), *s)).collect()))
+        }
+
+        fn cache(clock: Arc<FakeClock>) -> CheckStateCache {
+            CheckStateCache::new(clock)
+        }
+
+        #[test]
+        fn gh_체크_캐시는_이미_있는_키를_갱신해도_다른_항목을_밀어내지_않는다() {
+            let c = cache(FakeClock::at(CLOCK0));
+            for i in 0..5000 {
+                c.set(&format!("k{i}"), "success");
+            }
+            c.set("k4999", "failure");
+            assert_eq!((c.get("k0"), c.get("k4999")), (Some("success"), Some("failure")));
+            // 새 키가 들어오면 가장 오래된 것부터 밀려난다
+            c.set("k5000", "success");
+            assert_eq!((c.get("k0"), c.get("k1")), (None, Some("success")));
+        }
+
+        #[test]
+        fn gh_체크_캐시는_완료_상태는_오래_진행_중은_짧게_없음은_중간_길이로_보관한다() {
+            let clock = FakeClock::at(1_000_000);
+            let c = cache(clock.clone());
+            c.set("a", "success");
+            c.set("b", "pending");
+            c.set("c", "none");
+            clock.set(1_000_000 + TTL_PENDING_MS as u64);
+            assert_eq!((c.get("a"), c.get("b"), c.get("c")), (Some("success"), None, Some("none")));
+            clock.set(1_000_000 + TTL_NONE_MS as u64);
+            assert_eq!((c.get("c"), c.get("a")), (None, Some("success")));
+            clock.set(1_000_000 + TTL_NONE_MS as u64 + TTL_DONE_MS as u64);
+            assert_eq!(c.get("a"), None);
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_여러_커밋을_한_번의_요청으로_묻고_성공_실패_진행_중_없음_미push_를_구분한다() {
+            let _g = Guard;
+            let m = Mock::start(graphql_handler(rollups(&[(1, Some("SUCCESS")), (2, Some("FAILURE")), (3, Some("PENDING")), (4, None)])));
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            let shas: Vec<String> = (1..=5).map(sha).collect();
+            let out = jv(&checks::fetch_commit_checks(&c, &slug(), &shas, &cache(FakeClock::at(CLOCK0)), &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().len(), 1);
+            assert_eq!(m.requests()[0].method, "POST");
+            assert_eq!(out, json!({sha(1): "success", sha(2): "failure", sha(3): "pending", sha(4): "none", sha(5): "none"}));
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_sha_를_쿼리_문자열이_아니라_변수로_보낸다() {
+            let _g = Guard;
+            let m = Mock::start(graphql_handler(rollups(&[])));
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            checks::fetch_commit_checks(&c, &slug(), &[sha(7)], &cache(FakeClock::at(CLOCK0)), &CancellationToken::new()).await.unwrap();
+            let body: Value = serde_json::from_str(&m.requests()[0].text()).unwrap();
+            assert!(!body["query"].as_str().unwrap().contains(&sha(7)));
+            assert_eq!((body["variables"]["owner"].clone(), body["variables"]["name"].clone(), body["variables"]["o0"].clone()), (json!("octo"), json!("hello"), json!(sha(7))));
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_50개씩_나눠_묻고_잘못된_sha_와_중복은_버린다() {
+            let _g = Guard;
+            let m = Mock::start(graphql_handler(rollups(&[])));
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            let mut shas: Vec<String> = (1..=55).map(sha).collect();
+            shas.extend([sha(1), "xyz".to_string(), "; drop".to_string()]);
+            let out = jv(&checks::fetch_commit_checks(&c, &slug(), &shas, &cache(FakeClock::at(CLOCK0)), &CancellationToken::new()).await.unwrap());
+            assert_eq!(m.requests().len(), 2);
+            assert_eq!(out.as_object().unwrap().len(), 55);
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_캐시된_커밋은_다시_묻지_않고_진행_중은_ttl_이_지나면_다시_묻는다() {
+            let _g = Guard;
+            let state = rollups(&[(1, Some("SUCCESS")), (2, Some("PENDING"))]);
+            let m = Mock::start(graphql_handler(state.clone()));
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            let t0: u64 = 5_000_000;
+            let clock = FakeClock::at(t0);
+            let cache = cache(clock.clone());
+            let shas = [sha(1), sha(2)];
+            let cancel = CancellationToken::new();
+            checks::fetch_commit_checks(&c, &slug(), &shas, &cache, &cancel).await.unwrap();
+            assert_eq!(m.requests().len(), 1);
+            checks::fetch_commit_checks(&c, &slug(), &shas, &cache, &cancel).await.unwrap();
+            assert_eq!(m.requests().len(), 1);
+            // 진행 중이던 커밋이 끝났다
+            state.lock().unwrap().insert(sha(2), Some("SUCCESS"));
+            clock.set(t0 + TTL_PENDING_MS as u64 + 1);
+            let out = jv(&checks::fetch_commit_checks(&c, &slug(), &shas, &cache, &cancel).await.unwrap());
+            assert_eq!(m.requests().len(), 2);
+            let vars: Value = serde_json::from_str::<Value>(&m.requests()[1].text()).unwrap()["variables"].clone();
+            assert_eq!((vars["o0"].clone(), vars.get("o1").is_none()), (json!(sha(2)), true));
+            assert_eq!(out, json!({sha(1): "success", sha(2): "success"}));
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_레이트_리밋을_gh_rate_limit_로_던진다() {
+            let _g = Guard;
+            let limited = Mock::start(|_, _| ok(json!({"errors": [{"type": "RATE_LIMITED", "message": "x"}]})));
+            let c = gh(&limited.base(), Some(TOKEN), 5000, 0);
+            let err = failure(checks::fetch_commit_checks(&c, &slug(), &[sha(1)], &cache(FakeClock::at(CLOCK0)), &CancellationToken::new()).await);
+            assert_eq!(err.code, "GH_RATE_LIMIT");
+            let forbidden = Mock::start(|_, _| rate(status(403, json!({"message": "rate"})), 0));
+            let c = gh(&forbidden.base(), Some(TOKEN), 5000, 0);
+            let err = failure(checks::fetch_commit_checks(&c, &slug(), &[sha(1)], &cache(FakeClock::at(CLOCK0)), &CancellationToken::new()).await);
+            assert_eq!(err.code, "GH_RATE_LIMIT");
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_토큰이_없으면_요청하지_않고_gh_auth_로_거절한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({})));
+            let c = gh(&m.base(), None, 5000, 0);
+            let err = failure(checks::fetch_commit_checks(&c, &slug(), &[sha(1)], &cache(FakeClock::at(CLOCK0)), &CancellationToken::new()).await);
+            assert_eq!(err.code, "GH_AUTH");
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_저장소를_못_보면_결과에서_빠지고_캐시하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"data": {"repository": null}})));
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            let cache = cache(FakeClock::at(CLOCK0));
+            let out = jv(&checks::fetch_commit_checks(&c, &slug(), &[sha(1)], &cache, &CancellationToken::new()).await.unwrap());
+            assert_eq!(out, json!({}));
+            assert_eq!(cache.get(&format!("octo/hello@{}", sha(1))), None);
+        }
+
+        #[tokio::test]
+        async fn gh_커밋_상세는_check_run_과_legacy_status_를_합치고_소요_시간_결론_링크를_채운다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                if path_of(r).ends_with("/check-runs") {
+                    ok(json!({"check_runs": [
+                        {"name": "build", "status": "completed", "conclusion": "success", "html_url": "https://github.com/octo/hello/runs/1", "started_at": "2026-01-01T00:00:00Z", "completed_at": "2026-01-01T00:01:05Z"},
+                        {"name": "lint", "status": "in_progress", "conclusion": null, "started_at": "2026-01-01T00:00:00Z"},
+                        {"name": "e2e", "status": "completed", "conclusion": "failure"}
+                    ]}))
+                } else {
+                    ok(json!({"statuses": [{"context": "ci/legacy", "state": "success", "target_url": "https://ci.example/1"}]}))
+                }
+            });
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            let out = jv(&checks::fetch_check_details(&c, &slug(), &sha(9).to_uppercase(), &CancellationToken::new()).await.unwrap());
+            let mut targets: Vec<String> = m.requests().iter().map(|r| r.target.clone()).collect();
+            targets.sort();
+            assert_eq!(targets, [format!("/repos/octo/hello/commits/{}/check-runs?per_page=100", sha(9)), format!("/repos/octo/hello/commits/{}/status?per_page=100", sha(9))]);
+            assert_eq!(
+                out,
+                json!([
+                    {"name": "build", "state": "success", "conclusion": "success", "durationSec": 65, "url": "https://github.com/octo/hello/runs/1"},
+                    {"name": "lint", "state": "pending"},
+                    {"name": "e2e", "state": "failure", "conclusion": "failure"},
+                    {"name": "ci/legacy", "state": "success", "url": "https://ci.example/1"}
+                ])
+            );
+            assert!(failure(checks::fetch_check_details(&c, &slug(), "../x", &CancellationToken::new()).await).message.contains("커밋 해시"));
+        }
+
+        #[tokio::test]
+        async fn gh_워크플로_실행과_잡_목록을_변환한다_비로그인도_요청_가능() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                if path_of(r).contains("/actions/runs/77/jobs") {
+                    ok(json!({"jobs": [
+                        {"id": 1, "name": "test", "status": "completed", "conclusion": "cancelled", "started_at": "2026-01-01T00:00:00Z", "completed_at": "2026-01-01T01:02:03Z", "html_url": "https://github.com/o/r/job/1"},
+                        {"id": 2, "name": "deploy", "status": "queued", "conclusion": null}
+                    ]}))
+                } else {
+                    ok(json!({"workflow_runs": [{"id": 77, "name": "CI", "display_title": "fix: x", "head_branch": "main", "head_sha": sha(1), "event": "push", "status": "completed", "conclusion": "success", "run_number": 12, "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-01T00:05:00Z", "html_url": "https://github.com/o/r/actions/runs/77"}]})).header("link", NEXT)
+                }
+            });
+            let c = gh(&m.base(), None, 5000, 0);
+            let cancel = CancellationToken::new();
+            let runs = jv(&checks::list_runs(&c, &slug(), 1, &cancel).await.unwrap());
+            assert_eq!(m.requests()[0].header("authorization"), None);
+            assert_eq!(runs["hasMore"], json!(true));
+            let first = &runs["items"][0];
+            assert_eq!(
+                (first["id"].clone(), first["name"].clone(), first["title"].clone(), first["branch"].clone(), first["event"].clone(), first["state"].clone(), first["number"].clone(), first["conclusion"].clone()),
+                (json!(77), json!("CI"), json!("fix: x"), json!("main"), json!("push"), json!("success"), json!(12), json!("success"))
+            );
+            let jobs = jv(&checks::list_jobs(&c, &slug(), 77, &cancel).await.unwrap());
+            assert_eq!(
+                jobs,
+                json!([
+                    {"id": 1, "name": "test", "state": "failure", "status": "completed", "conclusion": "cancelled", "durationSec": 3723, "htmlUrl": "https://github.com/o/r/job/1"},
+                    {"id": 2, "name": "deploy", "state": "pending", "status": "queued", "htmlUrl": ""}
+                ])
+            );
+        }
+
+        #[tokio::test]
+        async fn gh_서비스_체크는_로그인하지_않았으면_요청_없이_available_false() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({})));
+            let e = env(&m);
+            let res = e.svc.commit_checks(&json!("r1"), &json!([sha(1)])).await.unwrap();
+            assert_eq!(jv(&res), json!({"available": false, "states": {}}));
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스_체크는_같은_커밋을_다시_물으면_캐시를_쓰고_결과_오류_어디에도_토큰이_없다() {
+            let _g = Guard;
+            let m = Mock::start(graphql_handler(rollups(&[(1, Some("SUCCESS"))])));
+            let e = signed_in_env(&m, TOKEN, GithubMethod::Pat);
+            let (id, shas) = (json!("r1"), json!([sha(1)]));
+            let a = e.svc.commit_checks(&id, &shas).await.unwrap();
+            let b = e.svc.commit_checks(&id, &shas).await.unwrap();
+            assert_eq!(jv(&a), json!({"available": true, "states": {sha(1): "success"}}));
+            assert_eq!(a, b);
+            assert_eq!(m.requests().len(), 1);
+            assert_eq!(m.requests()[0].header("authorization"), Some(format!("Bearer {TOKEN}").as_str()));
+            assert!(!format!("{}{}", stringify(&a), stringify(&b)).contains(TOKEN));
+            assert!(!m.requests()[0].text().contains(TOKEN));
+            // 로그아웃하면 캐시도 비워져 다시 묻는 대신 available=false
+            e.svc.logout().await.unwrap();
+            assert_eq!(jv(&e.svc.commit_checks(&id, &shas).await.unwrap())["available"], json!(false));
+        }
+
+        #[tokio::test]
+        async fn gh_서비스_체크의_레이트_리밋_오류_문구에_토큰이_실리지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| rate(status(403, json!({"message": format!("limit for {}", r.header("authorization").unwrap_or(""))})), 0));
+            let e = signed_in_env(&m, TOKEN, GithubMethod::Pat);
+            let err = failure(e.svc.commit_checks(&json!("r1"), &json!([sha(1)])).await);
+            assert!(err.code.starts_with("GH_"), "{err}");
+            assert!(!err.message.contains(TOKEN), "{err}");
+        }
+
+        // ── Launchpad(launchpadService) ─────────────────────────────────────
+
+        fn remote(owner: &str, repo: &str, name: &str) -> GhRepoRef {
+            GhRepoRef { owner: owner.into(), repo: repo.into(), remote: name.into() }
+        }
+
+        fn lp_issue(n: u64, repo: &str, over: Value) -> Value {
+            merged(
+                json!({
+                    "number": n, "title": format!("item {n}"), "state": "open", "user": {"login": "me", "avatar_url": "https://avatars.githubusercontent.com/u/1"},
+                    "labels": [{"name": "bug", "color": "ff0000"}], "assignees": [], "comments": 2, "updated_at": format!("2026-01-0{n}T00:00:00Z"), "created_at": "2026-01-01T00:00:00Z",
+                    "html_url": format!("https://github.com/{repo}/pull/{n}"), "repository_url": format!("https://api.github.com/repos/{repo}")
+                }),
+                over,
+            )
+        }
+
+        fn q_of(r: &Req) -> String {
+            qmap(r).get("q").cloned().unwrap_or_default()
+        }
+
+        fn section_of(r: &Req) -> &'static str {
+            let q = q_of(r);
+            if q.contains("author:@me") {
+                "authored"
+            } else if q.contains("review-requested:@me") {
+                "review"
+            } else {
+                "issues"
+            }
+        }
+
+        fn lp_env<S: AsRef<str>>(m: &Mock, remotes: Vec<(S, Remotes)>, signed_in: bool) -> Env {
+            let vault = new_vault();
+            if signed_in {
+                vault.save_github(&SecretString::new("ghp_tok"), GithubMethod::Pat).unwrap();
+            }
+            let opts = ServiceOptions { remote_timeout: Duration::from_millis(300), ..ServiceOptions::default() };
+            env_opts(&m.base(), vault, FakeRepos::new().with_remotes(remotes), 0, opts)
+        }
+
+        fn lp_remotes() -> Vec<(&'static str, Remotes)> {
+            vec![
+                ("r1", Remotes::List(vec![remote("acme", "app", "origin")])),
+                ("r2", Remotes::List(vec![remote("acme", "lib", "origin")])),
+                ("r3", Remotes::List(vec![])),
+                // 같은 GitHub 저장소를 대소문자만 다르게 등록한 클론
+                ("r4", Remotes::List(vec![remote("Acme", "App", "origin")])),
+                // 포크: origin 은 포크, upstream 이 원본
+                ("r5", Remotes::List(vec![remote("me", "lib-fork", "origin"), remote("acme", "lib", "upstream")])),
+            ]
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_로그인하지_않았으면_호출_없이_needs_login_으로_알린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"items": []})));
+            let e = lp_env(&m, lp_remotes(), false);
+            let res = jv(&e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap());
+            assert_eq!((res["needsLogin"].clone(), res["items"].clone(), res["errors"].clone()), (json!(true), json!([]), json!([])));
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_사용자_기준_검색을_섹션당_한_번만_보내고_등록된_저장소의_remote_와_맞춰_거른다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                assert_eq!(path_of(r), "/search/issues");
+                assert_eq!(r.header("authorization"), Some("Bearer ghp_tok"));
+                assert_eq!(qmap(r)["per_page"], "100");
+                match section_of(r) {
+                    "authored" => ok(json!({"items": [lp_issue(1, "acme/app", json!({"draft": true, "pull_request": {"merged_at": null}})), lp_issue(5, "stranger/other", json!({"pull_request": {}}))]})),
+                    "review" => ok(json!({"items": [lp_issue(2, "acme/lib", json!({"pull_request": {}}))]})),
+                    _ => ok(json!({"items": [lp_issue(3, "ACME/App", json!({})), lp_issue(4, "unknown/thing", json!({}))]})),
+                }
+            });
+            let e = lp_env(&m, lp_remotes(), true);
+            let res = e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap();
+            assert_eq!(m.requests().len(), 3);
+            let mut qs: Vec<String> = m.requests().iter().map(q_of).collect();
+            qs.sort();
+            assert_eq!(qs, ["is:issue is:open assignee:@me archived:false", "is:pr is:open author:@me archived:false", "is:pr is:open review-requested:@me archived:false"]);
+            assert!(qs.iter().all(|q| !q.contains("repo:")));
+            let v = jv(&res);
+            assert_eq!((v["needsLogin"].clone(), v["incomplete"].clone(), v["skipped"].clone(), v["unresolved"].clone(), v["errors"].clone()), (json!(false), json!(false), json!(1), json!(0), json!([])));
+            let items = v["items"].as_array().unwrap();
+            assert_eq!(items.len(), 3);
+            let by = |section: &str| items.iter().find(|i| i["section"] == json!(section)).unwrap().clone();
+            // 대소문자만 다른 두 등록(r1·r4)은 같은 저장소로 묶인다
+            let authored = by("authored");
+            assert_eq!(
+                (authored["kind"].clone(), authored["repoIds"].clone(), authored["owner"].clone(), authored["repo"].clone(), authored["number"].clone(), authored["draft"].clone(), authored["state"].clone()),
+                (json!("pull"), json!(["r1", "r4"]), json!("acme"), json!("app"), json!(1), json!(true), json!("open"))
+            );
+            // upstream remote 로 맞는다(포크 r5 와 원본 r2 모두 등록 저장소)
+            let review = by("review");
+            assert_eq!((review["kind"].clone(), review["repoIds"].clone(), review["number"].clone()), (json!("pull"), json!(["r2", "r5"]), json!(2)));
+            let issues = by("issues");
+            assert_eq!((issues["kind"].clone(), issues["repoIds"].clone(), issues["number"].clone(), issues["draft"].clone()), (json!("issue"), json!(["r1", "r4"]), json!(3), json!(false)));
+            assert!(!stringify(&res).contains("ghp_tok"));
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_저장소가_아무리_많아도_검색_수는_그대로이고_repo_묶음이_없다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if q_of(r).contains("repo:") { status(422, json!({"message": "Validation Failed"})) } else { ok(json!({"items": [lp_issue(1, "org/repo-with-a-long-name-7", json!({"pull_request": {}}))]})) });
+            let e = lp_env(&m, (0..400).map(|i| (format!("x{i}"), Remotes::List(vec![remote("org", &format!("repo-with-a-long-name-{i}"), "origin")]))).collect(), true);
+            let res = jv(&e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap());
+            assert_eq!(m.requests().len(), 3);
+            assert_eq!(res["errors"], json!([]));
+            let items = res["items"].as_array().unwrap();
+            assert_eq!(items.len(), 3);
+            assert!(items.iter().all(|i| i["repoIds"] == json!(["x7"])));
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_검색_한도에_걸린_섹션만_errors_로_남기고_나머지는_돌려준다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| match section_of(r) {
+                "review" => status(403, json!({"message": "rate limit"})).header("x-ratelimit-remaining", "0").header("x-ratelimit-limit", "30").header("x-ratelimit-reset", "1900000000").header("x-ratelimit-resource", "search"),
+                "authored" => ok(json!({"items": [lp_issue(1, "acme/app", json!({"pull_request": {}}))]})),
+                _ => ok(json!({"items": []})),
+            });
+            let e = lp_env(&m, lp_remotes(), true);
+            let res = jv(&e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap());
+            assert_eq!(res["items"].as_array().unwrap().iter().map(|i| i["number"].clone()).collect::<Vec<_>>(), [json!(1)]);
+            assert_eq!(res["errors"].as_array().unwrap().len(), 1);
+            assert!(res["errors"][0].as_str().unwrap().contains("한도"), "{res}");
+            assert_eq!(res["incomplete"], json!(true));
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_쪽_상한에_닿으면_incomplete_로_알리고_같은_항목은_한_번만_담는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                if section_of(r) != "authored" {
+                    return ok(json!({"items": []}));
+                }
+                ok(json!({"items": [lp_issue(1, "acme/app", json!({"pull_request": {}}))]})).header("link", "<https://api.github.com/search/issues?page=9>; rel=\"next\"")
+            });
+            let e = lp_env(&m, lp_remotes(), true);
+            let res = jv(&e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap());
+            assert_eq!(count(&m, |r| section_of(r) == "authored"), 5);
+            assert_eq!(res["incomplete"], json!(true));
+            assert_eq!(res["items"].as_array().unwrap().iter().filter(|i| i["section"] == json!("authored")).count(), 1);
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_incomplete_results_와_1000건_초과를_incomplete_로_알린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"items": [], "incomplete_results": true})));
+            let e = lp_env(&m, lp_remotes(), true);
+            assert_eq!(jv(&e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap())["incomplete"], json!(true));
+            let m2 = Mock::start(|_, _| ok(json!({"items": [], "total_count": 1500})));
+            let e2 = lp_env(&m2, lp_remotes(), true);
+            assert_eq!(jv(&e2.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap())["incomplete"], json!(true));
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_remote_를_읽지_못한_저장소는_건너뛰고_unresolved_로_알린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| ok(json!({"items": if section_of(r) == "authored" { json!([lp_issue(1, "acme/app", json!({"pull_request": {}}))]) } else { json!([]) }})));
+            let e = lp_env(&m, vec![("r1", Remotes::List(vec![remote("acme", "app", "origin")])), ("bad", Remotes::Fail), ("slow", Remotes::Hang)], true);
+            let t0 = Instant::now();
+            let res = jv(&e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap());
+            // 응답 없는 저장소 하나가 제한 시간(시험에서는 300ms) 이상 붙잡지 않는다
+            assert!(t0.elapsed() < WAIT_LIMIT, "{:?}", t0.elapsed());
+            assert_eq!((res["unresolved"].clone(), res["skipped"].clone()), (json!(2), json!(0)));
+            assert_eq!(res["items"].as_array().unwrap().iter().map(|i| i["number"].clone()).collect::<Vec<_>>(), [json!(1)]);
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_저장소가_하나도_github_가_아니어도_검색은_한_번씩_하고_결과는_비어_있다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"items": [lp_issue(1, "acme/app", json!({"pull_request": {}}))]})));
+            let e = lp_env(&m, vec![("r3", Remotes::List(vec![]))], true);
+            let res = jv(&e.svc.launchpad(&json!("req1"), &Value::Null).await.unwrap());
+            assert_eq!(m.requests().len(), 3);
+            assert_eq!((res["items"].clone(), res["skipped"].clone(), res["incomplete"].clone()), (json!([]), json!(1), json!(false)));
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_401_이면_토큰을_다시_확인하고_오류를_돌려준다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| bad_credentials());
+            let e = lp_env(&m, lp_remotes(), true);
+            let err = failure(e.svc.launchpad(&json!("req1"), &Value::Null).await);
+            assert!(err.message.contains("인증"), "{err}");
+            assert!(!e.svc.auth().await.signed_in);
+        }
+
+        #[tokio::test]
+        async fn gh_launchpad_는_fresh_면_remote_목록_캐시를_먼저_버린다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!({"items": []})));
+            let e = lp_env(&m, lp_remotes(), false);
+            e.svc.launchpad(&json!("req1"), &json!(true)).await.unwrap();
+            assert_eq!(e.repos.invalidated.load(Ordering::SeqCst), 1);
+            e.svc.launchpad(&json!("req2"), &json!(false)).await.unwrap();
+            assert_eq!(e.repos.invalidated.load(Ordering::SeqCst), 1);
         }
     }
 }
