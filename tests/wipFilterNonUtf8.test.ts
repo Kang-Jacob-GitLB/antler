@@ -73,9 +73,9 @@ describe('parseFilterDrivers', () => {
     expect(parseFilterDrivers(buf('filter.x.clean\ncmd', [0xff], '\0'))).toEqual(['x'])
   })
 
-  it('접미사는 JS 에서 판정한다: required 등은 건너뛰고 lfs 기본값은 제외', () => {
+  it('접미사는 JS 에서 판정한다: required 등은 건너뛰고 lfs 기본값도 드라이버로 센다', () => {
     const out = parseFilterDrivers(buf('filter.a.required\ntrue\0filter.a.smudge\nx\0filter.b.process\ny\0filter.lfs.clean\ngit-lfs clean -- %f\0filter.c\0'))
-    expect(out.sort()).toEqual(['a', 'b'])
+    expect(out.sort()).toEqual(['a', 'b', 'lfs'])
   })
 
   it('이름에 "=" 가 있으면 던진다', () => {

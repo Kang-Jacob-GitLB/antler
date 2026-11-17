@@ -3,14 +3,14 @@
 //!
 //! 보안(악성 저장소 방어):
 //! - 작업 트리를 읽는 status·diff 는 `.gitattributes` 의 filter 드라이버(clean/process)를 실행한다. 저장소 설정에 심은 명령이면 저장소를 열기만 해도
-//!   임의 명령이 돈다. git-lfs 기본 명령이 아닌 드라이버는 이번 실행에서만 빈 명령으로 덮어 쓴다 — 그 `-c` 인자는 [`FilterGuard`] 만 만든다.
+//!   임의 명령이 돈다. 모든 드라이버(git-lfs 포함 — clean 이 `lfs.extension.*.clean` 을 실행하고 `.git/lfs` 에 쓴다)는 이번 실행에서만 빈 명령으로 덮어 쓴다 — 그 `-c` 인자는 [`FilterGuard`] 만 만든다.
 //! - untracked diff 는 `diff --no-index` 로 파일을 직접 연다. 경로 문자열 검사([`assert_rel_path`])는 Windows 8.3 짧은 이름(`GIT~1/config`)을 `.git` 으로
 //!   알아보지 못하므로, untracked 는 **마지막 `wipStatus` 가 git 출력으로 보고한 경로와 정확히 일치**할 때만 받는다(허용 목록, 없으면 거부 — 닫힌 기본값).
 //!   unstaged 는 `~숫자` 8.3 모양 구성 요소를 거부하고, 로컬 저장소는 열기 직전에 `link_guard` 로 정션·symlink 를 확인한다.
 
 use std::collections::HashSet;
 
-use crate::git::fetch::{js_to_lowercase, js_trim};
+use crate::git::fetch::js_to_lowercase;
 
 /// 덮어쓸 수 없는 필터 드라이버가 있어 작업 트리 조회를 거부할 때의 메시지
 pub const UNSAFE_FILTER_MSG: &str =
@@ -21,9 +21,6 @@ pub const UNSAFE_FILTER_MSG: &str =
 const MAX_FILTER_DRIVERS: usize = 256;
 /// 덮어쓰기 `-c` 인자 전체의 길이 상한(각 인자 UTF-16 단위 수 + 1 의 합 — TS 와 같은 셈법)
 const MAX_OVERRIDE_CHARS: usize = 24000;
-
-/// 그대로 실행을 허용하는 필터 명령(git-lfs 기본 설치값과 정확히 같을 때만)
-const SAFE_FILTER_CMDS: [&str; 5] = ["git-lfs clean -- %f", "git-lfs smudge -- %f", "git-lfs smudge --skip -- %f", "git-lfs filter-process", "git-lfs filter-process --skip"];
 
 /// 덮어쓸 수 없는 드라이버가 있다 — 그런 저장소는 작업 트리를 읽지 않는다. 이유는 셋이다:
 /// - 이름에 `=`: git 은 `-c` 인자를 첫 `=` 에서 키와 값으로 자른다. `-c filter.a=b.clean=` 은 `filter.a` = `b.clean=` 으로 읽혀 덮어쓰기가 조용히 실패한다
@@ -89,7 +86,7 @@ impl FilterGuard {
 
 /// `git config -z --get-regexp '^filter\.'` 의 stdout 에서 덮어써야 할 드라이버 이름을 처음 나온 순서로 뽑는다(TS `parseFilterDrivers`).
 /// 접미사(.clean/.smudge/.process) 판정은 git 정규식(로캘 의존)이 아니라 여기서 한다. 키가 하나라도 잘못된 UTF-8·U+FFFD 면 드라이버 키가 아니어도 거부한다.
-/// 값(`\n` 뒤)은 손실 변환해 JS `trim` 한 것이 git-lfs 기본 명령 5개와 **정확히 같을 때만** 그대로 두고 그 드라이버는 뺀다.
+/// 값은 보지 않는다 — git-lfs 기본 명령도 예외가 아니다(clean 이 `lfs.extension.*.clean` 을 실행하고 `.git/lfs` 에 쓴다).
 pub fn filter_driver_names(stdout: &[u8]) -> Result<Vec<&str>, UnsafeFilterName> {
     let mut drivers: Vec<&str> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
@@ -97,18 +94,15 @@ pub fn filter_driver_names(stdout: &[u8]) -> Result<Vec<&str>, UnsafeFilterName>
         if entry.is_empty() {
             continue;
         }
-        let (key_bytes, value_bytes) = match entry.iter().position(|&b| b == b'\n') {
-            Some(nl) => (&entry[..nl], &entry[nl + 1..]),
-            None => (entry, &entry[entry.len()..]),
+        let key_bytes = match entry.iter().position(|&b| b == b'\n') {
+            Some(nl) => &entry[..nl],
+            None => entry,
         };
         let key = std::str::from_utf8(key_bytes).map_err(|_| UnsafeFilterName)?;
         if key.contains('\u{fffd}') {
             return Err(UnsafeFilterName);
         }
         let Some(name) = driver_name(key) else { continue };
-        if SAFE_FILTER_CMDS.contains(&js_trim(&String::from_utf8_lossy(value_bytes))) {
-            continue;
-        }
         // git 은 `-c` 인자를 첫 '=' 에서 키와 값으로 자른다(UnsafeFilterName 설명)
         if name.contains('=') {
             return Err(UnsafeFilterName);
@@ -212,26 +206,25 @@ mod tests {
     }
 
     #[test]
-    fn git_lfs_기본_명령만_그대로_둔다() {
-        let safe = [
+    fn git_lfs_기본_명령도_덮어쓴다() {
+        // clean 이 lfs.extension.*.clean 을 실행하고 .git/lfs 에 쓰므로 값과 상관없이 전부 무력화한다
+        let g = guard(&[
             ("filter.lfs.clean", "git-lfs clean -- %f"),
             ("filter.lfs.smudge", "git-lfs smudge -- %f"),
             ("filter.lfs.process", "git-lfs filter-process"),
             ("filter.lfs2.smudge", "  git-lfs smudge --skip -- %f \n"),
-            ("filter.lfs2.process", "\u{feff}git-lfs filter-process --skip\u{a0}"),
-        ];
-        assert_eq!(guard(&safe).unwrap(), FilterGuard::none());
-        // 뒤에 명령을 붙인 값은 덮어쓴다
-        let g = guard(&[("filter.x.clean", "git-lfs clean -- %f; touch pwned")]).unwrap();
-        assert_eq!(g.args(), driver_args("x"));
-        // JS trim 은 U+0085 를 지우지 않는다 — Rust 가 더 많이 지우면 안전하지 않은 값이 통과한다
-        assert_eq!(guard(&[("filter.x.clean", "git-lfs clean -- %f\u{85}")]).unwrap().args(), driver_args("x"));
+            ("filter.lfs2.process", "git-lfs filter-process --skip"),
+        ])
+        .unwrap();
+        let mut want = driver_args("lfs");
+        want.extend(driver_args("lfs2"));
+        assert_eq!(g.args(), want);
         assert_eq!(guard(&[("filter.x.clean", "")]).unwrap().args(), driver_args("x"));
     }
 
     #[test]
     fn 드라이버는_처음_나온_순서로_한_번씩() {
-        let g = guard(&[("filter.b.clean", "x"), ("filter.a.smudge", "y"), ("filter.b.process", "z"), ("filter.a.clean", "git-lfs clean -- %f")]).unwrap();
+        let g = guard(&[("filter.b.clean", "x"), ("filter.a.smudge", "y"), ("filter.b.process", "z"), ("filter.a.clean", "w")]).unwrap();
         let mut want = driver_args("b");
         want.extend(driver_args("a"));
         assert_eq!(g.args(), want);
@@ -254,8 +247,8 @@ mod tests {
     #[test]
     fn 이름에_등호가_있으면_거부한다() {
         assert_eq!(guard(&[("filter.a=b.clean", "x")]), Err(UnsafeFilterName));
-        // 안전한 값이면 이름에 = 가 있어도 덮어쓸 필요가 없다
-        assert!(guard(&[("filter.a=b.clean", "git-lfs clean -- %f")]).unwrap().is_empty());
+        // git-lfs 기본 값이어도 예외가 없다
+        assert_eq!(guard(&[("filter.a=b.clean", "git-lfs clean -- %f")]), Err(UnsafeFilterName));
         // 다른 드라이버가 먼저여도 거부는 전체다
         assert_eq!(guard(&[("filter.ok.clean", "x"), ("filter.a=b.smudge", "y")]), Err(UnsafeFilterName));
         assert!(UnsafeFilterName.message().contains('='));
@@ -340,6 +333,7 @@ mod tests {
         let g = guard(&[("filter.a.required", "true"), ("filter.a.smudge", "x"), ("filter.b.process", "y"), ("filter.lfs.clean", "git-lfs clean -- %f"), ("filter.c", "z")]).unwrap();
         let mut want = driver_args("a");
         want.extend(driver_args("b"));
+        want.extend(driver_args("lfs"));
         assert_eq!(g.args(), want);
     }
 
@@ -351,11 +345,14 @@ mod tests {
     fn 드라이버_수_상한_256() {
         assert_eq!(filter_driver_names(&many(256)).unwrap().len(), 256);
         assert_eq!(filter_driver_names(&many(257)), Err(UnsafeFilterName));
-        // 같은 이름의 반복·lfs 기본값은 세지 않는다
+        // 같은 이름의 반복은 세지 않는다
         let mut dup = many(256);
         dup.extend(many(256));
-        dup.extend_from_slice(b"filter.lfs.clean\ngit-lfs clean -- %f\0");
         assert_eq!(filter_driver_names(&dup).unwrap().len(), 256);
+        // lfs 기본값도 센다
+        let mut lfs = many(256);
+        lfs.extend_from_slice(b"filter.lfs.clean\ngit-lfs clean -- %f\0");
+        assert_eq!(filter_driver_names(&lfs), Err(UnsafeFilterName));
         let mut extra = many(256);
         extra.extend_from_slice(b"filter.extra.clean\ncmd\0");
         assert_eq!(filter_driver_names(&extra), Err(UnsafeFilterName));

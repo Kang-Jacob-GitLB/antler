@@ -48,8 +48,6 @@ export function parseFilterDrivers(stdout: Buffer): string[] {
     if (key.includes('�')) throw unsafeFilter()
     const m = /^filter\.(.+)\.(clean|smudge|process)$/s.exec(key)
     if (!m) continue
-    const value = nl < 0 ? '' : entry.subarray(nl + 1).toString('utf8')
-    if (SAFE_FILTER_CMDS.has(value.trim())) continue
     const d = m[1]!
     // git 은 `-c` 인자를 첫 '=' 에서 키와 값으로 자른다. 이름에 '=' 가 든 드라이버(gitattributes 에서 `filter=a=b` 로 쓸 수 있다)는
     // `-c filter.a=b.clean=` 이 `filter.a` = `b.clean=` 으로 읽혀 덮어쓰기가 조용히 실패한다 — 그런 저장소는 작업 트리를 읽지 않는다
@@ -65,13 +63,11 @@ export function hasShortNameSegment(p: string): boolean {
   return p.split(/[\\/]/).some((seg) => /~\d+$/.test(seg.replace(/[. ]+$/, '')))
 }
 
-/** 그대로 실행을 허용하는 필터 명령(git-lfs 기본 설치값과 정확히 같을 때만) */
-const SAFE_FILTER_CMDS = new Set(['git-lfs clean -- %f', 'git-lfs smudge -- %f', 'git-lfs smudge --skip -- %f', 'git-lfs filter-process', 'git-lfs filter-process --skip'])
-
 /**
  * 작업 트리를 읽는 status·diff 는 .gitattributes 의 filter 드라이버(clean/process)를 실행한다. 저장소 설정
  * (.git/config·include)에 심은 명령이면 저장소를 열기만 해도 임의 명령이 돈다(악성 저장소 방어 — core.fsmonitor 와 같은 부류).
- * git-lfs 기본 명령이 아닌 드라이버는 이번 실행에서만 빈 명령으로 덮어 쓴다(빈 명령 = 필터 없음, 원본 내용 그대로).
+ * 모든 드라이버(git-lfs 포함)를 이번 실행에서만 빈 명령으로 덮어 쓴다(빈 명령 = 필터 없음, 원본 내용 그대로).
+ * git-lfs 도 예외가 아니다: clean 이 저장소 설정의 `lfs.extension.<이름>.clean` 명령을 실행하고 `.git/lfs/objects` 에 쓴다.
  * 그 파일은 "수정됨"으로 보일 수 있지만 명령을 실행하는 것보다 낫다.
  */
 export async function filterOverrides(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<string[]> {

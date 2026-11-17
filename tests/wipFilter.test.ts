@@ -59,15 +59,17 @@ describe('WIP filter 드라이버 무력화', () => {
     expect(existsSync(marker)).toBe(false)
   })
 
-  it('git-lfs 기본 명령은 덮어 쓰지 않는다', async () => {
+  it('git-lfs 기본 명령도 예외 없이 덮어 쓴다(clean 이 lfs.extension 명령을 실행하고 .git/lfs 에 쓴다)', async () => {
     git('config', 'filter.lfs.clean', 'git-lfs clean -- %f')
     git('config', 'filter.lfs.process', 'git-lfs filter-process')
     const args = await filterOverrides(new LocalExecutor(), dir)
     expect(args.join(' ')).toContain('filter.evil.clean=')
-    expect(args.join(' ')).not.toContain('filter.lfs.')
+    expect(args).toContain('filter.lfs.clean=')
+    expect(args).toContain('filter.lfs.process=')
+    expect(args).toContain('filter.lfs.required=false')
   })
 
-  it('git-lfs 처럼 보이게 뒤에 명령을 붙인 값은 덮어 쓴다', async () => {
+  it('git-lfs 처럼 보이게 뒤에 명령을 붙인 값도 덮어 쓴다', async () => {
     git('config', 'filter.lfs.clean', 'git-lfs clean -- %f; touch x')
     const args = await filterOverrides(new LocalExecutor(), dir)
     expect(args).toContain('filter.lfs.clean=')
