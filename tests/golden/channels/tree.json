@@ -1,0 +1,988 @@
+{
+  "scenarios": [
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "최상위",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": {
+            "count": 25,
+            "first": {
+              "kind": "dir",
+              "mode": "040000",
+              "name": "dir.png",
+              "oid": "1d10dd7ad1b4eecbee5c5440d0ab907821462b81",
+              "path": "dir.png"
+            },
+            "last": {
+              "kind": "file",
+              "mode": "100644",
+              "name": "～.txt",
+              "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+              "path": "～.txt"
+            }
+          },
+          "missing": false,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "A4827A9EC94CF7D010FAB3AE6413A356E23858D7"
+        }
+      ],
+      "name": "대문자 rev 는 캐시에서 나와 처음 보낸 표기를 돌려준다",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": {
+            "count": 25,
+            "first": {
+              "kind": "dir",
+              "mode": "040000",
+              "name": "dir.png",
+              "oid": "1d10dd7ad1b4eecbee5c5440d0ab907821462b81",
+              "path": "dir.png"
+            },
+            "last": {
+              "kind": "file",
+              "mode": "100644",
+              "name": "～.txt",
+              "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+              "path": "～.txt"
+            }
+          },
+          "missing": false,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "src",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "하위 디렉터리",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "src",
+          "entries": [
+            {
+              "kind": "dir",
+              "mode": "040000",
+              "name": "lib",
+              "oid": "6738db2295e2593949ea417b0b14f1dc4ff114ea",
+              "path": "src/lib"
+            },
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "A.ts",
+              "oid": "41715495f45f651e6cf7d38f58a3d512abcfa440",
+              "path": "src/A.ts"
+            },
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "b.ts",
+              "oid": "9439af42307923049a0758d97571ac3d87358e44",
+              "path": "src/b.ts"
+            }
+          ],
+          "missing": false,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "/src/lib/",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "앞뒤 슬래시를 정리한다",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "src/lib",
+          "entries": [
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "deep.txt",
+              "oid": "4cdb2265d30204be5463b38174b2e8e717982405",
+              "path": "src/lib/deep.txt"
+            }
+          ],
+          "missing": false,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "한글",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "한글 디렉터리",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "한글",
+          "entries": [
+            {
+              "kind": "dir",
+              "mode": "040000",
+              "name": "하위",
+              "oid": "500ca7613a1d3c6f89827500a8c2394cba58bc69",
+              "path": "한글/하위"
+            },
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "파일.txt",
+              "oid": "f11e853aef637e047f1436e6143f83310b3e7540",
+              "path": "한글/파일.txt"
+            }
+          ],
+          "missing": false,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "한글/하위",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "깊은 한글 디렉터리",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "한글/하위",
+          "entries": [
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "깊은.txt",
+              "oid": "f11e853aef637e047f1436e6143f83310b3e7540",
+              "path": "한글/하위/깊은.txt"
+            }
+          ],
+          "missing": false,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "dir.png",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "이미지 확장자 이름의 디렉터리",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "dir.png",
+          "entries": [
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "inner.txt",
+              "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+              "path": "dir.png/inner.txt"
+            }
+          ],
+          "missing": false,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "385845e9bf985a71211be8ea1f43572243b010e5"
+        }
+      ],
+      "name": "이전 커밋의 최상위(later.txt 없음)",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": {
+            "count": 24,
+            "first": {
+              "kind": "dir",
+              "mode": "040000",
+              "name": "dir.png",
+              "oid": "1d10dd7ad1b4eecbee5c5440d0ab907821462b81",
+              "path": "dir.png"
+            },
+            "last": {
+              "kind": "file",
+              "mode": "100644",
+              "name": "～.txt",
+              "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+              "path": "～.txt"
+            }
+          },
+          "missing": false,
+          "rev": "385845e9bf985a71211be8ea1f43572243b010e5"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "src",
+          "rev": "385845e9bf985a71211be8ea1f43572243b010e5"
+        }
+      ],
+      "name": "이전 커밋의 하위 디렉터리",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "src",
+          "entries": [
+            {
+              "kind": "dir",
+              "mode": "040000",
+              "name": "lib",
+              "oid": "6738db2295e2593949ea417b0b14f1dc4ff114ea",
+              "path": "src/lib"
+            },
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "A.ts",
+              "oid": "41715495f45f651e6cf7d38f58a3d512abcfa440",
+              "path": "src/A.ts"
+            },
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "b.ts",
+              "oid": "9439af42307923049a0758d97571ac3d87358e44",
+              "path": "src/b.ts"
+            }
+          ],
+          "missing": false,
+          "rev": "385845e9bf985a71211be8ea1f43572243b010e5"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "nope",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "없는 경로",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "nope",
+          "entries": [],
+          "missing": true,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "README.md",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "파일 경로",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "README.md",
+          "entries": [],
+          "missing": true,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "sub",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "서브모듈 경로",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "sub",
+          "entries": [],
+          "missing": true,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "link",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "심볼릭 링크 경로",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "link",
+          "entries": [],
+          "missing": true,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "--output=x.txt",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "옵션 모양 이름은 디렉터리가 아니다",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "--output=x.txt",
+          "entries": [],
+          "missing": true,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "-x",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "-x 는 디렉터리가 아니다",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "-x",
+          "entries": [],
+          "missing": true,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "ffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "name": "없는 커밋(40자)",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": [],
+          "missing": true,
+          "rev": "ffffffffffffffffffffffffffffffffffffffff"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "src",
+          "rev": "ffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "name": "없는 커밋의 하위 디렉터리",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "src",
+          "entries": [],
+          "missing": true,
+          "rev": "ffffffffffffffffffffffffffffffffffffffff"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "name": "64자 rev(sha1 저장소에는 없다)",
+      "repo": "code",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": [],
+          "missing": true,
+          "rev": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "f",
+          "rev": "d17a190d50562f0fdab1664a5e84c72c85a55c2c"
+        }
+      ],
+      "name": "한 디렉터리에 5001개면 5000개만 담고 truncated",
+      "repo": "many",
+      "result": {
+        "data": {
+          "dir": "f",
+          "entries": {
+            "count": 5000,
+            "first": {
+              "kind": "file",
+              "mode": "100644",
+              "name": "0000.txt",
+              "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+              "path": "f/0000.txt"
+            },
+            "last": {
+              "kind": "file",
+              "mode": "100644",
+              "name": "4999.txt",
+              "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+              "path": "f/4999.txt"
+            }
+          },
+          "missing": false,
+          "rev": "d17a190d50562f0fdab1664a5e84c72c85a55c2c",
+          "truncated": true
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "d17a190d50562f0fdab1664a5e84c72c85a55c2c"
+        }
+      ],
+      "name": "many 의 최상위",
+      "repo": "many",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": [
+            {
+              "kind": "dir",
+              "mode": "040000",
+              "name": "f",
+              "oid": "a0de417361965aa06e8c3902e22edeb92e3dbe11",
+              "path": "f"
+            }
+          ],
+          "missing": false,
+          "rev": "d17a190d50562f0fdab1664a5e84c72c85a55c2c"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "ffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "name": "커밋이 없는 저장소",
+      "repo": "empty",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": [],
+          "missing": true,
+          "rev": "ffffffffffffffffffffffffffffffffffffffff"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "124f17511efb40465fcb3b759e9e0319294bdd95"
+        }
+      ],
+      "name": "branchy 최상위",
+      "repo": "branchy",
+      "result": {
+        "data": {
+          "dir": "",
+          "entries": [
+            {
+              "kind": "file",
+              "mode": "100644",
+              "name": "a.txt",
+              "oid": "587be6b4c3f93f93c489c0111bba5596147a26cb",
+              "path": "a.txt"
+            }
+          ],
+          "missing": false,
+          "rev": "124f17511efb40465fcb3b759e9e0319294bdd95"
+        },
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "HEAD"
+        }
+      ],
+      "name": "rev 가 HEAD",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "--all"
+        }
+      ],
+      "name": "rev 가 옵션 --all",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "--output=x.txt00000000000000000000000000"
+        }
+      ],
+      "name": "rev 가 --output=x.txt 를 40자로 채운 값",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "-fffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "name": "rev 가 -로 시작하는 40자",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "a4827a9e"
+        }
+      ],
+      "name": "짧은 rev",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d"
+        }
+      ],
+      "name": "39자 rev",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7a"
+        }
+      ],
+      "name": "41자 rev",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7\n"
+        }
+      ],
+      "name": "rev 뒤 개행",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": " a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "rev 앞 공백",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": 5
+        }
+      ],
+      "name": "rev 가 숫자",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "",
+          "rev": null
+        }
+      ],
+      "name": "rev 가 null",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": ""
+        }
+      ],
+      "name": "rev 없음",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "..",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir ..",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "../x",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir ../x",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "src/../..",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir src/../..",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "src/./lib",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir src/./lib",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": ".",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir .",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "src//lib",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir 빈 구성 요소",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "src\u0000",
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir 에 NUL",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": 5,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir 이 숫자",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": null,
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir 이 null",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "rev": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+        }
+      ],
+      "name": "dir 없음(최상위가 아니다)",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "dir": "..",
+          "rev": "zzzz"
+        }
+      ],
+      "name": "rev 와 dir 이 모두 틀리면 rev 먼저",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "src"
+      ],
+      "name": "요청이 문자열",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        5
+      ],
+      "name": "요청이 숫자",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        []
+      ],
+      "name": "요청이 배열",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {}
+      ],
+      "name": "요청이 빈 객체",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        null
+      ],
+      "name": "요청이 null",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      }
+    }
+  ]
+}

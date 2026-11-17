@@ -1,0 +1,257 @@
+{
+  "scenarios": [
+    {
+      "args": [
+        "37f5897762622c66bc076f659cfb5dee99a98b16"
+      ],
+      "name": "원격 추적 ref 의 tip",
+      "repo": "branchy",
+      "result": {
+        "data": true,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "66af7e0ee5c5c7aab894665c0db7e82c6654cc02"
+      ],
+      "name": "원격 tip 의 조상",
+      "repo": "branchy",
+      "result": {
+        "data": true,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "37F5897762622C66BC076F659CFB5DEE99A98B16"
+      ],
+      "name": "대문자 해시",
+      "repo": "branchy",
+      "result": {
+        "data": true,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "400f246be0a60477f1cac28120fa006b55f0d51d"
+      ],
+      "name": "슬래시가 둘 든 원격의 가지",
+      "repo": "branchy",
+      "result": {
+        "data": true,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "37f5897762622c66bc076f659cfb5dee99a98b16"
+      ],
+      "name": "한 번 true 면 다시 물어도 true",
+      "repo": "branchy",
+      "result": {
+        "data": true,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "124f17511efb40465fcb3b759e9e0319294bdd95"
+      ],
+      "name": "push 안 한 로컬 커밋",
+      "repo": "branchy",
+      "result": {
+        "data": false,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "50ffab607a496b9a4e826bc3cbffea2f5135e22d"
+      ],
+      "name": "어디에도 합쳐지지 않은 가지",
+      "repo": "branchy",
+      "result": {
+        "data": false,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+      ],
+      "name": "원격 추적 ref 가 없는 저장소",
+      "repo": "code",
+      "result": {
+        "data": false,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "dddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "name": "없는 커밋은 false(오류 아님)",
+      "repo": "branchy",
+      "result": {
+        "data": false,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "name": "64자 해시도 형식은 통과하고 false",
+      "repo": "branchy",
+      "result": {
+        "data": false,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "dddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "name": "커밋이 없는 저장소",
+      "repo": "empty",
+      "result": {
+        "data": false,
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "37f589776262"
+      ],
+      "name": "짧은 해시",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "--all"
+      ],
+      "name": "옵션 --all",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "--contains=x"
+      ],
+      "name": "옵션 --contains=x",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "-dddddddddddddddddddddddddddddddddddddddd"
+      ],
+      "name": "-로 시작하는 40자",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "37f5897762622c66bc076f659cfb5dee99a98b16x"
+      ],
+      "name": "해시 뒤 x",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "37f5897762622c66bc076f659cfb5dee99a98b16\n"
+      ],
+      "name": "해시 뒤 개행",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        ""
+      ],
+      "name": "빈 문자열",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "HEAD"
+      ],
+      "name": "HEAD",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "refs/heads/main"
+      ],
+      "name": "전체 ref 이름",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        5
+      ],
+      "name": "숫자",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        null
+      ],
+      "name": "null",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      }
+    }
+  ]
+}

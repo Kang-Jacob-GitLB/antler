@@ -369,7 +369,7 @@ async fn 사이드카로_가야_하는_요청은_건드리지_않는다() {
 
 // ── git:log ────────────────────────────────────────────
 
-/// 시나리오 값의 '@rev:<식>'·$gen·$str·$upper·$cat 을 푼다(`tests/goldenChannels.test.ts` 의 `expand` 와 같은 규칙)
+/// 시나리오 값의 '@rev:<식>'·$gen·$str·$upper·$short·$cat 을 푼다(`tests/goldenChannels.test.ts` 의 `expand` 와 같은 규칙)
 fn expand(v: &Value, rev: &dyn Fn(&str) -> String) -> Value {
     match v {
         Value::String(s) => match s.strip_prefix("@rev:") {
@@ -383,6 +383,10 @@ fn expand(v: &Value, rev: &dyn Fn(&str) -> String) -> Value {
             Value::Array((0..n).map(|i| json!(format!("{prefix}{i}"))).collect())
         }
         Value::Object(o) if o.len() == 1 && o.contains_key("$upper") => json!(expand(&o["$upper"], rev).as_str().unwrap().to_uppercase()),
+        Value::Object(o) if o.len() == 1 && o.contains_key("$short") => {
+            let a = o["$short"].as_array().unwrap();
+            json!(expand(&a[0], rev).as_str().unwrap().chars().take(a[1].as_u64().unwrap() as usize).collect::<String>())
+        }
         Value::Object(o) if o.len() == 1 && o.contains_key("$cat") => {
             json!(expand(&o["$cat"], rev).as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect::<String>())
         }
@@ -898,6 +902,397 @@ async fn blame_ignore_revs_file_의_내용이_응답으로_새지_않는다() {
     assert!(!env.to_string().contains("SECRETTOKEN"), "목록 파일 내용이 응답에 섞였다: {env}");
     // 목록을 끄고 다시 돌려 blame 자체는 성공한다
     assert_eq!(env["ok"], true, "{env}");
+}
+
+// ── 코드 탐색기: git:resolveRev · git:tree · git:blob · git:onRemote ────────────────
+
+const CODE_CHANNELS: [(&str, &str); 4] = [("resolveRev", "git:resolveRev"), ("tree", "git:tree"), ("blob", "git:blob"), ("onRemote", "git:onRemote")];
+
+/// 큰 파일 커밋(고아)을 만든다 — 작성자·시각이 고정이라 해시가 TS 와 같다(`tests/goldenChannels.test.ts` 의 `makeBigCommit` 과 같은 명령)
+fn make_big_commit(dir: &Path, setup: &Value) {
+    use std::io::Write;
+    let run = |args: &[&str], input: Option<&[u8]>| -> String {
+        let mut c = raw_git(dir);
+        c.args(args)
+            .env("GIT_AUTHOR_NAME", "홍길동")
+            .env("GIT_AUTHOR_EMAIL", "dev@example.com")
+            .env("GIT_AUTHOR_DATE", "1700000000 +0900")
+            .env("GIT_COMMITTER_NAME", "홍길동")
+            .env("GIT_COMMITTER_EMAIL", "dev@example.com")
+            .env("GIT_COMMITTER_DATE", "1700000000 +0900")
+            .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
+            .stdout(Stdio::piped());
+        let mut child = c.spawn().unwrap();
+        if let Some(bytes) = input {
+            child.stdin.take().unwrap().write_all(bytes).unwrap();
+        }
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    };
+    let mut entries = String::new();
+    for f in setup["files"].as_array().unwrap() {
+        let (ch, n) = (f["fill"][0].as_str().unwrap(), f["fill"][1].as_u64().unwrap() as usize);
+        let sha = run(&["hash-object", "-w", "--stdin"], Some(ch.repeat(n).as_bytes()));
+        entries.push_str(&format!("100644 blob {sha}\t{}\n", f["path"].as_str().unwrap()));
+    }
+    let tree = run(&["mktree"], Some(entries.as_bytes()));
+    let commit = run(&["-c", "commit.gpgsign=false", "commit-tree", &tree, "-m", "big files"], None);
+    run(&["update-ref", setup["ref"].as_str().unwrap(), &commit], None);
+}
+
+fn utf16_slice(s: &str, from: usize, to: usize) -> String {
+    let u: Vec<u16> = s.encode_utf16().collect();
+    String::from_utf16_lossy(&u[from..to])
+}
+
+/// text·dataUrl 이 200 글자(UTF-16 단위)를 넘으면 {len, head, tail}, tree 항목이 20개를 넘으면 {count, first, last}(`summarizeCode` 와 같다)
+fn summarize_code(channel: &str, mut data: Value) -> Value {
+    if channel == "blob" {
+        for k in ["text", "dataUrl"] {
+            if let Some(s) = data[k].as_str().map(str::to_string) {
+                let len = s.encode_utf16().count();
+                if len > 200 {
+                    data[k] = json!({ "len": len, "head": utf16_slice(&s, 0, 40), "tail": utf16_slice(&s, len - 40, len) });
+                }
+            }
+        }
+    }
+    if channel == "tree" {
+        if let Some(entries) = data["entries"].as_array().filter(|e| e.len() > 20).cloned() {
+            data["entries"] = json!({ "count": entries.len(), "first": entries[0], "last": entries[entries.len() - 1] });
+        }
+    }
+    data
+}
+
+fn code_result(channel: &str, env: &Value, msg: bool) -> Value {
+    if env["ok"] != true {
+        return if msg { json!({ "ok": false, "code": env["code"], "error": env["error"] }) } else { json!({ "ok": false, "code": env["code"] }) };
+    }
+    json!({ "ok": true, "data": summarize_code(channel, env["data"].clone()) })
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 코드_탐색기_시나리오가_ts_골든과_같다() {
+    code_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 코드_탐색기_시나리오가_ssh_에서도_ts_골든과_같다() {
+    code_scenarios(&Mode::ssh().await).await;
+}
+
+async fn code_scenarios(mode: &Mode) {
+    let all = read_json("tests/fixtures/repos/code.scenarios.json");
+    let tmp = TempDir::new("code");
+    let dirs: Vec<(String, PathBuf)> = ["code", "branchy", "many", "empty"].iter().map(|n| ((*n).to_string(), import(&tmp.0, n))).collect();
+    for s in all["setup"].as_array().unwrap() {
+        make_big_commit(&dirs.iter().find(|(n, _)| n == s["repo"].as_str().unwrap()).unwrap().1, s);
+    }
+    let entries: Vec<(&str, &Path)> = dirs.iter().map(|(n, d)| (n.as_str(), d.as_path())).collect();
+    let router = mode.router(&entries);
+    let mut diffs = Vec::new();
+    let mut total = 0;
+    for (channel, route) in CODE_CHANNELS {
+        let scenarios = all[channel].as_array().unwrap_or_else(|| panic!("{channel} 시나리오"));
+        let golden = read_json(&format!("tests/golden/channels/{channel}.json"));
+        let golden = golden["scenarios"].as_array().expect("golden scenarios");
+        assert_eq!(scenarios.len(), golden.len(), "{channel}: 시나리오 수가 골든과 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+        for (i, (s, g)) in scenarios.iter().zip(golden).enumerate() {
+            let name = s["name"].as_str().unwrap();
+            let repo = s.get("repo").and_then(Value::as_str).unwrap_or("code");
+            let dir = &dirs.iter().find(|(n, _)| n == repo).unwrap().1;
+            assert_eq!(g["name"], s["name"], "{channel}/{name}: 골든의 시나리오 순서가 다르다");
+            let args = expand(&s["args"], &|expr: &str| rev_parse(dir, expr));
+            // 보낸 값(해시 포함)이 TS 와 같아야 같은 입력이다 — 같은 .fi·같은 큰 파일 커밋이라 해시가 결정적이다
+            assert_eq!(args, g["args"], "{channel}/{name}: 입력이 다르다(fixture 가 바뀌었는가)");
+            let mut call = vec![json!(repo)];
+            call.extend(args.as_array().unwrap().iter().cloned());
+            // TS 는 tree·blob 에만 requestId 를 보낸다
+            if channel == "tree" || channel == "blob" {
+                call.push(json!(format!("req-{channel}-{i}")));
+            }
+            let env = envelope(router.route(route, &Value::Array(call)).await);
+            let got = code_result(channel, &env, s.get("msg") == Some(&json!(true)));
+            total += 1;
+            if norm_numbers(&got) != norm_numbers(&g["result"]) {
+                diffs.push(format!("{channel}/{name}: 골든과 다르다\n  Rust: {}\n  TS  : {}", short(&got), short(&g["result"])));
+            }
+        }
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+    assert!(total > 0 && router.rust_handled() > 0 && router.rust_handled() <= total);
+    for d in dirs.iter().map(|(_, d)| d) {
+        assert!(!d.join("x.txt").exists() && !Path::new("x.txt").exists());
+    }
+    mode.finish();
+}
+
+/// 검증이 git 을 띄우기 전에 거르는 적대적 입력: 저장소 경로가 없어서 git 을 띄웠다면 GIT 오류가 난다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 적대적_코드_탐색기_입력은_git_을_띄우지도_파일을_쓰지도_않는다() {
+    let nowhere = Path::new("/nonexistent-antler-code");
+    let router = Router::new(true, false, mirror_of(&[("a", nowhere)]));
+    let cwd_before = fs::read_dir(".").unwrap().count();
+    let ok_rev = "a".repeat(40);
+    let mut calls: Vec<(&str, Value, &str)> = Vec::new();
+    let evil_refs = [json!("--output=pwned.txt"), json!("-calias.x=!echo>pwned2.txt"), json!("--end-of-options"), json!("main"), json!("refs/heads/*"), json!("a\u{0}b"), json!(""), json!(5), json!(null), json!(["HEAD"])];
+    for r in evil_refs {
+        calls.push(("git:resolveRev", json!(["a", r]), "invalid ref"));
+    }
+    calls.push(("git:resolveRev", json!(["a"]), "invalid ref"));
+    let evil_revs = [
+        json!("-x"),
+        json!("--output=pwned.txt"),
+        json!(format!("-{}", "a".repeat(39))),
+        json!(format!("--{}", "a".repeat(38))),
+        json!("HEAD"),
+        json!("abcd"),
+        json!("a".repeat(39)),
+        json!("a".repeat(41)),
+        json!("a".repeat(63)),
+        json!("a".repeat(65)),
+        json!(format!("{ok_rev}\n")),
+        json!(format!("{}\u{0}", &ok_rev[..39])),
+        json!(5),
+        json!(null),
+    ];
+    for r in evil_revs {
+        calls.push(("git:tree", json!(["a", { "rev": r, "dir": "" }, "r"]), "invalid commit hash"));
+        calls.push(("git:blob", json!(["a", { "rev": r, "path": "a.txt" }, "r"]), "invalid commit hash"));
+        calls.push(("git:onRemote", json!(["a", r]), "invalid commit hash"));
+    }
+    for d in [json!(".."), json!("../x"), json!("a/../b"), json!("a/./b"), json!("."), json!("a//b"), json!("a\u{0}"), json!(5), json!(null), json!(["a"])] {
+        calls.push(("git:tree", json!(["a", { "rev": ok_rev, "dir": d }, "r"]), "invalid path"));
+    }
+    for p in [json!(""), json!("/"), json!(".."), json!("a/../b"), json!("./a"), json!("a\u{0}"), json!(5), json!(null), json!(["a"])] {
+        calls.push(("git:blob", json!(["a", { "rev": ok_rev, "path": p }, "r"]), "invalid path"));
+    }
+    calls.push(("git:tree", json!(["a", { "rev": ok_rev }, "r"]), "invalid path"));
+    calls.push(("git:blob", json!(["a", { "rev": ok_rev }, "r"]), "invalid path"));
+    for req in [json!("a"), json!(5), json!([]), json!({}), json!(true)] {
+        calls.push(("git:tree", json!(["a", req, "r"]), "invalid commit hash"));
+        calls.push(("git:blob", json!(["a", req, "r"]), "invalid commit hash"));
+    }
+    calls.push(("git:onRemote", json!(["a"]), "invalid commit hash"));
+    for (ch, args, msg) in calls {
+        let env = envelope(router.route(ch, &args).await);
+        assert_eq!((env["ok"].as_bool(), env["code"].as_str(), env["error"].as_str()), (Some(false), Some("ERROR"), Some(msg)), "{ch} {args}");
+    }
+    // 요청이 null 이거나 없으면 TS 는 TypeError(ERROR) — 문구는 다르지만 git 을 띄우지 않고 ERROR 다
+    for ch in ["git:tree", "git:blob"] {
+        for args in [json!(["a", null, "r"]), json!(["a"])] {
+            let env = envelope(router.route(ch, &args).await);
+            assert_eq!((env["ok"].as_bool(), env["code"].as_str()), (Some(false), Some("ERROR")), "{ch} {args}");
+        }
+    }
+    for p in [PathBuf::from("pwned.txt"), PathBuf::from("pwned2.txt")] {
+        assert!(!p.exists(), "{p:?}");
+    }
+    assert_eq!(fs::read_dir(".").unwrap().count(), cwd_before);
+    assert_eq!(router.rust_handled(), 0, "검증에서 거부된 요청은 git 까지 가지 않는다");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 코드_탐색기_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카() {
+    for ch in ["git:resolveRev", "git:tree", "git:blob", "git:onRemote"] {
+        assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+    }
+    let nowhere = Path::new("/nonexistent-antler-code");
+    let m = RepoMirror::default();
+    m.apply(
+        1,
+        vec![
+            MirrorRepo { id: "a".into(), kind: "local".into(), path: nowhere.to_string_lossy().into_owned(), distro: None, ssh_host: None },
+            MirrorRepo { id: "g".into(), kind: "github".into(), path: "/cache".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "s".into(), kind: "ssh".into(), path: "/srv".into(), distro: None, ssh_host: Some("devbox".into()) },
+        ],
+    );
+    let router = Router::new(true, false, m.clone());
+    let off = Router::new(false, false, m);
+    let rev = "a".repeat(40);
+    let calls = |id: &str| {
+        vec![
+            ("git:resolveRev", json!([id, "HEAD"])),
+            ("git:tree", json!([id, { "rev": rev, "dir": "" }])),
+            ("git:blob", json!([id, { "rev": rev, "path": "a" }])),
+            ("git:onRemote", json!([id, rev])),
+        ]
+    };
+    // 미러에 없는 id·github·(풀이 없는) ssh 는 사이드카가 처리한다
+    for id in ["nope", "g", "s"] {
+        for (ch, args) in calls(id) {
+            assert!(matches!(router.route(ch, &args).await, Routed::Sidecar), "{id} {ch}");
+        }
+    }
+    // 저장소 id 가 문자열이 아니거나 없다
+    for ch in ["git:resolveRev", "git:tree", "git:blob", "git:onRemote"] {
+        for args in [json!([]), json!([null]), json!([5, "HEAD"])] {
+            assert!(matches!(router.route(ch, &args).await, Routed::Sidecar), "{ch} {args}");
+        }
+    }
+    // 스위치(ANTLER_RUST_GIT=0)를 끄면 미러에 있어도 사이드카다
+    for (ch, args) in calls("a") {
+        assert!(matches!(off.route(ch, &args).await, Routed::Sidecar), "{ch}");
+    }
+    assert_eq!(router.rust_handled() + off.rust_handled(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 등록_전에_온_cancel_은_코드_탐색기_요청을_git_없이_취소한다() {
+    let nowhere = Path::new("/nonexistent-antler-code");
+    let router = Router::new(true, false, mirror_of(&[("a", nowhere)]));
+    let rev = "a".repeat(40);
+    for (i, (ch, args)) in [("git:tree", json!(["a", { "rev": rev, "dir": "src" }])), ("git:blob", json!(["a", { "rev": rev, "path": "a.txt" }]))].into_iter().enumerate() {
+        let id = format!("early{i}");
+        assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+        let mut call = args.as_array().unwrap().clone();
+        call.push(json!(id));
+        // git 을 띄웠다면 경로가 없어 GIT/ERROR 가 난다 — ABORTED 면 띄우지 않은 것이다
+        let env = envelope(router.route(ch, &Value::Array(call)).await);
+        assert_eq!(env["code"], "ABORTED", "{ch}: {env}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 진행_중_코드_탐색기_요청을_취소해도_멈추지_않는다() {
+    let tmp = TempDir::new("codecancel");
+    let dir = import(&tmp.0, "code");
+    make_big_commit(&dir, &read_json("tests/fixtures/repos/code.scenarios.json")["setup"][0]);
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("c", dir.as_path())])));
+    let big = rev_parse(&dir, "big");
+    let main = rev_parse(&dir, "main");
+    for (i, (ch, args)) in [
+        ("git:blob", json!(["c", { "rev": big, "path": "limit.png" }])),
+        ("git:blob", json!(["c", { "rev": big, "path": "limit.txt" }])),
+        ("git:tree", json!(["c", { "rev": main, "dir": "src" }])),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = format!("slow{i}");
+        let mut call = args.as_array().unwrap().clone();
+        call.push(json!(id));
+        let r = router.clone();
+        let task = tokio::spawn(async move { envelope(r.route(ch, &Value::Array(call)).await) });
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+        let env = tokio::time::timeout(std::time::Duration::from_secs(60), task).await.expect("취소 뒤에도 끝나야 한다").unwrap();
+        // 타이밍에 따라 이미 끝났을 수도 있다 — 어느 쪽이든 형식이 맞아야 한다
+        match env["ok"].as_bool() {
+            Some(true) => {}
+            _ => assert_eq!(env["code"], "ABORTED", "{ch}: {env}"),
+        }
+    }
+    // 취소한 뒤에도 같은 요청을 다시 받을 수 있다
+    let again = envelope(router.route("git:blob", &json!(["c", { "rev": big, "path": "limit.png" }])).await);
+    assert_eq!((again["ok"].clone(), again["data"]["kind"].clone()), (json!(true), json!("image")));
+}
+
+/// 트리·파일 내용은 커밋 해시 기준 불변이라 캐시에서 나온다(저장소를 지워도). 캐시 키는 rev 소문자라
+/// 대문자 요청이 캐시에 걸리면 먼저 캐시한 요청의 rev 표기가 돌아온다(TS 도 같다)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 트리와_파일_내용은_캐시에서_나온다() {
+    let tmp = TempDir::new("codecache");
+    let dir = import(&tmp.0, "code");
+    let main = rev_parse(&dir, "main");
+    let router = Router::new(true, false, mirror_of(&[("c", dir.as_path())]));
+    let tree = envelope(router.route("git:tree", &json!(["c", { "rev": main, "dir": "src" }, "t1"])).await);
+    let blob = envelope(router.route("git:blob", &json!(["c", { "rev": main, "path": "README.md" }, "b1"])).await);
+    assert_eq!((tree["ok"].clone(), blob["data"]["kind"].clone()), (json!(true), json!("text")));
+    // 저장소가 사라져도 캐시된 것은 나온다 — 대문자 rev 도 같은 키다
+    drop(tmp);
+    if !dir.exists() {
+        let upper = main.to_uppercase();
+        let tree2 = envelope(router.route("git:tree", &json!(["c", { "rev": upper, "dir": "/src/" }])).await);
+        let blob2 = envelope(router.route("git:blob", &json!(["c", { "rev": upper, "path": "README.md" }])).await);
+        assert_eq!((&tree2, &blob2), (&tree, &blob));
+    }
+}
+
+/// missing 은 캐시하지 않는다: 없던 커밋이 나중에 들어오면(fetch) 같은 요청이 이제 내용을 돌려준다.
+/// 작은 큰-파일 커밋(결정적 해시)을 다른 저장소에서 먼저 만들어 해시를 알아 둔다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 없던_커밋이_들어오면_missing_이_아니게_된다() {
+    let tmp = TempDir::new("codemissing");
+    let small = json!({ "ref": "refs/heads/big", "files": [{ "path": "s.txt", "fill": ["z", 10] }] });
+    let (donor, dir) = (import(&tmp.0, "code"), import(&tmp.0, "empty"));
+    make_big_commit(&donor, &small);
+    let rev = rev_parse(&donor, "big");
+    let router = Router::new(true, false, mirror_of(&[("c", dir.as_path())]));
+    let ask = |ch: &'static str, args: Value| {
+        let router = &router;
+        async move { envelope(router.route(ch, &args).await) }
+    };
+    let (t, b) = (json!(["c", { "rev": rev, "dir": "" }, "t"]), json!(["c", { "rev": rev, "path": "s.txt" }, "b"]));
+    assert_eq!(ask("git:tree", t.clone()).await["data"]["missing"], true);
+    assert_eq!(ask("git:blob", b.clone()).await["data"]["kind"], "missing");
+    make_big_commit(&dir, &small);
+    assert_eq!(rev_parse(&dir, "big"), rev);
+    assert_eq!(ask("git:tree", t).await["data"]["missing"], false);
+    assert_eq!(ask("git:blob", b).await["data"]["kind"], "text");
+}
+
+/// onRemote 는 true 만 기억한다: false 였던 커밋이 fetch 로 원격 ref 에 들어오면 다음 호출이 true 가 된다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 원격_여부는_true_만_기억한다() {
+    let tmp = TempDir::new("onremote");
+    let dir = import(&tmp.0, "branchy");
+    let head = rev_parse(&dir, "main");
+    let router = Router::new(true, false, mirror_of(&[("b", dir.as_path())]));
+    let ask = |rev: String| {
+        let router = &router;
+        async move { envelope(router.route("git:onRemote", &json!(["b", rev])).await) }
+    };
+    assert_eq!(ask(head.clone()).await["data"], false);
+    assert!(raw_git(&dir).args(["update-ref", "refs/remotes/origin/main", &head]).status().unwrap().success());
+    assert_eq!(ask(head.clone()).await["data"], true);
+    // 원격 ref 가 사라져도 true 는 기억한다(경고용이라 허용)
+    assert!(raw_git(&dir).args(["update-ref", "-d", "refs/remotes/origin/main"]).status().unwrap().success());
+    assert_eq!(ask(head.to_uppercase()).await["data"], true);
+}
+
+/// 악성 저장소: textconv·filter 를 저장소 설정에 심어도 `cat-file blob`·`ls-tree` 는 돌리지 않는다(`codeBrowse.test.ts` 의 같은 이름 시험)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 악성_저장소의_textconv_와_filter_는_코드_탐색기가_실행하지_않는다() {
+    let tmp = TempDir::new("codeevil");
+    let dir = import(&tmp.0, "code");
+    let head = rev_parse(&dir, "main");
+    let marker = tmp.0.join("cb-evil-ran");
+    let m = marker.to_string_lossy().replace('\\', "/");
+    fs::write(dir.join(".git").join("info").join("attributes"), "*.txt diff=evil filter=evil\n*.md diff=evil filter=evil\n").unwrap();
+    let cmd = format!("sh -c \"echo x > '{m}'; cat\" --");
+    for key in ["diff.evil.textconv", "filter.evil.smudge", "filter.evil.clean", "filter.evil.process"] {
+        assert!(raw_git(&dir).args(["config", key, &cmd]).status().unwrap().success());
+    }
+    let router = Router::new(true, false, mirror_of(&[("c", dir.as_path())]));
+    for (path, kind) in [("README.md", "text"), ("later.txt", "text"), ("alpha.txt", "text")] {
+        let b = envelope(router.route("git:blob", &json!(["c", { "rev": head, "path": path }, "r"])).await);
+        assert_eq!(b["data"]["kind"], kind, "{path}: {b}");
+    }
+    let t = envelope(router.route("git:tree", &json!(["c", { "rev": head, "dir": "" }, "r"])).await);
+    assert_eq!(t["ok"], true);
+    let r = envelope(router.route("git:resolveRev", &json!(["c", "HEAD"])).await);
+    assert_eq!(r["ok"], true);
+    assert!(!marker.exists(), "저장소가 심은 명령이 실행됐다");
+}
+
+#[test]
+fn 코드_탐색기_argv_는_상수_뒤_검증된_값뿐이다() {
+    use antler_lib::git::code_browse::{cat_file_args, ls_tree_args, on_remote_args, resolve_rev_args, CommitId};
+    let rev = "ABCDEFabcdef0123456789ABCDEFabcdef012345";
+    assert_eq!(resolve_rev_args("refs/heads/main"), ["rev-parse", "--verify", "--end-of-options", "refs/heads/main^{commit}"]);
+    assert_eq!(cat_file_args("blob", &format!("{rev}:-x")), ["cat-file", "blob", &format!("{rev}:-x")]);
+    assert_eq!(ls_tree_args(rev), ["ls-tree", "-z", "--end-of-options", rev]);
+    // onRemote 의 해시는 소문자, 범위는 refs/remotes/
+    assert_eq!(on_remote_args(&CommitId::parse(rev).unwrap()), ["for-each-ref", "--count=1", "--contains", &rev.to_lowercase(), "--format=%(refname)", "refs/remotes/"]);
+    // 파일 내용은 `cat-file blob` 뿐이다 — `git show`·diff 계열·`ls-tree -l` 인자는 어디에도 없다
+    let src = fs::read_to_string(repo_root().join("src-tauri/src/git/code_browse.rs")).unwrap();
+    let body = src.split("#[cfg(test)]").next().unwrap();
+    for banned in ["\"show\"", "\"diff\"", "\"-l\"", "\"--textconv\"", "\"--filters\""] {
+        assert!(!body.contains(banned), "코드 탐색기가 {banned} 를 쓴다");
+    }
 }
 
 // ── git:fetch ──────────────────────────────────────────

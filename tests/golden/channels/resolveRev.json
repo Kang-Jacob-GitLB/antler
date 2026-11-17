@@ -1,0 +1,437 @@
+{
+  "scenarios": [
+    {
+      "args": [
+        "HEAD"
+      ],
+      "name": "HEAD",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "refs/heads/main"
+      ],
+      "name": "전체 가지 이름",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "refs/heads/feature/x"
+      ],
+      "name": "슬래시가 든 가지 이름",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "refs/tags/v1"
+      ],
+      "name": "가벼운 태그",
+      "repo": "code",
+      "result": {
+        "data": "385845e9bf985a71211be8ea1f43572243b010e5",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "refs/tags/v2"
+      ],
+      "name": "주석 태그는 커밋으로 벗긴다",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+      ],
+      "name": "전체 해시",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "A4827A9EC94CF7D010FAB3AE6413A356E23858D7"
+      ],
+      "name": "대문자 전체 해시는 소문자로",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "a4827a9e"
+      ],
+      "name": "짧은 해시(8자)",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "a482"
+      ],
+      "name": "짧은 해시(4자)",
+      "repo": "code",
+      "result": {
+        "data": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "385845e9bf985a71211be8ea1f43572243b010e5"
+      ],
+      "name": "이전 커밋 해시",
+      "repo": "code",
+      "result": {
+        "data": "385845e9bf985a71211be8ea1f43572243b010e5",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "refs/remotes/origin/main"
+      ],
+      "name": "원격 추적 ref(branchy)",
+      "repo": "branchy",
+      "result": {
+        "data": "37f5897762622c66bc076f659cfb5dee99a98b16",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "refs/remotes/team/alice/work"
+      ],
+      "name": "슬래시가 둘 든 원격 추적 ref",
+      "repo": "branchy",
+      "result": {
+        "data": "400f246be0a60477f1cac28120fa006b55f0d51d",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "HEAD"
+      ],
+      "name": "HEAD 가 가리키는 커밋(branchy)",
+      "repo": "branchy",
+      "result": {
+        "data": "124f17511efb40465fcb3b759e9e0319294bdd95",
+        "ok": true
+      }
+    },
+    {
+      "args": [
+        "refs/heads/nope"
+      ],
+      "name": "없는 가지",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "커밋을 찾을 수 없습니다: refs/heads/nope",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "0000000000000000000000000000000000000000"
+      ],
+      "name": "없는 전체 해시",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "커밋을 찾을 수 없습니다: 0000000000000000000000000000000000000000",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "ABCD"
+      ],
+      "name": "4자 16진수인 없는 해시",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "커밋을 찾을 수 없습니다: ABCD",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "HEAD"
+      ],
+      "name": "커밋이 없는 저장소의 HEAD",
+      "repo": "empty",
+      "result": {
+        "code": "ERROR",
+        "error": "커밋을 찾을 수 없습니다: HEAD",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "--output=x"
+      ],
+      "name": "옵션 --output",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "-x"
+      ],
+      "name": "옵션 -x",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "--end-of-options"
+      ],
+      "name": "--end-of-options",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "main"
+      ],
+      "name": "단축 이름 main",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "head"
+      ],
+      "name": "소문자 head",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "HEAD~1"
+      ],
+      "name": "리비전 식 HEAD~1",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "HEAD^"
+      ],
+      "name": "리비전 식 HEAD^",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "refs/heads/main^{tree}"
+      ],
+      "name": "리비전 식 main^{tree}",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "refs/heads/*"
+      ],
+      "name": "가지 전체 패턴 refs/heads/*",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "refs/remotes/origin/*"
+      ],
+      "name": "원격 전체 패턴",
+      "repo": "branchy",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        ""
+      ],
+      "name": "빈 문자열",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "refs/heads/main\u0000x"
+      ],
+      "name": "NUL 이 든 ref",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "refs/heads/a b"
+      ],
+      "name": "공백이 든 ref",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "refs/heads/../x"
+      ],
+      "name": "..이 든 ref",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "abc"
+      ],
+      "name": "3자 16진수",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "name": "65자 16진수",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        "a4827a9ec94cf7d010fab3ae6413a356e23858d7\n"
+      ],
+      "name": "해시 뒤 개행",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        5
+      ],
+      "name": "숫자",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        null
+      ],
+      "name": "null",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    },
+    {
+      "args": [
+        {
+          "x": 1
+        }
+      ],
+      "name": "객체",
+      "repo": "code",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid ref",
+        "ok": false
+      }
+    }
+  ]
+}

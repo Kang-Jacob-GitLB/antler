@@ -20,6 +20,7 @@ import { knownHostsLine, makeHome, newKeyPair, startServer, type TestServer } fr
 //  - tests/golden/exec/channels.json: IPC_CHANNELS 목록. Rust 의 RUST_CHANNELS 가 이것의 부분집합인지 Rust 테스트가 강제한다
 //  - tests/golden/channels/log.json: git:log 시나리오(tests/fixtures/repos/log.scenarios.json — 다단계: 페이지·범위·저장소 조작). logArgs.json: logArgs 의 argv(logArgs.cases.json)
 //  - tests/golden/channels/{compare,fileDiff,fileHistory,blame}.json: 파일 단위 채널 시나리오(tests/fixtures/repos/files.scenarios.json)
+//  - tests/golden/channels/{resolveRev,tree,blob,onRemote}.json: 코드 탐색기 채널 시나리오(tests/fixtures/repos/code.scenarios.json — 한 서비스 인스턴스가 순서대로 돌아 캐시 적중도 본다. 큰 파일은 setup 으로 시험 시점에 만든다)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 //  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
@@ -167,6 +168,10 @@ function expand(v: unknown, rev: (expr: string) => string): unknown {
     }
     if (keys.length === 1 && keys[0] === '$cat') return (expand(o['$cat'], rev) as string[]).join('')
     if (keys.length === 1 && keys[0] === '$upper') return String(expand(o['$upper'], rev)).toUpperCase()
+    if (keys.length === 1 && keys[0] === '$short') {
+      const [v, n] = o['$short'] as [unknown, number]
+      return String(expand(v, rev)).slice(0, n)
+    }
     return Object.fromEntries(keys.map((k) => [k, expand(o[k], rev)]))
   }
   return v
@@ -312,6 +317,96 @@ describe('파일 단위 채널 골든(channels/{compare,fileDiff,fileHistory,bla
     }
     await svc.dispose()
   }, 120_000)
+})
+
+// ── 코드 탐색기: git:resolveRev · git:tree · git:blob · git:onRemote ────────────────
+
+interface CodeSetup {
+  repo: string
+  ref: string
+  files: { path: string; fill: [string, number] }[]
+}
+
+/** 큰 파일 커밋(고아)을 만든다 — 작성자·시각이 고정이라 해시가 결정적이다. Rust 테스트(channels.rs 의 `make_big_commit`)도 같은 명령이다 */
+function makeBigCommit(dir: string, setup: CodeSetup): void {
+  const env = {
+    ...process.env,
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_AUTHOR_NAME: '홍길동',
+    GIT_AUTHOR_EMAIL: 'dev@example.com',
+    GIT_AUTHOR_DATE: '1700000000 +0900',
+    GIT_COMMITTER_NAME: '홍길동',
+    GIT_COMMITTER_EMAIL: 'dev@example.com',
+    GIT_COMMITTER_DATE: '1700000000 +0900'
+  }
+  const run = (args: string[], input?: Buffer | string): string => execFileSync('git', args, { cwd: dir, env, input }).toString('utf8').trim()
+  const entries = setup.files.map((f) => `100644 blob ${run(['hash-object', '-w', '--stdin'], Buffer.alloc(f.fill[1], f.fill[0]))}\t${f.path}\n`).join('')
+  const tree = run(['mktree'], entries)
+  const commit = run(['-c', 'commit.gpgsign=false', 'commit-tree', tree, '-m', 'big files'])
+  run(['update-ref', setup.ref, commit])
+}
+
+/** text·dataUrl 이 200 글자(UTF-16 단위)를 넘으면 {len, head, tail}, tree 항목이 20개를 넘으면 {count, first, last}. Rust 테스트(channels.rs 의 `summarize_code`)도 같은 규칙이다 */
+function summarizeCode(channel: string, data: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...data }
+  if (channel === 'blob') {
+    for (const k of ['text', 'dataUrl']) {
+      const v = out[k]
+      if (typeof v === 'string' && v.length > 200) out[k] = { len: v.length, head: v.slice(0, 40), tail: v.slice(-40) }
+    }
+  }
+  const entries = out['entries']
+  if (channel === 'tree' && Array.isArray(entries) && entries.length > 20) out['entries'] = { count: entries.length, first: entries[0], last: entries[entries.length - 1] }
+  return out
+}
+
+describe('코드 탐색기 채널 골든(channels/{resolveRev,tree,blob,onRemote}.json)', () => {
+  const all = JSON.parse(readFileSync(join(FIXTURES, 'code.scenarios.json'), 'utf8')) as Record<'resolveRev' | 'tree' | 'blob' | 'onRemote', FileScenario[]> & { setup: CodeSetup[] }
+  let root: string
+  const dirs: Record<string, string> = {}
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chancode-'))
+    for (const r of ['code', 'branchy', 'many', 'empty']) {
+      const dir = join(root, r)
+      mkdirSync(dir)
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${r}.fi`)))
+      dirs[r] = dir
+    }
+    for (const s of all.setup) makeBigCommit(dirs[s.repo]!, s)
+  }, 60_000)
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const config = new ConfigStore(join(root, 'config.json'))
+    const svc = new RepoService(config)
+    const ids: Record<string, string> = {}
+    for (const r of Object.keys(dirs)) ids[r] = config.addRepo({ sourceId: 'local', path: dirs[r]!, name: r }).id
+    const methods = { resolveRev: 'resolveRev', tree: 'codeTree', blob: 'codeBlob', onRemote: 'codeOnRemote' } as const
+    for (const channel of ['resolveRev', 'tree', 'blob', 'onRemote'] as const) {
+      const results: unknown[] = []
+      for (const [i, s] of all[channel].entries()) {
+        const repo = s.repo ?? 'code'
+        const args = expand(s.args, (expr) => git(dirs[repo]!, ['rev-parse', expr])) as unknown[]
+        if (channel === 'tree' || channel === 'blob') args.push(`req-${channel}-${i}`)
+        let result: Record<string, unknown>
+        try {
+          const call = svc as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>
+          const data = JSON.parse(JSON.stringify(await call[methods[channel]]!.call(svc, ids[repo], ...args)))
+          result = { ok: true, data: channel === 'resolveRev' || channel === 'onRemote' ? data : summarizeCode(channel, data as Record<string, unknown>) }
+        } catch (err) {
+          result = { ok: false, code: codeOf(err), ...(s.msg ? { error: (err as Error).message } : {}) }
+        }
+        if (channel === 'tree' || channel === 'blob') args.pop()
+        results.push({ name: s.name, repo, args, result })
+      }
+      check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: results }))
+    }
+    await svc.dispose()
+  }, 180_000)
 })
 
 // ── git:fetch ──────────────────────────────────────────

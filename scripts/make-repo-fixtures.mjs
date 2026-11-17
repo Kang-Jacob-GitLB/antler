@@ -25,14 +25,18 @@ class Stream {
     this.raw(`blob\nmark :${mark}\n`)
     this.data(body)
   }
-  /** files: [['M', 경로, mark] | ['D', 경로]] (경로는 따옴표가 필요 없는 문자만) */
+  /** files: [['M', 경로, mark(, 모드)] | ['G', 경로, 서브모듈 커밋 해시] | ['D', 경로]] (경로는 따옴표가 필요 없는 문자만. 모드 기본 100644, 심볼릭 링크는 '120000') */
   commit({ ref = 'refs/heads/main', mark, n, msg, from, merge, files }) {
     const when = `${BASE + n * 3600} +0900`
     this.raw(`commit ${ref}\nmark :${mark}\nauthor ${WHO} ${when}\ncommitter ${WHO} ${when}\n`)
     this.data(msg)
     if (from) this.raw(`from :${from}\n`)
     if (merge) this.raw(`merge :${merge}\n`)
-    for (const [op, path, m] of files) this.raw(op === 'D' ? `D ${path}\n` : `M 100644 :${m} ${path}\n`)
+    for (const [op, path, m, mode] of files) {
+      if (op === 'D') this.raw(`D ${path}\n`)
+      else if (op === 'G') this.raw(`M 160000 ${m} ${path}\n`)
+      else this.raw(`M ${mode ?? '100644'} :${m} ${path}\n`)
+    }
     this.raw('\n')
   }
   /** 이미 만든 커밋(mark)에 ref 를 붙인다(가벼운 태그·리모트 추적 ref) */
@@ -182,6 +186,73 @@ const lines = (n, tag = 'line') => `${Array.from({ length: n }, (_, i) => `${tag
   s.blob(13, `${Array.from({ length: 11000 }, (_, i) => `line ${String(i).padStart(5, '0')} ${'x'.repeat(36)}`).join('\n')}\n`)
   s.commit({ mark: 80, n: 8, from: 70, msg: 'large file\n', files: [['M', 'large.txt', 13]] })
   s.write('files.fi')
+}
+
+// ---- code: 코드 탐색기(git:tree·git:blob·git:resolveRev)용 — 텍스트·BOM·깨진 UTF-8·NUL·이미지(대소문자 확장자)·LFS 포인터·심볼릭 링크·서브모듈·옵션처럼 보이는 이름·한글·비 BMP 이름·중첩 디렉터리 ----
+{
+  const s = new Stream()
+  const pointer = `version https://git-lfs.github.com/spec/v1\noid sha256:${'a'.repeat(64)}\nsize 12345\n`
+  s.blob(1, '# hi\n')
+  s.blob(2, 'export const b = 1\n')
+  s.blob(3, 'export const a = 1\n')
+  s.blob(4, 'deep\n')
+  s.blob(5, 'z\n')
+  s.blob(6, 'a\n')
+  s.blob(7, 'dash\n')
+  s.blob(8, Buffer.from([0x61, 0xe9, 0x62, 0x0a]))
+  s.blob(9, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('hello\n')]))
+  s.blob(10, Buffer.from([1, 2, 0, 3]))
+  s.blob(11, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]))
+  s.blob(12, '<svg xmlns="http://www.w3.org/2000/svg"/>\n')
+  s.blob(13, pointer)
+  s.blob(14, 'alpha.txt')
+  s.blob(15, '안녕\n')
+  s.blob(16, 'a\r\nb\r\n')
+  s.blob(17, '')
+  s.blob(18, Buffer.concat([Buffer.alloc(8000, 0x61), Buffer.from([0]), Buffer.from('b\n')]))
+  s.blob(19, Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]))
+  s.blob(20, 'x\n')
+  s.commit({
+    mark: 100,
+    n: 1,
+    msg: 'code browse\n',
+    files: [
+      ['M', 'README.md', 1],
+      ['M', 'src/b.ts', 2],
+      ['M', 'src/A.ts', 3],
+      ['M', 'src/lib/deep.txt', 4],
+      ['M', 'Zeta.txt', 5],
+      ['M', 'alpha.txt', 6],
+      ['M', '-x', 7],
+      ['M', '--output=x.txt', 7],
+      ['M', 'latin1.txt', 8],
+      ['M', 'bom.txt', 9],
+      ['M', 'bin.dat', 10],
+      ['M', 'pic.PNG', 11],
+      ['M', 'vec.svg', 12],
+      ['M', 'PHOTO.JPG', 19],
+      ['M', 'model.bin', 13],
+      ['M', 'logo.png', 13],
+      ['M', 'link', 14, '120000'],
+      ['G', 'sub', 'c'.repeat(40)],
+      ['M', '한글/파일.txt', 15],
+      ['M', '한글/하위/깊은.txt', 15],
+      ['M', 'crlf.txt', 16],
+      ['M', 'empty.txt', 17],
+      ['M', 'nul-late.txt', 18],
+      ['M', 'dir.png/inner.txt', 20],
+      ['M', '\u{1d49c}.txt', 20],
+      ['M', '\uff5e.txt', 20],
+      ['M', 'a b.txt', 20]
+    ]
+  })
+  s.blob(21, '# hi v2\n')
+  s.blob(22, 'later\n')
+  s.commit({ mark: 110, n: 2, from: 100, msg: 'second\n', files: [['M', 'README.md', 21], ['M', 'later.txt', 22]] })
+  s.reset('refs/tags/v1', 100)
+  s.reset('refs/heads/feature/x', 110)
+  s.tag('v2', 110, 3, 'annotated\n')
+  s.write('code.fi')
 }
 
 // ---- empty: 커밋이 하나도 없는 저장소(빈 스트림) ----

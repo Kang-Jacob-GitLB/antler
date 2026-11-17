@@ -35,6 +35,7 @@ const REPO_SERVICE_DESCRIBES = ['RepoService 첫 페이지 문', 'RepoService.ad
 const RUST_SOURCES: Record<string, string> = {
   'golden.rs': '../src-tauri/tests/golden.rs',
   'exec.rs': '../src-tauri/tests/exec.rs',
+  'channels.rs': '../src-tauri/tests/channels.rs',
   'refs.rs': '../src-tauri/src/git/parsers/refs.rs',
   'submodule.rs': '../src-tauri/src/git/parsers/submodule.rs',
   'activity.rs': '../src-tauri/src/git/activity.rs',
