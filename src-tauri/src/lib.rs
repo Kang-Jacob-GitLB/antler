@@ -1,17 +1,19 @@
-// jira:* 채널 처리(Phase 4 PR 6). 통합 테스트(tests/channels.rs·api_route.rs)가 별도 크레이트라 pub 이다
+// jira:*·gh:* 채널 처리(Phase 4 PR 6·9). 통합 테스트(tests/channels.rs·api_route.rs)가 별도 크레이트라 pub 이다
 pub mod api_host;
 mod commands;
 mod dialogs;
 mod fetch_host;
 pub mod git;
-// Phase 4 의 순수 로직(PR 1)·응답 매퍼(PR 2)·HTTP 클라이언트(PR 3). GitHub 는 아직 앱 경로에서 부르지 않고(PR 7·9), Jira 는 PR 6 부터 api_host 가 부른다.
+// Phase 4 의 순수 로직(PR 1)·응답 매퍼(PR 2)·HTTP 클라이언트(PR 3). Jira(PR 6)·GitHub(PR 9)는 api_host 가 부른다.
 // 통합 테스트(tests/net.rs)가 별도 크레이트라 pub 이다
 pub mod github;
 pub mod jira;
 pub mod mirror;
 pub mod net;
+// Rust → Node 질의(`repoq`)·토큰 사본(`ghToken`)의 메시지와 검증(Phase 4 PR 9). 통합 테스트(tests/repoq.rs)가 별도 크레이트라 pub 이다
+pub mod repoq;
 pub mod router;
-// 토큰 보관(Phase 4 PR 4) — PR 6 에서 Jira 서비스가 쓴다(GitHub 는 PR 9)
+// 토큰 보관(Phase 4 PR 4) — Jira(PR 6)·GitHub(PR 9) 서비스가 같은 Vault 를 쓴다
 pub mod secret;
 mod sidecar;
 mod snap;
@@ -120,17 +122,43 @@ pub fn run() {
                 };
                 router.set_fetch(std::sync::Arc::new(FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir))));
             }
-            // Jira 서비스(PR 6). 스위치가 꺼져 있으면(ANTLER_RUST_API=0·ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다.
-            // 켜져 있으면 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결은 여기서 복원한다
+            // Jira·GitHub 서비스(PR 6·9). 스위치가 꺼져 있으면(ANTLER_RUST_API=0·ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다.
+            // 켜져 있으면 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결·로그인은 여기서 복원한다.
+            // 사이드카의 env(ANTLER_RUST_API) 하나가 두 서비스를 함께 넘기므로 **둘 다** 만들어졌을 때만 둘 다 주입한다(하나만 되면 사이드카가 둘 다 처리한다)
+            let mut gh_service: Option<github::service::GitHubService> = None;
             if router.api_enabled() {
                 let vault = std::sync::Arc::new(secret::Vault::new(secret::open_store(std::env::var_os("ANTLER_USER_DATA").as_deref())));
-                match jira::service::JiraService::new(vault) {
-                    Ok(service) => router.set_jira(api_host::JiraHost { service, opener: std::sync::Arc::new(open_https) }),
-                    Err(e) => eprintln!("[api] Jira 서비스를 만들지 못했다({e}) — 사이드카가 처리한다"),
+                let jira = jira::service::JiraService::new(vault.clone());
+                // 저장소 정보는 사이드카에 묻는다(repoq). 사이드카는 이 서비스보다 늦게 만들어지므로 전송이 호출 때 찾는다
+                let repos = std::sync::Arc::new(repoq::SidecarRepos::new(std::sync::Arc::new(sidecar::SidecarQuery::new(app.handle().clone()))));
+                let cli: std::sync::Arc<dyn github::ports::ExternalTokenProvider> = std::sync::Arc::new(github::gh_cli::GhCli::new());
+                let opts = github::service::ServiceOptions { avatar_cache_file: Some(user_data.join(github::avatars::AVATAR_CACHE_FILE)), ..Default::default() };
+                let gh = github::service::GitHubService::new(vault, repos, Some(cli), opts);
+                match (jira, gh) {
+                    (Ok(jira), Ok(gh)) => {
+                        router.set_jira(api_host::JiraHost { service: jira, opener: std::sync::Arc::new(open_https) });
+                        router.set_github(api_host::GithubHost { service: gh.clone(), opener: std::sync::Arc::new(open_https) });
+                        // 토큰이 바뀌면(로그인·로그아웃·폐기) 사이드카의 메모리 사본을 갱신한다. 서비스가 자기 자신을 쥐는 고리라 앱이 끝날 때까지 산다
+                        let (handle, svc) = (app.handle().clone(), gh.clone());
+                        gh.set_on_auth_changed(move || {
+                            if let Some(s) = handle.try_state::<sidecar::Sidecar>() {
+                                s.push_gh_token(|| svc.git_token());
+                            }
+                        });
+                        gh_service = Some(gh);
+                    }
+                    (jira, gh) => {
+                        if let Err(e) = jira {
+                            eprintln!("[api] Jira 서비스를 만들지 못했다({e}) — 사이드카가 처리한다");
+                        }
+                        if let Err(e) = gh {
+                            eprintln!("[api] GitHub 서비스를 만들지 못했다({e}) — 사이드카가 처리한다");
+                        }
+                    }
                 }
             }
             let fetch_kinds = router::sidecar_fetch_kinds(router.enabled());
-            // 사이드카에 jira 를 소유하지 않음을 알리는 값. 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
+            // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
             let rust_api = router.api_active();
             app.manage(router);
             // fetchPrefs 를 받는 곳은 **사이드카를 띄우기 전에** 등록한다 — 첫 fetchPrefs 는 ready 전에 한 번만 오고 같은 내용이면 다시 오지 않는다.
@@ -142,6 +170,12 @@ pub fn run() {
                 }
             })));
             app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, fetch_kinds, rust_api)?);
+            // 저장된 로그인의 토큰 사본을 사이드카에 한 번 보낸다(사이드카의 원격 전용 저장소 fetch 용). 이후는 위의 인증 변경 콜백이 보낸다. Rust 가 GitHub 를 처리할 때만이다
+            if let (true, Some(gh)) = (rust_api, gh_service) {
+                if let Some(s) = app.try_state::<sidecar::Sidecar>() {
+                    s.push_gh_token(|| gh.git_token());
+                }
+            }
 
             let mut win = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title("Antler")

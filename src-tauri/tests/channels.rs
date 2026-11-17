@@ -21,10 +21,16 @@ use antler_lib::mirror::{MirrorRepo, RepoMirror};
 use antler_lib::router::{Routed, Router, RUST_CHANNELS};
 use serde_json::{json, Value};
 
-// jira:* 채널 골든(Phase 4 PR 6). 루프백 http 를 허용하는 테스트 훅이 필요해 `test-hooks` feature 가 있을 때만 빌드한다(CI 는 항상 켠다)
+// jira:*(PR 6)·gh:*(PR 9) 채널 골든. 루프백 http 를 허용하는 테스트 훅이 필요해 `test-hooks` feature 가 있을 때만 빌드한다(CI 는 항상 켠다). 목 서버는 둘이 나눠 쓴다
+#[cfg(feature = "test-hooks")]
+#[path = "channels/mock.rs"]
+mod mock;
 #[cfg(feature = "test-hooks")]
 #[path = "channels/jira.rs"]
 mod jira;
+#[cfg(feature = "test-hooks")]
+#[path = "channels/github.rs"]
+mod github;
 
 // unsafe: main 이전 코드는 Rust 런타임 초기화 전에 돈다 — 여기서는 환경 변수만 넣고 다른 것에 기대지 않는다
 #[ctor::ctor(unsafe)]

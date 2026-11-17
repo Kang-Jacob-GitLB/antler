@@ -24,6 +24,13 @@ export type NoteOp = (typeof NOTE_OPS)[number]
 export const FETCH_APPROVE_KINDS = ['approval', 'trusted'] as const
 export type FetchApproveKind = (typeof FETCH_APPROVE_KINDS)[number]
 
+/**
+ * Rust 가 사이드카에 묻는 일(GitHub 서비스가 저장소 정보를 얻는다 — `repoq`). 닫힌 목록이고 사이드카가 다시 검사한다(src/sidecar/repoQuery.ts).
+ * Rust 의 `repoq::Op` 과 같아야 한다(Rust 테스트가 이 줄을 읽어 대조한다).
+ */
+export const REPOQ_OPS = ['ghRepo', 'ghRemotes', 'pushedShas', 'invalidateGhRemotes', 'githubClientId', 'repoIds'] as const
+export type RepoqOp = (typeof REPOQ_OPS)[number]
+
 /** Rust → Node */
 export type ToSidecar =
   | { t: 'req'; id: number; ch: string; args: unknown[] }
@@ -34,6 +41,18 @@ export type ToSidecar =
    */
   | { t: 'fetchApprove'; kind: FetchApproveKind; repoId: string; fingerprint: string }
   | { t: 'focus'; focused: boolean }
+  /**
+   * 저장소 정보 질의. `id` 가 있으면 `res`(`{t:'res',id,env}`)로 답하고 없으면 알림이다(invalidateGhRemotes). 매개변수는 `p` 안에만 있다.
+   * ghRepo `{repoId}` → GhRepoRef|null, ghRemotes `{repoId}` → GhRepoRef[], pushedShas `{repoId,email,limit}` → sha[], githubClientId → string|null, repoIds → string[]
+   */
+  | { t: 'repoq'; id?: number; op: RepoqOp; p: Record<string, unknown> }
+  /** 응답을 기다리다 버린(시간 초과·취소) 질의 — 사이드카가 그 질의의 AbortSignal 을 끊는다 */
+  | { t: 'repoqCancel'; id: number }
+  /**
+   * GitHub 토큰의 메모리 사본(없으면 null). Rust 가 GitHub 를 처리할 때(env ANTLER_RUST_API=1)만, 시작 때 한 번과 로그인 상태가 바뀔 때마다 보낸다.
+   * 사이드카에 남는 일(원격 전용 저장소의 git fetch 인증)이 쓴다. 로그·오류·env 에 싣지 않는다
+   */
+  | { t: 'ghToken'; token: string | null }
   | { t: 'hostres'; id: number; ok: boolean; value?: unknown }
 
 /**

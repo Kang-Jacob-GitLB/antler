@@ -1,0 +1,411 @@
+{
+  "_doc": "gh:* 채널 골든(PR 9)의 시나리오. TS(tests/goldenGithubChannels.test.ts: GitHubService + src/main/ipc/github.ts 핸들러)와 Rust(src-tauri/tests/channels.rs: Router 의 gh 경로)가 같은 목 서버 규칙으로 돌려 tests/golden/channels/github.json 과 같은 결과를 내야 한다. api.github.com·github.com 으로 가는 요청은 둘 다 같은 목 서버로 보낸다(경로가 겹치지 않는다). 규칙은 jira.scenarios.json 의 _doc 과 같다: routes 는 위에서부터 첫 일치(method·path 가 같고 query 에 적은 키의 값이 모두 같다), 없으면 404 {message:Not Found}, responses 는 n 번째 요청에 n 번째 항목(마지막이 반복), 단계의 routes 는 그 단계에서만 기본 경로표 앞에 놓인다. fake: 사이드카가 쥔 저장소 정보의 가짜(repos: 저장소 ID → {ref, remotes, pushed}, clientId, repoIds)와 gh CLI 의 가짜(cli: {available, token | error}); 단계의 fake 는 그 단계부터 이 값들을 덮는다. restart 는 같은 보관소로 서비스를 다시 만든다. cancel {afterRequests, id} 는 이 단계에서 목 서버가 요청을 그만큼 받은 뒤(시간이 아니라 도착을 기다린다) req:cancel(id) 를 보낸다. fetchedAt(시계에서 나오는 값)은 골든에서 \"<time>\" 으로 가린다.",
+  "fake": {
+    "clientId": "Iv1.golden",
+    "repoIds": ["r1", "r2"],
+    "repos": {
+      "r1": {
+        "ref": { "owner": "octo", "repo": "hello", "remote": "origin" },
+        "remotes": [
+          { "owner": "octo", "repo": "hello", "remote": "origin" },
+          { "owner": "upstream", "repo": "hello", "remote": "upstream" }
+        ],
+        "pushed": ["3333333333333333333333333333333333333333"]
+      },
+      "r2": { "ref": null, "remotes": [], "pushed": [] }
+    },
+    "cli": { "available": true, "token": "ghp_cliToken1234567890" }
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/user",
+      "responses": [
+        {
+          "status": 200,
+          "body": { "login": "me", "avatar_url": "https://avatars.githubusercontent.com/u/100" },
+          "headers": { "x-ratelimit-limit": "5000", "x-ratelimit-remaining": "4990", "x-ratelimit-reset": "1900000000" }
+        }
+      ]
+    },
+    { "method": "POST", "path": "/login/device/code", "responses": [{ "status": 200, "body": { "device_code": "dc-golden", "user_code": "ABCD-1234", "verification_uri": "https://github.com/login/device", "expires_in": 900, "interval": 5 } }] },
+    {
+      "method": "POST",
+      "path": "/login/oauth/access_token",
+      "responses": [
+        { "status": 200, "body": { "error": "authorization_pending" } },
+        { "status": 200, "body": { "error": "slow_down" } },
+        { "status": 200, "body": { "access_token": "gho_deviceToken1234567890", "token_type": "bearer" } }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/pulls",
+      "query": { "state": "closed" },
+      "responses": [{ "status": 403, "body": { "message": "API rate limit exceeded" }, "headers": { "x-ratelimit-limit": "5000", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1900000000" } }]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/pulls",
+      "responses": [
+        {
+          "status": 200,
+          "headers": { "link": "<https://api.github.com/repositories/1/pulls?page=2>; rel=\"next\"" },
+          "body": [
+            {
+              "number": 7,
+              "title": "기능 추가",
+              "state": "open",
+              "draft": false,
+              "user": { "login": "alice", "avatar_url": "https://avatars.githubusercontent.com/u/1" },
+              "labels": [{ "name": "bug", "color": "d73a4a" }],
+              "assignees": [],
+              "requested_reviewers": [{ "login": "bob" }],
+              "requested_teams": [],
+              "head": { "ref": "feat", "sha": "1111111111111111111111111111111111111111" },
+              "base": { "ref": "main" },
+              "updated_at": "2026-01-02T00:00:00Z",
+              "created_at": "2026-01-01T00:00:00Z",
+              "comments": 2,
+              "html_url": "https://github.com/octo/hello/pull/7"
+            },
+            {
+              "number": 6,
+              "title": "문서 고침",
+              "state": "open",
+              "draft": true,
+              "user": null,
+              "labels": [],
+              "head": { "ref": "docs", "sha": "2222222222222222222222222222222222222222" },
+              "base": { "ref": "main" },
+              "updated_at": "2026-01-01T12:00:00Z",
+              "created_at": "2025-12-31T00:00:00Z",
+              "html_url": "https://github.com/octo/hello/pull/6"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/pulls/7",
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "number": 7,
+            "title": "기능 추가",
+            "state": "open",
+            "user": { "login": "alice", "avatar_url": "https://avatars.githubusercontent.com/u/1" },
+            "labels": [],
+            "requested_reviewers": [{ "login": "bob" }],
+            "head": { "ref": "feat", "sha": "1111111111111111111111111111111111111111" },
+            "base": { "ref": "main" },
+            "updated_at": "2026-01-02T00:00:00Z",
+            "created_at": "2026-01-01T00:00:00Z",
+            "comments": 2,
+            "html_url": "https://github.com/octo/hello/pull/7",
+            "body_html": "<p>본문</p>",
+            "mergeable": true,
+            "additions": 10,
+            "deletions": 2,
+            "changed_files": 3
+          }
+        }
+      ]
+    },
+    { "method": "GET", "path": "/repos/octo/hello/pulls/7/reviews", "responses": [{ "status": 200, "body": [{ "user": { "login": "bob" }, "state": "APPROVED", "submitted_at": "2026-01-02T01:00:00Z" }] }] },
+    { "method": "GET", "path": "/repos/octo/hello/pulls/6/reviews", "responses": [{ "status": 200, "body": [] }] },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/pulls/7/files",
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            { "filename": "src/a.ts", "status": "modified", "additions": 5, "deletions": 1, "patch": "@@ -1 +1 @@\n-a\n+b" },
+            { "filename": "src/new.ts", "previous_filename": "src/old.ts", "status": "renamed", "additions": 0, "deletions": 0 }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/pulls/7/commits",
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            { "sha": "1111111111111111111111111111111111111111", "commit": { "message": "feat: 추가", "author": { "name": "Alice", "date": "2026-01-01T00:00:00Z" } }, "author": { "login": "alice", "avatar_url": "https://avatars.githubusercontent.com/u/1" } },
+            { "sha": "4444444444444444444444444444444444444444", "commit": { "message": "fix", "committer": { "date": "2026-01-01T01:00:00Z" } }, "author": null }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/commits/1111111111111111111111111111111111111111/check-runs",
+      "responses": [{ "status": 200, "body": { "check_runs": [{ "name": "ci", "status": "completed", "conclusion": "success", "html_url": "https://github.com/octo/hello/runs/1", "started_at": "2026-01-02T00:00:00Z", "completed_at": "2026-01-02T00:01:30Z" }] } }]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/commits/1111111111111111111111111111111111111111/status",
+      "responses": [{ "status": 200, "body": { "statuses": [{ "context": "lint", "state": "pending", "target_url": "https://ci.example.com/lint" }] } }]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/commits/2222222222222222222222222222222222222222/check-runs",
+      "responses": [{ "status": 200, "body": { "check_runs": [{ "name": "ci", "status": "completed", "conclusion": "failure" }] } }]
+    },
+    { "method": "GET", "path": "/repos/octo/hello/commits/2222222222222222222222222222222222222222/status", "responses": [{ "status": 200, "body": { "statuses": [] } }] },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/issues",
+      "query": { "labels": "bug" },
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            { "number": 7, "title": "기능 추가", "state": "open", "user": { "login": "alice" }, "labels": [{ "name": "bug", "color": "d73a4a" }], "pull_request": {}, "updated_at": "2026-01-02T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "https://github.com/octo/hello/pull/7" },
+            { "number": 3, "title": "이슈", "state": "open", "user": { "login": "carol" }, "labels": ["bug"], "updated_at": "2026-01-02T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "https://github.com/octo/hello/issues/3" }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/issues",
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            { "number": 7, "title": "PR 이 섞여 있다", "state": "open", "pull_request": {}, "updated_at": "2026-01-02T00:00:00Z" },
+            { "number": 3, "title": "이슈", "state": "open", "user": { "login": "carol", "avatar_url": "https://avatars.githubusercontent.com/u/3" }, "labels": [{ "name": "bug", "color": "#d73a4a" }], "assignees": [{ "login": "dave" }], "comments": 1, "updated_at": "2026-01-02T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "https://github.com/octo/hello/issues/3" }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/issues/3",
+      "responses": [{ "status": 200, "body": { "number": 3, "title": "이슈", "state": "closed", "user": { "login": "carol" }, "body_html": "<p>이슈 본문</p>", "closed_at": "2026-01-03T00:00:00Z", "updated_at": "2026-01-03T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "https://github.com/octo/hello/issues/3" } }]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/issues/3/comments",
+      "responses": [{ "status": 200, "body": [{ "user": { "login": "dave" }, "body_html": "<p>댓글</p>", "created_at": "2026-01-02T00:00:00Z", "html_url": "https://github.com/octo/hello/issues/3#c1" }, { "user": null, "created_at": "2026-01-02T01:00:00Z" }] }]
+    },
+    { "method": "GET", "path": "/repos/octo/hello/labels", "responses": [{ "status": 200, "body": [{ "name": "bug", "color": "d73a4a" }, { "name": "docs", "color": "0075ca" }] }] },
+    { "method": "GET", "path": "/repos/octo/hello/assignees", "responses": [{ "status": 200, "body": [{ "login": "alice", "avatar_url": "https://avatars.githubusercontent.com/u/1" }] }] },
+    {
+      "method": "POST",
+      "path": "/graphql",
+      "responses": [{ "status": 200, "body": { "data": { "repository": { "c0": { "statusCheckRollup": { "state": "SUCCESS" } }, "c1": { "statusCheckRollup": { "state": "FAILURE" } }, "c2": null } } } }]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/actions/runs",
+      "responses": [
+        {
+          "status": 200,
+          "headers": { "link": "<https://api.github.com/x?page=2>; rel=\"next\"" },
+          "body": { "workflow_runs": [{ "id": 9001, "name": "CI", "display_title": "feat: 추가", "head_branch": "feat", "head_sha": "1111111111111111111111111111111111111111", "event": "push", "status": "completed", "conclusion": "success", "run_number": 12, "created_at": "2026-01-02T00:00:00Z", "updated_at": "2026-01-02T00:02:00Z", "html_url": "https://github.com/octo/hello/actions/runs/9001" }] }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/actions/runs/9001/jobs",
+      "responses": [{ "status": 200, "body": { "jobs": [{ "id": 55, "name": "build", "status": "completed", "conclusion": "success", "started_at": "2026-01-02T00:00:00Z", "completed_at": "2026-01-02T00:01:00Z", "html_url": "https://github.com/octo/hello/actions/runs/9001/job/55" }] } }]
+    },
+    {
+      "method": "GET",
+      "path": "/search/issues",
+      "query": { "q": "repo:octo/hello is:pr \"ABC-123\"" },
+      "responses": [{ "status": 200, "body": { "items": [{ "number": 7, "title": "ABC-123 기능", "state": "open", "pull_request": {}, "user": { "login": "alice" }, "updated_at": "2026-01-02T00:00:00Z", "html_url": "https://github.com/octo/hello/pull/7" }, { "number": 3, "title": "이슈는 제외", "state": "open" }] } }]
+    },
+    {
+      "method": "GET",
+      "path": "/search/issues",
+      "query": { "q": "is:pr is:open author:@me archived:false" },
+      "responses": [{ "status": 200, "body": { "total_count": 1, "items": [{ "number": 7, "title": "내 PR", "state": "open", "pull_request": {}, "user": { "login": "me" }, "repository_url": "https://api.github.com/repos/octo/hello", "updated_at": "2026-01-02T00:00:00Z", "created_at": "2026-01-01T00:00:00Z", "html_url": "https://github.com/octo/hello/pull/7" }] } }]
+    },
+    {
+      "method": "GET",
+      "path": "/search/issues",
+      "query": { "q": "is:pr is:open review-requested:@me archived:false" },
+      "responses": [
+        {
+          "status": 200,
+          "body": {
+            "total_count": 2,
+            "items": [
+              { "number": 8, "title": "리뷰 요청", "state": "open", "pull_request": {}, "draft": true, "user": { "login": "alice" }, "repository_url": "https://api.github.com/repos/octo/hello", "updated_at": "2026-01-03T00:00:00Z", "html_url": "https://github.com/octo/hello/pull/8" },
+              { "number": 9, "title": "등록되지 않은 저장소", "state": "open", "pull_request": {}, "repository_url": "https://api.github.com/repos/other/zzz", "updated_at": "2026-01-03T00:00:00Z" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/search/issues",
+      "query": { "q": "is:issue is:open assignee:@me archived:false" },
+      "responses": [{ "status": 200, "body": { "total_count": 1, "items": [{ "number": 3, "title": "내 이슈", "state": "open", "user": { "login": "carol" }, "repository_url": "https://api.github.com/repos/upstream/hello", "updated_at": "2026-01-01T00:00:00Z", "html_url": "https://github.com/upstream/hello/issues/3" }] } }]
+    },
+    {
+      "method": "GET",
+      "path": "/user/repos",
+      "responses": [
+        {
+          "status": 200,
+          "body": [
+            { "owner": { "login": "octo", "type": "Organization" }, "name": "hello", "full_name": "octo/hello", "html_url": "https://github.com/octo/hello", "private": true, "default_branch": "main", "description": "d", "pushed_at": "2026-01-02T00:00:00Z" },
+            { "owner": { "login": "me", "type": "User" }, "name": "dot", "html_url": "https://github.com/me/dot", "fork": true, "pushed_at": "2026-01-05T00:00:00Z" },
+            { "name": "no-owner", "html_url": "https://github.com/x/y" }
+          ]
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/commits",
+      "query": { "sha": "1111111111111111111111111111111111111111" },
+      "responses": [{ "status": 200, "body": [{ "sha": "1111111111111111111111111111111111111111", "author": { "login": "alice", "id": 1, "avatar_url": "https://avatars.githubusercontent.com/u/1?v=4" } }] }]
+    },
+    { "method": "GET", "path": "/repos/octo/hello/commits", "query": { "sha": "2222222222222222222222222222222222222222" }, "responses": [{ "status": 404, "body": { "message": "No commit found for SHA" } }] },
+    {
+      "method": "GET",
+      "path": "/repos/octo/hello/commits",
+      "query": { "sha": "3333333333333333333333333333333333333333" },
+      "responses": [{ "status": 200, "body": [{ "sha": "3333333333333333333333333333333333333333", "author": { "login": "bob", "id": 2, "avatar_url": "https://avatars.githubusercontent.com/u/2?v=4" } }] }]
+    }
+  ],
+  "steps": [
+    { "name": "미연결 상태", "ch": "gh:auth", "args": [] },
+    { "name": "미연결 PR 목록", "ch": "gh:pulls", "args": ["r1", { "state": "open", "page": 1 }] },
+    { "name": "미연결 PR 목록 재요청(ETag 가 없어 다시 묻는다)", "ch": "gh:pulls", "args": ["r1", { "state": "open", "page": 1 }] },
+    { "name": "미연결 체크 요약", "ch": "gh:commitChecks", "args": ["r1", ["1111111111111111111111111111111111111111"]] },
+    { "name": "GitHub 저장소가 아니다", "ch": "gh:pulls", "args": ["r2", { "state": "open", "page": 1 }] },
+    { "name": "목록 질의의 상태가 틀렸다", "ch": "gh:pulls", "args": ["r1", { "state": "bogus", "page": 1 }] },
+    { "name": "PR 번호가 0", "ch": "gh:pull", "args": ["r1", 0] },
+    { "name": "PR 번호가 정수가 아니다", "ch": "gh:pull", "args": ["r1", 1.5] },
+    { "name": "저장소 ID 가 없다", "ch": "gh:filters", "args": [{ "$undefined": true }] },
+    { "name": "미연결 Launchpad", "ch": "gh:launchpad", "args": ["lp-0"] },
+    { "name": "미연결 접근 가능 저장소", "ch": "gh:accessibleRepos", "args": ["ar-0"] },
+    { "name": "시작하지 않은 로그인 폴링", "ch": "gh:devicePoll", "args": ["poll-0"] },
+    { "name": "클라이언트 ID 가 없다", "fake": { "clientId": "" }, "ch": "gh:deviceStart", "args": [] },
+    { "name": "Device Flow 시작", "fake": { "clientId": "Iv1.golden" }, "ch": "gh:deviceStart", "args": [] },
+    { "name": "Device Flow 폴링(대기·느리게·승인)", "ch": "gh:devicePoll", "args": ["poll-1"] },
+    { "name": "로그인 뒤 상태", "ch": "gh:auth", "args": [] },
+    { "name": "로그아웃", "ch": "gh:logout", "args": [] },
+    { "name": "PAT 형식이 틀렸다", "ch": "gh:loginPat", "args": ["has space"] },
+    { "name": "PAT 가 없다", "ch": "gh:loginPat", "args": [{ "$undefined": true }] },
+    {
+      "name": "PAT 가 거부됐다",
+      "ch": "gh:loginPat",
+      "args": ["ghp_rejected1234567890"],
+      "routes": [{ "method": "GET", "path": "/user", "responses": [{ "status": 401, "body": { "message": "Bad credentials" } }] }]
+    },
+    {
+      "name": "PAT 검증 중 서버 오류",
+      "ch": "gh:loginPat",
+      "args": ["ghp_servererr1234567890"],
+      "routes": [{ "method": "GET", "path": "/user", "responses": [{ "status": 500, "body": { "message": "oops" } }] }]
+    },
+    { "name": "PAT 로그인", "ch": "gh:loginPat", "args": ["  ghp_goldenpat1234567890  "] },
+    { "name": "gh 가 토큰을 못 준다", "fake": { "cli": { "available": true, "error": "gh 에 로그인되어 있지 않습니다" } }, "ch": "gh:importCliToken", "args": [] },
+    { "name": "gh 토큰 형식이 틀렸다", "fake": { "cli": { "available": true, "token": "has space" } }, "ch": "gh:importCliToken", "args": [] },
+    {
+      "name": "gh 토큰이 거부됐다",
+      "fake": { "cli": { "available": true, "token": "ghp_cliToken1234567890" } },
+      "ch": "gh:importCliToken",
+      "args": [],
+      "routes": [{ "method": "GET", "path": "/user", "responses": [{ "status": 401, "body": { "message": "Bad credentials" } }] }]
+    },
+    { "name": "gh 에서 가져오기", "ch": "gh:importCliToken", "args": [] },
+    { "name": "재시작 뒤 저장된 로그인 복원", "restart": true, "ch": "gh:auth", "args": [] },
+    { "name": "PR 목록(리뷰·체크 보강)", "ch": "gh:pulls", "args": ["r1", { "state": "open", "page": 1 }] },
+    { "name": "PR 목록 라벨 필터(issues 엔드포인트)", "ch": "gh:pulls", "args": ["r1", { "state": "open", "label": "bug", "page": 1 }] },
+    { "name": "Jira 키를 언급한 PR", "ch": "gh:pullsForKey", "args": ["r1", "ABC-123"] },
+    { "name": "Jira 키가 틀렸다", "ch": "gh:pullsForKey", "args": ["r1", "abc-123"] },
+    { "name": "PR 상세", "ch": "gh:pull", "args": ["r1", 7] },
+    { "name": "PR 변경 파일", "ch": "gh:pullFiles", "args": ["r1", 7] },
+    { "name": "PR 커밋", "ch": "gh:pullCommits", "args": ["r1", 7] },
+    { "name": "이슈 목록(PR 은 뺀다)", "ch": "gh:issues", "args": ["r1", { "state": "open", "page": 1 }] },
+    { "name": "이슈 상세", "ch": "gh:issue", "args": ["r1", 3] },
+    { "name": "댓글", "ch": "gh:comments", "args": ["r1", 3] },
+    { "name": "필터(라벨·담당자)", "ch": "gh:filters", "args": ["r1"] },
+    { "name": "커밋 체크 요약(GraphQL)", "ch": "gh:commitChecks", "args": ["r1", ["1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222", "3333333333333333333333333333333333333333"]] },
+    { "name": "커밋 체크 요약 재요청(캐시)", "ch": "gh:commitChecks", "args": ["r1", ["1111111111111111111111111111111111111111", "2222222222222222222222222222222222222222"]] },
+    { "name": "커밋 해시가 틀렸다", "ch": "gh:commitChecks", "args": ["r1", ["zz"]] },
+    { "name": "커밋 체크 상세", "ch": "gh:commitCheckRuns", "args": ["r1", "1111111111111111111111111111111111111111"] },
+    { "name": "워크플로 실행", "ch": "gh:runs", "args": ["r1", 1] },
+    { "name": "워크플로 잡", "ch": "gh:runJobs", "args": ["r1", 9001] },
+    { "name": "실행 ID 가 틀렸다", "ch": "gh:runJobs", "args": ["r1", -1] },
+    {
+      "name": "작성자 아바타(404 면 push 된 커밋으로 다시)",
+      "ch": "gh:avatars",
+      "args": ["r1", "av-1", [{ "email": "alice@example.com", "sha": "1111111111111111111111111111111111111111" }, { "email": "bob@example.com", "sha": "2222222222222222222222222222222222222222" }, { "email": "12345+carol@users.noreply.github.com", "sha": "1111111111111111111111111111111111111111" }]]
+    },
+    { "name": "GitHub 저장소가 아니면 noreply 만 푼다", "ch": "gh:avatars", "args": ["r2", "av-2", [{ "email": "12345+carol@users.noreply.github.com", "sha": "1111111111111111111111111111111111111111" }]] },
+    { "name": "아바타 작성자 목록이 틀렸다", "ch": "gh:avatars", "args": ["r1", "av-3", [{ "email": "x", "sha": "1" }]] },
+    { "name": "Launchpad", "ch": "gh:launchpad", "args": ["lp-1"] },
+    { "name": "Launchpad 새로고침", "ch": "gh:launchpad", "args": ["lp-2", true] },
+    { "name": "Launchpad 요청 ID 가 없다", "ch": "gh:launchpad", "args": [{ "$undefined": true }] },
+    { "name": "접근 가능한 저장소", "ch": "gh:accessibleRepos", "args": ["ar-1"] },
+    { "name": "접근 가능한 저장소 재요청(5분 캐시)", "ch": "gh:accessibleRepos", "args": ["ar-2"] },
+    { "name": "접근 가능한 저장소 새로고침", "ch": "gh:accessibleRepos", "args": ["ar-3", true] },
+    { "name": "GitHub 주소 열기", "ch": "gh:openExternal", "args": ["https://github.com/octo/hello/pull/7"] },
+    { "name": "GitHub 가 아닌 주소는 열지 않는다", "ch": "gh:openExternal", "args": ["https://example.com/"] },
+    { "name": "http 주소는 열지 않는다", "ch": "gh:openExternal", "args": ["http://github.com/octo/hello"] },
+    { "name": "호출 한도 초과", "ch": "gh:pulls", "args": ["r1", { "state": "closed", "page": 1 }] },
+    { "name": "한도 초과 뒤 상태(한도 표시)", "ch": "gh:auth", "args": [] },
+    {
+      "name": "없는 PR",
+      "ch": "gh:pull",
+      "args": ["r1", 404],
+      "routes": [{ "method": "GET", "path": "/repos/octo/hello/pulls/404", "responses": [{ "status": 404, "body": { "message": "Not Found" } }] }]
+    },
+    {
+      "name": "서버 오류",
+      "ch": "gh:issue",
+      "args": ["r1", 500],
+      "routes": [{ "method": "GET", "path": "/repos/octo/hello/issues/500", "responses": [{ "status": 500, "body": { "message": "oops" } }] }]
+    },
+    {
+      "name": "권한 없음(403, 한도 아님)",
+      "ch": "gh:pullFiles",
+      "args": ["r1", 403],
+      "routes": [{ "method": "GET", "path": "/repos/octo/hello/pulls/403/files", "responses": [{ "status": 403, "body": { "message": "Resource not accessible" }, "headers": { "x-ratelimit-remaining": "100", "x-ratelimit-limit": "5000" } }] }]
+    },
+    {
+      "name": "조회 중 토큰 폐기(401 뒤 /user 도 거부)",
+      "ch": "gh:comments",
+      "args": ["r1", 401],
+      "routes": [
+        { "method": "GET", "path": "/repos/octo/hello/issues/401/comments", "responses": [{ "status": 401, "body": { "message": "Bad credentials" } }] },
+        { "method": "GET", "path": "/user", "responses": [{ "status": 401, "body": { "message": "Bad credentials" } }] }
+      ]
+    },
+    { "name": "폐기된 뒤 상태", "ch": "gh:auth", "args": [] },
+    { "name": "다시 PAT 로그인", "ch": "gh:loginPat", "args": ["ghp_goldenpat1234567890"] },
+    {
+      "name": "조회가 401 이지만 토큰은 유효하다",
+      "ch": "gh:filters",
+      "args": ["r1"],
+      "routes": [{ "method": "GET", "path": "/repos/octo/hello/labels", "responses": [{ "status": 401, "body": { "message": "Bad credentials" } }] }]
+    },
+    { "name": "유효한 토큰이면 로그인 유지", "ch": "gh:auth", "args": [] },
+    { "name": "취소할 Device Flow 시작", "ch": "gh:deviceStart", "args": [] },
+    {
+      "name": "Device Flow 폴링 취소",
+      "ch": "gh:devicePoll",
+      "args": ["poll-cancel"],
+      "cancel": { "afterRequests": 1, "id": "poll-cancel" },
+      "routes": [{ "method": "POST", "path": "/login/oauth/access_token", "responses": [{ "status": 200, "body": { "error": "authorization_pending" }, "delayMs": 3000 }] }]
+    },
+    { "name": "로그아웃(마지막)", "ch": "gh:logout", "args": [] },
+    { "name": "로그아웃 뒤 체크 요약", "ch": "gh:commitChecks", "args": ["r1", ["1111111111111111111111111111111111111111"]] }
+  ]
+}

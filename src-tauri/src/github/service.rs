@@ -209,11 +209,11 @@ pub struct GitHubService {
 }
 
 impl GitHubService {
-    /// 운영 서비스: 보관소에서 저장된 토큰을 복원한다. 한도 해제 시각의 표시는 클라이언트 기본값(UTC)이다 — `with_parts` 의 `make_client` 에서 바꾼다
+    /// 운영 서비스: 보관소에서 저장된 토큰을 복원한다. 한도 해제 시각은 로컬 시간대로 표시한다([`local_time`](super::local_time))
     pub fn new(vault: Arc<Vault>, repos: Arc<dyn RepoQuery>, cli: Option<Arc<dyn ExternalTokenProvider>>, opts: ServiceOptions) -> Result<Self, HttpInitError> {
         let clock: Arc<dyn Clock> = Arc::new(SystemClock);
         let flow = DeviceFlow::new(Arc::new(TokioSleeper), clock.clone())?;
-        Self::with_parts(vault, repos, cli, GitHubClient::new, flow, clock, opts)
+        Self::with_parts(vault, repos, cli, |p| GitHubClient::new(p).map(|c| c.with_format_time(super::local_time::format_epoch_sec)), flow, clock, opts)
     }
 
     /// 부품을 직접 받는 생성자. `make_client` 는 서비스가 쥔 토큰을 읽는 `TokenProvider` 를 받아 클라이언트를 만든다.
