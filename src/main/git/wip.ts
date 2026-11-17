@@ -150,8 +150,8 @@ export async function wipFileDiff(
     if (exec.kind === 'local') await assertNoLinkEscape(repoPath, req.path, req.area === 'unstaged')
   }
 
-  // --no-index 는 저장소 속성을 읽지 않지만, 작업 트리·인덱스 diff 는 clean 필터를 돈다
-  const guard = req.area === 'untracked' ? [] : await filterOverrides(exec, repoPath, opts)
+  // --no-index 도 `-C` 저장소의 설정·.gitattributes·info/attributes 를 읽어 그 파일에 맞는 clean 필터를 돈다(실측) — 모든 영역에 건다
+  const guard = await filterOverrides(exec, repoPath, opts)
   const common = [...guard, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3']
   const paths = req.oldPath !== undefined && req.oldPath !== req.path ? [req.oldPath, req.path] : [req.path]
   const args =

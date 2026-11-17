@@ -5,6 +5,7 @@ import { addedLines, gitattributesUsesLfs, parseCheckAttrLfs } from '@shared/lfs
 import { parseGitflowConfig } from '@shared/gitflow'
 import { GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { assertHex } from './commands'
+import { filterOverrides } from './wip'
 
 /** 한 번에 물어볼 수 있는 경로 수 상한(넘는 경로는 표시하지 않는다) */
 export const LFS_PATHS_MAX = 1000
@@ -31,10 +32,14 @@ export async function repoExtras(exec: GitExecutor, repoPath: string, opts?: Run
  * 하나라도 filter=lfs 규칙이 있으면 true. 하나가 읽히지 않아도 나머지로 판단한다.
  */
 async function usesLfs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<boolean> {
+  // 작업 트리·git-dir 파일을 읽는 `--no-index` 두 호출이 같은 가드를 쓰도록 저장소당 한 번만 조회한다.
+  // 무력화할 수 없으면(던지면) 두 호출 모두 읽기를 건너뛴다(아래 .catch → false)
+  const guard = filterOverrides(exec, repoPath, opts)
+  guard.catch(() => undefined)
   const checks = [
     committedAttributesUseLfs(exec, repoPath, opts),
-    fileUsesLfs(exec, repoPath, '.gitattributes', opts),
-    infoAttributesUseLfs(exec, repoPath, opts)
+    fileUsesLfs(exec, repoPath, '.gitattributes', guard, opts),
+    infoAttributesUseLfs(exec, repoPath, guard, opts)
   ]
   return (await Promise.all(checks.map((c) => c.catch(() => false)))).some(Boolean)
 }
@@ -57,18 +62,20 @@ async function committedAttributesUseLfs(exec: GitExecutor, repoPath: string, op
   return found.some(Boolean)
 }
 
-async function infoAttributesUseLfs(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<boolean> {
+async function infoAttributesUseLfs(exec: GitExecutor, repoPath: string, guard: Promise<string[]>, opts?: RunOpts): Promise<boolean> {
   const r = await exec.run(repoPath, ['rev-parse', '--path-format=absolute', '--git-path', 'info/attributes'], opts)
   const path = r.code === 0 ? (r.stdout.toString('utf8').split('\n')[0]?.replace(/\r$/, '') ?? '') : ''
-  return path ? fileUsesLfs(exec, repoPath, path, opts) : false
+  return path ? fileUsesLfs(exec, repoPath, path, guard, opts) : false
 }
 
 /**
  * 작업 트리·git-dir 의 파일 내용을 읽는다. executor 로는 git 만 실행할 수 있어 `git diff --no-index /dev/null <file>` 의
  * 추가 줄로 읽는다(외부 diff·textconv 는 끈다). 파일이 없거나 상한을 넘으면 false.
+ * `--no-index` 도 `-C` 저장소의 filter 드라이버를 돌리므로(.gitattributes 규칙이 그 파일에 맞으면 clean 실행) filterOverrides 로 비운다.
+ * guard 가 던지면 이 파일은 읽지 않는다(호출부 .catch → false).
  */
-async function fileUsesLfs(exec: GitExecutor, repoPath: string, path: string, opts?: RunOpts): Promise<boolean> {
-  const args = ['diff', '--no-index', '--no-ext-diff', '--no-textconv', '--no-color', '--', '/dev/null', path]
+async function fileUsesLfs(exec: GitExecutor, repoPath: string, path: string, guard: Promise<string[]>, opts?: RunOpts): Promise<boolean> {
+  const args = [...(await guard), 'diff', '--no-index', '--no-ext-diff', '--no-textconv', '--no-color', '--', '/dev/null', path]
   const r = await exec.run(repoPath, args, { ...opts, maxBuffer: ATTRIBUTES_MAX_BYTES * 2 })
   // --no-index 는 차이가 있으면 종료 코드 1 이다
   if (r.code !== 1) return false
