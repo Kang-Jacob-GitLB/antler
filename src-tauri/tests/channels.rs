@@ -1357,6 +1357,8 @@ async fn refs_scenarios(mode: &Mode) {
     let golden = [read_json("tests/golden/channels/refs.json"), read_json("tests/golden/channels/refsDetails.json")];
     let tmp = TempDir::new("refs");
     let root = tmp.0.to_string_lossy().into_owned();
+    // CI(Windows 러너)의 TEMP 는 8.3 짧은 이름(`RUNNER~1`)인데 git(worktree list 등)은 긴 이름으로 보고한다 — 두 꼴을 모두 지운다
+    let root_long = fs::canonicalize(&tmp.0).map(|p| p.to_string_lossy().trim_start_matches(r"\\?\").to_string()).unwrap_or_else(|_| root.clone());
     let mut cursor = [0usize; 2];
     let mut diffs = Vec::new();
     for (si, sc) in scenarios.iter().enumerate() {
@@ -1384,7 +1386,7 @@ async fn refs_scenarios(mode: &Mode) {
             }
             let (k, route) = if step.get("refs").is_some() { (0, "git:refs") } else { (1, "git:refsDetails") };
             let env = envelope(router.route(route, &json!([id])).await);
-            let got = if env["ok"] == true { json!({ "ok": true, "data": scrub_root(&env["data"], &root) }) } else { json!({ "ok": false, "code": env["code"] }) };
+            let got = if env["ok"] == true { json!({ "ok": true, "data": scrub_root(&scrub_root(&env["data"], &root), &root_long) }) } else { json!({ "ok": false, "code": env["code"] }) };
             let g = &golden[k]["scenarios"][cursor[k]];
             cursor[k] += 1;
             assert_eq!((&g["name"], &g["step"]), (&json!(name), &json!(i)), "{name}/{route}: 골든의 순서가 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
