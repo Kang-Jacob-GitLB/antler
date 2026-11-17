@@ -12,6 +12,7 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use antler_lib::git::exec::ssh::SshPool;
 use antler_lib::git::exec::{GitExecutor, LocalExecutor};
 use antler_lib::git::fetch::confirm_text::ConfirmBox;
 use antler_lib::git::fetch::service::{ApprovalKind, FetchHost, FetchService, HostEvent};
@@ -31,6 +32,12 @@ mod jira;
 #[cfg(feature = "test-hooks")]
 #[path = "channels/github.rs"]
 mod github;
+
+// SSH 대상 시나리오(Phase 5 PR 3): 같은 골든을 127.0.0.1 의 프로세스 안 russh 서버 뒤에서 한 번 더 돈다. 임시 홈·`AgentSetting::Disabled` 만 쓴다(사용자의 ~/.ssh·agent 를 건드리지 않는다)
+#[path = "ssh/common.rs"]
+mod ssh_common;
+#[path = "ssh/server.rs"]
+mod ssh_server;
 
 // unsafe: main 이전 코드는 Rust 런타임 초기화 전에 돈다 — 여기서는 환경 변수만 넣고 다른 것에 기대지 않는다
 #[ctor::ctor(unsafe)]
@@ -106,11 +113,74 @@ fn rev_parse(dir: &Path, rev: &str) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
+/// 시나리오를 도는 대상. Local 은 라우터가 이 PC 의 git 을 직접 돌리고, Ssh 는 같은 저장소를 루프백 SSH 서버(`~/.ssh/config` 의 `Host test`)를 거쳐 돌린다.
+/// 서버·연결 풀은 시험 하나가 공유한다(시나리오마다 라우터를 새로 만들어도 연결은 하나다)
+enum Mode {
+    Local,
+    Ssh(SshRig),
+}
+
+struct SshRig {
+    server: ssh_server::TestServer,
+    pool: Arc<SshPool>,
+    _home: Arc<ssh_common::Home>,
+}
+
+impl Mode {
+    async fn ssh() -> Mode {
+        let client = ssh_server::new_key();
+        let server = ssh_server::TestServer::start(ssh_server::Opts::new(vec![client.public_key().clone()])).await;
+        let home = Arc::new(ssh_common::Home::new(&client));
+        home.write_config(&format!(
+            "Host test\n  HostName 127.0.0.1\n  Port {}\n  User tester\n  IdentityFile {}\n  IdentitiesOnly yes\n",
+            server.port,
+            home.key_for_config()
+        ));
+        home.write_known_hosts(&ssh_common::known_hosts_line(server.port, &server.host_key));
+        let h = home.clone();
+        let pool = SshPool::new(move |host| h.executor(host));
+        Mode::Ssh(SshRig { server, pool, _home: home })
+    }
+
+    /// 이 대상으로 `entries`(id, 경로)를 여는 라우터
+    fn router(&self, entries: &[(&str, &Path)]) -> Router {
+        match self {
+            Mode::Local => Router::new(true, false, mirror_of(entries)),
+            Mode::Ssh(rig) => {
+                let m = RepoMirror::default();
+                let repos = entries
+                    .iter()
+                    .map(|(id, p)| MirrorRepo {
+                        id: (*id).to_string(),
+                        kind: "ssh".into(),
+                        path: p.to_string_lossy().into_owned(),
+                        distro: None,
+                        ssh_host: Some("test".into()),
+                    })
+                    .collect();
+                m.apply(1, repos);
+                let router = Router::new(true, false, m);
+                router.set_ssh_pool(rig.pool.clone());
+                assert!(router.ssh_active());
+                router
+            }
+        }
+    }
+
+    /// 끝낼 때: 풀이 호스트당 연결 하나를 나눠 썼는지 보고 SSH 연결을 닫는다
+    fn finish(&self) {
+        if let Mode::Ssh(rig) = self {
+            assert_eq!(rig.server.connections(), 1, "풀이 호스트당 연결 하나를 나눠 쓴다");
+            rig.pool.dispose_all();
+        }
+    }
+}
+
 fn mirror_of(entries: &[(&str, &Path)]) -> RepoMirror {
     let m = RepoMirror::default();
     let repos = entries
         .iter()
-        .map(|(id, p)| MirrorRepo { id: (*id).to_string(), kind: "local".into(), path: p.to_string_lossy().into_owned(), distro: None })
+        .map(|(id, p)| MirrorRepo { id: (*id).to_string(), kind: "local".into(), path: p.to_string_lossy().into_owned(), distro: None, ssh_host: None })
         .collect();
     m.apply(1, repos);
     m
@@ -155,6 +225,15 @@ fn rust_채널은_ipc_채널의_부분집합이다() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn git_commit_시나리오가_ts_골든과_같다() {
+    commit_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn git_commit_시나리오가_ssh_에서도_ts_골든과_같다() {
+    commit_scenarios(&Mode::ssh().await).await;
+}
+
+async fn commit_scenarios(mode: &Mode) {
     let scenarios = read_json("tests/fixtures/repos/commit.scenarios.json");
     let golden = read_json("tests/golden/channels/commit.json");
     let scenarios = scenarios["scenarios"].as_array().expect("scenarios");
@@ -167,7 +246,7 @@ async fn git_commit_시나리오가_ts_골든과_같다() {
     names.dedup();
     let dirs: Vec<(String, PathBuf)> = names.iter().map(|n| (n.clone(), import(&tmp.0, n))).collect();
     let entries: Vec<(&str, &Path)> = dirs.iter().map(|(n, d)| (n.as_str(), d.as_path())).collect();
-    let router = Router::new(true, false, mirror_of(&entries));
+    let router = mode.router(&entries);
 
     let mut diffs = Vec::new();
     for (i, (s, g)) in scenarios.iter().zip(golden).enumerate() {
@@ -199,6 +278,7 @@ async fn git_commit_시나리오가_ts_골든과_같다() {
     }
     assert!(diffs.is_empty(), "{}", diffs.join("\n"));
     assert_eq!(router.rust_handled() as usize, scenarios.len());
+    mode.finish();
 }
 
 fn short(v: &Value) -> String {
@@ -338,6 +418,15 @@ fn log_result(env: &Value, full: bool) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn git_log_시나리오가_ts_골든과_같다() {
+    log_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn git_log_시나리오가_ssh_에서도_ts_골든과_같다() {
+    log_scenarios(&Mode::ssh().await).await;
+}
+
+async fn log_scenarios(mode: &Mode) {
     let scenarios = read_json("tests/fixtures/repos/log.scenarios.json");
     let golden = read_json("tests/golden/channels/log.json");
     let scenarios = scenarios["scenarios"].as_array().expect("scenarios");
@@ -352,7 +441,7 @@ async fn git_log_시나리오가_ts_골든과_같다() {
         // 시나리오마다 새 디렉터리에 import 한다(저장소를 바꾸는 단계가 다른 시나리오에 번지지 않게)
         let dir = import(&tmp.0.join(format!("s{si}")), sc["repo"].as_str().unwrap());
         let id = format!("s{si}");
-        let router = Router::new(true, false, mirror_of(&[(id.as_str(), dir.as_path())]));
+        let router = mode.router(&[(id.as_str(), dir.as_path())]);
         let rev = |expr: &str| rev_parse(&dir, expr);
         let golden_steps = g["steps"].as_array().unwrap();
         let steps = sc["steps"].as_array().unwrap();
@@ -385,6 +474,7 @@ async fn git_log_시나리오가_ts_골든과_같다() {
         assert!(!dir.join("pwned.txt").exists() && !Path::new("pwned.txt").exists(), "{name}: pwned.txt");
     }
     assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+    mode.finish();
 }
 
 #[test]
@@ -476,11 +566,20 @@ fn file_result(channel: &str, env: &Value, msg: bool) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn 파일_단위_채널_시나리오가_ts_골든과_같다() {
+    file_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 파일_단위_채널_시나리오가_ssh_에서도_ts_골든과_같다() {
+    file_scenarios(&Mode::ssh().await).await;
+}
+
+async fn file_scenarios(mode: &Mode) {
     let all = read_json("tests/fixtures/repos/files.scenarios.json");
     let tmp = TempDir::new("files");
     let dirs: Vec<(String, PathBuf)> = ["files", "empty"].iter().map(|n| ((*n).to_string(), import(&tmp.0, n))).collect();
     let entries: Vec<(&str, &Path)> = dirs.iter().map(|(n, d)| (n.as_str(), d.as_path())).collect();
-    let router = Router::new(true, false, mirror_of(&entries));
+    let router = mode.router(&entries);
     let mut diffs = Vec::new();
     let mut total = 0;
     for channel in FILE_CHANNELS {
@@ -519,6 +618,7 @@ async fn 파일_단위_채널_시나리오가_ts_골든과_같다() {
     for d in dirs.iter().map(|(_, d)| d) {
         assert!(!d.join("pwned.txt").exists() && !Path::new("pwned.txt").exists());
     }
+    mode.finish();
 }
 
 /// 검증이 git 을 띄우기 전에 거르는 적대적 입력: 저장소 경로가 없어서 git 을 띄웠다면 GIT 오류가 난다

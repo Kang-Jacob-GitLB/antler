@@ -9,7 +9,7 @@ import type { FromSidecar } from '../src/sidecar/protocol'
 const tmp = (): string => join(mkdtempSync(join(tmpdir(), 'antler-mirror-')), 'antler.config.json')
 
 describe('사이드카 저장소 미러', () => {
-  it('저장소마다 id·kind·path·name(+wsl 의 distro)만 담고 그룹 같은 것은 담지 않는다', () => {
+  it('저장소마다 id·kind·path·name(+wsl 의 distro, ssh 의 sshHost)만 담고 그룹 같은 것은 담지 않는다', () => {
     const c = new ConfigStore(tmp())
     const local = c.addRepo({ sourceId: 'local', path: 'C:\\work\\a', name: 'a', group: 'g' })
     const wsl = c.addRepo({ sourceId: 'wsl:Ubuntu', path: '/home/me/b', name: 'b' }, { id: 'wsl:Ubuntu', kind: 'wsl', label: 'WSL: Ubuntu', distro: 'Ubuntu' })
@@ -17,8 +17,21 @@ describe('사이드카 저장소 미러', () => {
     expect(mirrorOf(c.get())).toEqual([
       { id: local.id, kind: 'local', path: 'C:\\work\\a', name: 'a' },
       { id: wsl.id, kind: 'wsl', path: '/home/me/b', name: 'b', distro: 'Ubuntu' },
-      { id: ssh.id, kind: 'ssh', path: '/srv/c', name: 'c' }
+      { id: ssh.id, kind: 'ssh', path: '/srv/c', name: 'c', sshHost: 'h' }
     ])
+  })
+
+  it('ssh 호스트가 바뀌면 미러도 바뀌고 다른 종류의 소스에는 sshHost 가 실리지 않는다', () => {
+    const sent: Extract<FromSidecar, { t: 'repos' }>[] = []
+    const c = new ConfigStore(tmp())
+    const m = new MirrorSender((msg) => sent.push(msg))
+    const r = c.addRepo({ sourceId: 'ssh:a', path: '/srv/x', name: 'x' }, { id: 'ssh:a', kind: 'ssh', label: 'SSH: a', sshHost: 'a' })
+    m.push(c.get())
+    expect(sent.at(-1)?.repos).toEqual([{ id: r.id, kind: 'ssh', path: '/srv/x', name: 'x', sshHost: 'a' }])
+    // 소스를 못 찾은 저장소는 뺀다(호스트도 없다)
+    const cfg = c.get()
+    cfg.sources = cfg.sources.filter((s) => s.id !== 'ssh:a')
+    expect(mirrorOf(cfg)).toEqual([])
   })
 
   it('저장소 목록이 바뀔 때만 보내고 gen 은 1 부터 오른다', () => {

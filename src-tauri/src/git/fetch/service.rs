@@ -314,9 +314,9 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         status
     }
 
-    /// 이 저장소의 환경(실행기·큐). 미러에 없거나 Rust 가 다루지 않는 저장소면 오류(TS `fetchContext` 의 `unknown repo` 와 같다)
+    /// 이 저장소의 환경(실행기·큐). 미러에 없거나 Rust 가 fetch 하지 않는 저장소(ssh·github)면 오류(TS `fetchContext` 의 `unknown repo` 와 같다)
     fn resolve(&self, repo_id: &str) -> Result<(Target, Arc<Source<R>>), ExecError> {
-        let target = match self.mirror.resolve(repo_id) {
+        let target = match self.mirror.resolve_fetch(repo_id) {
             Resolved::Rust(t) => t,
             Resolved::Sidecar => return Err(ExecError::Other { message: format!("unknown repo: {repo_id}") }),
             Resolved::Invalid(message) => return Err(ExecError::Other { message }),
@@ -358,8 +358,9 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         self.host.approve(kind, repo_id, fingerprint);
     }
 
+    /// Rust fetch 서비스가 맡는 저장소인가 — **소스 종류(local·wsl)로** 정한다(`RepoMirror::resolve_fetch`). ssh 가 Rust 로 풀려도 여기서는 맡지 않는다(이중 fetch 방지)
     fn is_rust_repo(&self, repo_id: &str) -> bool {
-        matches!(self.mirror.resolve(repo_id), Resolved::Rust(_))
+        matches!(self.mirror.resolve_fetch(repo_id), Resolved::Rust(_))
     }
 
     // ── 예약 ──────────────────────────────────────────────────────────────

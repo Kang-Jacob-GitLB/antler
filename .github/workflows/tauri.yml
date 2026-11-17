@@ -84,9 +84,10 @@ jobs:
       # TS 테스트 대응표는 tests/golden/ssh/test-map.json(vitest 가 누락을 강제)
       # ssh: SSH 실행기(russh, Phase 5 PR 2)의 통합 테스트 — 127.0.0.1 의 프로세스 안 russh::server 만 쓴다(외부 접속·사용자의 ~/.ssh·agent 를 쓰지 않는다). 원격 git 은 LocalExecutor 로 돌린다.
       # 실제 sshd 를 쓰는 시험은 #[ignore] 라 CI 에서 돌지 않는다
+      # ssh_route: ssh 저장소 라우팅(Phase 5 PR 3) — sshHost 검사·스위치·쓰지 않는 호스트의 연결 정리·앱 배선의 소스 검사. 같은 루프백 서버만 쓴다(channels 의 *_ssh_에서도_* 시험도 같다)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden --test ssh
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden --test ssh --test ssh_route
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy

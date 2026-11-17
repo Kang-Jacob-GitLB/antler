@@ -1,4 +1,4 @@
-//! SSH 실행기(`src/main/executors/ssh`)의 이식 — Phase 5. PR 1 은 순수 로직(소켓·russh 없음), PR 2 는 russh 실행기(`connection`·`auth`·`executor`). 아직 앱에서 호출하지 않는다.
+//! SSH 실행기(`src/main/executors/ssh`)의 이식 — Phase 5. PR 1 은 순수 로직(소켓·russh 없음), PR 2 는 russh 실행기(`connection`·`auth`·`executor`). PR 3 부터 라우터가 `SshPool` 로 호출한다.
 //!
 //! - [`config`]: `~/.ssh/config` 파서와 호스트 해석(`config.ts`). ProxyCommand·해당 Match 는 `unsupported` 로 표시해 연결 쪽이 거부하게 한다.
 //! - [`known_hosts`]: known_hosts 검증(`knownHosts.ts`). 키를 자동으로 등록하지 않는다(TOFU 없음) — **쓰기 기능이 없다.**
@@ -22,6 +22,7 @@ mod auth;
 pub mod config;
 mod connection;
 mod executor;
+mod pool;
 pub mod known_hosts;
 pub mod quote;
 mod stream;
@@ -30,6 +31,7 @@ pub mod win32_path;
 pub use auth::AgentSetting;
 pub use connection::{EnvFn, SshOptions, Timeouts, DEFAULT_MAX_CHANNELS, SHELL_PROBE};
 pub use executor::SshExecutor;
+pub use pool::SshPool;
 pub use stream::{is_read_ahead_exceeded, ReadAheadExceeded, SshStream, STREAM_AHEAD_LIMIT};
 
 /// JS `.` 가 맞추는 코드 단위인가(줄 끝 문자 제외)
