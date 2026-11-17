@@ -1,0 +1,714 @@
+{
+  "scenarios": [
+    {
+      "args": [
+        {
+          "paths": [
+            "a.bin",
+            "b.txt"
+          ]
+        }
+      ],
+      "name": "커밋이 없는 저장소: 작업 트리 .gitattributes 만 본다",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.psd",
+            "b.txt",
+            "dir/c.psd"
+          ],
+          "rev": "2bc7916bd76f8a5ae441c5b95c73aa4d99af38d6"
+        }
+      ],
+      "name": "커밋된 루트 .gitattributes 와 작업 트리의 차이",
+      "result": {
+        "data": [
+          "a.psd",
+          "dir/c.psd"
+        ],
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.psd",
+            "b.txt",
+            "dir/c.psd"
+          ]
+        }
+      ],
+      "name": "커밋된 루트 .gitattributes 와 작업 트리의 차이",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.psd"
+          ],
+          "rev": "2BC7916BD76F8A5AE441C5B95C73AA4D99AF38D6"
+        }
+      ],
+      "name": "커밋된 루트 .gitattributes 와 작업 트리의 차이",
+      "result": {
+        "data": [
+          "a.psd"
+        ],
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.psd"
+          ],
+          "rev": "2bc7916"
+        }
+      ],
+      "name": "커밋된 루트 .gitattributes 와 작업 트리의 차이",
+      "result": {
+        "data": [
+          "a.psd"
+        ],
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "assets/a.png",
+            "assets/b.txt",
+            "a.png"
+          ],
+          "rev": "f25ceee53a257884f1fb6c56b1199e63f4e5c288"
+        }
+      ],
+      "name": "하위 폴더의 .gitattributes 만 있어도 LFS 를 쓴다",
+      "result": {
+        "data": [
+          "assets/a.png"
+        ],
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "assets/a.png",
+            "assets/b.txt",
+            "a.png"
+          ]
+        }
+      ],
+      "name": "하위 폴더의 .gitattributes 만 있어도 LFS 를 쓴다",
+      "result": {
+        "data": [
+          "assets/a.png"
+        ],
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.bin",
+            "b.txt"
+          ]
+        }
+      ],
+      "name": ".git/info/attributes 만 있어도 LFS 를 쓴다",
+      "result": {
+        "data": [
+          "a.bin"
+        ],
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.bin",
+            "b.txt"
+          ],
+          "rev": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58"
+        }
+      ],
+      "name": ".git/info/attributes 만 있어도 LFS 를 쓴다",
+      "result": {
+        "data": [
+          "a.bin"
+        ],
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        {
+          "paths": []
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        {
+          "paths": [],
+          "rev": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        null
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "x"
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid paths",
+        "ok": false
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        5
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid paths",
+        "ok": false
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        []
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid paths",
+        "ok": false
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        {}
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid paths",
+        "ok": false
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        {
+          "paths": "a"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid paths",
+        "ok": false
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        {
+          "paths": {
+            "length": 1
+          }
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid paths",
+        "ok": false
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            ""
+          ]
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a\u0000b"
+          ]
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 11
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            5
+          ]
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 12
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            null
+          ]
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 13
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "ok.psd",
+            {}
+          ]
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 14
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a"
+          ],
+          "rev": "--help"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 15
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a"
+          ],
+          "rev": "abc"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 16
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a"
+          ],
+          "rev": "abcd\n"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 17
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a"
+          ],
+          "rev": "zz12"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 18
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a"
+          ],
+          "rev": "HEAD"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 19
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a"
+          ],
+          "rev": null
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 20
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a"
+          ],
+          "rev": 5
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 21
+    },
+    {
+      "args": [
+        {
+          "paths": 5,
+          "rev": "--help"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid commit hash",
+        "ok": false
+      },
+      "step": 22
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.psd"
+          ],
+          "rev": "0123456789abcdef0123456789abcdef01234567"
+        }
+      ],
+      "name": "lfsPaths 요청 검증",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 23
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "-weird.psd",
+            "--help.psd",
+            "--output=x.psd",
+            ":(top)a.psd",
+            ":!b.psd",
+            "we ird.psd",
+            "한글 😀.psd",
+            "a\nb.psd",
+            "*.psd",
+            "dir/../a.psd",
+            "plain.txt"
+          ],
+          "rev": "fbb3041d48988d4827b8321b1875c903cee505fd"
+        }
+      ],
+      "name": "lfsPaths: 특수한 경로는 옵션·pathspec 이 아니라 경로다",
+      "result": {
+        "data": [
+          "-weird.psd",
+          "--help.psd",
+          "--output=x.psd",
+          ":(top)a.psd",
+          ":!b.psd",
+          "we ird.psd",
+          "한글 😀.psd",
+          "a\nb.psd",
+          "*.psd",
+          "dir/../a.psd"
+        ],
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "-weird.psd",
+            "--help.psd",
+            "--output=x.psd",
+            ":(top)a.psd",
+            ":!b.psd",
+            "we ird.psd",
+            "한글 😀.psd",
+            "a\nb.psd",
+            "*.psd",
+            "dir/../a.psd",
+            "plain.txt"
+          ]
+        }
+      ],
+      "name": "lfsPaths: 특수한 경로는 옵션·pathspec 이 아니라 경로다",
+      "result": {
+        "data": [
+          "-weird.psd",
+          "--help.psd",
+          "--output=x.psd",
+          ":(top)a.psd",
+          ":!b.psd",
+          "we ird.psd",
+          "한글 😀.psd",
+          "a\nb.psd",
+          "*.psd",
+          "dir/../a.psd"
+        ],
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "../outside.psd"
+          ],
+          "rev": "fbb3041d48988d4827b8321b1875c903cee505fd"
+        }
+      ],
+      "name": "lfsPaths: 특수한 경로는 옵션·pathspec 이 아니라 경로다",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "../outside.psd"
+          ]
+        }
+      ],
+      "name": "lfsPaths: 특수한 경로는 옵션·pathspec 이 아니라 경로다",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        {
+          "paths": [
+            "a.psd",
+            "a.psd"
+          ],
+          "rev": "fbb3041d48988d4827b8321b1875c903cee505fd"
+        }
+      ],
+      "name": "lfsPaths: 특수한 경로는 옵션·pathspec 이 아니라 경로다",
+      "result": {
+        "data": [
+          "a.psd",
+          "a.psd"
+        ],
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        {
+          "paths": {
+            "count": 1500,
+            "first": "dir/xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy0",
+            "last": "dir/xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy1499"
+          },
+          "rev": "31ed0bdead8f3bf571655c4459b6fa572a0ab38d"
+        }
+      ],
+      "name": "lfsPaths: 경로가 아주 많으면 앞 1000개만 묶어서 처리한다",
+      "result": {
+        "data": {
+          "count": 1000,
+          "first": "dir/xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy0",
+          "last": "dir/xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy999"
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        {
+          "paths": {
+            "count": 1000,
+            "first": "x0",
+            "last": "x999"
+          }
+        }
+      ],
+      "name": "lfsPaths: 경로가 아주 많으면 앞 1000개만 묶어서 처리한다",
+      "result": {
+        "data": {
+          "count": 1000,
+          "first": "x0",
+          "last": "x999"
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        {
+          "paths": {
+            "count": 1001,
+            "first": "x0",
+            "last": "x1000"
+          }
+        }
+      ],
+      "name": "lfsPaths: 경로가 아주 많으면 앞 1000개만 묶어서 처리한다",
+      "result": {
+        "data": {
+          "count": 1000,
+          "first": "x0",
+          "last": "x999"
+        },
+        "ok": true
+      },
+      "step": 6
+    }
+  ]
+}

@@ -21,6 +21,7 @@ const TARGET_TESTS = [
   'wip',
   'wipFilter',
   'wipFilterNonUtf8',
+  'noIndexFilter',
   'hostileRepo',
   'submodule',
   'defaultBranch',

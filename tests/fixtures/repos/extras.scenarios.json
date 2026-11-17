@@ -1,0 +1,180 @@
+{
+  "_": "git:repoExtras·git:lfsPaths 채널 패리티 시나리오. TS(tests/goldenChannels.test.ts → RepoService.repoExtras·lfsPaths)와 Rust(src-tauri/tests/channels.rs → Router::route)가 시나리오마다 <repo>.fi 를 새 디렉터리에 import 해 steps 를 순서대로 돈다. 단계: { git: [인자…] }(그 저장소에서 날 git 실행 — 작성자·시각은 고정 환경), { write: [저장소 기준 경로, 내용] }(디렉터리를 만들고 파일을 쓴다 — .git/info/attributes 도 된다), { extras: true }, { lfsPaths: [요청?] }(요청을 생략하면 undefined, null 이면 null — git:lfsPaths 의 인자 그대로, requestId 는 하네스가 붙인다). msg: true 면 ERROR 의 문구도 비교한다(검증이 만든 문구만 — TypeError 문구는 TS·Rust 가 다르다). 인자 안의 '@rev:<식>' 은 git rev-parse 결과 해시로, { '$short': [값, n] }·{ '$upper': 값 }·{ '$cat': [조각…] }·{ '$gen': [접두사, n] }·{ '$str': [접두사, 글자, n] } 은 로그 시나리오(log.scenarios.json)와 같은 규칙이다. lfsPaths 결과가 20개를 넘으면 {count, first, last} 로 줄여 비교한다. 결과는 tests/golden/channels/{repoExtras,lfsPaths}.json. 작업 트리·info/attributes 를 읽는 단계(diff --no-index)에 저장소가 심은 필터를 둔 시나리오는 없다 — 그 읽기가 필터를 실행하는 알려진 문제는 docs/tauri.md 의 PR 5 절에 있다.",
+  "scenarios": [
+    {
+      "name": "LFS 규칙이 없는 저장소",
+      "repo": "basic",
+      "steps": [{ "extras": true }]
+    },
+    {
+      "name": "커밋이 없는 저장소: 작업 트리 .gitattributes 만 본다",
+      "repo": "empty",
+      "steps": [
+        { "extras": true },
+        { "write": [".gitattributes", "*.bin filter=lfs\n"] },
+        { "extras": true },
+        { "write": [".gitattributes", "# *.bin filter=lfs\n"] },
+        { "extras": true },
+        { "lfsPaths": [{ "paths": ["a.bin", "b.txt"] }] }
+      ]
+    },
+    {
+      "name": "커밋된 루트 .gitattributes 와 작업 트리의 차이",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "write": [".gitattributes", "*.psd filter=lfs diff=lfs merge=lfs -text\n"] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "lfs"] },
+        { "extras": true },
+        { "write": [".gitattributes", "*.txt text\n"] },
+        { "extras": true },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": ["a.psd", "b.txt", "dir/c.psd"] }] },
+        { "lfsPaths": [{ "paths": ["a.psd", "b.txt", "dir/c.psd"] }] },
+        { "lfsPaths": [{ "rev": { "$upper": "@rev:HEAD" }, "paths": ["a.psd"] }] },
+        { "lfsPaths": [{ "rev": { "$short": ["@rev:HEAD", 7] }, "paths": ["a.psd"] }] }
+      ]
+    },
+    {
+      "name": "하위 폴더의 .gitattributes 만 있어도 LFS 를 쓴다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "write": ["assets/.gitattributes", "*.png filter=lfs diff=lfs merge=lfs -text\n"] },
+        { "write": ["assets/a.png", "x"] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "assets"] },
+        { "extras": true },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": ["assets/a.png", "assets/b.txt", "a.png"] }] },
+        { "lfsPaths": [{ "paths": ["assets/a.png", "assets/b.txt", "a.png"] }] }
+      ]
+    },
+    {
+      "name": ".git/info/attributes 만 있어도 LFS 를 쓴다",
+      "repo": "basic",
+      "steps": [
+        { "extras": true },
+        { "write": [".git/info/attributes", "*.bin filter=lfs\n"] },
+        { "extras": true },
+        { "lfsPaths": [{ "paths": ["a.bin", "b.txt"] }] },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": ["a.bin", "b.txt"] }] }
+      ]
+    },
+    {
+      "name": "filter=lfs 토큰 경계(주석·접미사·다른 속성 이름·탭·CRLF)",
+      "repo": "empty",
+      "steps": [
+        { "write": [".gitattributes", "*.psd filter=lfsx\n*.a myfilter=lfs\n# *.b filter=lfs\n"] },
+        { "extras": true },
+        { "write": [".gitattributes", "*.a\tfilter=lfs\r\n"] },
+        { "extras": true },
+        { "write": [".gitattributes", "  *.a  filter=lfs  \n"] },
+        { "extras": true }
+      ]
+    },
+    {
+      "name": "속성 파일 크기 한계(커밋된 것 256KB·작업 트리 읽기 출력 512KB)",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "write": [".gitattributes", { "$str": ["*.psd filter=lfs\n#", "x", 200000] }] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "big ok"] },
+        { "write": [".gitattributes", "*.txt text\n"] },
+        { "extras": true },
+        { "write": [".gitattributes", { "$str": ["*.psd filter=lfs\n#", "x", 300000] }] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "big too large"] },
+        { "write": [".gitattributes", "*.txt text\n"] },
+        { "extras": true },
+        { "write": [".gitattributes", { "$str": ["*.psd filter=lfs\n#", "x", 600000] }] },
+        { "extras": true }
+      ]
+    },
+    {
+      "name": "gitflow 설정(저장소 설정만, 안전한 값만)",
+      "repo": "basic",
+      "steps": [
+        { "extras": true },
+        { "git": ["config", "gitflow.branch.master", "main"] },
+        { "git": ["config", "gitflow.branch.develop", "dev"] },
+        { "git": ["config", "gitflow.prefix.feature", "feat/"] },
+        { "git": ["config", "gitflow.prefix.versiontag", "v"] },
+        { "extras": true },
+        { "git": ["config", "gitflow.prefix.release", "$(touch pwned)"] },
+        { "git": ["config", "gitflow.prefix.hotfix", "a\tb"] },
+        { "git": ["config", "gitflow.prefix.bugfix", { "$str": ["", "x", 101] }] },
+        { "git": ["config", "gitflow.prefix.support", { "$str": ["", "x", 100] }] },
+        { "extras": true }
+      ]
+    },
+    {
+      "name": "gitflow: 쓸 만한 키가 없으면 null",
+      "repo": "basic",
+      "steps": [
+        { "git": ["config", "gitflow.prefix.versiontag", "v"] },
+        { "git": ["config", "gitflow.unknown", "x"] },
+        { "git": ["config", "gitflow.branch.master", "a\tb"] },
+        { "extras": true }
+      ]
+    },
+    {
+      "name": "lfsPaths 요청 검증",
+      "repo": "basic",
+      "steps": [
+        { "lfsPaths": [{ "paths": [] }] },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": [] }] },
+        { "lfsPaths": [] },
+        { "lfsPaths": [null] },
+        { "lfsPaths": ["x"], "msg": true },
+        { "lfsPaths": [5], "msg": true },
+        { "lfsPaths": [[]], "msg": true },
+        { "lfsPaths": [{}], "msg": true },
+        { "lfsPaths": [{ "paths": "a" }], "msg": true },
+        { "lfsPaths": [{ "paths": { "length": 1 } }], "msg": true },
+        { "lfsPaths": [{ "paths": [""] }], "msg": true },
+        { "lfsPaths": [{ "paths": ["a\u0000b"] }], "msg": true },
+        { "lfsPaths": [{ "paths": [5] }], "msg": true },
+        { "lfsPaths": [{ "paths": [null] }], "msg": true },
+        { "lfsPaths": [{ "paths": ["ok.psd", {}] }], "msg": true },
+        { "lfsPaths": [{ "rev": "--help", "paths": ["a"] }], "msg": true },
+        { "lfsPaths": [{ "rev": "abc", "paths": ["a"] }], "msg": true },
+        { "lfsPaths": [{ "rev": "abcd\n", "paths": ["a"] }], "msg": true },
+        { "lfsPaths": [{ "rev": "zz12", "paths": ["a"] }], "msg": true },
+        { "lfsPaths": [{ "rev": "HEAD", "paths": ["a"] }], "msg": true },
+        { "lfsPaths": [{ "rev": null, "paths": ["a"] }], "msg": true },
+        { "lfsPaths": [{ "rev": 5, "paths": ["a"] }], "msg": true },
+        { "lfsPaths": [{ "rev": "--help", "paths": 5 }], "msg": true },
+        { "lfsPaths": [{ "rev": "0123456789abcdef0123456789abcdef01234567", "paths": ["a.psd"] }] }
+      ]
+    },
+    {
+      "name": "lfsPaths: 특수한 경로는 옵션·pathspec 이 아니라 경로다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "write": [".gitattributes", "*.psd filter=lfs\n"] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "lfs"] },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": ["-weird.psd", "--help.psd", "--output=x.psd", ":(top)a.psd", ":!b.psd", "we ird.psd", "한글 😀.psd", "a\nb.psd", "*.psd", "dir/../a.psd", "plain.txt"] }] },
+        { "lfsPaths": [{ "paths": ["-weird.psd", "--help.psd", "--output=x.psd", ":(top)a.psd", ":!b.psd", "we ird.psd", "한글 😀.psd", "a\nb.psd", "*.psd", "dir/../a.psd", "plain.txt"] }] },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": ["../outside.psd"] }] },
+        { "lfsPaths": [{ "paths": ["../outside.psd"] }] },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": ["a.psd", "a.psd"] }] }
+      ]
+    },
+    {
+      "name": "lfsPaths: 경로가 아주 많으면 앞 1000개만 묶어서 처리한다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "write": [".gitattributes", "x* filter=lfs\n"] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "lfs"] },
+        { "lfsPaths": [{ "rev": "@rev:HEAD", "paths": { "$gen": ["dir/xyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", 1500] } }] },
+        { "lfsPaths": [{ "paths": { "$gen": ["x", 1000] } }] },
+        { "lfsPaths": [{ "paths": { "$gen": ["x", 1001] } }] }
+      ]
+    }
+  ]
+}

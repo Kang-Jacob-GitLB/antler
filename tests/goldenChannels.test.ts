@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AbortError, GitError } from '../src/main/executors/GitExecutor'
 import { ProcessQueue } from '../src/main/executors/ProcessQueue'
@@ -23,6 +23,7 @@ import { knownHostsLine, makeHome, newKeyPair, startServer, type TestServer } fr
 //  - tests/golden/channels/{resolveRev,tree,blob,onRemote}.json: 코드 탐색기 채널 시나리오(tests/fixtures/repos/code.scenarios.json — 한 서비스 인스턴스가 순서대로 돌아 캐시 적중도 본다. 큰 파일은 setup 으로 시험 시점에 만든다)
 //  - tests/golden/channels/{refs,refsDetails}.json: 사이드바 ref 채널 시나리오(tests/fixtures/repos/refs.scenarios.json — 다단계: 저장소 조작 뒤 조회. knownDiff 는 정렬 근사 때문에 Rust 가 다른 순서를 내는 알려진 차이)
 //  - tests/golden/channels/{search,activity}.json: 검색·활동 채널 시나리오(tests/fixtures/repos/search.scenarios.json — 다단계: 저장소 조작 뒤 조회. 악성 질의·범위·해시 갈래·스태시 같은 닿지 않는 커밋을 포함한다)
+//  - tests/golden/channels/{repoExtras,lfsPaths}.json: LFS·gitflow 채널 시나리오(tests/fixtures/repos/extras.scenarios.json — 다단계: 저장소·작업 트리·info/attributes·설정 조작 뒤 조회. 요청 검증·묶음·1000개 상한을 포함한다)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 //  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
@@ -542,6 +543,81 @@ describe('검색·활동 채널 골든(channels/{search,activity}.json)', () => 
       await svc.dispose()
     }
     for (const channel of ['search', 'activity'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
+  }, 180_000)
+})
+
+// ── LFS·gitflow: git:repoExtras · git:lfsPaths ────────────────
+
+type ExtrasStep = { git: string[] } | { write: [string, string] } | { extras: true } | { lfsPaths: unknown[]; msg?: boolean }
+interface ExtrasScenario {
+  name: string
+  repo: string
+  steps: ExtrasStep[]
+}
+
+/** 골든에 남기는 인자: 요청의 paths 가 20개를 넘으면 {count, first, last} 로 줄인다. Rust 테스트(channels.rs 의 `summarize_lfs_args`)도 같은 규칙이다 */
+function summarizeLfsArgs(list: unknown[]): unknown[] {
+  const req = list[0] as { paths?: unknown } | null | undefined
+  if (!req || typeof req !== 'object' || !Array.isArray(req.paths) || req.paths.length <= 20) return list
+  const p = req.paths
+  return [{ ...req, paths: { count: p.length, first: p[0], last: p[p.length - 1] } }, ...list.slice(1)]
+}
+
+describe('LFS·gitflow 채널 골든(channels/{repoExtras,lfsPaths}.json)', () => {
+  const scenarios = (JSON.parse(readFileSync(join(FIXTURES, 'extras.scenarios.json'), 'utf8')) as { scenarios: ExtrasScenario[] }).scenarios
+  let root: string
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, ...REFS_STEP_ENV, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chanextras-'))
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const out: Record<'repoExtras' | 'lfsPaths', unknown[]> = { repoExtras: [], lfsPaths: [] }
+    for (const [si, sc] of scenarios.entries()) {
+      const dir = join(root, `s${si}`)
+      mkdirSync(dir)
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${sc.repo}.fi`)))
+      const config = new ConfigStore(join(root, `s${si}.config.json`))
+      const id = config.addRepo({ sourceId: 'local', path: dir, name: sc.repo }).id
+      const svc = new RepoService(config)
+      const rev = (expr: string): string => git(dir, ['rev-parse', expr])
+      for (const [i, step] of sc.steps.entries()) {
+        if ('git' in step) {
+          git(dir, expand(step.git, rev) as string[])
+          continue
+        }
+        if ('write' in step) {
+          const [path, content] = expand(step.write, rev) as [string, string]
+          mkdirSync(dirname(join(dir, path)), { recursive: true })
+          writeFileSync(join(dir, path), content)
+          continue
+        }
+        let result: Record<string, unknown>
+        if ('extras' in step) {
+          try {
+            result = { ok: true, data: JSON.parse(JSON.stringify(await svc.repoExtras(id))) }
+          } catch (err) {
+            result = { ok: false, code: codeOf(err) }
+          }
+          out.repoExtras.push({ name: sc.name, step: i, result })
+          continue
+        }
+        const list = expand(step.lfsPaths, rev) as unknown[]
+        try {
+          const data = JSON.parse(JSON.stringify(await svc.lfsPaths(id, list[0] as never, `req-${i}`))) as string[]
+          result = { ok: true, data: data.length > 20 ? { count: data.length, first: data[0], last: data[data.length - 1] } : data }
+        } catch (err) {
+          result = { ok: false, code: codeOf(err), ...(step.msg ? { error: (err as Error).message } : {}) }
+        }
+        out.lfsPaths.push({ name: sc.name, step: i, args: summarizeLfsArgs(list), result })
+      }
+      await svc.dispose()
+    }
+    for (const channel of ['repoExtras', 'lfsPaths'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
   }, 180_000)
 })
 

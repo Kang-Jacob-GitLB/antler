@@ -46,6 +46,7 @@ use crate::git::fetch::service::{FetchControl, FetchPrefs};
 use crate::git::file_channels::{
     compare, estimate_compare_bytes, estimate_diff_bytes, file_blame, file_diff, file_history, parse_compare, BlameRequest, DiffRequest, HistoryRequest,
 };
+use crate::git::lfs::{lfs_paths, repo_extras, LfsPathsRequest};
 use crate::git::log_service::{parse_query, LogService, NoteSink};
 use crate::git::lru::LruCache;
 use crate::git::refs_service::{refs_details, refs_snapshot};
@@ -72,6 +73,8 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:refsDetails",
     "git:search",
     "git:activity",
+    "git:repoExtras",
+    "git:lfsPaths",
 ];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
@@ -197,7 +200,11 @@ enum HistoryJob {
     Search(SearchRequest),
     Activity(ActivityRequest),
 }
-
+/// 검증을 마친 `git:repoExtras`·`git:lfsPaths` 요청
+enum ExtrasJob {
+    Extras,
+    LfsPaths(LfsPathsRequest),
+}
 
 fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ExecError> {
     serde_json::to_value(v).map_err(|e| ExecError::Other { message: e.to_string() })
@@ -725,6 +732,7 @@ impl Router {
             "git:resolveRev" | "git:tree" | "git:blob" | "git:onRemote" => self.git_code_channel(channel, &args).await,
             "git:refs" | "git:refsDetails" => self.git_refs_channel(channel, &args).await,
             "git:search" | "git:activity" => self.git_history_channel(channel, &args).await,
+            "git:repoExtras" | "git:lfsPaths" => self.git_extras_channel(channel, &args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -1119,6 +1127,53 @@ impl Router {
         })
     }
 
+    /// LFS·gitflow 채널: `git:repoExtras(repoId)`·`git:lfsPaths(repoId, {rev?, paths}, requestId?)`. 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다)
+    /// 통과한 값만 `git::lfs` 의 argv 빌더로 간다. `lfsPaths` 만 requestId 로 취소할 수 있다. 캐시·합치기는 없다(TS 도 같다 — 설정이 바뀔 수 있다). github 소스는 미러가 사이드카로 보낸다
+    async fn git_extras_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note(channel, "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        let job = if channel == "git:lfsPaths" { LfsPathsRequest::parse(args.get(1).copied().flatten()).map(ExtrasJob::LfsPaths) } else { Ok(ExtrasJob::Extras) };
+        let job = match job {
+            Ok(j) => j,
+            Err(e) => return Routed::Done(err_env(&e.to_string(), e.envelope_code())),
+        };
+        // 등록은 첫 await 전에 한다. 빈 문자열은 requestId 없음이다
+        let reg = match (&job, args.get(2)) {
+            (ExtrasJob::LfsPaths(_), Some(Some(Value::String(id)))) if is_request_id(id) => Some(self.cancels.register(id)),
+            _ => None,
+        };
+        let token = reg.as_ref().map_or_else(CancellationToken::new, |r| r.token.clone());
+        self.note(channel, "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let result = self.extras_job(&target, job, &token).await;
+        drop(reg);
+        Routed::Done(match result {
+            Ok(data) => ok_env(Arc::try_unwrap(data).unwrap_or_else(|a| (*a).clone())),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    async fn extras_job(&self, target: &Target, job: ExtrasJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+        let rt = self.runtime(target)?;
+        let (exec, path) = (rt.exec.clone(), target.path().to_string());
+        match job {
+            // 큐 슬롯 하나 안에서 git 여러 번이 동시에 돈다. 취소 신호가 없다(TS 도 같다)
+            ExtrasJob::Extras => rt.queue.run(None, None, move || async move { Ok(Arc::new(to_value(&repo_extras(&exec, &path, &RunOpts::default()).await)?)) }).await,
+            // 취소는 이 요청의 프로세스에 바로 닿는다(`withSignal`)
+            ExtrasJob::LfsPaths(req) => {
+                let t = token.clone();
+                rt.queue.run(None, Some(token.clone()), move || async move { Ok(Arc::new(json!(lfs_paths(&exec, &path, &req, &RunOpts::with_cancel(t)).await?))) }).await
+            }
+        }
+    }
+
     async fn history_job(&self, repo_id: &str, target: &Target, job: HistoryJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
         let rt = self.runtime(target)?;
         let (exec, path) = (rt.exec.clone(), target.path().to_string());
@@ -1346,8 +1401,9 @@ mod tests {
     async fn 사이드카로_가는_경우() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache")]);
         let r = Router::new(true, false, m.clone());
-        // 채널이 등록되지 않았다
-        assert!(is_sidecar(&r.route("git:lfsPaths", &json!(["a"])).await));
+        // 채널이 등록되지 않았다(PR 6·7 까지 사이드카에 남는 git 채널은 피하고 6b 까지 남는 비 git 채널을 쓴다)
+        assert!(!RUST_CHANNELS.contains(&"config:get"));
+        assert!(is_sidecar(&r.route("config:get", &json!(["a"])).await));
         // 미러에 없는 저장소·ssh·github
         for id in ["nope", "s", "g"] {
             assert!(is_sidecar(&r.route("git:commit", &json!([id, "abcd"])).await), "{id}");
@@ -1422,6 +1478,25 @@ mod tests {
         let r = Router::new(true, false, m.clone());
         let off = Router::new(false, false, m);
         for (ch, tail) in [("git:search", json!(["q"])), ("git:activity", json!([]))] {
+            assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+            let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
+            for id in ["nope", "s", "g"] {
+                assert!(is_sidecar(&r.route(ch, &call(id)).await), "{id} {ch}");
+            }
+            assert!(is_sidecar(&off.route(ch, &call("a")).await), "{ch}");
+            let env = envelope(r.route(ch, &call("unc")).await);
+            assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+        }
+        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+    }
+
+    /// LFS·gitflow 채널의 소유도 같은 한 술어다 — 사이드카에는 이 채널의 소유 env 가 없다
+    #[tokio::test]
+    async fn lfs_채널의_소유는_다른_git_채널과_같은_한_술어다() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
+        let r = Router::new(true, false, m.clone());
+        let off = Router::new(false, false, m);
+        for (ch, tail) in [("git:repoExtras", json!([])), ("git:lfsPaths", json!([{ "paths": ["a"] }]))] {
             assert!(RUST_CHANNELS.contains(&ch), "{ch}");
             let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
             for id in ["nope", "s", "g"] {

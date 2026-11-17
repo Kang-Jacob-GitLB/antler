@@ -1,0 +1,227 @@
+{
+  "scenarios": [
+    {
+      "name": "LFS 규칙이 없는 저장소",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "커밋이 없는 저장소: 작업 트리 .gitattributes 만 본다",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "커밋이 없는 저장소: 작업 트리 .gitattributes 만 본다",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "name": "커밋이 없는 저장소: 작업 트리 .gitattributes 만 본다",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "name": "커밋된 루트 .gitattributes 와 작업 트리의 차이",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "name": "커밋된 루트 .gitattributes 와 작업 트리의 차이",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "name": "하위 폴더의 .gitattributes 만 있어도 LFS 를 쓴다",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "name": ".git/info/attributes 만 있어도 LFS 를 쓴다",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": ".git/info/attributes 만 있어도 LFS 를 쓴다",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "name": "filter=lfs 토큰 경계(주석·접미사·다른 속성 이름·탭·CRLF)",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "filter=lfs 토큰 경계(주석·접미사·다른 속성 이름·탭·CRLF)",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "name": "filter=lfs 토큰 경계(주석·접미사·다른 속성 이름·탭·CRLF)",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "name": "속성 파일 크기 한계(커밋된 것 256KB·작업 트리 읽기 출력 512KB)",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": true
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "name": "속성 파일 크기 한계(커밋된 것 256KB·작업 트리 읽기 출력 512KB)",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "name": "속성 파일 크기 한계(커밋된 것 256KB·작업 트리 읽기 출력 512KB)",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 12
+    },
+    {
+      "name": "gitflow 설정(저장소 설정만, 안전한 값만)",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "gitflow 설정(저장소 설정만, 안전한 값만)",
+      "result": {
+        "data": {
+          "gitflow": {
+            "develop": "dev",
+            "master": "main",
+            "prefixes": {
+              "feature": "feat/"
+            }
+          },
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "name": "gitflow 설정(저장소 설정만, 안전한 값만)",
+      "result": {
+        "data": {
+          "gitflow": {
+            "develop": "dev",
+            "master": "main",
+            "prefixes": {
+              "feature": "feat/",
+              "release": "$(touch pwned)",
+              "support": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          },
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "name": "gitflow: 쓸 만한 키가 없으면 null",
+      "result": {
+        "data": {
+          "gitflow": null,
+          "lfs": false
+        },
+        "ok": true
+      },
+      "step": 3
+    }
+  ]
+}

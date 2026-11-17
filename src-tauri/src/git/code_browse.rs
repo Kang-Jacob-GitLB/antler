@@ -219,7 +219,7 @@ pub fn parse_rev(v: Option<&Value>) -> Result<CommitId, ExecError> {
 }
 
 /// 요청 객체의 필드. 객체가 아닌 값은 필드가 없는 것과 같다(`req.rev` 가 undefined) — 단 `null`·인자 없음은 TS 에서 TypeError(code ERROR)라 `invalid request` 로 거절한다
-fn field<'a>(req: Option<&'a Value>, key: &str) -> Result<Option<&'a Value>, ExecError> {
+pub(crate) fn field<'a>(req: Option<&'a Value>, key: &str) -> Result<Option<&'a Value>, ExecError> {
     match req {
         None | Some(Value::Null) => Err(other("invalid request")),
         Some(Value::Object(o)) => Ok(o.get(key)),
