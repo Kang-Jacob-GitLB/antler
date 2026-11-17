@@ -995,15 +995,68 @@ fn run_step_git(step: &Value, origin: &Path, repo: &Path, port: u16) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn git_fetch_시나리오가_ts_골든과_같다() {
+    fetch_scenarios(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn git_fetch_ssh_시나리오가_ts_골든과_같다() {
+    fetch_scenarios(true).await;
+}
+
+/// target:'ssh' 시나리오의 환경: 루프백 SSH 서버·임시 홈·풀. `anomaly` 는 `refused`(닫힌 포트) 또는 `hostkey`(known_hosts 와 다른 호스트 키)다.
+/// 이 서버 너머의 저장소가 원격 저장소다(서버가 같은 PC 의 git 으로 돌린다). 임시 홈·`AgentSetting::Disabled` 만 쓴다
+struct FetchSshRig {
+    server: Option<ssh_server::TestServer>,
+    pool: Arc<SshPool>,
+    _home: Arc<ssh_common::Home>,
+}
+
+async fn fetch_ssh_rig(anomaly: Option<&str>) -> FetchSshRig {
+    let client = ssh_server::new_key();
+    let home = Arc::new(ssh_common::Home::new(&client));
+    let (server, port, known) = match anomaly {
+        // 닫힌 포트: 잠깐 열었다 닫아 빈 포트를 얻는다(서버는 없다)
+        Some("refused") => {
+            let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let port = l.local_addr().unwrap().port();
+            drop(l);
+            (None, port, ssh_server::new_key().public_key().clone())
+        }
+        other => {
+            let s = ssh_server::TestServer::start(ssh_server::Opts::new(vec![client.public_key().clone()])).await;
+            let known = if other == Some("hostkey") { ssh_server::new_key().public_key().clone() } else { s.host_key.clone() };
+            let port = s.port;
+            (Some(s), port, known)
+        }
+    };
+    home.write_config(&format!("Host test
+  HostName 127.0.0.1
+  Port {port}
+  User tester
+  IdentityFile {}
+  IdentitiesOnly yes
+", home.key_for_config()));
+    home.write_known_hosts(&ssh_common::known_hosts_line(port, &known));
+    let h = home.clone();
+    FetchSshRig { server, pool: SshPool::new(move |host| h.executor(host)), _home: home }
+}
+
+/// `ssh` 가 거짓이면 target 이 없는(local) 시나리오를, 참이면 target:'ssh' 시나리오를 TS 골든과 비교한다. 둘 다 비어 있으면 안 된다(조용히 건너뛰지 않는다)
+async fn fetch_scenarios(ssh: bool) {
+    // local·ssh 시나리오는 한 번에 하나만 돈다 — 둘이 겹치면 git 프로세스가 몰려 fetch 의 60초 제한(요청 시점부터)에 걸릴 수 있다(다른 무거운 시험과도 겹치는 러너에서 한 번 관측)
+    static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _gate = GATE.lock().await;
     let scenarios = read_json("tests/fixtures/repos/fetch.scenarios.json");
     let golden = read_json("tests/golden/channels/fetch.json");
     let scenarios = scenarios["scenarios"].as_array().expect("scenarios");
     let golden = golden["scenarios"].as_array().expect("golden scenarios");
     assert_eq!(scenarios.len(), golden.len(), "시나리오 수가 골든과 다르다 — UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts 로 골든을 다시 만든다");
+    let picked: Vec<(usize, &Value, &Value)> = scenarios.iter().zip(golden).enumerate().filter(|(_, (sc, _))| (sc.get("target") == Some(&json!("ssh"))) == ssh).map(|(n, (sc, g))| (n, sc, g)).collect();
+    assert!(!picked.is_empty(), "{} 시나리오가 하나도 없다", if ssh { "ssh" } else { "local" });
 
     let tmp = TempDir::new("fetchgold");
     let mut diffs = Vec::new();
-    for (n, (sc, g)) in scenarios.iter().zip(golden).enumerate() {
+    for (n, sc, g) in picked {
         let name = sc["name"].as_str().unwrap();
         assert_eq!(g["name"], sc["name"], "{name}: 골든의 시나리오 순서가 다르다");
         let dir = tmp.0.join(format!("s{n}"));
@@ -1015,10 +1068,26 @@ async fn git_fetch_시나리오가_ts_골든과_같다() {
         let server = (sc.get("server") == Some(&json!("auth401"))).then(auth_server);
         let port = server.as_ref().map_or(0, |s| s.0);
 
-        let mirror = mirror_of(&[("r", repo.as_path())]);
+        let ssh_rig = if ssh { Some(fetch_ssh_rig(sc.get("ssh").and_then(Value::as_str)).await) } else { None };
+        let mirror = match &ssh_rig {
+            None => mirror_of(&[("r", repo.as_path())]),
+            Some(_) => {
+                let m = RepoMirror::default();
+                m.apply(1, vec![MirrorRepo { id: "r".into(), kind: "ssh".into(), path: repo.to_string_lossy().into_owned(), distro: None, ssh_host: Some("test".into()) }]);
+                m
+            }
+        };
         let router = Router::new(true, false, mirror.clone());
         let host = RigHost::default();
-        let make_runner = |_: &antler_lib::mirror::Target| Arc::new(GitExecutor::Local(LocalExecutor::default()));
+        let pool = ssh_rig.as_ref().map(|r| r.pool.clone());
+        if let Some(pool) = &pool {
+            router.set_ssh_pool(pool.clone());
+            assert!(router.ssh_active());
+        }
+        let make_runner = move |t: &antler_lib::mirror::Target| match (t, &pool) {
+            (antler_lib::mirror::Target::Ssh { host, .. }, Some(pool)) => Arc::new(GitExecutor::Ssh(pool.get(host))),
+            _ => Arc::new(GitExecutor::Local(LocalExecutor::default())),
+        };
         router.set_fetch(Arc::new(FetchService::new(host.clone(), mirror, make_runner, Some(dir.join("no-hooks").to_string_lossy().into_owned()))));
 
         let mut got = Vec::new();
@@ -1054,6 +1123,9 @@ async fn git_fetch_시나리오가_ts_골든과_같다() {
             }));
         }
         router.shutdown();
+        if let Some(server) = ssh_rig.as_ref().and_then(|r| r.server.as_ref()) {
+            assert!(server.connections() <= 1, "{name}: 풀이 호스트당 연결 하나를 나눠 쓴다(연결 {})", server.connections());
+        }
         if let Some((port, stop, handle)) = server {
             stop.store(true, Ordering::SeqCst);
             let _ = std::net::TcpStream::connect(("127.0.0.1", port));

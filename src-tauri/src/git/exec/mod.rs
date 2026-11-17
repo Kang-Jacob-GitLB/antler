@@ -44,6 +44,11 @@ impl GitExecutor {
         }
     }
 
+    /// 정리돼 영구히 거부하는 실행기인가(SSH 만 해당한다). 이런 실행기를 쥔 쪽(fetch 서비스)은 버리고 새로 받아야 한다
+    pub fn is_closed(&self) -> bool {
+        matches!(self, GitExecutor::Ssh(e) if e.is_disposed())
+    }
+
     /// 같은 git 을 가리키는 실행기끼리 같은 키(git 버전 캐시용): 로컬은 실행 파일, WSL 은 배포판, SSH 는 호스트
     pub fn cache_key(&self) -> String {
         match self {

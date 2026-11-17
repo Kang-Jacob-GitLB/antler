@@ -63,11 +63,14 @@ function stable(value: unknown): string {
 
 // fetch: runFetch 가 실제로 spawn 에 주는 argv·환경(로컬)과 wsl.exe argv(WSL). Rust 의 fetch_args·FetchEnv·wsl_argv_with 가 같은 값을 만드는지 본다.
 // ssh 명령이 process.env 에 기대지 않도록 사용자 core.sshCommand 를 주거나(로컬) WSL 로만 본다(WSL 은 Windows 환경변수를 읽지 않는다)
-const FETCH_SAMPLES: { kind: 'local' | 'wsl'; remotes: string[]; hooksPath: string; allowFile: boolean; credentialHelpers: boolean; userSsh: string | null }[] = [
+const FETCH_SAMPLES: { kind: 'local' | 'wsl' | 'ssh'; remotes: string[]; hooksPath: string; allowFile: boolean; credentialHelpers: boolean; userSsh: string | null }[] = [
   { kind: 'local', remotes: ['origin'], hooksPath: 'C:/Users/me/no-hooks', allowFile: false, credentialHelpers: false, userSsh: 'ssh -F x' },
   { kind: 'local', remotes: ['origin', 'up stream', '-x', 'a:b', '한글'], hooksPath: '/tmp/no-hooks', allowFile: true, credentialHelpers: true, userSsh: 'ssh -i "k k"' },
   { kind: 'wsl', remotes: ['origin'], hooksPath: '/dev/null', allowFile: false, credentialHelpers: false, userSsh: null },
-  { kind: 'wsl', remotes: ['origin', '--upload-pack=evil', 'x y'], hooksPath: '/dev/null', allowFile: true, credentialHelpers: true, userSsh: 'ssh -J h' }
+  { kind: 'wsl', remotes: ['origin', '--upload-pack=evil', 'x y'], hooksPath: '/dev/null', allowFile: true, credentialHelpers: true, userSsh: 'ssh -J h' },
+  // ssh: 훅은 /dev/null, ssh 명령은 원격 저장소의 사용자 core.sshCommand 또는 BatchMode 기본(GIT_SSH_COMMAND·GIT_SSH 는 읽지 않는다). 원격 셸이 받는 명령 문자열이 곧 호출이다
+  { kind: 'ssh', remotes: ['origin'], hooksPath: '/dev/null', allowFile: false, credentialHelpers: false, userSsh: null },
+  { kind: 'ssh', remotes: ['origin', 'up stream', '-x', "it's", '한글'], hooksPath: '/dev/null', allowFile: true, credentialHelpers: true, userSsh: 'ssh -i "k k" -F x' }
 ]
 
 async function captureFetch(): Promise<unknown[]> {
@@ -78,7 +81,19 @@ async function captureFetch(): Promise<unknown[]> {
       ...inspectEntries(s.userSsh ? parseConfigList(`global\0core.sshcommand\n${s.userSsh}\0`) : []),
       remoteNames: s.remotes
     }
-    const exec = s.kind === 'local' ? new LocalExecutor() : new WslExecutor('Ubuntu')
+    // ssh 는 연결 없이 SshExecutor.run 이 원격 셸에 보내는 명령(`buildRemoteCommand(repo, args, { ...GIT_ENV, ...opts.env })`)을 그대로 적는다
+    const exec =
+      s.kind === 'local'
+        ? new LocalExecutor()
+        : s.kind === 'wsl'
+          ? new WslExecutor('Ubuntu')
+          : ({
+              kind: 'ssh',
+              run: async (repoPath: string, args: string[], opts: { env?: Record<string, string> } = {}) => {
+                spawned.push({ command: 'ssh', argv: [buildRemoteCommand(repoPath, args, { ...GIT_ENV, ...opts.env })], env: {} })
+                return { code: 0, stdout: Buffer.alloc(0), stderr: '' }
+              }
+            } as unknown as LocalExecutor)
     await runFetch(exec, '/home/me/repo', ins, { hooksPath: s.hooksPath, allowFile: s.allowFile, credentialHelpers: s.credentialHelpers })
     const keys = [...new Set([...Object.keys(GIT_ENV), ...Object.keys(fetchEnv({ sshCommand: '', allowFile: false }))])]
     out.push({

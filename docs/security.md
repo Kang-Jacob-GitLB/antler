@@ -54,6 +54,14 @@ Jira 토큰은 Rust 프로세스 밖(renderer·사이드카)으로 나가지 않
 GitHub 토큰은 renderer 로 가지 않고, 사이드카에 남는 원격 전용 저장소의 git fetch 인증용 **메모리 사본**만 사이드카 stdin(`ghToken`, `ANTLER_RUST_API=1` 일 때만)으로 간다 — env·인자·로그에는 싣지 않는다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
 리다이렉트를 따라가지 않으며, `jira:openExternal` 은 연결한 사이트의 https 주소만, `gh:openExternal` 은 `https://github.com` 의 주소만 연다. 자세한 것은 docs/tauri.md "PR 6"·"PR 9".
 
+**Tauri 판의 SSH**(`src-tauri/src/git/exec/ssh/`, `russh`): Electron 판(`ssh2` + 자체 설정 파서)과 같은 규칙을 Rust 로 옮겼다. 호스트 키는 known_hosts 로만 검증한다(TOFU 없음 — 모르는 호스트·키가 바뀐 호스트·폐기된 키는 거부하고
+ssh CLI 로 직접 수락하라고 안내한다. ProxyJump 는 홉마다 검증). `ProxyCommand`·`ProxyCommand` 가 걸리는 `Match` 는 설정을 읽는 단계에서 거부한다. 연결 뒤 원격 셸이 POSIX 인지 확인하는 명령(`echo 'an''tler'`)이 통과해야 사용자 값이 든 명령을 보낸다(Windows `cmd` 서버는 거부).
+인증은 ssh-agent 와 암호 없는 키 파일뿐이다(password·keyboard-interactive·known_hosts 쓰기·포트 포워딩 API 는 소스 검사가 허용된 파일 밖의 사용을 막는다). **서버가 먼저 여는 채널은 종류를 가리지 않고 모두 거부한다**(agent·X11·forwarded-tcpip·direct 등 7종).
+원격으로 가는 명령은 `build_remote_command`(모든 인자를 작은따옴표로 인용, 환경은 `GIT_ENV` 와 닫힌 `FetchEnv` 뿐) 하나로만 만든다 — 임의 명령을 보낼 길이 없다.
+**ssh 저장소의 fetch**: 위 fetch 규칙(refspec 고정·`--refmap=`·허용 목록·훅 차단·원격 계정의 사용자 `core.sshCommand` 또는 `BatchMode` 기본)이 원격에서도 그대로이고, 훅 경로는 `/dev/null` 이다. 이 PC 의 `GIT_SSH_COMMAND`·`GIT_SSH` 는 원격으로 가지 않는다.
+SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패)는 문구가 아니라 오류 종류로 network(백오프)로 분류한다 — 호스트 키 불일치가 "인증 일시 정지"로 오분류되지 않는다. 원격 git 이 낸 인증 오류는 문구로 auth 다.
+호스트가 미러에서 빠지면 연결과 fetch 서비스의 실행기를 함께 닫는다. 연결 확인 창은 저장소를 **추가할 때만** 뜨고(사이드카 몫), fetch 중에는 원격 설정의 위험 항목에 대한 확인 창(local·WSL 과 같은 것)만 뜬다. 자세한 것은 docs/tauri.md "SSH(Phase 5)".
+
 ## GitHub 원격 전용 저장소의 예외
 
 저장소 추가 대화상자의 GitHub 탭으로 추가한 저장소는 작업 폴더 없이 앱 캐시

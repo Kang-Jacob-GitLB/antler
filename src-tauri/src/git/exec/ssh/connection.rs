@@ -105,8 +105,9 @@ impl SshOptions {
     }
 }
 
+/// 이 파일의 오류는 모두 Antler 와 원격 호스트 사이의 전송 오류다(연결·호스트 키·인증·셸 확인·채널·종료) — `ExecError::Ssh` 로 구분한다(fetch 가 문구 대신 종류로 분류한다)
 fn other(message: impl Into<String>) -> ExecError {
-    ExecError::Other { message: message.into() }
+    ExecError::Ssh { message: message.into() }
 }
 
 /// 서버 호스트 키를 known_hosts 로 판정하는 클라이언트 핸들러. 거부 사유는 `verdict` 에 남겨 연결 오류 문구로 쓴다
@@ -921,6 +922,11 @@ impl Connection {
     /// 지금 살아 있는 연결이 있는가(관측용)
     pub(super) fn is_connected(&self) -> bool {
         self.inner.current().is_some()
+    }
+
+    /// 정리(`dispose`)된 연결인가 — 닫은 연결은 영구히 거부한다
+    pub(super) fn is_disposed(&self) -> bool {
+        self.inner.disposed.load(Ordering::SeqCst)
     }
 
     /// 비어 있는 채널 슬롯 수(관측용 — 슬롯 누수 시험)

@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::git::exec::wsl_paths::is_wsl_unc;
 use crate::git::parsers::js_trim;
 use crate::git::scope::is_js_space;
-use crate::router::RUST_FETCH_KINDS;
+use crate::router::rust_fetch_kinds;
 
 /// `src/main/ipc/handlers.ts` 의 `MAX_PATH_LEN`·`MAX_HOST_LEN`
 const MAX_PATH_LEN: usize = 4096;
@@ -172,13 +172,15 @@ impl RepoMirror {
         }
     }
 
-    /// fetch 를 Rust 서비스가 맡는 저장소만 거른 해석. **소스 종류(`RUST_FETCH_KINDS`)가 먼저다** — 해석 결과(`Resolved::Rust`)로 소유를 정하면
-    /// ssh 가 Rust 로 풀리는 순간 Rust 도 ssh 를 자동 fetch 해 사이드카와 이중 fetch 가 된다. fetch 의 서비스·라우터·자동 예약은 모두 이 함수만 쓴다.
-    /// 종류가 맡는 것이 아니면(ssh·github) 검증보다 먼저 `Sidecar` 다 — 호스트가 잘못된 ssh 저장소의 fetch 도 사이드카가 오류를 만든다
+    /// fetch 를 Rust 서비스가 맡는 저장소만 거른 해석. **소스 종류(`rust_fetch_kinds`)가 먼저다** — 해석 결과(`Resolved::Rust`)가 아니라 종류로 소유를 정해야
+    /// 사이드카(`ANTLER_RUST_FETCH_KINDS`)와 같은 술어를 쓴다. 이 술어(ssh 는 `ssh` 스위치가 켜졌을 때만 포함)가 두 쪽에서 같으므로 이중 fetch 도 미소유도 없다.
+    /// fetch 의 서비스·라우터·자동 예약은 모두 이 함수만 쓴다. 종류가 맡는 것이 아니면(github, 꺼진 ssh) 검증보다 먼저 `Sidecar` 다 —
+    /// 호스트가 잘못된 ssh 저장소의 fetch 는 켜져 있으면 Rust 가 `Invalid` 로, 꺼져 있으면 사이드카가 오류를 만든다
     pub fn resolve_fetch(&self, repo_id: &str) -> Resolved {
+        let kinds = rust_fetch_kinds(self.ssh.load(Ordering::SeqCst));
         let owned = {
             let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-            inner.repos.get(repo_id).is_some_and(|r| RUST_FETCH_KINDS.split(',').any(|k| k == r.kind))
+            inner.repos.get(repo_id).is_some_and(|r| kinds.split(',').any(|k| k == r.kind))
         };
         if owned {
             self.resolve(repo_id)
@@ -379,16 +381,21 @@ mod tests {
     }
 
     #[test]
-    fn fetch_소유는_해석이_아니라_소스_종류로_정한다() {
+    fn fetch_소유는_해석이_아니라_소스_종류로_정하고_ssh_는_스위치가_켜졌을_때만_포함한다() {
         let m = RepoMirror::default();
         m.apply(1, vec![repo("a", "local", "/r", None), ssh_repo("s", Some("devbox"), "/srv/r"), ssh_repo("bad", Some("-x"), "/srv/r"), repo("g", "github", "/c", None)]);
-        m.set_ssh(true);
-        // ssh 는 Rust 로 풀리지만 fetch 는 사이드카다(이중 fetch 방지) — 호스트가 잘못돼도 오류가 아니라 사이드카
-        assert!(matches!(m.resolve("s"), Resolved::Rust(_)));
+        // 스위치가 꺼져 있으면(기본) ssh 의 fetch 는 사이드카다
         for id in ["s", "bad", "g", "nope"] {
             assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}");
         }
         assert_eq!(m.resolve_fetch("a"), Resolved::Rust(Target::Local { path: "/r".into() }));
+        m.set_ssh(true);
+        // 켜지면 ssh 도 Rust 가 맡는다(사이드카 env 의 ssh 포함과 같은 술어). 호스트가 잘못되면 사이드카가 아니라 오류다
+        assert_eq!(m.resolve_fetch("s"), Resolved::Rust(Target::Ssh { host: "devbox".into(), path: "/srv/r".into() }));
+        assert!(matches!(m.resolve_fetch("bad"), Resolved::Invalid(_)));
+        for id in ["g", "nope"] {
+            assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}");
+        }
     }
 
     #[test]

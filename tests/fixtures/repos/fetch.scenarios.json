@@ -1,5 +1,5 @@
 {
-  "_comment": "git:fetch 채널 시나리오. TS(FetchService)와 Rust(라우터+FetchService)가 같은 순서로 돌려 같은 상태 결과를 내는지 본다(tests/golden/channels/fetch.json). 저장소 쌍: origin(basic.fi) 와 그 복제본 repo(경로 URL — file 전송). step: {in:'origin'|'repo', git:[...]} 는 git 실행, {fetch:{manual, confirm?, during?}} 는 git:fetch. confirm 은 확인 창에서 누른 버튼 번호(null 은 창 실패)이고 기본은 2(취소). during 은 확인 창이 떠 있는 동안 실행하는 git 단계(검사와 실행 사이의 설정 변경). 인자의 {port} 는 시나리오의 401 서버 포트로 바뀐다(server:'auth401').",
+  "_comment": "git:fetch 채널 시나리오. TS(FetchService)와 Rust(라우터+FetchService)가 같은 순서로 돌려 같은 상태 결과를 내는지 본다(tests/golden/channels/fetch.json). 저장소 쌍: origin(basic.fi) 와 그 복제본 repo(경로 URL — file 전송). step: {in:'origin'|'repo', git:[...]} 는 git 실행, {fetch:{manual, confirm?, during?}} 는 git:fetch. confirm 은 확인 창에서 누른 버튼 번호(null 은 창 실패)이고 기본은 2(취소). during 은 확인 창이 떠 있는 동안 실행하는 git 단계(검사와 실행 사이의 설정 변경). 인자의 {port} 는 시나리오의 401 서버 포트로 바뀐다(server:'auth401'). target:'ssh' 면 repo 를 127.0.0.1 의 SSH 테스트 서버(TS: ssh2 하네스+SshExecutor, Rust: 루프백 russh 하네스+SshExecutor) 너머의 원격 저장소로 두고 같은 단계를 돌린다 — ssh:'refused' 는 닫힌 포트(연결 거부), ssh:'hostkey' 는 known_hosts 와 다른 호스트 키. 이 둘의 실패는 문구가 아니라 SSH 전송 오류라 network(백오프, authPaused=false)다.",
   "scenarios": [
     {
       "name": "수동 fetch: 새 커밋을 받으면 변경을 알리고 승인을 남긴다",
@@ -93,6 +93,48 @@
         { "fetch": { "manual": false } },
         { "fetch": { "manual": true } }
       ]
+    },
+    {
+      "name": "ssh: 수동 fetch 는 원격의 저장소에서 새 커밋을 받고 승인을 남긴다",
+      "target": "ssh",
+      "steps": [
+        { "in": "origin", "git": ["commit", "-q", "--allow-empty", "-m", "second"] },
+        { "fetch": { "manual": true } },
+        { "fetch": { "manual": true } }
+      ]
+    },
+    {
+      "name": "ssh: 원격 저장소의 위험 설정은 자동 fetch 가 차단하고 수동 확인이 있어야 받는다",
+      "target": "ssh",
+      "steps": [
+        { "in": "repo", "git": ["config", "core.sshCommand", "false"] },
+        { "fetch": { "manual": false, "confirm": 0 } },
+        { "fetch": { "manual": true, "confirm": 2 } },
+        { "fetch": { "manual": true, "confirm": 0 } },
+        { "fetch": { "manual": true, "confirm": 2 } }
+      ]
+    },
+    {
+      "name": "ssh: 원격 git 이 낸 http 인증 실패는 문구로 분류해 auth 다(전송 오류가 아니다)",
+      "target": "ssh",
+      "server": "auth401",
+      "steps": [
+        { "in": "repo", "git": ["remote", "set-url", "origin", "http://127.0.0.1:{port}/r.git"] },
+        { "fetch": { "manual": false } },
+        { "fetch": { "manual": true } }
+      ]
+    },
+    {
+      "name": "ssh: SSH 연결이 거부되면 인증 중단이 아니라 network(백오프)다",
+      "target": "ssh",
+      "ssh": "refused",
+      "steps": [{ "fetch": { "manual": true } }, { "fetch": { "manual": false } }]
+    },
+    {
+      "name": "ssh: 호스트 키가 known_hosts 와 다르면 인증 중단이 아니라 network(백오프)다",
+      "target": "ssh",
+      "ssh": "hostkey",
+      "steps": [{ "fetch": { "manual": true } }, { "fetch": { "manual": false } }]
     }
   ]
 }

@@ -280,6 +280,8 @@ fn mirror_of(repos: &[(&str, &str, &str, Option<&str>)]) -> RepoMirror {
 enum Plan {
     Ok(Duration),
     Fail(String),
+    /// SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패) — 실행기가 `ExecError::Ssh` 를 돌려준다
+    Transport(String),
     /// 취소될 때까지 끝나지 않는다
     Hang,
     Panic,
@@ -400,6 +402,7 @@ impl GitRunner for FakeGit {
                             Ok(res(0, "", ""))
                         }
                         Plan::Fail(stderr) => Ok(res(128, "", &stderr)),
+                        Plan::Transport(message) => Err(ExecError::Ssh { message }),
                         Plan::Hang => {
                             sleep_or_cancel(Duration::from_secs(60 * 60 * 24), cancel.as_ref()).await?;
                             Ok(res(0, "", ""))
@@ -715,6 +718,39 @@ async fn 인증_실패는_수동_새로고침_전까지_자동_fetch_를_멈춘�
     assert!(!s.auth_paused && s.error.is_none());
     tokio::time::sleep(minutes(5) + Duration::from_secs(1)).await;
     assert_eq!(f.local.fetches(), 3, "풀린 뒤에는 다시 주기로 돈다");
+}
+
+/// SSH 전송 오류는 문구가 아니라 종류로 network(백오프)다 — 문구에 auth 단어("permission denied", "host key verification failed", "publickey")가 있어도 인증 중단이 아니다.
+/// 같은 문구라도 원격 git 이 낸 오류(`Git`, 종료 코드 128)는 문구로 분류해 auth 다(원격 git 이 자기 remote 에 인증하지 못한 것)
+#[tokio::test(start_paused = true)]
+async fn ssh_전송_오류는_종류로_network_이고_원격_git_의_인증_오류는_문구로_auth_다() {
+    let f = fx();
+    f.svc.apply_prefs(prefs(1, 5.0, &[], &[]));
+    for message in ["Permission denied (publickey).", "호스트 키가 known_hosts 와 다릅니다. Host key verification failed.", "SSH 연결에 실패했습니다: publickey authentication failed"] {
+        f.local.plan(Plan::Transport(message.into()));
+        let s = f.svc.fetch("r1", true).await;
+        assert!(s.error.is_some() && !s.auth_paused && !s.needs_manual && s.blocked.is_none(), "{message}: {s:?}");
+    }
+    // 백오프다: 자동 fetch 가 계속 돈다(멈추지 않는다). 수동 fetch 가 실패 수를 1 로 되돌렸으므로 다음은 10분 뒤, 또 실패하면 20분 뒤다
+    f.svc.set_active(Some("r1"));
+    let before = f.local.fetches();
+    f.local.plan(Plan::Transport("SSH 연결에 실패했습니다 (127.0.0.1:22)".into()));
+    f.local.plan(Plan::Transport("SSH 연결에 실패했습니다 (127.0.0.1:22)".into()));
+    tokio::time::sleep(minutes(9)).await;
+    assert_eq!(f.local.fetches(), before, "5분 주기가 아니라 백오프(10분)다");
+    tokio::time::sleep(minutes(2)).await;
+    assert_eq!(f.local.fetches(), before + 1);
+    assert!(!f.svc.status("r1").auth_paused);
+    tokio::time::sleep(minutes(15)).await;
+    assert_eq!(f.local.fetches(), before + 1, "두 번째 실패 뒤에는 20분");
+    tokio::time::sleep(minutes(6)).await;
+    assert_eq!(f.local.fetches(), before + 2);
+    assert!(!f.svc.status("r1").auth_paused);
+    // 같은 문구라도 원격 git 의 stderr(Git 오류)는 문구로 분류한다
+    f.local.plan(Plan::Fail("Permission denied (publickey).
+".into()));
+    let s = f.svc.fetch("r1", true).await;
+    assert!(s.auth_paused, "{s:?}");
 }
 
 #[tokio::test(start_paused = true)]

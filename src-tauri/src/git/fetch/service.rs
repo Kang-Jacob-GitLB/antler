@@ -1,4 +1,4 @@
-//! fetch 상태 기계(`src/main/services/FetchService.ts` 의 이식, GitHub 원격 전용 갈래는 뺐다). 앱에서는 라우터가 [`FetchControl`] 로 부른다(local·WSL 저장소만).
+//! fetch 상태 기계(`src/main/services/FetchService.ts` 의 이식, GitHub 원격 전용 갈래는 뺐다). 앱에서는 라우터가 [`FetchControl`] 로 부른다(local·WSL 저장소, 그리고 Rust 가 ssh 를 풀 때는 ssh 저장소).
 //!
 //! 이 앱이 저장소에 하는 유일한 쓰기라 흐름을 TS 와 같게 둔다:
 //! - 저장소당 진행 중인 요청은 하나다 — 진행 중이면 같은 [`FetchFuture`] 를 돌려준다(두 번째 호출의 `manual` 은 무시된다. TS 와 같다).
@@ -314,7 +314,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         status
     }
 
-    /// 이 저장소의 환경(실행기·큐). 미러에 없거나 Rust 가 fetch 하지 않는 저장소(ssh·github)면 오류(TS `fetchContext` 의 `unknown repo` 와 같다)
+    /// 이 저장소의 환경(실행기·큐). 미러에 없거나 Rust 가 fetch 하지 않는 저장소(github, 꺼진 ssh)면 오류(TS `fetchContext` 의 `unknown repo` 와 같다)
     fn resolve(&self, repo_id: &str) -> Result<(Target, Arc<Source<R>>), ExecError> {
         let target = match self.mirror.resolve_fetch(repo_id) {
             Resolved::Rust(t) => t,
@@ -323,6 +323,17 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         };
         let key = target.source_key();
         let mut sources = lock(&self.sources);
+        // ssh: `resolve_fetch` 와 이 사이에 미러가 바뀌어 호스트가 빠졌으면 실행기를 만들지 않는다(낡은 대상이 지운 호스트로 풀에 다시 등록하지 않게).
+        // `sources` 잠금 안에서 본다 — 정리(`sync_mirror`)도 이 잠금을 잡는다. 라우터의 `runtime` 과 같다
+        if let Target::Ssh { host, .. } = &target {
+            if !self.mirror.ssh_hosts().contains(host) {
+                return Err(ExecError::Other { message: "저장소 목록이 바뀌었습니다. 다시 시도하세요".to_string() });
+            }
+        }
+        // 풀이 닫은 실행기(미러에서 빠졌다가 다시 추가된 호스트)를 계속 쥐지 않는다 — 버리고 새로 받는다
+        if sources.get(&key).is_some_and(|s| s.runner.is_closed()) {
+            sources.remove(&key);
+        }
         let source = sources
             .entry(key)
             .or_insert_with(|| Arc::new(Source { runner: (self.make_runner)(&target), queue: ProcessQueue::new(1), version: OnceCell::new() }))
@@ -358,9 +369,17 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         self.host.approve(kind, repo_id, fingerprint);
     }
 
-    /// Rust fetch 서비스가 맡는 저장소인가 — **소스 종류(local·wsl)로** 정한다(`RepoMirror::resolve_fetch`). ssh 가 Rust 로 풀려도 여기서는 맡지 않는다(이중 fetch 방지)
+    /// Rust fetch 서비스가 맡는 저장소인가 — **소스 종류(`rust_fetch_kinds`)로** 정한다(`RepoMirror::resolve_fetch`). 사이드카의 소유 판정과 같은 술어라 이중 fetch 가 없다
     fn is_rust_repo(&self, repo_id: &str) -> bool {
         matches!(self.mirror.resolve_fetch(repo_id), Resolved::Rust(_))
+    }
+
+    /// 미러에 없는(또는 Rust 로 풀리지 않는) ssh 호스트의 환경과 풀이 닫은 실행기의 환경을 버린다. 연결은 풀(라우터의 `sync_ssh_hosts`)이 닫는다 —
+    /// 여기서는 닫힌 실행기를 계속 쥐지 않게 `sources` 에서만 뺀다. 저장소 상태가 없어도 거른다(호스트 단위다)
+    fn sync_sources(&self) {
+        let keep = self.mirror.ssh_hosts();
+        let mut sources = lock(&self.sources);
+        sources.retain(|key, s| !s.runner.is_closed() && key.strip_prefix("ssh:").is_none_or(|host| keep.contains(host)));
     }
 
     // ── 예약 ──────────────────────────────────────────────────────────────
@@ -486,7 +505,9 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
             }
             let text = if timed_out { format!("시간 초과({}초)", FETCH_TIMEOUT.as_secs()) } else { err.to_string() };
             let mut error = slice_utf16_lossy(&text, MAX_ERROR_LEN);
-            let kind = if timed_out || matches!(err, ExecError::Aborted) { FetchFailure::Network } else { classify_failure(&err.to_string(), false) };
+            // SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패)는 문구가 아니라 종류로 network 다 — 재시도해도 소용없는 쪽이 아니라 백오프로 다시 본다.
+            // 원격 git 이 낸 오류(`Git`)는 그대로 문구로 분류한다(원격이 자기 remote 에 인증하지 못한 것은 auth)
+            let kind = if timed_out || matches!(err, ExecError::Aborted | ExecError::Ssh { .. }) { FetchFailure::Network } else { classify_failure(&err.to_string(), false) };
             if kind == FetchFailure::Protocol {
                 error = slice_utf16_lossy(&format!("자동 fetch 는 로컬 경로(file) remote 를 쓰지 않습니다. 새로고침으로 직접 fetch 하세요. {error}"), MAX_ERROR_LEN);
             }
@@ -703,6 +724,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
         for id in gone {
             self.forget(&id);
         }
+        self.inner.sync_sources();
     }
 
     pub fn dispose(&self) {

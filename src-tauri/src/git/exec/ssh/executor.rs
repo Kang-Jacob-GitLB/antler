@@ -57,6 +57,11 @@ impl SshExecutor {
         self.conn.dispose();
     }
 
+    /// 정리(`dispose`)된 실행기인가 — 정리된 실행기는 영구히 거부하므로 쥐고 있던 쪽이 새로 받아야 한다
+    pub fn is_disposed(&self) -> bool {
+        self.conn.is_disposed()
+    }
+
     /// 지금 살아 있는 연결이 있는가(시험·진단용)
     pub fn is_connected(&self) -> bool {
         self.conn.is_connected()

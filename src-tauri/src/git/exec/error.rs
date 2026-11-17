@@ -14,6 +14,9 @@ pub enum ExecError {
     SpawnFailed { message: String },
     /// 실행기 밖의 검증·해석 실패(잘못된 입력, 파서가 거부한 출력). TS 의 일반 `Error` 에 해당해 code 는 ERROR 다
     Other { message: String },
+    /// SSH 전송 오류: Antler 와 원격 호스트 사이(연결·호스트 키·인증·셸 확인·채널·연결 끊김). 원격 git 이 낸 오류(`Git`)와 구분한다 —
+    /// fetch 는 문구가 아니라 이 종류로 network(백오프)로 분류한다. envelope 의 code 는 TS 의 일반 `Error` 와 같은 ERROR 다
+    Ssh { message: String },
 }
 
 impl ExecError {
@@ -22,7 +25,7 @@ impl ExecError {
         match self {
             ExecError::Git { .. } => "GIT",
             ExecError::Aborted => "ABORTED",
-            ExecError::SpawnFailed { .. } | ExecError::Other { .. } => "ERROR",
+            ExecError::SpawnFailed { .. } | ExecError::Other { .. } | ExecError::Ssh { .. } => "ERROR",
         }
     }
 
@@ -36,7 +39,7 @@ impl fmt::Display for ExecError {
         match self {
             ExecError::Git { message, .. } => f.write_str(message),
             ExecError::Aborted => f.write_str("aborted"),
-            ExecError::SpawnFailed { message } | ExecError::Other { message } => f.write_str(message),
+            ExecError::SpawnFailed { message } | ExecError::Other { message } | ExecError::Ssh { message } => f.write_str(message),
         }
     }
 }
@@ -54,6 +57,7 @@ mod tests {
         assert_eq!(ExecError::Aborted.envelope_code(), "ABORTED");
         assert_eq!(ExecError::SpawnFailed { message: "x".into() }.envelope_code(), "ERROR");
         assert_eq!(ExecError::Other { message: "x".into() }.envelope_code(), "ERROR");
+        assert_eq!(ExecError::Ssh { message: "x".into() }.envelope_code(), "ERROR");
         assert_eq!(ExecError::Aborted.to_string(), "aborted");
     }
 }

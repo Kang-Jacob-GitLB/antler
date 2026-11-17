@@ -181,7 +181,8 @@ fn 골든_fetch_argv_와_환경이_ts_와_같다() {
 
     let g = golden();
     let samples = g["fetch"].as_array().expect("fetch 골든");
-    assert!(samples.len() >= 4, "fetch 표본이 줄었다");
+    assert!(samples.len() >= 6, "fetch 표본이 줄었다");
+    assert!(samples.iter().filter(|s| s["kind"] == "ssh").count() >= 2, "ssh fetch 표본이 줄었다");
     for s in samples {
         let kind = s["kind"].as_str().unwrap();
         let local = kind == "local";
@@ -202,6 +203,11 @@ fn 골든_fetch_argv_와_환경이_ts_와_같다() {
                 assert_eq!(call["command"], "git");
                 assert_eq!(strs(&call["argv"]), build_git_args("/home/me/repo", &args), "local argv {name}");
                 assert_eq!(pairs(&call["env"]), merged_env(Some(&fe)), "local env {name}");
+            } else if kind == "ssh" {
+                // SshExecutor 가 원격 셸에 보내는 명령 문자열(argv 한 칸)이 TS 와 같다
+                assert_eq!(call["command"], "ssh");
+                let cmd = antler_lib::git::exec::ssh::quote::build_remote_command("/home/me/repo", &args, Some(&fe)).unwrap();
+                assert_eq!(strs(&call["argv"]), [cmd], "ssh 원격 명령 {name}");
             } else {
                 assert_eq!(call["command"], "wsl.exe");
                 assert_eq!(strs(&call["argv"]), wsl_argv_with("Ubuntu", "/home/me/repo", &args, Some(&fe)), "wsl argv {name}");

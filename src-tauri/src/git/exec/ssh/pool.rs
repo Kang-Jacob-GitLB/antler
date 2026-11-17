@@ -30,6 +30,17 @@ impl SshPool {
         self.hosts.lock().unwrap_or_else(PoisonError::into_inner).entry(host.to_string()).or_insert_with(|| (self.make)(host)).clone()
     }
 
+    /// `get` 과 같되, 풀 잠금을 쥔 채 `alive` 가 참일 때만 만든다(거짓이면 `None`).
+    /// 호스트 확인과 등록을 `retain` 과 같은 잠금 하나로 묶는다 — 미러 적용 뒤의 호출은 거부되고, 그 전의 호출이 넣은 실행기는 뒤이은 `retain` 이 닫는다.
+    /// 라우터와 다른 잠금으로 확인하는 쪽(fetch 서비스)이 지운 호스트를 닫히지 않은 채 다시 등록하지 않게 한다
+    pub fn get_if(&self, host: &str, alive: impl FnOnce() -> bool) -> Option<SshExecutor> {
+        let mut hosts = self.hosts.lock().unwrap_or_else(PoisonError::into_inner);
+        if !alive() {
+            return None;
+        }
+        Some(hosts.entry(host.to_string()).or_insert_with(|| (self.make)(host)).clone())
+    }
+
     /// `keep` 에 없는 호스트의 연결을 닫고 풀에서 뺀다(닫은 실행기는 영구히 거부하므로 **풀에서도 빼야** 같은 호스트를 다시 쓸 때 새로 맺는다). 닫은 호스트 이름을 돌려준다
     pub fn retain(&self, keep: &HashSet<String>) -> Vec<String> {
         let gone: Vec<(String, SshExecutor)> = {
@@ -97,5 +108,14 @@ mod tests {
         assert_eq!(*made.lock().unwrap(), 3, "닫은 호스트는 풀에서 빠져 있어 새로 만든다");
         counting.dispose_all();
         assert!(counting.hosts().is_empty());
+    }
+
+    #[test]
+    fn get_if_는_확인이_거짓이면_만들지도_등록하지도_않는다() {
+        let p = pool();
+        assert!(p.get_if("a", || false).is_none());
+        assert!(p.hosts().is_empty(), "거부한 호스트는 풀에 남지 않는다");
+        assert!(p.get_if("a", || true).is_some());
+        assert_eq!(p.hosts(), ["a"]);
     }
 }

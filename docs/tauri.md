@@ -24,7 +24,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
-| 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 진행 중 — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음) 완료, PR 2a(`russh` 스파이크 go·연결·`run`·시험) 완료, PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한) 완료, PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`·fetch 소유 판정을 소스 종류로) 완료 — 4(ssh fetch)·5(측정·사람 확인) 남음. 계획·결정은 아래 "SSH(Phase 5)" |
+| 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
@@ -163,11 +163,11 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 `antler_invoke` 는 이제 라우터를 거친다. 채널이 Rust 에서 처리할 수 있는 것이면 Rust 가 envelope 를 만들고, 아니면 사이드카에 인자를 **그대로** 넘긴다.
 
 ```
-renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit·git:log·git:compare·git:fileDiff·git:fileHistory·git:blame, git:fetch 는 local·wsl 만)
+renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit·git:log·git:compare·git:fileDiff·git:fileHistory·git:blame·git:fetch — ssh 는 `ANTLER_RUST_SSH` 가 켜졌을 때)
                                          └ Sidecar → Node 사이드카 → envelope → renderer (그 밖의 모든 것)
 ```
 
-- **Rust 경로 조건**(전부): 채널이 `RUST_CHANNELS` 에 있다 · 인자의 저장소 id 가 미러에 있다 · 그 kind 가 local 또는 wsl 이다(github 소스는 사이드카. **ssh 는 `ANTLER_RUST_SSH` 가 켜져 있으면 `git:fetch` 를 뺀 6개 채널을 Rust 가 처리**한다 — 아래 "SSH PR 3") ·
+- **Rust 경로 조건**(전부): 채널이 `RUST_CHANNELS` 에 있다 · 인자의 저장소 id 가 미러에 있다 · 그 kind 가 local 또는 wsl 이다(github 소스는 사이드카. **ssh 는 `ANTLER_RUST_SSH` 가 켜져 있으면 `git:fetch` 를 포함한 7개 채널 모두 Rust 가 처리**한다 — 아래 "SSH PR 3"·"SSH PR 4") ·
   환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아니다. 미러에 없는 id 는 사이드카로 가서 오류 문구를 사이드카가 만든다.
 - **되돌리기 스위치**: `ANTLER_RUST_GIT=0` 으로 실행하면 모든 채널이 사이드카로 간다(Electron 판과 같은 경로). 확인용으로 `ANTLER_ROUTE_LOG=1` 이면
   `RUST_CHANNELS` 채널이 어디로 갔는지 stderr 에 `[route] git:commit -> rust|sidecar` 로 남긴다(기본은 조용하다. drive 는 `ANTLER_DRIVE_DEBUG=1` 로 stderr 를 본다).
@@ -398,7 +398,7 @@ git 은 `GitRunner` 로 주입한다(운영은 `GitExecutor`, 주기·백오프�
 
 ### fetch 라우팅 — PR D
 
-Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(ssh·github 는 사이드카 그대로 — ssh 가 다른 채널에서 Rust 로 풀려도 fetch 는 사이드카다. 아래 "SSH PR 3"). 켜고 끄는 스위치는 라우터와 같은 `ANTLER_RUST_GIT`(`0` 이면 전부 사이드카)이다.
+Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(github 는 사이드카 그대로. ssh 는 PR 4 부터 Rust 가 ssh 를 풀 때 함께 Rust 가 맡는다 — 아래 "SSH PR 4"; PR D 시점에는 ssh fetch 가 사이드카였다). 켜고 끄는 스위치는 라우터와 같은 `ANTLER_RUST_GIT`(`0` 이면 전부 사이드카)이다.
 
 - **라우팅 채널**: `RUST_CHANNELS` 에 `git:fetch` 가 늘었다(`git:commit`·`git:log`·`git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`·`git:fetch`). `git:fetch(repoId, manual)` 의 `manual` 은 **정확히 `true` 일 때만** 참이다
   (`handlers.ts` 의 `manual === true` 와 같다 — 문자열·숫자·배열·빈 자리는 자동 fetch). 미러에 있는 local·wsl 이면 Rust, 미러에 없거나 ssh·github 면 사이드카다(**소스 종류로 정한다** — `RepoMirror::resolve_fetch`).
@@ -833,7 +833,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 16MB 선읽기를 넘으면 프로세스를 죽이고 `--skip` 으로 다시 시작하는 방식을 PR 2 에서 시험한다 — Electron 판과의 동작 차이는 받아들이기로 했다.
 
 **PR 순서**: 1 순수 로직·골든(**완료**) → 2 `SshExecutor`(`russh`, **2a·2b 완료**; 첫 단계 go/no-go 스파이크: ring 빌드·세션 정지·agent. `GitExecutor::stream` async 전환, 루프백 `russh::server` 하네스, clippy 로 password/keyboard-interactive/TOFU 쓰기/포트 포워딩 금지) →
-3 라우팅(`sshHost` 미러·`Target::Ssh`·`SshPool`·`ANTLER_RUST_SSH`, fetch 소유 판정을 kind 상수로 — 이중 fetch 방지, **완료**) → 4 ssh fetch 를 Rust 로(`RUST_FETCH_KINDS`·`fetchOwns.ts`·SSH 전송 오류는 network 로 분류·fetch.scenarios ssh 시나리오) → 5 측정·사람 확인.
+3 라우팅(`sshHost` 미러·`Target::Ssh`·`SshPool`·`ANTLER_RUST_SSH`, fetch 소유 판정을 kind 상수로 — 이중 fetch 방지, **완료**) → 4 ssh fetch 를 Rust 로(`rust_fetch_kinds` 계산 값·`fetchOwns.ts`·SSH 전송 오류는 network 로 분류·fetch.scenarios ssh 시나리오, **완료**) → 5 측정·사람 확인(사람 몫).
 이 단계 뒤 Phase 6 은 6a(나머지 git 채널·RepoWatcher) · 6b(설정·저장소 관리·env·external·github 원격 전용) · 6c(업데이터·패키징·Electron 제거)로 나눈다. 사이드카 전용으로 남은 채널은 37개다.
 
 ### PR 1 — 설정·known_hosts·원격 명령 인용(앱에 연결하지 않는다)
@@ -997,7 +997,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 
 ### PR 3 — 라우팅(`sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)
 
-ssh 저장소의 `git:commit`·`git:log`·`git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame` 6개를 Rust 가 처리한다. **`git:fetch` 는 이 PR 에서도 사이드카다**(PR 4 몫). 새 IPC 채널은 없다.
+ssh 저장소의 `git:commit`·`git:log`·`git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame` 6개를 Rust 가 처리한다. **`git:fetch` 는 이 PR 에서는 사이드카였다**(PR 4 에서 바꿨다 — 아래). 새 IPC 채널은 없다.
 
 | 파일 | 내용 |
 |---|---|
@@ -1009,15 +1009,15 @@ ssh 저장소의 `git:commit`·`git:log`·`git:compare`·`git:fileDiff`·`git:fi
 
 - **스위치**: `ANTLER_RUST_SSH` — 기본 켬, `0` 이면 끈다. `ANTLER_RUST_GIT=0` 이면 함께 꺼진다(`api` 와 같은 관례). 판정은 `Router::ssh_active()`(스위치 + 풀 주입) **하나**이고 ① 미러가 ssh 를 `Resolved::Rust` 로 풀지(`RepoMirror::set_ssh` — 풀을 주입할 때 켠다)
   ② 사이드카 env 가 `1` 인지가 같은 값이다. Rust 가 env 를 직접 정한다(켜면 `cmd.env("ANTLER_RUST_SSH","1")`, 아니면 `env_remove` — 부모 환경이 뒤집지 못한다). 꺼져 있으면 풀도 만들지 않아 `~/.ssh` 를 읽지 않고 ssh 는 전부 사이드카다.
-  **사이드카(TS)는 이 env 를 읽지 않는다**(가정) — PR 4 에서 `fetchOwns.ts` 가 ssh 를 맡을 때 쓸 자리다. 해석을 미러 한 곳에서만 갈라 로그 커서·fetch 서비스·라우터가 같은 답을 본다.
+  **사이드카(TS)는 이 env 를 읽지 않는다**(PR 4 에서도 fetch 소유는 `ANTLER_RUST_FETCH_KINDS` 만 읽는다 — ssh 포함 여부를 Rust 가 같은 `ssh_active` 로 정해 넘긴다). 해석을 미러 한 곳에서만 갈라 로그 커서·fetch 서비스·라우터가 같은 답을 본다.
 - **`check_ssh_host`**(`handlers.ts` 의 `checkEnvInput` 규칙): 앞뒤 공백을 지운 값이 비지 않음·255 UTF-16 단위 이하·공백(JS `\s`)·NUL 없음·`-` 로 시작하지 않음. **검사한 값(공백을 지운 값)이 풀 키·큐 키·실행기 호스트이다** — 다른 값을 쓰면 ` -x` 가 검사를 빠져나간다.
   검사에 걸리면 연결하지 않고 `ERROR "잘못된 SSH 호스트입니다"`(사이드카로 넘기지 않는다 — 로컬·WSL 과 같다). 호스트가 `~/.ssh/config` 에 있는지는 연결할 때 실행기가 본다(확인 창은 저장소를 **추가할 때만** 뜬다 — 사이드카 몫이고 이 PR 은 그대로다).
 - **연결 정리**: `on_mirror_changed` 는 `logs.sync_mirror()` 뒤에 "지금 미러에서 Rust 로 풀리는 ssh 호스트 집합"에 없는 호스트를 **풀과 `sources["ssh:<host>"]` 를 함께** 비운다(`sources` 잠금을 쥔 채 풀을 만진다 — `runtime` 과 같은 순서).
   `SshExecutor::dispose` 는 영구 거부라 풀에 남기면 같은 호스트를 다시 추가했을 때 죽은 실행기가 나온다(시험: 다시 추가한 호스트가 새 연결로 동작). 쓰는 호스트는 연결을 그대로 쓴다. `shutdown` 도 `dispose_all`.
   앱 종료(`RunEvent::Exit`)는 런타임 밖 스레드라 `disconnect` 해제 메시지를 보내지 못하고 연결만 버린다(프로세스가 끝나며 소켓이 닫힌다) — `in_runtime_of` 로 감싸지 않았다.
 - **이중 fetch 방지**: fetch 소유 판정을 `Resolved::Rust(_)`(해석 결과)가 아니라 **소스 종류**로 바꿨다 — `RepoMirror::resolve_fetch` 가 원시 `kind` 를 `RUST_FETCH_KINDS`(`local,wsl`)와 먼저 대조하고(검증보다 먼저 — 호스트가 잘못된 ssh 의 `git:fetch` 도 오류가 아니라 사이드카),
-  fetch 서비스(`resolve`·`is_rust_repo` — 소유·활성·`sync_mirror`)와 라우터(`git_fetch`·`repos:watch` 의 자동 fetch 대상)가 이 함수만 쓴다(소스 검사가 `mirror.resolve(` 호출이 없음을 강제). 사이드카 env `ANTLER_RUST_FETCH_KINDS` 는 계속 `local,wsl` 이다.
-  PR 4 가 ssh 를 켤 때 `RUST_FETCH_KINDS`·`fetchOwns.ts` 의 `RUST_FETCH_KINDS` 를 같이 바꾼다. fetch 서비스의 `make_runner` 는 `Target::Ssh` 에 같은 풀의 실행기를 준다(지금은 오지 않는 길 — PR 4 의 자리).
+  fetch 서비스(`resolve`·`is_rust_repo` — 소유·활성·`sync_mirror`)와 라우터(`git_fetch`·`repos:watch` 의 자동 fetch 대상)가 이 함수만 쓴다(소스 검사가 `mirror.resolve(` 호출이 없음을 강제). 사이드카 env `ANTLER_RUST_FETCH_KINDS` 는 PR 3 시점에는 계속 `local,wsl` 이었다.
+  **PR 4 에서 상수가 `rust_fetch_kinds(ssh_active)` 계산 값으로 바뀌어** ssh 를 포함하고 `fetchOwns.ts` 도 같이 바뀌었다(아래 "PR 4"). fetch 서비스의 `make_runner` 는 `Target::Ssh` 에 같은 풀의 실행기를 준다.
 - **`file_diff` 상한 초과**: ssh 의 `file_diff` 는 원격 출력이 소비자보다 16MB 이상 앞서면(소비자가 네트워크보다 느릴 때만) 이어 읽지 못하고 오류로 끝난다. **PR 3 에서는 그대로 두기로 했다** — 로컬 파서가 네트워크보다 느린 경우는 드물고
   재시도·`ANTLER_RUST_SSH=0`(사이드카의 backpressure 경로)으로 비껴갈 수 있으며, 소비자 쪽 대기(원격을 멈추는 방법)는 russh 윈도우 정지(R1)를 되살린다. 실제 sshd·큰 diff 로는 확인하지 않았다(아래 "남은 위험").
 - **큐·캐시**: ssh 큐는 호스트마다 하나, 동시 4(`SSH_LIMIT` — 연결당 채널 6 안). 커밋·compare·diff 캐시는 저장소 id 키라 local·wsl 과 같은 LRU 를 나눠 쓴다(`runtime` 만 소스별이다).
@@ -1033,6 +1033,57 @@ ssh 저장소의 `git:commit`·`git:log`·`git:compare`·`git:fileDiff`·`git:fi
   소스 검사(`lib.rs` 순서: 스위치 확인 < 풀 주입 < fetch 서비스 < `ssh_active` < `manage(router)` < `Sidecar::spawn`, 사이드카 env 를 직접 정함).
 - `tests/fetch_route.rs`(새 4개): ssh 가 Rust 로 풀려도 `git:fetch`(수동·자동·호스트가 잘못된 것 포함)는 사이드카, 서비스에 닿지 않음·`repos:watch` 는 `active None`·진짜 `FetchService` 가 ssh 를 소유하지 않음("unknown repo", 실행기 0개)·소스 검사(`resolve_fetch` 만).
 - 단위(lib +7): `mirror.rs`(호스트 검사·스위치·`resolve_fetch`·메시지의 `sshHost`) 3개 추가, `router.rs`(스위치 술어·풀이 있어야 Rust) 2개, `pool.rs` 2개. vitest `sidecarMirror` 1개 추가.
+
+### PR 4 — ssh fetch 를 Rust 로(Phase 5 마지막 코드 PR)
+
+ssh 저장소의 `git:fetch`(수동·자동·포커스)를 Rust 의 `FetchService` 가 맡는다. 새 IPC 채널·새 크레이트는 없다. 켜고 끄는 것은 PR 3 의 `ANTLER_RUST_SSH`(`ssh_active`) **하나**다.
+
+| 파일 | 내용 |
+|---|---|
+| `router.rs` | `RUST_FETCH_KINDS` 상수 → `rust_fetch_kinds(ssh_active)` 계산 값(`local,wsl` + ssh 활성이면 `,ssh`). `sidecar_fetch_kinds(router_enabled, ssh_active)` |
+| `mirror.rs` | `resolve_fetch` 가 자기 ssh 플래그(= `ssh_active`)로 같은 함수를 부른다 — 소유 판정은 **종류 대조**다(검증보다 먼저) |
+| `lib.rs`·`sidecar.rs` | `rust_ssh = router.ssh_active()` → `fetch_kinds = sidecar_fetch_kinds(enabled, rust_ssh)` → 사이드카 env `ANTLER_RUST_FETCH_KINDS` 와 `ANTLER_RUST_SSH`. fetch 서비스의 `make_runner` 가 `Target::Ssh` 에 **라우터와 같은 `SshPool`** 의 실행기를 준다 |
+| `src/sidecar/fetchOwns.ts` | 허용 토큰에 `ssh` 추가(같은 PR — 안 그러면 `local,wsl,ssh` 를 받은 사이드카가 ssh 를 계속 fetch 해 이중 fetch 다) |
+| `git/exec/error.rs`·`ssh/connection.rs`·`ssh/stream.rs` | `ExecError::Ssh`(Antler 와 호스트 사이의 전송 오류) 추가. `connection.rs`·`stream.rs` 의 오류는 모두 이 종류다. envelope code 는 `ERROR`(TS 의 일반 `Error`) |
+| `git/fetch/service.rs`·`run.rs` | 아래 "분류"·"정리". `GitRunner::is_closed`(기본 거짓, `GitExecutor::Ssh` 만 `dispose` 여부) |
+
+- **술어가 하나다(이중 fetch·미소유 방지)**: 사이드카 env 와 미러의 `resolve_fetch` 가 같은 `rust_fetch_kinds` 를 부르고, 둘의 입력(`ssh_active`)이 같은 값이다. 스위치를 끄면(`ANTLER_RUST_SSH=0`·`ANTLER_RUST_GIT=0`·홈을 모름) env 에서 `ssh` 가 빠지고
+  미러가 ssh 를 풀지 않아 사이드카가 fetch 한다. ssh 가 Rust 로 풀리는데 호스트가 잘못된 저장소(`-oProxyCommand=x` 등)의 `git:fetch` 는 local·wsl 의 검사 실패와 같이 **사이드카로 보내지 않고 `ERROR "잘못된 SSH 호스트입니다"`** 다(사이드카는 그 저장소를 맡지 않는다).
+  `repos:watch` 의 자동 fetch 대상에도 ssh 가 들어간다.
+- **ssh 의 fetch 호출**(코드는 local·wsl 과 같고 실행기 종류만 다르다): 훅 차단은 `/dev/null`(앱 소유 빈 디렉터리는 local 만), ssh 명령은 **원격 저장소의 사용자(시스템·전역) `core.sshCommand`**, 없으면 `ssh -o BatchMode=yes -o ConnectTimeout=15`
+  (`GIT_SSH_COMMAND`·`GIT_SSH` 환경변수는 local 만 읽는다 — 이 PC 의 환경변수가 원격으로 가지 않는다). 환경은 `FetchEnv`(닫힌 타입)가 `build_remote_command` 를 거쳐 원격의 `env K='V' … git -C <경로> -c … fetch …` 로만 간다(`SshExecutor::run`). refspec 고정·`--refmap=`·`ALLOWED_KEYS` 허용 목록은 원격에서도 그대로다.
+  원격 git 이 쓰는 `~/.ssh` 는 원격 계정의 것이다(이 PC 의 `~/.ssh` 가 아니다).
+- **연결 공유**: fetch 서비스와 라우터가 같은 `SshPool` 의 실행기를 쓴다 — 호스트당 연결 하나·채널 6개 한도 공유(TS `fetchContext` 가 `runtimes` 의 같은 실행기를 주는 것과 같다). fetch 큐는 환경마다 하나(동시 1)다. 골든 시험이 시나리오마다 `connections() <= 1` 을 본다.
+- **분류**: SSH 전송 오류(`ExecError::Ssh` — 연결 거부·시간 초과·호스트 키 불일치·인증 수단 없음/거부·셸 확인 실패·연결 끊김·exec 거부)는 **오류 종류로** `network`(지수 백오프)다. 문구 정규식에 기대지 않는다 —
+  TS 는 한국어 문구라 정규식(`permission denied`·`host key verification failed`·`publickey`)에 걸리지 않아 우연히 network 가 됐지만, Rust 문구에 그 영어 단어가 섞여도(russh 오류 문구) 인증 중단이 되지 않게 했다.
+  원격 **git** 이 낸 오류(`ExecError::Git`: 원격 git 이 자기 remote 에 인증하지 못한 `Permission denied (publickey)`·http 401 등)는 TS 와 같이 문구로 분류한다(auth) — 골든 시나리오가 이 둘을 가른다.
+  `ExecError::Aborted` 와 60초 시간 초과는 기존대로 network 다.
+- **정리(리뷰 지적)**: ① 호스트가 미러에서 빠지면 라우터의 `sync_ssh_hosts` 가 풀의 연결을 닫고(`dispose`), fetch 서비스의 `sync_mirror` 가 `sources` 에서 `ssh:<호스트>` 환경(실행기·큐·버전 캐시)을 함께 뺀다 — 저장소 상태가 없어도 호스트 단위로 거른다.
+  ② 서비스는 `sources` 에서 닫힌 실행기(`GitRunner::is_closed`)를 만나면 버리고 `make_runner`(= `pool.get`)로 새로 받는다 — 풀의 정리와 서비스의 정리 사이에 같은 호스트가 다시 추가돼도(삭제→재추가가 두 번의 `on_mirror_changed` 사이에 끼는 순서) 죽은 실행기를 쥐지 않는다.
+  ③ **낡은 대상 재등록 경합**: `resolve` 와 `sources` 잠금 사이에 미러가 바뀌어 호스트가 빠졌으면 실행기를 만들지 않고 `"저장소 목록이 바뀌었습니다. 다시 시도하세요"`(라우터 `runtime` 과 같은 문구·같은 잠금 순서 `sources` → 풀). 지운 호스트로 `pool.get` 해 풀에 낡은 항목이 다시 생기지 않는다.
+  이 경합 자체는 시험으로 재현하지 못했다(결정적으로 끼워 넣을 이음새가 없다) — ①②의 결과(삭제 뒤 재추가하면 새 연결로 fetch 성공, 닫힌 실행기 재생성)는 시험한다.
+- **골든**: `fetch.scenarios.json` 에 `target:"ssh"` 시나리오 5개(수동 성공·승인, 위험 설정의 자동 차단과 수동 확인, 원격 git 의 http 401(auth), SSH 연결 거부(network), 호스트 키 불일치(network)). TS 는 ssh2 하네스(`tests/sshHarness.ts`)와 `SshExecutor` 를
+  임시 홈으로, Rust 는 루프백 `russh::server`(`tests/ssh/server.rs`)와 `SshExecutor` 로 같은 골든(`tests/golden/channels/fetch.json`)을 낸다. 원격 저장소의 remote 는 경로 URL(수동 fetch 는 file 전송 허용)과 기존 127.0.0.1 가짜 http 서버(401)다.
+  TS 쪽은 `RepoService` 의 실행기 공장이 실제 `~/.ssh` 를 읽으므로 fetch 가 쓰는 `fetchContext`·`signature` 두 메서드만 임시 홈의 `SshExecutor` 로 바꾼 서브클래스를 쓴다(운영 코드는 건드리지 않았다).
+  Rust 하네스는 원격 명령의 `env K='V'` 에서 `GIT_SSH_COMMAND`·`GIT_ALLOW_PROTOCOL`(file 허용 여부)을 읽어 닫힌 `FetchEnv` 로만 자식 git 에 준다(자유 env 는 적용하지 않는다). `tests/golden/exec/env.json` 의 `fetch` 에 ssh 표본 2개(원격 셸이 받는 명령 원문)를 더했고 `exec.rs` 가 같은 `build_remote_command` 결과인지 본다.
+  재생성: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts -t "git:fetch"`, `UPDATE_GOLDEN=1 npx vitest run tests/goldenExec.test.ts`.
+
+**TS 와 다른 점(PR 4)**
+- SSH 전송 오류의 network 분류가 **종류 기반**이다(TS 는 문구가 한국어라 정규식을 비껴가 network 가 되는 것에 기댄다). 결과(code·authPaused=false)는 같다. 오류 문구는 Rust 가 PR 2 의 문구다(골든은 문구를 비교하지 않는다).
+- 삭제된 호스트·닫힌 실행기 처리는 Rust 의 미러(사이드카가 보낸 목록)와 풀 구조에서 나온 것이다. TS 는 `releaseUnused` 가 설정에서 쓰지 않는 소스의 런타임을 놓는다.
+- 서버발 채널·ProxyCommand 거부 등 SSH 계층의 규칙은 PR 1~3 그대로다(docs/security.md "Tauri 판의 SSH").
+
+**시험**(`cargo test --features test-hooks`)
+- `channels.rs`: `git_fetch_ssh_시나리오가_ts_골든과_같다`(ssh 시나리오 5개). 기존 local 시험은 target 이 없는 시나리오만 돌고, 두 시험 모두 고른 시나리오가 0개면 실패한다(조용히 건너뛰지 않는다). 서버 하네스 `ssh/server.rs` 에 fetch 환경 반영을 더했다.
+- `fetch_route.rs`(ssh 절 교체, 6개): ssh 활성이면 `git:fetch` 가 서비스로(호스트가 잘못되면 `ERROR`, 사이드카 env 에 ssh 포함)·`ANTLER_RUST_SSH=0`/`ANTLER_RUST_GIT=0`/풀 없음은 사이드카·env 에 ssh 없음·`repos:watch` 가 ssh 를 활성으로·진짜 서비스가 ssh 를 소유하고 닫힌 실행기를 새로 받으며 전송 오류가 network·
+  스위치가 꺼지면 서비스가 소유하지 않음·호스트가 빠졌다 재추가되면 서비스도 새 실행기를 받음(루프백 거부 포트)·소스 검사(`rust_fetch_kinds` 한 곳, `RUST_FETCH_KINDS` 상수 없음).
+- `ssh_route.rs`(+1): 루프백 서버 너머 저장소의 수동 fetch 성공, 라우터와 연결 하나 공유, 호스트 삭제 → 연결 닫힘 → 재추가 → 새 연결(`connections()==2`)로 fetch 성공.
+- `fetch_service.rs`(+1): 전송 오류는 문구가 auth 단어여도 network(백오프 10분→20분), 같은 문구의 `Git` 오류는 auth.
+- 단위: `mirror.rs`(`resolve_fetch` 가 스위치에 따라 ssh 를 포함)·`error.rs`. vitest `sidecarFetchOwns`(+1: `local,wsl,ssh` 면 ssh 도 맡지 않는다).
+
+**사람 확인 필요(SSH PR 4)**: 실제 sshd 의 저장소로 ① 수동 fetch 가 새 커밋을 받고 그래프가 갱신되는지, ② 원격 저장소에 위험 설정(`core.sshCommand` 등)을 넣고 새로고침하면 확인 창이 뜨고 [이번만][항상][취소]가 맞게 동작하는지(자동 fetch 는 묻지 않고 차단),
+③ 자동 fetch 가 **한 번만** 도는지(`ANTLER_ROUTE_LOG=1` 로 `[route] git:fetch -> rust`, 원격의 `ps`/`last` 로 호스트당 연결 하나·fetch 가 중복되지 않는지), ④ 네트워크를 끊거나 호스트 키를 바꿨을 때 오류가 표시되고 백오프(수동 새로고침 전까지 멈추지 않고 간격이 길어짐)이며 "인증 일시 정지"가 아닌지,
+⑤ `ANTLER_RUST_SSH=0` 으로 실행하면 같은 저장소가 사이드카로 fetch 되는지, ⑥ ssh 저장소 삭제 뒤 같은 호스트를 다시 추가하고 fetch 가 성공하는지.
 
 ## Phase 0 에서 확인한 것
 
@@ -1093,7 +1144,7 @@ B 469–477 / 185–195(small), 446–448 / 167–168(big).
 - 새 창으로 여는 링크는 github.com 만 기본 브라우저로 보낸다(Electron 판 `setWindowOpenHandler` 와 같은 규칙).
 - 미지원: `theme:system` 이벤트(renderer 가 `matchMedia` 로 시스템 테마를 직접 따라 필요 없다), `openPath`·`showItemInFolder`, 확인 창의 체크박스, Windows 밖에서의 기본 버튼 지정(위 참고).
 - 직접 확인 필요(SSH PR 3): 실제 sshd 에 있는 저장소를 열어 그래프·로그(더 보기)·커밋 상세·파일 diff·파일 이력·blame 이 TS 판과 같이 나오는지, 큰 저장소의 `file_diff` 가 상한 오류 없이 열리는지,
-  `ANTLER_RUST_SSH=0` 으로 실행하면 같은 저장소가 사이드카(ssh2)로 열리는지(`ANTLER_ROUTE_LOG=1` 로 `[route] git:log -> rust|sidecar` 확인), ssh 저장소를 삭제한 뒤 연결이 닫히는지(원격 `who`·`ss`), ssh 저장소의 fetch 가 한 번만 일어나는지(사이드카만).
+  `ANTLER_RUST_SSH=0` 으로 실행하면 같은 저장소가 사이드카(ssh2)로 열리는지(`ANTLER_ROUTE_LOG=1` 로 `[route] git:log -> rust|sidecar` 확인), ssh 저장소를 삭제한 뒤 연결이 닫히는지(원격 `who`·`ss`), ssh 저장소의 fetch 가 한 번만 일어나는지(PR 4 부터 Rust 만 — 위 "사람 확인 필요(SSH PR 4)").
 - 직접 확인 필요: 확인 창(fetch·SSH)과 폴더·에디터 선택 대화상자가 실제로 뜨고 버튼 응답이 맞는지, 창 위치·크기·최대화가 재시작 뒤 복원되는지(자동 확인은 대화상자를 띄우지 않고 요청·응답 형식만 봤다).
 - 배포 전 필수: 사이드카 경로가 빌드 머신 절대 경로로 박혀 있다(`src-tauri/src/sidecar.rs`) — Node 를 걷어 내면 사라지지만,
   그 전에 배포해야 한다면 resource 경로로 바꾼다. `cdp` 기능은 배포 빌드에서 켜지지 않게 CI 에서 막는다.

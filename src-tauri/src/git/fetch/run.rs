@@ -27,9 +27,13 @@ use crate::git::exec::{ExecError, FetchEnv, GitExecutor, RunOpts, RunResult};
 
 /// 이 모듈이 git 을 부르는 유일한 길
 pub trait GitRunner: Sync {
-    /// "local" | "wsl"
+    /// "local" | "wsl" | "ssh"
     fn kind(&self) -> &'static str;
     fn run(&self, repo_path: &str, args: &[String], opts: &RunOpts) -> impl Future<Output = Result<RunResult, ExecError>> + Send;
+    /// 정리돼 영구히 거부하는 실행기인가(SSH 실행기가 미러에서 빠진 호스트의 연결을 닫은 경우). 서비스는 이런 실행기를 쥐지 않고 새로 받는다
+    fn is_closed(&self) -> bool {
+        false
+    }
 }
 
 impl GitRunner for GitExecutor {
@@ -39,6 +43,10 @@ impl GitRunner for GitExecutor {
 
     fn run(&self, repo_path: &str, args: &[String], opts: &RunOpts) -> impl Future<Output = Result<RunResult, ExecError>> + Send {
         GitExecutor::run(self, repo_path, args, opts)
+    }
+
+    fn is_closed(&self) -> bool {
+        GitExecutor::is_closed(self)
     }
 }
 

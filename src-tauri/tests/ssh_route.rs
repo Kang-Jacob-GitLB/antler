@@ -10,7 +10,11 @@ use std::sync::Arc;
 
 use antler_lib::git::exec::queue::SSH_LIMIT;
 use antler_lib::git::exec::ssh::SshPool;
-use antler_lib::mirror::{MirrorRepo, RepoMirror};
+use antler_lib::git::exec::GitExecutor;
+use antler_lib::git::fetch::confirm_text::ConfirmBox;
+use antler_lib::git::fetch::service::{ApprovalKind, FetchHost, FetchService, HostEvent};
+use antler_lib::git::log_service::NoteOp;
+use antler_lib::mirror::{MirrorRepo, RepoMirror, Target};
 use antler_lib::router::{Routed, Router};
 use serde_json::{json, Value};
 
@@ -244,6 +248,74 @@ async fn 종료하면_모든_ssh_연결이_닫힌다() {
     wait_for("모든 연결 닫힘", || rig.server.open_connections() == 0).await;
 }
 
+// ── ssh fetch(Phase 5 PR 4) ────────────────────────────────
+
+struct NullHost;
+
+impl FetchHost for NullHost {
+    fn emit(&self, _event: HostEvent) {}
+    async fn confirm(&self, _repo_id: &str, _confirm: &ConfirmBox) -> Option<i64> {
+        None
+    }
+    fn approve(&self, _kind: ApprovalKind, _repo_id: &str, _fingerprint: &str) {}
+    fn note(&self, _op: NoteOp, _repo_id: &str) {}
+}
+
+/// `origin` 의 복제본(remote 가 origin 의 경로다 — file 전송이라 수동 fetch 만 받는다). 준비용 날 git 이다(제품 경로가 아니다)
+#[allow(clippy::disallowed_methods)]
+fn clone_of(origin: &TempDir) -> TempDir {
+    let dest = TempDir::new("clone");
+    let out = std::process::Command::new("git").args(["clone", "-q"]).arg(origin.path()).arg(dest.path()).output().expect("git 실행");
+    assert!(out.status.success(), "git clone: {}", String::from_utf8_lossy(&out.stderr));
+    dest
+}
+
+/// 루프백 서버 너머의 저장소를 Rust 서비스가 수동 fetch 한다. 풀을 라우터와 나눠 쓰므로 호스트당 연결이 하나이고,
+/// 호스트가 미러에서 빠지면 연결과 서비스가 쥔 실행기가 함께 정리돼 같은 호스트를 다시 추가한 뒤의 fetch 도 새 연결로 성공한다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ssh_fetch_는_라우터와_같은_연결을_쓰고_호스트를_지웠다_다시_추가해도_성공한다() {
+    let rig = Rig::new().await;
+    let origin = make_repo(0);
+    let clone = clone_of(&origin);
+    let mk = || MirrorRepo { id: "s".into(), kind: "ssh".into(), path: clone.path().to_string_lossy().into_owned(), distro: None, ssh_host: Some("a".into()) };
+    let m = RepoMirror::default();
+    m.apply(1, vec![mk()]);
+    let router = rig.router(&m);
+    let pool = rig.pool.clone();
+    let make_runner = move |t: &Target| match t {
+        Target::Ssh { host, .. } => Arc::new(GitExecutor::Ssh(pool.get(host))),
+        _ => unreachable!("ssh 저장소만 있다"),
+    };
+    router.set_fetch(Arc::new(FetchService::new(NullHost, m.clone(), make_runner, None)));
+    let fetch = || async { envelope(router.route("git:fetch", &json!(["s", true])).await) };
+
+    let env = fetch().await;
+    assert!(env["data"]["error"].is_null() && env["data"]["lastOkAt"].is_u64(), "{env}");
+    // 라우터의 git:log 도 같은 연결을 쓴다(호스트당 하나)
+    assert!(log_ok_at(&router, "s", 1).await);
+    assert_eq!(rig.server.connections(), 1);
+
+    // 호스트가 빠진다 — 연결이 닫히고 풀에서도 빠진다
+    assert!(m.apply(2, vec![]));
+    router.on_mirror_changed();
+    assert!(rig.pool.hosts().is_empty());
+    wait_for("연결 닫힘", || rig.server.open_connections() == 0).await;
+    // 같은 호스트를 다시 추가하면 새 연결로 fetch 가 성공한다(낡은 실행기의 "이미 종료" 가 아니다)
+    assert!(m.apply(3, vec![mk()]));
+    router.on_mirror_changed();
+    let env = fetch().await;
+    assert!(env["data"]["error"].is_null() && env["data"]["lastOkAt"].is_u64(), "{env}");
+    assert_eq!(rig.server.connections(), 2);
+    router.shutdown();
+    wait_for("모든 연결 닫힘", || rig.server.open_connections() == 0).await;
+}
+
+/// `log_ok` 의 커밋 수를 정할 수 있는 형태(복제본은 커밋이 1개다)
+async fn log_ok_at(router: &Router, id: &str, commits: usize) -> bool {
+    let env = envelope(router.route("git:log", &json!([id, { "skip": 0, "count": 5 }])).await);
+    env["ok"] == true && env["data"]["commits"].as_array().is_some_and(|c| c.len() == commits)
+}
+
 // ── 앱 배선(소스 검사) ─────────────────────────────────────
 
 #[test]
@@ -253,9 +325,10 @@ fn 앱은_풀을_fetch_서비스와_사이드카_env_보다_먼저_주입하고_
     let guard = lib.find("if router.ssh_enabled()").expect("스위치 확인");
     let fetch = lib.find("router.set_fetch(").expect("fetch 서비스 주입");
     let active = lib.find("let rust_ssh = router.ssh_active();").expect("사이드카 env 값(미러 해석과 같은 판정)");
+    let kinds = lib.find("let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh);").expect("fetch 소유 종류도 같은 판정(ssh_active)으로 정한다");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(guard < pool && pool < fetch && fetch < active && active < manage && manage < spawn);
+    assert!(guard < pool && pool < fetch && fetch < active && active < kinds && kinds < manage && manage < spawn);
     assert_eq!(lib.matches("router.set_ssh_pool(").count(), 1);
     assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh)"));
     // 홈을 알 수 없으면 풀을 주입하지 않는다(사이드카가 처리한다) — 빈 홈으로 만들지 않는다

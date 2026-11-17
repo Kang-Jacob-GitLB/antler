@@ -130,19 +130,20 @@ pub fn run() {
                 let ssh_pool = router.ssh_pool();
                 let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone());
                 let no_hooks_dir = user_data.join("no-hooks").to_string_lossy().into_owned();
+                let runner_mirror = mirror.clone();
                 let make_runner = move |target: &Target| match target {
                     Target::Local { .. } => std::sync::Arc::new(GitExecutor::Local(LocalExecutor::default())),
                     Target::Wsl { distro, .. } => std::sync::Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))),
-                    // fetch 의 소유는 소스 종류(local·wsl)로 정하므로(RepoMirror::resolve_fetch) ssh 는 여기까지 오지 않는다 — PR 4 가 ssh fetch 를 켤 때 같은 풀을 쓴다
-                    Target::Ssh { host, .. } => std::sync::Arc::new(GitExecutor::Ssh(match &ssh_pool {
-                        Some(pool) => pool.get(host),
-                        // 풀이 없으면 오지 않는 길이다 — 닿아도 어떤 설정 파일도 읽지 않게 닫힌 실행기를 준다(모든 호출이 거부된다)
-                        None => {
+                    // ssh fetch(Phase 5 PR 4): 라우터와 같은 풀의 실행기(호스트당 연결 하나·채널 6개 한도 공유)를 쓴다. 풀이 닫은 실행기는 서비스가 `is_closed` 로 알아보고 새로 받는다.
+                    // 호스트가 아직 미러에 있는지는 **풀 잠금 안에서** 다시 본다(`get_if`) — 서비스의 확인은 라우터와 다른 잠금이라, 그 사이 정리된 호스트를 닫히지 않은 채 풀에 다시 넣지 않게
+                    Target::Ssh { host, .. } => std::sync::Arc::new(GitExecutor::Ssh(
+                        ssh_pool.as_ref().and_then(|pool| pool.get_if(host, || runner_mirror.ssh_hosts().contains(host))).unwrap_or_else(|| {
+                            // 풀이 없거나(오지 않는 길) 호스트가 방금 빠졌다 — 어떤 설정 파일도 읽지 않게 닫힌 실행기를 준다(모든 호출이 거부되고, 서비스는 다음 resolve 에서 버린다)
                             let closed = SshPool::for_home("").get(host);
                             closed.dispose();
                             closed
-                        }
-                    })),
+                        }),
+                    )),
                 };
                 router.set_fetch(std::sync::Arc::new(FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir))));
             }
@@ -181,9 +182,9 @@ pub fn run() {
                     }
                 }
             }
-            let fetch_kinds = router::sidecar_fetch_kinds(router.enabled());
-            // 사이드카에 ssh 를 Rust 가 처리함을 알리는 값. 미러의 ssh 해석과 같은 판정(ssh_active) 하나다
+            // 사이드카에 ssh 를 Rust 가 처리함을 알리는 값. 미러의 ssh 해석과 같은 판정(ssh_active) 하나다 — fetch 소유 종류(local,wsl[,ssh])도 이 값으로 정한다
             let rust_ssh = router.ssh_active();
+            let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh);
             // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
             let rust_api = router.claim_api();
             app.manage(router);
