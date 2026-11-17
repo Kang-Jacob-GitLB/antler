@@ -1,7 +1,25 @@
 import { execFile } from 'node:child_process'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AbortError, GitError } from '../src/main/executors/GitExecutor'
-import { listWslDistros, WslExecutor, wslArgv } from '../src/main/executors/WslExecutor'
+import { listWslDistros, parseLxssQuery, WslExecutor, wslArgv } from '../src/main/executors/WslExecutor'
+
+describe('parseLxssQuery', () => {
+  it('reg query 출력에서 DistributionName 값만 뽑는다(배포판이 없으면 빈 배열 — 이때 wsl.exe 를 부르지 않는다)', () => {
+    const out = [
+      '',
+      'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{0d1e7a1c-0000-0000-0000-000000000001}',
+      '    DistributionName    REG_SZ    Ubuntu-22.04',
+      '',
+      'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{0d1e7a1c-0000-0000-0000-000000000002}',
+      '    DistributionName    REG_SZ    docker-desktop',
+      '',
+      '검색 종료: 2 일치하는 항목이 있습니다.'
+    ].join('\r\n')
+    expect(parseLxssQuery(out)).toEqual(['Ubuntu-22.04', 'docker-desktop'])
+    expect(parseLxssQuery('')).toEqual([])
+    expect(parseLxssQuery('HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\r\n    DefaultDistribution    REG_SZ    {x}')).toEqual([])
+  })
+})
 
 describe('wslArgv', () => {
   it('--exec env ... git -C 형태로 만든다', () => {
