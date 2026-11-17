@@ -61,7 +61,7 @@ impl From<SigError> for ExecError {
     }
 }
 
-type SharedSig =Shared<BoxFuture<'static, Result<Signature, SigError>>>;
+type SharedSig = Shared<BoxFuture<'static, Result<Signature, SigError>>>;
 
 struct Gate {
     deadline: Instant,
