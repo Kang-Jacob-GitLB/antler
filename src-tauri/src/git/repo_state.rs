@@ -535,6 +535,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn 낡은_계산의_정리는_아직_진행_중인_새_계산의_합류_표시를_지우지_않는다() {
+        let s = RepoState::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (old, old_tx) = manual();
+        let first = {
+            let s = s.clone();
+            tokio::spawn(async move { s.shared_signature("r", move |_| old, None).await })
+        };
+        flush().await;
+        s.invalidate_signature("r");
+        // 새 공유 계산 B 를 진행 중으로 둔다
+        let (new, new_tx) = manual();
+        let second = {
+            let (s, calls) = (s.clone(), calls.clone());
+            tokio::spawn(async move {
+                s.shared_signature(
+                    "r",
+                    move |_| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        new
+                    },
+                    None,
+                )
+                .await
+            })
+        };
+        flush().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        // 옛 계산 A 가 끝나 정리된다 — B 는 아직 진행 중
+        old_tx.send(Ok(sig(1))).unwrap();
+        assert_eq!(first.await.unwrap(), Ok(sig(1)));
+        assert!(!second.is_finished());
+        // 세 번째 호출은 B 에 합류해야 한다(새로 계산하면 calls 가 는다)
+        let third = {
+            let (s, calls) = (s.clone(), calls.clone());
+            tokio::spawn(async move {
+                s.shared_signature(
+                    "r",
+                    move |_| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        async { Ok(sig(7)) }
+                    },
+                    None,
+                )
+                .await
+            })
+        };
+        flush().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "B 에 합류하지 않고 새로 계산했다");
+        assert!(!third.is_finished());
+        new_tx.send(Ok(sig(2))).unwrap();
+        assert_eq!((second.await.unwrap(), third.await.unwrap()), (Ok(sig(2)), Ok(sig(2))));
+        assert_eq!(s.known_signature("r"), Some(sig(2)));
+    }
+
+    #[tokio::test]
     async fn 기다림을_취소해도_계산은_끝까지_가서_기억한다() {
         let s = RepoState::default();
         let (c, tx) = manual();

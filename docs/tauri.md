@@ -1267,9 +1267,9 @@ TS `RepoService` 가 쥔 상태 둘을 Rust 에 둔다. 소비자(`refsDetails`�
 **소비 금지**: `known_signature` 는 **감시(PR 7b)가 갱신하기 전까지 소비하지 않는다** — 감시와 `activity` 가 다른 프로세스에 있으면 기억값이 낡는다(계획 §2). PR 4 의 `activity` 는 기억값을 쓰지 않고 `shared_signature` 로 매번 얻는다.
 이 PR 은 사이드카가 보내는 `repo:changed`(감시 이벤트)는 **연결하지 않았다** — 감시는 PR 7 의 몫이고, 지금 Rust 상태를 갱신할 감시자가 없다.
 
-**대응표**(`test-map.json`): `repoService` 의 첫 페이지 문·시그니처 `it` 6개의 `N/A: PR 3a` 를 `repo_state.rs::…` 로 바꿨다(`golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `repo_state.rs` 를 더했다).
-TS 가 `activity` 로 관찰하던 4개(`logStale`·`fetchChanged`·시그니처 재사용·`StaleLogError`)는 소비자가 없어 **상태 수준**(기억이 비었는가·합류했는가·낡은 계산이 덮지 못하는가)으로 옮겼다 — `activity` 수준의 확인은 PR 4 가 한다.
-이 PR 뒤 `<파일>.rs::<fn>` 93개, `N/A: PR n` 63개, 사유 있는 N/A 43개(합 199).
+**대응표**(`test-map.json`): `repoService` 의 첫 페이지 문 `it` 2개(문 열림·`logFirstPage`)만 `repo_state.rs::…` 로 연결했다(`golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `repo_state.rs` 를 더했다).
+TS 가 `activity` 결과로 관찰하던 4개(`logStale`·`fetchChanged`·시그니처 재사용·`StaleLogError`)는 `N/A: PR 4` 로 되돌렸다 — 이 PR 의 상태 수준 시험(기억이 비었는가·합류했는가·낡은 계산이 덮지 못하는가)은 `activity` 결과를 보증하지 않으므로, **PR 4 가 `activity` 수준 시험으로 다시 매핑해야 한다.**
+이 PR 뒤 `<파일>.rs::<fn>` 89개, `N/A: PR n` 67개, 사유 있는 N/A 43개(합 199).
 
 **시험**: `repo_state.rs` 단위 17개(문: 활성화·유예·재 arm 이 유예를 안 미룸·낡은 유예가 새 문을 못 엶·저장소별·dispose / 시그니처: 실패 비기록·늦게 시작한 계산 우선·무효화 전 계산 비기록·순번 시점·note·합류·합류 끊김·기다림 취소·제한 시간·패닉·동시 16개 저장소, 멈춘 시계(`start_paused`)와 손으로 푸는 future),
 `signature.rs` 1개, `router.rs` 6개(`repos:watch` arm 대상·재 arm 이 기억을 버림·**팬아웃 순서**(싱크 안에서 상태가 이미 반영됨)·싱크 없이도 반영/나중에 단 싱크도 받음·`with_log_timing` 뒤에도 로그 알림이 상태를 엶·종료가 문을 풂).
