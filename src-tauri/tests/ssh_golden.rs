@@ -1,6 +1,6 @@
 //! SSH 순수 로직(`src/git/exec/ssh`)의 골든 패리티 테스트. `tests/golden/ssh/*.json`(TS 가 기준: `UPDATE_GOLDEN=1 npx vitest run tests/goldenSsh.test.ts`)과
 //! `tests/golden/exec/env.json` 의 `ssh` 절(원격 명령 원문 바이트)을 읽어 Rust 이식이 같은 결과를 내는지 본다. **건너뛰는 골든이 없다** — 처리기 없는 파일이 있으면 실패한다.
-//! 입력 표는 `tests/fixtures/sshCases.ts`. 네트워크·ssh·git 을 쓰지 않는다. 알려진 차이(비 ASCII 대소문자)는 골든의 `rust` 필드로 고정하고, 그 값이 TS 와 **실제로 다른지**도 단언한다.
+//! 입력 표는 `tests/fixtures/sshCases.ts`. 네트워크·ssh·git 을 쓰지 않는다. 알려진 차이(비 ASCII 호스트 이름·범위 밖 포트 관문)는 골든의 `rust` 필드로 고정하고, 그 값이 TS 와 **실제로 다른지**도 단언한다.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -114,7 +114,7 @@ fn config_골든이_ts_와_같다() {
         assert_eq!(Value::Array(hosts), case["hosts"], "{name} / listHosts");
     }
     eprintln!("[config] 질의 {queries}(알려진 차이 {diffs})");
-    assert!(queries > 80 && diffs == 2);
+    assert!(queries > 80 && diffs == 11);
 }
 
 #[test]
@@ -158,6 +158,9 @@ fn known_hosts_골든이_ts_와_같다() {
                 assert_eq!(status.as_str(), s(rust), "{label} / rustStatus");
                 assert_ne!(status.as_str(), s(&q["status"]), "{label}: rustStatus 가 TS 와 같다 — 차이 표기를 지운다");
                 assert_eq!(verify.is_ok(), s(rust) == "ok", "{label} / verify");
+                if s(rust) == "unsupported" {
+                    assert!(known_host_key_algorithms(text, host, port).is_empty(), "{label} / algorithms");
+                }
                 diffs += 1;
             } else {
                 assert_eq!(status.as_str(), s(&q["status"]), "{label} / status");

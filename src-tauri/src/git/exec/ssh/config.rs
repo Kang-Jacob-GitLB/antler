@@ -9,6 +9,8 @@
 //! **조용히 무시하면 위험한 설정은 [`ResolvedHost::unsupported`] 로 알린다**: ProxyCommand 를 무시하면 bastion 을 건너뛰고 내부 이름으로 직접 접속하고,
 //! 이 호스트에 걸릴 수 있는 Match 블록을 무시하면 의도와 다른 신원으로 접속한다. 연결 쪽은 `unsupported` 가 있으면 거부해야 한다(이 약화는 금지).
 //!
+//! Rust 가 TS 보다 **엄격한** 곳(역시 `unsupported`): 별칭·HostName·HostKeyAlias 의 비 ASCII, 범위 밖 포트(최종·ProxyJump 홉), RevokedHostKeys.
+//!
 //! TS 와 같게 옮긴 곳: 경로는 Node `path.win32` 규칙으로 정규화하고([`super::win32_path`]), 파일·환경변수·로컬 사용자 이름은 호출자가 넣는다
 //! ([`ConfigFs`]·[`Ctx`]) — 골든이 임시 경로에 기대지 않게 한다. 정규식은 쓰지 않았다(줄 형식·`\s`·`.` 의 JS 의미는 [`split_key_value`] 에 손으로 풀었다).
 
@@ -21,6 +23,12 @@ use crate::git::fetch::{is_line_terminator, js_to_lowercase, js_trim};
 use crate::git::scope::is_js_space;
 
 const MAX_INCLUDE_DEPTH: usize = 16;
+
+const PORT_RANGE: std::ops::RangeInclusive<u32> = 1..=65535;
+
+/// `unsupported` 문구(연결 쪽은 `unsupported` 가 있으면 거부한다)
+const NON_ASCII_HOST: &str = "비 ASCII 호스트 이름(punycode 로 적으세요)";
+const BAD_PORT: &str = "포트가 1~65535 범위 밖";
 
 // ── 파일 시스템·환경 주입 ────────────────────────────────────────────────────
 
@@ -346,7 +354,7 @@ pub struct HostSpec {
     pub port: Option<u32>,
 }
 
-/// 10진 숫자 열을 포트로 읽는다(TS 는 `Number()` 라 어떤 크기든 받는다 — Rust 는 u32 로 포화시킨다. 65535 를 넘는 값은 연결 쪽이 거부해야 한다)
+/// 10진 숫자 열을 포트로 읽는다(TS 는 `Number()` 라 어떤 크기든 받는다 — Rust 는 u32 로 포화시킨다. 범위 밖 값은 [`resolve_host`] 가 `unsupported` 로 표시한다)
 fn digits_to_port(s: &str) -> u32 {
     s.parse::<u32>().unwrap_or(u32::MAX)
 }
@@ -561,6 +569,21 @@ pub fn resolve_host(config: &SshConfig, spec: &str, ctx: &Ctx) -> ResolvedHost {
         }
     }
 
+    // 관리자 폐기 목록(RevokedHostKeys)은 읽지 않는다 — 조용히 무시하면 폐기된 키를 수락하므로 거부한다(TS 는 무시한다: 더 엄격한 차이)
+    if first_arg(&first, "revokedhostkeys").is_some() {
+        problems.push("RevokedHostKeys".to_string());
+    }
+    // 비교하는 이름 쪽을 ASCII 로 막는다 — 이름이 ASCII 면 어떤 패턴이든 ASCII 접기가 TS(JS 비유니코드 `i`)와 같다(`mod.rs` "이식 규칙")
+    let host_key_alias = first_arg(&first, "hostkeyalias").filter(|s| !s.is_empty()).map(String::from);
+    if [alias.as_str(), host_name.as_str()].into_iter().chain(host_key_alias.as_deref()).any(|n| !n.is_ascii()) {
+        problems.push(NON_ASCII_HOST.to_string());
+    }
+    // 포트는 최종 값과 모든 ProxyJump 홉이 1..=65535 여야 한다(digits_to_port 는 u32 로 포화시킨다)
+    let proxy_jump: Vec<JumpHop> = first.get("proxyjump").map(|pj| parse_proxy_jump(&pj.join(" "))).unwrap_or_default();
+    if !PORT_RANGE.contains(&port) || proxy_jump.iter().any(|h| h.port.is_some_and(|p| !PORT_RANGE.contains(&p))) {
+        problems.push(BAD_PORT.to_string());
+    }
+
     // UserKnownHostsFile 은 공백으로 여러 파일을 줄 수 있다. 'none' 이면 지정 없음으로 본다
     let known_hosts_files: Vec<String> =
         first.get("userknownhostsfile").copied().unwrap_or(&[]).iter().filter(|f| js_to_lowercase(f) != "none").map(|f| normalized(f)).collect();
@@ -578,12 +601,12 @@ pub fn resolve_host(config: &SshConfig, spec: &str, ctx: &Ctx) -> ResolvedHost {
         user,
         port,
         identity_files: files,
-        proxy_jump: first.get("proxyjump").map(|pj| parse_proxy_jump(&pj.join(" "))).unwrap_or_default(),
+        proxy_jump,
         identities_only: first_arg(&first, "identitiesonly").is_some_and(|v| js_to_lowercase(v) == "yes"),
         identity_agent,
         unsupported: (!problems.is_empty()).then(|| problems.join(", ")),
         known_hosts_files,
-        host_key_alias: first_arg(&first, "hostkeyalias").filter(|s| !s.is_empty()).map(String::from),
+        host_key_alias,
     }
 }
 
@@ -690,6 +713,45 @@ mod tests {
         assert_eq!(resolve(cfg, "db.corp").unsupported.as_deref(), Some("Match host *.corp exec true, Match user root"));
         assert_eq!(resolve("Match host other\n  User x\n", "mine").unsupported, None);
         assert_eq!(resolve("Match exec \"true\"\n", "mine").unsupported, None);
+    }
+
+    #[test]
+    fn 비_ascii_호스트_이름은_unsupported() {
+        let bad = Some(NON_ASCII_HOST);
+        assert_eq!(resolve("", "Éxample").unsupported.as_deref(), bad, "별칭");
+        assert_eq!(resolve("Host a\n  HostName 例.test\n", "a").unsupported.as_deref(), bad, "HostName");
+        assert_eq!(resolve("Host a\n  HostKeyAlias é\n", "a").unsupported.as_deref(), bad, "HostKeyAlias");
+        assert_eq!(resolve("Host a\n  HostName %h\n", "a").unsupported, None);
+        // 켈빈 기호·ſ 같은 대소문자 접기 변종도 같은 관문에 걸린다
+        assert_eq!(resolve("", "\u{212a}").unsupported.as_deref(), bad);
+        assert_eq!(resolve("", "\u{17f}").unsupported.as_deref(), bad);
+        // ASCII 이름이면 비 ASCII 패턴이 있어도 TS 와 같다(비 ASCII 패턴은 ASCII 이름에 맞지 않는다)
+        assert_eq!(resolve("Host É*\n  Port 9\n", "x").port, 22);
+    }
+
+    #[test]
+    fn 포트는_1_65535_밖이면_unsupported() {
+        let bad = Some(BAD_PORT);
+        assert_eq!(resolve("", "h:0").unsupported.as_deref(), bad);
+        assert_eq!(resolve("", "h:65536").unsupported.as_deref(), bad);
+        assert_eq!(resolve("", "h:99999999999999999999").unsupported.as_deref(), bad);
+        assert_eq!(resolve("", "h:65535").unsupported, None);
+        assert_eq!(resolve("", "h:1").unsupported, None);
+        // 설정 파일의 Port 는 범위 밖이면 무시하므로 문제가 아니다
+        assert_eq!(resolve("Host h\n  Port 70000\n", "h").unsupported, None);
+        // ProxyJump 홉
+        assert_eq!(resolve("Host h\n  ProxyJump b@j:0\n", "h").unsupported.as_deref(), bad);
+        assert_eq!(resolve("Host h\n  ProxyJump ok,j:70000\n", "h").unsupported.as_deref(), bad);
+        assert_eq!(resolve("Host h\n  ProxyJump j:22,k:65535\n", "h").unsupported, None);
+    }
+
+    #[test]
+    fn revoked_host_keys_는_unsupported() {
+        assert_eq!(resolve("Host h\n  RevokedHostKeys ~/revoked\n", "h").unsupported.as_deref(), Some("RevokedHostKeys"));
+        assert_eq!(resolve("Host *\n  revokedhostkeys /etc/ssh/revoked\n", "h").unsupported.as_deref(), Some("RevokedHostKeys"));
+        assert_eq!(resolve("Host other\n  RevokedHostKeys x\n", "h").unsupported, None, "이 호스트에 적용되지 않으면 무관하다");
+        // 여러 문제는 쉼표로 이어 붙는다
+        assert_eq!(resolve("Host h\n  RevokedHostKeys x\n  ProxyCommand c\n", "h:0").unsupported.as_deref(), Some("ProxyCommand, RevokedHostKeys, 포트가 1~65535 범위 밖"));
     }
 
     #[test]

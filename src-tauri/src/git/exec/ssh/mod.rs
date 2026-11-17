@@ -13,8 +13,9 @@
 //! - **와일드카드 매칭(`glob_match`)은 UTF-16 코드 단위로 한다.** JS 의 `.`(`?`)는 코드 단위 하나라 이모지 하나에 `?` 가 둘 필요하고, `.`(`*`·`?`)는 줄 끝 문자
 //!   (`\n`·`\r`·U+2028·U+2029)를 맞추지 않는다.
 //! - **대소문자 무시(`i` 플래그)는 ASCII 만 접는다.** TS 는 유니코드가 아닌 정규식의 `i` 라 `toUpperCase` 로 정규화한다(`é` 와 `É` 가 같다).
-//!   Rust 는 Node 의 대문자 표가 없어 접지 않는다 — 비 ASCII 호스트 이름·패턴에서만 다르다(골든에 고정, docs/tauri.md "TS 와 다른 점").
-//!   known_hosts 의 `@revoked` 가 비 ASCII 대소문자 변형으로 놓칠 수 있는 방향이라 연결 PR 에서 호스트 이름을 ASCII(punycode)로 제한하는지 확인한다.
+//!   Rust 는 Node 의 대문자 표가 없어 접지 않는다. **비교되는 이름 쪽을 ASCII 로 막아 닫는다**: JS 비유니코드 `i` 의 Canonicalize 는 비 ASCII 를 ASCII 로 접지 않으므로
+//!   이름이 ASCII 면 어떤 패턴이든 ASCII 접기 결과가 TS 와 같다. 관문은 `config::resolve_host`(별칭·HostName·HostKeyAlias 가 비 ASCII 면 `unsupported`)와
+//!   `known_hosts::check_host_key`(비 ASCII 호스트는 `Unsupported`)다 — `to_lowercase` 로 바꾸지 않는다(켈빈 기호 등으로 새 차이가 생긴다). docs/tauri.md "TS 와 다른 점".
 
 pub mod config;
 pub mod known_hosts;

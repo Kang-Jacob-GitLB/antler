@@ -846,22 +846,25 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 | `ssh/win32_path.rs` | Node `path.win32` 의 `normalize`·`join`·`isAbsolute`·`dirname`·`basename`(Node 22.17.1 의 `lib/path.js`) |
 | `ssh/mod.rs` | JS 정규식 `globToRegExp` 의 의미를 옮긴 `glob_match`(UTF-16 단위·줄 끝 문자 제외·ASCII 대소문자 무시) |
 
-**골든**: `tests/fixtures/sshCases.ts`(입력 표 — 설정 사례 30개(질의 108)·호스트 스펙 29개·known_hosts 사례 14개(질의 49)·인용 28개·원격 명령 24개) → `tests/goldenSsh.test.ts` 가 TS 구현으로 `tests/golden/ssh/{config,knownHosts,quote}.json` 을 만들고
+**골든**: `tests/fixtures/sshCases.ts`(입력 표 — 설정 사례 31개(질의 111)·호스트 스펙 29개·known_hosts 사례 14개(질의 49)·인용 28개·원격 명령 24개) → `tests/goldenSsh.test.ts` 가 TS 구현으로 `tests/golden/ssh/{config,knownHosts,quote}.json` 을 만들고
 (`UPDATE_GOLDEN=1 npx vitest run tests/goldenSsh.test.ts`), 원격 명령 원문 바이트는 `tests/goldenExec.test.ts` 가 `tests/golden/exec/env.json` 의 `ssh` 절로 만든다(`GIT_ENV` 단독·fetch 환경 둘 × 작은따옴표·백슬래시·`$`·백틱·개행·한글·`-c alias…`·NUL).
 `src-tauri/tests/ssh_golden.rs` 가 전부 읽어 비교한다(처리기 없는 골든이 있으면 실패). 입력 `TRICKY` 는 기존 `tests/sshQuote.test.ts` 와 공유한다.
 - **플랫폼과 무관한 골든**: 골든 생성기는 `node:path` 를 win32 판으로, `node:fs` 를 가상 파일 시스템(`C:\golden\…`, 대소문자 무시)으로 바꿔 돌린다 — 임시 경로·플랫폼(CI 의 vitest 는 ubuntu)에 기대지 않고 Rust 의 `MemFs`·`win32_path` 와 같은 규칙으로 맞춘다. 홈(`C:\golden\home`)·로컬 사용자·환경변수는 사례 입력이다.
 - **대응표**(`tests/golden/ssh/test-map.json`): 대상 테스트 5개(`sshConfig`·`sshKnownHosts`·`sshQuote`·`sshExecutor`·`sshRemoteDir`)의 모든 `it` 59개가 있어야 하고(vitest 가 강제) 값은 `<파일>.rs::<테스트 이름>`(그 이름의 `fn` 이 있어야 한다)·`N/A: PR n`·`N/A: 사유` 중 하나다.
   `sshExecutor` 는 `N/A: PR 2`, `sshRemoteDir` 는 `N/A: 저장소 추가 흐름(사이드카 유지)`. 골든 사례 이름은 해당 `it` 제목과 같고, 한 골든 시험이 여러 `it` 을 덮는다.
-- **시험**: 라이브러리 단위 18개(`win32_path`·`glob`·줄 모양·토큰·`$VAR`·Include 깊이·실제 파일 시스템 Include·base64·키 종류·인용 모양·env 이름 거부), `ssh_golden.rs` 11개, vitest `goldenSsh`(2)·`goldenExec`(`ssh` 절 포함).
+- **시험**: 라이브러리 단위 21개(`win32_path`·`glob`·줄 모양·토큰·`$VAR`·Include 깊이·실제 파일 시스템 Include·base64·키 종류·인용 모양·env 이름 거부), `ssh_golden.rs` 11개, vitest `goldenSsh`(2)·`goldenExec`(`ssh` 절 포함).
 
 **TS 와 다른 점**
-- **대소문자 무시는 ASCII 만이다.** TS 의 `globToRegExp` 는 `i` 플래그(유니코드가 아닌 정규식)라 `toUpperCase` 로 정규화해 `é` 와 `É` 를 같게 본다. Rust 는 Node 의 대문자 표가 없어 ASCII 만 접는다(`ſ`·켈빈 기호가 ASCII 와 다른 것은 TS 도 같다).
-  다른 곳은 비 ASCII 호스트 이름·패턴뿐이고 골든이 고정한다(`rust` 필드·`rustStatus`: 서로 **달라야** 통과한다). 방향 주의: known_hosts 는 호스트를 소문자로 바꿔 비교하므로 **대문자 비 ASCII 패턴은 Rust 에서 맞지 않는다** —
-  `@revoked` 가 그 모양이면 TS 는 거부하는데 Rust 는 놓친다. **설정 파서에도 같은 방향이 있다**: 대소문자가 있는 비 ASCII `Host`·`Match host` 패턴에서 TS 는 블록을 적용하거나 `unsupported`(ProxyCommand·해당 Match)로 표시하는데
-  Rust 는 놓칠 수 있어, 그 블록의 ProxyCommand·ProxyJump·IdentitiesOnly 가 빠진다(ProxyCommand·해당 Match 거부 경계가 이 경우에만 TS 보다 느슨하다). 실제 호스트 이름은 ASCII(punycode)라 영향이 없지만,
-  연결 PR 에서 접속 대상 호스트 이름(별칭 포함)을 ASCII 로 제한하거나 비 ASCII 패턴이 든 설정은 거부하는 쪽으로 닫는다.
+- **대소문자 무시는 ASCII 만이다 — 이름 쪽을 ASCII 로 막아 닫았다.** TS 의 `globToRegExp` 는 `i` 플래그(유니코드가 아닌 정규식)라 `toUpperCase` 로 정규화해 `é` 와 `É` 를 같게 본다.
+  Rust 는 Node 의 대문자 표가 없어 ASCII 만 접는다(`ſ`·켈빈 기호가 ASCII 와 다른 것은 TS 도 같다). JS 비유니코드 `i` 의 Canonicalize 는 비 ASCII 를 ASCII 로 접지 않으므로 **비교되는 이름이 ASCII 면 어떤 패턴이든 Rust 결과가 TS 와 정확히 같다.**
+  그래서 관문을 이름 쪽에 둔다(`to_lowercase` 로 바꾸지 않는다 — 켈빈 기호 등으로 새 차이가 생긴다): `resolve_host` 는 별칭·HostName·HostKeyAlias 에 비 ASCII 가 있으면 `unsupported`("비 ASCII 호스트 이름(punycode 로 적으세요)"),
+  `check_host_key` 는 비 ASCII 호스트를 판정하지 않고 `HostKeyCheck::Unsupported`(검증 거부, `known_host_key_algorithms` 는 빈 목록)를 낸다. 골든(`rust` 필드·`rustStatus`)이 이 차이를 고정하고 서로 **달라야** 통과한다.
+  비 ASCII 대문자 `@revoked`·`Host`/`Match host` 패턴이 호스트 이름과 맞지 않아 거부·ProxyCommand 판정이 새던 경로는 이 관문으로 닫혔다.
+- **Rust 가 TS 보다 엄격한 곳**(모두 `unsupported`): ① 최종 포트와 모든 ProxyJump 홉 포트가 1..=65535 가 아니면("포트가 1~65535 범위 밖"; TS 는 `Number()` 라 어떤 값이든 받고 `ssh2` 가 실패한다. 설정 파일의 `Port` 는 TS 처럼 범위 밖이면 무시한다).
+  ② 이 호스트에 적용되는 `RevokedHostKeys`("RevokedHostKeys" — 관리자 폐기 목록을 읽지 않는데 조용히 무시하면 폐기된 키를 수락한다. TS 는 무시한다).
+- **지원하지 않는 한계(TS 와 같다, 조용히 무시한다)**: `GlobalKnownHostsFile`(시스템 known_hosts 를 읽지 않는다)·`KnownHostsCommand`·`CanonicalizeHostname`. 이 설정에 기대는 환경에서는 호스트를 "알 수 없음"으로 거부하거나 다른 이름으로 접속할 수 있으니 사용자 안내에 적는다.
 - `~/.ssh/config` 의 경로는 **항상 win32 규칙**으로 정규화한다(`win32_path`). macOS·Linux 지원(Phase 6)에서 posix 규칙이 필요하면 호출부에서 고른다. Node 판이 올라 `path.win32` 가 바뀌면 골든이 실패하니 `lib/path.js` 와 다시 대조한다(예약 이름 `CON` 등의 처리는 `isWindowsReservedName(path, -1)` 의 끝 글자 하나 잘림까지 옮겼다).
-- 포트는 `u32` 로 포화시킨다(TS 는 `Number()` 라 어떤 크기든 받는다). 65535 를 넘는 값은 두 쪽 모두 접속할 수 없다(TS 는 `connection.ts` 가 따로 검사하지 않고 `ssh2` 가 실패한다 — Rust 연결 PR 은 `1..=65535` 를 명시적으로 검사한다. 설정 파일의 `Port` 는 TS 처럼 1~65535 가 아니면 무시한다).
+- 포트는 `u32` 로 포화시킨다(골든 모양 유지). 범위 검사는 위 "엄격한 곳" ① 이 `resolve_host` 한 곳에서 한다.
 - 로컬 사용자 이름은 Windows 에서 `GetUserNameW`(`windows` 크레이트의 `Win32_System_WindowsProgramming` 기능만 켰다 — 새 크레이트 아님), 실패하면 `USERNAME`·`USER`·`user`. 환경변수는 `process_env`(Windows 는 대소문자 무시, Node 와 같다).
 - 정규식 크레이트를 쓰지 않았다. 줄 형식 `^([A-Za-z0-9]+)(?:\s*=\s*|\s+)(.*)$` 는 손으로 풀었다(JS `\s`·`trim` 은 U+FEFF 를 공백으로 보고 U+0085 는 아니다, `.` 는 줄 끝 문자를 맞추지 않아 값 안에 있으면 그 줄을 버린다). `.sort()` 는 UTF-16 단위 순서다.
 - 해시된 known_hosts 의 salt·hash 는 Node `Buffer.from(x, 'base64')` 처럼 느슨하게 푼다(URL-safe 문자·공백·누락된 `=`). 키 종류는 Node `toString('ascii')` 처럼 바이트의 최상위 비트를 지운다.
@@ -870,9 +873,14 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 **추가한 크레이트**: `hmac` 0.12.1·`sha1` 0.10.7(해시된 known_hosts 의 HMAC-SHA1). 이미 lock 에 있는 RustCrypto 0.10 계열(`digest` 0.10.7·`sha2` 0.10.9)과 같은 판이라 중복 판이 없다(`cargo tree -d` 로 확인).
 전이로 `subtle` 2.6.1 이 하나 더 들어왔다(`digest` 의 `mac` 기능). 그 밖의 새 크레이트는 없다.
 
+**PR 2 에서 반드시 옮길 방어**(TS `connection.ts` 가 하던 것 — 빠뜨리면 PR 1 의 순수 로직이 막은 것이 연결에서 새 나간다)
+- **원격 셸 확인 `SHELL_PROBE`**(`connection.ts:70-76,490-510`): 접속 직후 `echo 'an''tler'` 로 로그인 셸이 POSIX 인용을 해석하는지 확인한다. cmd.exe 로그인 셸에서는 `sh_quote` 의 인용이 무효라 주입 방어선이 사라진다.
+- **홉마다 `unsupported` 거부**(`connection.ts:285`): 대상뿐 아니라 ProxyJump 의 모든 홉을 `resolve_host` 로 다시 해석해 `unsupported` 가 있으면 거부한다.
+- **HostKeyAlias 가 있으면 포트 22 고정 조회**(`connection.ts:412-413`): known_hosts 조회 이름을 `[alias]:port` 가 아니라 alias·22 로 한다(TS 와 같다).
+- **비 ASCII 관문·포트 관문이 연결 경로에서도 걸리는지 시험**: 별칭·HostName·HostKeyAlias 비 ASCII, 대상·홉 포트 0·65536, `RevokedHostKeys` 가 `unsupported` 로 연결 전에 거부되는지, `check_host_key` 의 `Unsupported` 가 호스트 키 콜백을 거부로 이끄는지.
+
 **남은 위험(PR 1)**
-- 위 대문자 비 ASCII `@revoked`·`Host`/`Match host` 방향(연결 PR 에서 호스트 이름을 ASCII 로 제한하거나 비 ASCII 패턴 설정을 거부).
-- 연결 쪽이 `ResolvedHost::unsupported` 를 거부해야 한다(TS 는 `connection.ts` 가 점프 호스트까지 모든 노드에서 한다). PR 1 에는 연결이 없어 이 거부는 시험되지 않는다 — PR 2 의 첫 시험으로 넣는다.
+- 연결 쪽이 `ResolvedHost::unsupported`(비 ASCII·포트 범위·RevokedHostKeys 포함)를 거부해야 한다(TS 는 `connection.ts` 가 점프 호스트까지 모든 노드에서 한다). PR 1 에는 연결이 없어 이 거부는 시험되지 않는다 — PR 2 의 첫 시험으로 넣는다.
 - `MemFs` 가 feature 없이 운영 lib 에 들어 있다(통합 시험이 별도 크레이트라 `cfg(test)` 로 숨길 수 없다). 메모리 파일만 다루고 운영 경로에서 쓰이지 않는다.
 - 골든 생성기의 `node:path`·`node:fs` 모킹이 ubuntu CI(vitest)에서도 같은 골든을 내는지는 로컬(Windows)에서만 돌렸다.
 - `RealFs` 의 Include(실제 파일)는 Windows 임시 디렉터리로 한 시험뿐이다(심볼릭 링크·권한 오류·비 UTF-8 이름은 시험하지 않았다).

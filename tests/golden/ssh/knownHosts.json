@@ -1045,7 +1045,7 @@
           "verify": {
             "ok": true
           },
-          "rustStatus": "unknown"
+          "rustStatus": "unsupported"
         },
         {
           "host": "éxample.com",
@@ -1062,7 +1062,7 @@
           "verify": {
             "ok": true
           },
-          "rustStatus": "unknown"
+          "rustStatus": "unsupported"
         },
         {
           "host": "x.é",
@@ -1078,7 +1078,7 @@
             "ok": false,
             "message": "폐기된(@revoked) 호스트 키입니다: x.é. 연결을 거부했습니다."
           },
-          "rustStatus": "unknown"
+          "rustStatus": "unsupported"
         },
         {
           "host": "x.É",
@@ -1094,7 +1094,7 @@
             "ok": false,
             "message": "폐기된(@revoked) 호스트 키입니다: x.é. 연결을 거부했습니다."
           },
-          "rustStatus": "unknown"
+          "rustStatus": "unsupported"
         }
       ]
     }

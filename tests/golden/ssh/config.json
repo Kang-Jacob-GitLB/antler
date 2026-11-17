@@ -194,6 +194,9 @@
         },
         {
           "spec": "node😀",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
           "resolved": {
             "alias": "node😀",
             "hostName": "node😀",
@@ -1781,6 +1784,9 @@
         },
         {
           "spec": "p0:70000",
+          "rust": {
+            "unsupported": "포트가 1~65535 범위 밖"
+          },
           "resolved": {
             "alias": "p0",
             "hostName": "p0",
@@ -1799,6 +1805,9 @@
         },
         {
           "spec": "p4:0",
+          "rust": {
+            "unsupported": "포트가 1~65535 범위 밖"
+          },
           "resolved": {
             "alias": "p4",
             "hostName": "p4",
@@ -2409,6 +2418,9 @@
       "queries": [
         {
           "spec": "Éxample",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
           "resolved": {
             "alias": "Éxample",
             "hostName": "Éxample",
@@ -2428,7 +2440,8 @@
         {
           "spec": "éxample",
           "rust": {
-            "user": "me"
+            "user": "me",
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
           },
           "resolved": {
             "alias": "éxample",
@@ -2449,7 +2462,8 @@
         {
           "spec": "ÜNÏcode",
           "rust": {
-            "user": "me"
+            "user": "me",
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
           },
           "resolved": {
             "alias": "ÜNÏcode",
@@ -2469,6 +2483,9 @@
         },
         {
           "spec": "ünïcode",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
           "resolved": {
             "alias": "ünïcode",
             "hostName": "ünïcode",
@@ -2487,6 +2504,9 @@
         },
         {
           "spec": "a b",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
           "resolved": {
             "alias": "a b",
             "hostName": "a b",
@@ -2523,6 +2543,9 @@
         },
         {
           "spec": "😀",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
           "resolved": {
             "alias": "😀",
             "hostName": "😀",
@@ -2564,6 +2587,116 @@
           "hostName": "Éxample",
           "user": "u",
           "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: RevokedHostKeys·범위 밖 ProxyJump 포트(TS 는 무시·통과 — Rust 는 unsupported)",
+      "text": "Host r\n  RevokedHostKeys C:\\revoked\nHost j\n  ProxyJump ok,b@bad:0\nHost k\n  ProxyJump j1:65535\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "r",
+          "rust": {
+            "unsupported": "RevokedHostKeys"
+          },
+          "resolved": {
+            "alias": "r",
+            "hostName": "r",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "j",
+          "rust": {
+            "unsupported": "포트가 1~65535 범위 밖"
+          },
+          "resolved": {
+            "alias": "j",
+            "hostName": "j",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "ok",
+                "user": null,
+                "host": "ok",
+                "port": null
+              },
+              {
+                "spec": "b@bad:0",
+                "user": "b",
+                "host": "bad",
+                "port": 0
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "k",
+          "resolved": {
+            "alias": "k",
+            "hostName": "k",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "j1:65535",
+                "user": null,
+                "host": "j1",
+                "port": 65535
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "r",
+          "hostName": "r",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "j",
+          "hostName": "j",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "ok,b@bad:0"
+        },
+        {
+          "alias": "k",
+          "hostName": "k",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "j1:65535"
         }
       ]
     },

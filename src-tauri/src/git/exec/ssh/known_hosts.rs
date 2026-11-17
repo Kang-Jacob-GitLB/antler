@@ -40,6 +40,8 @@ pub enum HostKeyCheck {
     Unknown,
     Mismatch,
     Revoked,
+    /// 비 ASCII 호스트 이름 — 대소문자 접기가 TS 와 달라질 수 있어 판정하지 않고 거부한다(`mod.rs` "이식 규칙")
+    Unsupported,
 }
 
 impl HostKeyCheck {
@@ -50,6 +52,7 @@ impl HostKeyCheck {
             HostKeyCheck::Unknown => "unknown",
             HostKeyCheck::Mismatch => "mismatch",
             HostKeyCheck::Revoked => "revoked",
+            HostKeyCheck::Unsupported => "unsupported",
         }
     }
 }
@@ -165,6 +168,9 @@ fn matching(entries: Vec<KnownHostEntry>, host: &str, port: u32) -> Vec<KnownHos
 }
 
 pub fn check_host_key(text: &str, host: &str, port: u32, key: &[u8]) -> HostKeyCheck {
+    if !host.is_ascii() {
+        return HostKeyCheck::Unsupported;
+    }
     let hits = matching(parse_known_hosts(text), host, port);
     let b64 = STANDARD.encode(key);
     let ty = key_type_of_blob(key);
@@ -184,6 +190,10 @@ pub fn check_host_key(text: &str, host: &str, port: u32, key: &[u8]) -> HostKeyC
 /// known_hosts 에 이 호스트로 등록된 키 종류에 대응하는 서버 호스트 키 알고리즘(서버가 다른 종류를 내밀지 않게 제한). `ssh-rsa` 는 SHA-2 서명 이름이 먼저다
 pub fn known_host_key_algorithms(text: &str, host: &str, port: u32) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
+    // 비 ASCII 호스트는 판정하지 않는다([`check_host_key`])
+    if !host.is_ascii() {
+        return out;
+    }
     for e in matching(parse_known_hosts(text), host, port) {
         if e.marker == Some(Marker::Revoked) {
             continue;
@@ -229,6 +239,7 @@ pub fn verify_host_key_text(text: &str, host: &str, port: u32, key: &[u8]) -> Ve
             fingerprint(key)
         )),
         HostKeyCheck::Revoked => Err(format!("폐기된(@revoked) 호스트 키입니다: {label}. 연결을 거부했습니다.")),
+        HostKeyCheck::Unsupported => Err(format!("비 ASCII 호스트 이름은 호스트 키를 검증할 수 없어 연결을 거부했습니다: {label}. punycode 로 적으세요.")),
     }
 }
 
@@ -260,6 +271,27 @@ mod tests {
         assert_eq!(key_type_of_blob(&[0, 0, 0]), "");
         assert_eq!(key_type_of_blob(&[0, 0, 0, 9, 1]), "");
         assert_eq!(key_type_of_blob(&[0, 0, 0, 1, 0xE5]), "e", "최상위 비트를 지운다");
+    }
+
+    #[test]
+    fn 비_ascii_호스트는_판정하지_않고_거부한다() {
+        let key = {
+            let mut b = vec![0, 0, 0, 11];
+            b.extend_from_slice(b"ssh-ed25519");
+            b.extend_from_slice(&[1, 2, 3]);
+            b
+        };
+        let b64 = STANDARD.encode(&key);
+        // 일반 항목·와일드카드·@revoked 모두 비 ASCII 호스트에서는 판정하지 않는다
+        let text = format!("Éxample.com ssh-ed25519 {b64}\n@revoked *.É ssh-ed25519 {b64}\n* ssh-ed25519 {b64}\n");
+        for host in ["Éxample.com", "éxample.com", "x.é", "x.É", "\u{212a}", "例.test"] {
+            assert_eq!(check_host_key(&text, host, 22, &key), HostKeyCheck::Unsupported, "{host}");
+            assert!(known_host_key_algorithms(&text, host, 22).is_empty(), "{host}");
+            let e = verify_host_key_text(&text, host, 22, &key).unwrap_err();
+            assert!(e.contains("비 ASCII"), "{e}");
+        }
+        // ASCII 호스트는 그대로 판정한다
+        assert_eq!(check_host_key(&text, "a.test", 22, &key), HostKeyCheck::Ok);
     }
 
     #[test]

@@ -8,8 +8,12 @@ import { createHmac } from 'node:crypto'
 export const HOME = 'C:\\golden\\home'
 export const LOCAL_USER = 'me'
 
-/** 질의 하나. `rust` 는 비 ASCII 대소문자 때문에 Rust 가 TS 와 **다르게** 내는 필드(알려진 차이 — docs/tauri.md "TS 와 다른 점")다 */
+/** 질의 하나. `rust` 는 Rust 가 TS 와 **다르게** 내는 필드(알려진 차이 — 비 ASCII 호스트·범위 밖 포트 관문, docs/tauri.md "TS 와 다른 점")다 */
 export type Query = string | { spec: string; rust: Record<string, unknown> }
+
+/** Rust `resolve_host` 가 덧붙이는 `unsupported` 문구(config.rs 의 상수와 같다) */
+const NON_ASCII = { unsupported: '비 ASCII 호스트 이름(punycode 로 적으세요)' }
+const BAD_PORT = { unsupported: '포트가 1~65535 범위 밖' }
 
 export interface ConfigCase {
   /** 이식 대응표에 쓰이는 이름(해당하는 TS `it` 제목과 같다) */
@@ -32,7 +36,7 @@ export const CONFIG_CASES: ConfigCase[] = [
   {
     name: '? 와일드카드와 대소문자 무시',
     text: 'HOST node?\n  USER=u1\n',
-    queries: ['node7', 'node77', 'NODE7', 'node😀', 'node\u2028', 'nod']
+    queries: ['node7', 'node77', 'NODE7', { spec: 'node😀', rust: NON_ASCII }, 'node\u2028', 'nod']
   },
   {
     name: '먼저 얻은 값이 이긴다(블록 순서 기준)',
@@ -171,7 +175,7 @@ export const CONFIG_CASES: ConfigCase[] = [
   {
     name: '추가: 포트 값(범위 밖·숫자 아님·앞의 0)',
     text: 'Host p0\n  Port 0\nHost p1\n  Port 65536\nHost p2\n  Port abc\nHost p3\n  Port 22x\nHost p4\n  Port 0022\nHost p5\n  Port 65535\nHost p6\n  Port ""\n',
-    queries: ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p0:70000', 'p4:0']
+    queries: ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', { spec: 'p0:70000', rust: BAD_PORT }, { spec: 'p4:0', rust: BAD_PORT }]
   },
   {
     name: '추가: ProxyJump 모양(대소문자·빈 항목·여러 인자·IPv6)',
@@ -193,15 +197,20 @@ export const CONFIG_CASES: ConfigCase[] = [
     name: '추가: 비 ASCII 와 줄 끝 문자 패턴',
     text: 'Host Éxample ünï*\n  User u\nHost a*b\n  Port 9\nHost ?\n  Port 8\n',
     queries: [
-      'Éxample',
-      { spec: 'éxample', rust: { user: LOCAL_USER } },
-      { spec: 'ÜNÏcode', rust: { user: LOCAL_USER } },
-      'ünïcode',
-      'a\u2028b',
+      { spec: 'Éxample', rust: NON_ASCII },
+      { spec: 'éxample', rust: { user: LOCAL_USER, ...NON_ASCII } },
+      { spec: 'ÜNÏcode', rust: { user: LOCAL_USER, ...NON_ASCII } },
+      { spec: 'ünïcode', rust: NON_ASCII },
+      { spec: 'a\u2028b', rust: NON_ASCII },
       'axb',
-      '😀',
+      { spec: '😀', rust: NON_ASCII },
       'x'
     ]
+  },
+  {
+    name: '추가: RevokedHostKeys·범위 밖 ProxyJump 포트(TS 는 무시·통과 — Rust 는 unsupported)',
+    text: 'Host r\n  RevokedHostKeys C:\\revoked\nHost j\n  ProxyJump ok,b@bad:0\nHost k\n  ProxyJump j1:65535\n',
+    queries: [{ spec: 'r', rust: { unsupported: 'RevokedHostKeys' } }, { spec: 'j', rust: BAD_PORT }, 'k']
   },
   {
     name: '추가: Include 상태·순서·경로 모양',
@@ -408,8 +417,8 @@ export const KNOWN_HOSTS_CASES: KnownHostsCase[] = [
     name: '추가: 비 ASCII 호스트(대소문자)',
     text: (b) => `Éxample.com ssh-ed25519 ${b.k1}\n@revoked *.É ssh-ed25519 ${b.k2}\n`,
     queries: [q('Éxample.com', 22, 'k1'), q('éxample.com', 22, 'k1'), q('x.é', 22, 'k2'), q('x.É', 22, 'k2')],
-    // TS 는 `é`·`É` 를 같은 글자로 본다(ok, ok, revoked, revoked). 호스트는 소문자로 바꿔 비교하므로 Rust 는 대문자 비 ASCII 패턴을 맞추지 못한다 — 전부 unknown
-    rust: { 0: 'unknown', 1: 'unknown', 2: 'unknown', 3: 'unknown' }
+    // TS 는 `é`·`É` 를 같은 글자로 본다(ok, ok, revoked, revoked). Rust 는 비 ASCII 호스트를 판정하지 않고 거부한다 — 전부 unsupported
+    rust: { 0: 'unsupported', 1: 'unsupported', 2: 'unsupported', 3: 'unsupported' }
   }
 ]
 
