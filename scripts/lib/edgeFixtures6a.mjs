@@ -267,7 +267,7 @@ export function make6aFixtures({ out, H, NUL }) {
       cfgs(...LFS),
       cfgs(['filter.lfs.smudge', 'git-lfs smudge --skip -- %f'], ['filter.lfs.process', 'git-lfs filter-process --skip']),
       cfgs(['filter.lfs.clean', '  git-lfs clean -- %f \r\n'], ['filter.lfs.smudge', '\ufeffgit-lfs smudge -- %f\u00a0\u3000']),
-      cfgs(['filter.lfs.clean', 'git-lfs clean -- %f\u0085']), // U+0085 는 JS trim 이 지우지 않으므로 정확히 같지 않다
+      cfgs(['filter.lfs.clean', 'git-lfs clean -- %f\u0085']),
       cfgs(['filter.lfs.clean', 'git-lfs clean -- %f; touch pwned']),
       cfgs(['filter.lfs.clean', 'git-lfs clean -- %f'], ['filter.lfs.smudge', 'git-lfs smudge -- %f && echo x']),
       cfgs(['filter.evil.clean', 'sh -c "touch x"']),
@@ -300,7 +300,7 @@ export function make6aFixtures({ out, H, NUL }) {
       'filter.�.clean\ncmd\0',
       'filter.x.clean\n�\0',
       cfgs(['filter.\u{1f600}.clean', 'x']),
-      // 드라이버 수 상한 256: 같은 이름의 반복·lfs 기본값은 세지 않는다
+      // 드라이버 수 상한 256: 같은 이름의 반복은 세지 않는다(lfs 기본값도 드라이버로 센다)
       { parts: [{ repeat: [`filter.d{i}.clean\ncmd${NUL}`, 256] }] },
       { parts: [{ repeat: [`filter.d{i}.clean\ncmd${NUL}`, 257] }] },
       { parts: [{ repeat: [`filter.d{i}.clean\ncmd${NUL}filter.d{i}.smudge\ncmd${NUL}`, 256] }] },

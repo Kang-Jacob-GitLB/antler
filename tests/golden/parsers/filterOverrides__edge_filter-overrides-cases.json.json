@@ -5,15 +5,42 @@
   },
   {
     "in": "filter.lfs.clean\ngit-lfs clean -- %f\u0000filter.lfs.smudge\ngit-lfs smudge -- %f\u0000filter.lfs.process\ngit-lfs filter-process\u0000",
-    "out": []
+    "out": [
+      "-c",
+      "filter.lfs.clean=",
+      "-c",
+      "filter.lfs.smudge=",
+      "-c",
+      "filter.lfs.process=",
+      "-c",
+      "filter.lfs.required=false"
+    ]
   },
   {
     "in": "filter.lfs.smudge\ngit-lfs smudge --skip -- %f\u0000filter.lfs.process\ngit-lfs filter-process --skip\u0000",
-    "out": []
+    "out": [
+      "-c",
+      "filter.lfs.clean=",
+      "-c",
+      "filter.lfs.smudge=",
+      "-c",
+      "filter.lfs.process=",
+      "-c",
+      "filter.lfs.required=false"
+    ]
   },
   {
     "in": "filter.lfs.clean\n  git-lfs clean -- %f \r\n\u0000filter.lfs.smudge\n﻿git-lfs smudge -- %f 　\u0000",
-    "out": []
+    "out": [
+      "-c",
+      "filter.lfs.clean=",
+      "-c",
+      "filter.lfs.smudge=",
+      "-c",
+      "filter.lfs.process=",
+      "-c",
+      "filter.lfs.required=false"
+    ]
   },
   {
     "in": "filter.lfs.clean\ngit-lfs clean -- %f\u0000",
@@ -131,8 +158,8 @@
     "in": "filter.a=b.clean\nx\u0000"
   },
   {
-    "in": "filter.a=b.clean\ngit-lfs clean -- %f\u0000",
-    "out": []
+    "error": "이 저장소의 filter 드라이버(이름에 \"=\" 나 잘못된 UTF-8 이 있거나 개수가 너무 많음)를 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.",
+    "in": "filter.a=b.clean\ngit-lfs clean -- %f\u0000"
   },
   {
     "error": "이 저장소의 filter 드라이버(이름에 \"=\" 나 잘못된 UTF-8 이 있거나 개수가 너무 많음)를 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.",
