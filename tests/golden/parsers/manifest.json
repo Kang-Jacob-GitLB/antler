@@ -697,6 +697,159 @@
     "golden": "probe__edge_empty.bin.json"
   },
   {
+    "parser": "tree",
+    "fixture": "edge/tree-edge.dat",
+    "golden": "tree__edge_tree-edge.dat.json"
+  },
+  {
+    "parser": "tree",
+    "fixture": "edge/tree-edge.dat",
+    "args": {
+      "dir": "src/sub"
+    },
+    "golden": "tree__edge_tree-edge.dat@dir.json"
+  },
+  {
+    "parser": "tree",
+    "fixture": "edge/empty.bin",
+    "golden": "tree__edge_empty.bin.json"
+  },
+  {
+    "parser": "commitId",
+    "fixture": "edge/commit-id-cases.json",
+    "golden": "commitId__edge_commit-id-cases.json.json"
+  },
+  {
+    "parser": "resolveRef",
+    "fixture": "edge/resolve-ref-cases.json",
+    "golden": "resolveRef__edge_resolve-ref-cases.json.json"
+  },
+  {
+    "parser": "imageMime",
+    "fixture": "edge/image-mime-cases.json",
+    "golden": "imageMime__edge_image-mime-cases.json.json"
+  },
+  {
+    "parser": "lfsPointer",
+    "fixture": "edge/lfs-pointer-cases.json",
+    "golden": "lfsPointer__edge_lfs-pointer-cases.json.json"
+  },
+  {
+    "parser": "checkAttrLfs",
+    "fixture": "edge/check-attr-cases.json",
+    "golden": "checkAttrLfs__edge_check-attr-cases.json.json"
+  },
+  {
+    "parser": "addedLines",
+    "fixture": "edge/added-lines-cases.json",
+    "golden": "addedLines__edge_added-lines-cases.json.json"
+  },
+  {
+    "parser": "gitattributes",
+    "fixture": "edge/gitattributes-cases.json",
+    "golden": "gitattributes__edge_gitattributes-cases.json.json"
+  },
+  {
+    "parser": "gitflowConfig",
+    "fixture": "edge/gitflow-cases.json",
+    "golden": "gitflowConfig__edge_gitflow-cases.json.json"
+  },
+  {
+    "parser": "bucketize",
+    "fixture": "edge/bucketize-cases.json",
+    "golden": "bucketize__edge_bucketize-cases.json.json"
+  },
+  {
+    "parser": "defaultBranch",
+    "fixture": "edge/default-branch-cases.json",
+    "golden": "defaultBranch__edge_default-branch-cases.json.json"
+  },
+  {
+    "parser": "filterOverrides",
+    "fixture": "edge/filter-overrides-cases.json",
+    "golden": "filterOverrides__edge_filter-overrides-cases.json.json"
+  },
+  {
+    "parser": "filterDrivers",
+    "fixture": "edge/filter-overrides-cases.json",
+    "golden": "filterDrivers__edge_filter-overrides-cases.json.json"
+  },
+  {
+    "parser": "relPath",
+    "fixture": "edge/rel-path-cases.json",
+    "golden": "relPath__edge_rel-path-cases.json.json"
+  },
+  {
+    "parser": "shortName",
+    "fixture": "edge/short-name-cases.json",
+    "golden": "shortName__edge_short-name-cases.json.json"
+  },
+  {
+    "parser": "submodulePath",
+    "fixture": "edge/submodule-path-cases.json",
+    "golden": "submodulePath__edge_submodule-path-cases.json.json"
+  },
+  {
+    "parser": "normalizeDir",
+    "fixture": "edge/normalize-dir-cases.json",
+    "golden": "normalizeDir__edge_normalize-dir-cases.json.json"
+  },
+  {
+    "parser": "normalizeDir",
+    "fixture": "edge/normalize-dir-cases.json",
+    "args": {
+      "file": "1"
+    },
+    "golden": "normalizeDir__edge_normalize-dir-cases.json@file.json"
+  },
+  {
+    "parser": "timeStream",
+    "fixture": "edge/time-stream.txt",
+    "golden": "timeStream__edge_time-stream.txt.json"
+  },
+  {
+    "parser": "timeStream",
+    "fixture": "edge/time-stream.txt",
+    "args": {
+      "chunk": "1"
+    },
+    "golden": "timeStream__edge_time-stream.txt@chunk1.json"
+  },
+  {
+    "parser": "timeStream",
+    "fixture": "edge/time-stream.txt",
+    "args": {
+      "chunk": "3"
+    },
+    "golden": "timeStream__edge_time-stream.txt@chunk3.json"
+  },
+  {
+    "parser": "timeStream",
+    "fixture": "edge/time-stream.txt",
+    "args": {
+      "chunk": "7"
+    },
+    "golden": "timeStream__edge_time-stream.txt@chunk7.json"
+  },
+  {
+    "parser": "timeStream",
+    "fixture": "edge/time-stream-huge.txt",
+    "golden": "timeStream__edge_time-stream-huge.txt.json"
+  },
+  {
+    "parser": "timeStream",
+    "fixture": "edge/time-stream-huge.txt",
+    "args": {
+      "chunk": "5"
+    },
+    "golden": "timeStream__edge_time-stream-huge.txt@chunk5.json"
+  },
+  {
+    "parser": "timeStream",
+    "fixture": "edge/empty.bin",
+    "golden": "timeStream__edge_empty.bin.json"
+  },
+  {
     "parser": "nulRecords",
     "fixture": "dt-name-status-korean.bin",
     "golden": "nulRecords__dt-name-status-korean.bin.json"

@@ -1,0 +1,251 @@
+[
+ "",
+ "filter.lfs.clean\ngit-lfs clean -- %f\u0000filter.lfs.smudge\ngit-lfs smudge -- %f\u0000filter.lfs.process\ngit-lfs filter-process\u0000",
+ "filter.lfs.smudge\ngit-lfs smudge --skip -- %f\u0000filter.lfs.process\ngit-lfs filter-process --skip\u0000",
+ "filter.lfs.clean\n  git-lfs clean -- %f \r\n\u0000filter.lfs.smudge\n﻿git-lfs smudge -- %f 　\u0000",
+ "filter.lfs.clean\ngit-lfs clean -- %f\u0000",
+ "filter.lfs.clean\ngit-lfs clean -- %f; touch pwned\u0000",
+ "filter.lfs.clean\ngit-lfs clean -- %f\u0000filter.lfs.smudge\ngit-lfs smudge -- %f && echo x\u0000",
+ "filter.evil.clean\nsh -c \"touch x\"\u0000",
+ "filter.b.clean\nx\u0000filter.a.smudge\ny\u0000filter.b.process\nz\u0000filter.a.clean\ngit-lfs clean -- %f\u0000",
+ "filter.a.b.clean\nx\u0000filter.c.clean.process\ny\u0000",
+ "filter.MyDrv.clean\nx\u0000Filter.x.clean\nx\u0000FILTER.y.clean\nx\u0000",
+ "filter..clean\nx\u0000filter.a.required\nx\u0000filter.a\nx\u0000xfilter.a.clean\nx\u0000filter.a.cleans\nx\u0000filter.clean\nx\u0000",
+ "filter.a=b.clean\nx\u0000",
+ "filter.a=b.clean\ngit-lfs clean -- %f\u0000",
+ "filter.ok.clean\nx\u0000filter.a=b.smudge\ny\u0000",
+ "filter.=.process\nx\u0000",
+ "filter.한글 드라이버.clean\nx\u0000",
+ "filter.sp ace.clean\n\u0000",
+ "filter.a.clean\nmulti\nline value\u0000",
+ "filter.a.clean\u0000\u0000filter.b.smudge\u0000",
+ "filter.a\nb.clean\nvalue\u0000",
+ "filter.nonl.process",
+ "filter.a.clean\nx\u0000trailing without nul",
+ {
+  "parts": [
+   "filter.",
+   {
+    "hex": "ff"
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.x.",
+   {
+    "hex": "c328"
+   },
+   "\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.ok.clean\nx\u0000other.",
+   {
+    "hex": "ff"
+   },
+   "\nv\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "hex": "e0a080"
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "hex": "c0af"
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "hex": "eda080"
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "hex": "f4908080"
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.x.clean\ncmd",
+   {
+    "hex": "ff"
+   },
+   "\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.x.clean\n",
+   {
+    "hex": "ff"
+   },
+   "\u0000",
+   "filter.y.smudge\nz",
+   "\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.a.clean\nx",
+   "\u0000",
+   "filter.",
+   {
+    "hex": "fe"
+   },
+   ".clean\ny",
+   "\u0000"
+  ]
+ },
+ "filter.�.clean\ncmd\u0000",
+ "filter.x.clean\n�\u0000",
+ "filter.😀.clean\nx\u0000",
+ {
+  "parts": [
+   {
+    "repeat": [
+     "filter.d{i}.clean\ncmd\u0000",
+     256
+    ]
+   }
+  ]
+ },
+ {
+  "parts": [
+   {
+    "repeat": [
+     "filter.d{i}.clean\ncmd\u0000",
+     257
+    ]
+   }
+  ]
+ },
+ {
+  "parts": [
+   {
+    "repeat": [
+     "filter.d{i}.clean\ncmd\u0000filter.d{i}.smudge\ncmd\u0000",
+     256
+    ]
+   }
+  ]
+ },
+ {
+  "parts": [
+   {
+    "repeat": [
+     "filter.d{i}.clean\ncmd\u0000",
+     256
+    ]
+   },
+   "filter.lfs.clean\ngit-lfs clean -- %f\u0000"
+  ]
+ },
+ {
+  "parts": [
+   {
+    "repeat": [
+     "filter.d{i}.clean\ncmd\u0000",
+     256
+    ]
+   },
+   "filter.extra.clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "repeat": [
+     "a",
+     2979
+    ]
+   },
+   ".clean\ncmd\u0000filter.",
+   {
+    "repeat": [
+     "b",
+     2979
+    ]
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "repeat": [
+     "a",
+     2979
+    ]
+   },
+   ".clean\ncmd\u0000filter.",
+   {
+    "repeat": [
+     "b",
+     2980
+    ]
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "repeat": [
+     "😀",
+     1489
+    ]
+   },
+   "a.clean\ncmd\u0000filter.",
+   {
+    "repeat": [
+     "b",
+     2979
+    ]
+   },
+   ".clean\ncmd\u0000"
+  ]
+ },
+ {
+  "parts": [
+   "filter.",
+   {
+    "repeat": [
+     "😀",
+     1490
+    ]
+   },
+   ".clean\ncmd\u0000filter.",
+   {
+    "repeat": [
+     "b",
+     2979
+    ]
+   },
+   ".clean\ncmd\u0000"
+  ]
+ }
+]

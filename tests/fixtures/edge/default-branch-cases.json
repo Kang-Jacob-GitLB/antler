@@ -1,0 +1,430 @@
+[
+ {
+  "originHead": "refs/remotes/origin/main",
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/remotes/origin/main\n",
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "  refs/remotes/origin/dev \r\n",
+  "local": [],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "﻿refs/remotes/origin/main",
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/remotes/origin/main",
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": " refs/remotes/origin/main　",
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/remotes/origin/gone",
+  "local": [
+   {
+    "name": "master",
+    "fullName": "refs/heads/master",
+    "hash": "L2"
+   },
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/remotes/origin/gone",
+  "local": [
+   {
+    "name": "master",
+    "fullName": "refs/heads/master",
+    "hash": "L2"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/heads/main",
+  "local": [
+   {
+    "name": "master",
+    "fullName": "refs/heads/master",
+    "hash": "L2"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "origin/main",
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "",
+  "local": [
+   {
+    "name": "master",
+    "fullName": "refs/heads/master",
+    "hash": "L2"
+   }
+  ],
+  "remotes": []
+ },
+ {
+  "originHead": null,
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   },
+   {
+    "name": "master",
+    "fullName": "refs/heads/master",
+    "hash": "L2"
+   }
+  ],
+  "remotes": []
+ },
+ {
+  "originHead": null,
+  "local": [
+   {
+    "name": "develop",
+    "fullName": "refs/heads/develop",
+    "hash": "L3"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": null,
+  "local": [],
+  "remotes": []
+ },
+ {
+  "originHead": "refs/remotes/up/main",
+  "local": [],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     }
+    ]
+   },
+   {
+    "name": "up",
+    "branches": [
+     {
+      "name": "up/x",
+      "fullName": "refs/remotes/up/x",
+      "hash": "U0"
+     },
+     {
+      "name": "up/main",
+      "fullName": "refs/remotes/up/main",
+      "hash": "U1"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/remotes/origin/main",
+  "local": [],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "first"
+     }
+    ]
+   },
+   {
+    "name": "dup",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "second"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/remotes/",
+  "local": [
+   {
+    "name": "main",
+    "fullName": "refs/heads/main",
+    "hash": "L1"
+   }
+  ],
+  "remotes": [
+   {
+    "name": "origin",
+    "branches": [
+     {
+      "name": "origin/main",
+      "fullName": "refs/remotes/origin/main",
+      "hash": "R1"
+     },
+     {
+      "name": "origin/dev",
+      "fullName": "refs/remotes/origin/dev",
+      "hash": "R2"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "originHead": "refs/remotes/origin/main",
+  "local": [
+   {
+    "name": "Main",
+    "fullName": "refs/heads/Main",
+    "hash": "L9"
+   },
+   {
+    "name": "master",
+    "fullName": "refs/heads/master",
+    "hash": "L2"
+   }
+  ],
+  "remotes": []
+ }
+]

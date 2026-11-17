@@ -1,0 +1,114 @@
+[
+  {
+    "in": "a.png",
+    "out": "image/png"
+  },
+  {
+    "in": "A.PNG",
+    "out": "image/png"
+  },
+  {
+    "in": "dir/x.JPG",
+    "out": "image/jpeg"
+  },
+  {
+    "in": "x.jpeg",
+    "out": "image/jpeg"
+  },
+  {
+    "in": "x.gif",
+    "out": "image/gif"
+  },
+  {
+    "in": "x.webp",
+    "out": "image/webp"
+  },
+  {
+    "in": "x.bmp",
+    "out": "image/bmp"
+  },
+  {
+    "in": "x.ico",
+    "out": "image/x-icon"
+  },
+  {
+    "in": "x.svg",
+    "out": "image/svg+xml"
+  },
+  {
+    "in": "x.SVG",
+    "out": "image/svg+xml"
+  },
+  {
+    "in": "x.sVg",
+    "out": "image/svg+xml"
+  },
+  {
+    "in": "x.avif",
+    "out": "image/avif"
+  },
+  {
+    "in": "noext",
+    "out": null
+  },
+  {
+    "in": ".png",
+    "out": "image/png"
+  },
+  {
+    "in": "a.",
+    "out": null
+  },
+  {
+    "in": "dir.png/file",
+    "out": null
+  },
+  {
+    "in": "dir.png\\file",
+    "out": null
+  },
+  {
+    "in": "a.png.txt",
+    "out": null
+  },
+  {
+    "in": "a.tar.gz",
+    "out": null
+  },
+  {
+    "in": "a.b.PNG",
+    "out": "image/png"
+  },
+  {
+    "in": "x.pn",
+    "out": null
+  },
+  {
+    "in": "x.pngg",
+    "out": null
+  },
+  {
+    "in": "x.İcx",
+    "out": null
+  },
+  {
+    "in": "x.ſvg",
+    "out": null
+  },
+  {
+    "in": "x.pıng",
+    "out": null
+  },
+  {
+    "in": "한글.PNG",
+    "out": "image/png"
+  },
+  {
+    "in": "a/b/c/.avif",
+    "out": "image/avif"
+  },
+  {
+    "in": "",
+    "out": null
+  }
+]

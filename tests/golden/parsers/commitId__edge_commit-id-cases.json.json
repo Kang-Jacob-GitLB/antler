@@ -1,0 +1,90 @@
+[
+  {
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": true
+  },
+  {
+    "in": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "out": true
+  },
+  {
+    "in": "aBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaBaB",
+    "out": true
+  },
+  {
+    "in": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "out": true
+  },
+  {
+    "in": "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
+    "out": true
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": ""
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "abc"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "gggggggggggggggggggggggggggggggggggggggg"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": " aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa١"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaａ"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaſ"
+  },
+  {
+    "error": "invalid commit hash",
+    "in": 5
+  },
+  {
+    "error": "invalid commit hash",
+    "in": null
+  }
+]

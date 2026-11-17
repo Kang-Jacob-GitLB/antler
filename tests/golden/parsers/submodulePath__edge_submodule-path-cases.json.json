@@ -1,0 +1,114 @@
+[
+  {
+    "in": "sub",
+    "out": true
+  },
+  {
+    "in": "a/b",
+    "out": true
+  },
+  {
+    "in": "a\\b",
+    "out": true
+  },
+  {
+    "in": "한글/모듈",
+    "out": true
+  },
+  {
+    "in": "a.b/.c",
+    "out": true
+  },
+  {
+    "in": "...",
+    "out": true
+  },
+  {
+    "in": "a/..b",
+    "out": true
+  },
+  {
+    "in": "",
+    "out": false
+  },
+  {
+    "in": "/abs",
+    "out": false
+  },
+  {
+    "in": "\\abs",
+    "out": false
+  },
+  {
+    "in": "C:/x",
+    "out": false
+  },
+  {
+    "in": "c:x",
+    "out": false
+  },
+  {
+    "in": "z:",
+    "out": false
+  },
+  {
+    "in": "1:/x",
+    "out": true
+  },
+  {
+    "in": "../x",
+    "out": false
+  },
+  {
+    "in": "a/../b",
+    "out": false
+  },
+  {
+    "in": "a\\..\\b",
+    "out": false
+  },
+  {
+    "in": "a//b",
+    "out": false
+  },
+  {
+    "in": "a\\\\b",
+    "out": false
+  },
+  {
+    "in": "a/",
+    "out": false
+  },
+  {
+    "in": "./a",
+    "out": false
+  },
+  {
+    "in": "a/.",
+    "out": false
+  },
+  {
+    "in": ".",
+    "out": false
+  },
+  {
+    "in": "..",
+    "out": false
+  },
+  {
+    "in": "//host/share",
+    "out": false
+  },
+  {
+    "in": "..\\x",
+    "out": false
+  },
+  {
+    "in": ".git",
+    "out": true
+  },
+  {
+    "in": "a/.git/x",
+    "out": true
+  }
+]

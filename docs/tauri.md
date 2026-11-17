@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -834,7 +834,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 
 **PR 순서**: 1 순수 로직·골든(**완료**) → 2 `SshExecutor`(`russh`, **2a·2b 완료**; 첫 단계 go/no-go 스파이크: ring 빌드·세션 정지·agent. `GitExecutor::stream` async 전환, 루프백 `russh::server` 하네스, clippy 로 password/keyboard-interactive/TOFU 쓰기/포트 포워딩 금지) →
 3 라우팅(`sshHost` 미러·`Target::Ssh`·`SshPool`·`ANTLER_RUST_SSH`, fetch 소유 판정을 kind 상수로 — 이중 fetch 방지, **완료**) → 4 ssh fetch 를 Rust 로(`rust_fetch_kinds` 계산 값·`fetchOwns.ts`·SSH 전송 오류는 network 로 분류·fetch.scenarios ssh 시나리오, **완료**) → 5 측정·사람 확인(사람 몫).
-이 단계 뒤 Phase 6 은 6a(나머지 git 채널·RepoWatcher) · 6b(설정·저장소 관리·env·external·github 원격 전용) · 6c(업데이터·패키징·Electron 제거)로 나눈다. 사이드카 전용으로 남은 채널은 37개다.
+이 단계 뒤 Phase 6 은 6a(나머지 git 채널·RepoWatcher) · 6b(설정·저장소 관리·env·external·github 원격 전용) · 6c(업데이터·패키징·Electron 제거)로 나눈다. 사이드카가 응답하는 채널은 계산하면 40개다(`IPC_CHANNELS` 83개 − `RUST_CHANNELS` 7개 − `API_CHANNELS` 36개, 이 PR 에서 세어 확인했다. 이 문서가 적던 37개는 Rust 가 가로채기만 하고 응답은 사이드카가 하는 `repos:watch`·`req:cancel` 과 `gh:repo` 를 뺀 값과 같다 — 원래 기준은 확인하지 못했다). 6a 뒤에 남는 것은 아래 "나머지 git 채널(Phase 6a)".
 
 ### PR 1 — 설정·known_hosts·원격 명령 인용(앱에 연결하지 않는다)
 
@@ -990,7 +990,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - 실제 sshd 지연·패킷 손실 아래의 상한 동작은 루프백으로만 봤다.
 
 **남은 위험(3)**
-- **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널이 넘어오면 사라진다.
+- **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널·감시가 넘어오면 줄지만, 사이드카의 `gh:repo`·repoq 의 git 조회(`remotes`·`pushedShas`)가 남으면 사라지지 않는다 — 6a PR 8(포함 — 2026-11-17 결정, 아래 "나머지 git 채널(Phase 6a)")의 몫이다.
 - **정리 경합.** 미러 변경 직전에 해석을 마친 요청이 정리(`sync_ssh_hosts`) 뒤에 `runtime()` 으로 들어오면 지운 호스트가 풀에 다시 생긴다. 다음 미러 변경이나 유휴 5분(연결 해제) 뒤에 정리되며 기능 영향은 없다.
 - `file_diff` 상한 초과(위)·실제 sshd 에서의 라우팅은 확인하지 않았다(루프백 서버만).
 - 검증 중 `cargo test` 가 한 번 `fetch_service` 의 `git clone file://…`(시험 준비용 git)에서 15분 넘게 멈춘 적이 있다 — 1회 관측, 원인은 확인하지 못했고 그 바이너리를 단독으로 다시 돌리면 통과했다(PR 3 의 코드는 그 바이너리에서 `MirrorRepo` 리터럴 한 줄만 바뀌었다).
@@ -1084,6 +1084,104 @@ ssh 저장소의 `git:fetch`(수동·자동·포커스)를 Rust 의 `FetchServic
 **사람 확인 필요(SSH PR 4)**: 실제 sshd 의 저장소로 ① 수동 fetch 가 새 커밋을 받고 그래프가 갱신되는지, ② 원격 저장소에 위험 설정(`core.sshCommand` 등)을 넣고 새로고침하면 확인 창이 뜨고 [이번만][항상][취소]가 맞게 동작하는지(자동 fetch 는 묻지 않고 차단),
 ③ 자동 fetch 가 **한 번만** 도는지(`ANTLER_ROUTE_LOG=1` 로 `[route] git:fetch -> rust`, 원격의 `ps`/`last` 로 호스트당 연결 하나·fetch 가 중복되지 않는지), ④ 네트워크를 끊거나 호스트 키를 바꿨을 때 오류가 표시되고 백오프(수동 새로고침 전까지 멈추지 않고 간격이 길어짐)이며 "인증 일시 정지"가 아닌지,
 ⑤ `ANTLER_RUST_SSH=0` 으로 실행하면 같은 저장소가 사이드카로 fetch 되는지, ⑥ ssh 저장소 삭제 뒤 같은 호스트를 다시 추가하고 fetch 가 성공하는지.
+
+## 나머지 git 채널(Phase 6a, `src-tauri/src/git/`)
+
+Rust 로 옮기는 것: 사이드카가 처리하던 git 채널 12개(`git:refs`·`refsDetails`·`search`·`activity`·`resolveRev`·`tree`·`blob`·`onRemote`·`repoExtras`·`lfsPaths`·`wipStatus`·`wipDiff`)와 RepoWatcher.
+GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 보낸다. 되돌리기 스위치는 늘리지 않는다 — `ANTLER_RUST_GIT=0`(전부 사이드카)·`ANTLER_RUST_SSH=0`(ssh 만)이 새 채널과 감시에도 그대로 적용된다.
+
+**결정(사용자 승인)**: ① refs 정렬은 `natural_compare` 근사를 유지한다(ICU 를 들이지 않는다 — 한글↔라틴 경계만 TS 와 다르다, 위 "골든 테스트"). ② `notify` 크레이트는 PR 7b 에서 도입한다(이 PR 에는 새 크레이트가 없다).
+③ #113 에서 TS 에 들어간 방어(untracked 허용 목록·정션/심볼릭 링크 거부·unstaged `~숫자` 거부·서브모듈 경로 검증과 realpath)는 Rust 에 **동등 이상으로** 옮긴다.
+④ PR 8(`gh:repo`·repoq 의 git 조회를 Rust 가 처리)은 **아직 결정되지 않았다** — 하지 않으면 SSH 호스트당 사이드카 `ssh2` 연결이 6a 뒤에도 남는다.
+
+| PR | 내용 | 앱 연결 | 상태 |
+|---|---|---|---|
+| 1 | 순수 로직·골든: 코드 탐색기 트리 파서·정렬·입력 검증, LFS·gitflow 파서, 활동 집계, 기본 브랜치, filter 가드, WIP 경로 검증·링크 확인. TS 는 순수 함수 export 만 | 없음 | **완료** |
+| 2 | 코드 탐색기 4채널(`resolveRev`·`tree`·`blob`·`onRemote`) | 있음 | |
+| 3a / 3b | 3a: 공유 상태(첫 페이지 문·ref 시그니처 저장소, `signature.rs` 추출, note 팬아웃). 3b: `refs`·`refsDetails`(서브모듈 확인 포함) | 3a 없음 / 3b 있음 | |
+| 4 | `search`·`activity` | 있음 | |
+| 5 | `repoExtras`·`lfsPaths` | 있음 | |
+| 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | |
+| 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | |
+| 8 | `gh:repo`·repoq 의 git 조회 | 있음 | |
+
+모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 마지막 PR 에서 이식 대응표의 `N/A: PR n` 이 0개여야 한다.
+
+### PR 1 — 순수 로직과 골든(앱에 연결하지 않는다)
+
+Electron 동작은 그대로다(TS 쪽은 `export` 추가와 순수 함수 추출뿐이고 기존 vitest 가 증명한다).
+
+| 파일 | 내용 |
+|---|---|
+| `git/code_browse.rs` | `CommitId`(40·64자 16진수, **대소문자 무시** — `scope::is_hash`(소문자만)·`HexHash`(4~64자)와 다르다)·`normalize_dir`·`normalize_file_path`·`is_resolvable_ref`·`resolved_commit_id`·`is_missing_object_error`·`image_mime`·`parse_tree`·`compare_names` |
+| `git/lfs.rs` | `parse_lfs_pointer`·`parse_check_attr_lfs`·`added_lines`·`gitattributes_uses_lfs`·`parse_gitflow_config`(`GitflowConfig`) |
+| `git/activity.rs` | `bucketize`(`now` 를 인자로)·`TimeStreamParser`(`Uint32Array` 처럼 2^32 로 감긴다)·`empty_activity` |
+| `git/refs_service.rs` | `pick_default_branch`·`is_safe_submodule_path`·`submodule_base`·서브모듈 상한 상수 |
+| `git/wip.rs` | `FilterGuard`(닫힌 타입 — filter 드라이버 무력화 `-c` 인자를 만드는 유일한 곳; 키는 바이트로 받아 UTF-8 엄격 검사, 드라이버 256개·`-c` 24000자 상한)·`filter_driver_names`·`assert_rel_path`·`has_short_name_segment`·`WipArea`·`validate_wip_diff_request`·`is_untracked_dir_entry` |
+| `git/link_guard.rs` | `assert_no_link_escape`(구성 요소마다 lstat — 정션·symlink 거부)·`assert_inside_root`(`canonicalize` 로 8.3 이름을 편 실제 경로가 저장소 안이고 `.git` 이 아닌지)·순수 비교 `check_real_path` |
+
+**TS 쪽 변경(동작 불변)**: `codeBrowse.ts` 의 `imageMime`·`assertCommitId`·`compareNames`·`parseTree` 를 export 하고 `isResolvableRef` 를 추출(`resolveRev` 가 부른다), `wip.ts` 의 `assertRelPath` export 와 `filterOverrideArgs(stdout)`(#114 의 `parseFilterDrivers` 결과를 `-c` 로 펴고 총 길이 상한을 보는 순수 함수 — 골든이 부른다)를
+추출(`filterOverrides` 가 부른다 — 명령 실행·종료 코드 처리는 그대로). `parseFilterDrivers`·`hasShortNameSegment`(끝의 `.`·공백을 벗긴 뒤 판정)는 #114 의 것 그대로다. `tests/fixtures/itTitles.ts` 가 `it.skipIf(...)(…)`·`it.runIf` 제목도 읽는다(#113 이 `wip.test.ts` 에 `skipIf` 를 넣었다).
+
+**골든**(`tests/golden/parsers/manifest.json` 에 27개 추가, 총 150개 — `UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts`): 입력은 `scripts/lib/edgeFixtures6a.mjs`(`make-edge-fixtures.mjs` 가 부른다)가 `tests/fixtures/edge/` 에 만든다.
+`.bin` 은 nulRecords 골든이 전부 돌리므로 피했다(`.dat`·`.txt`·`.json`). JSON 입력 목록은 케이스 390개이고 골든은 `{in, out}`(던지면 `{in, error}`)로 짝을 남긴다.
+
+| 골든 | 입력·경계 |
+|---|---|
+| `tree`(3) | ls-tree 출력: 대소문자·디렉터리 우선·`İ`/`ẞ`(소문자화로 길이가 달라진다)·비 BMP 와 U+FF5E(UTF-16 순서)·시그마·잘린 레코드·깨진 UTF-8·`dir` 접두 |
+| `commitId`·`normalizeDir`(2)·`resolveRef`·`imageMime` | 전체 해시 대소문자·길이 경계·`\n`·전각·`ſ`/비문자열, 경로 정규화 `..`·`.`·빈 구성 요소·NUL, ref 모양(`/*`·`HEAD`·hex·`--`), 확장자 대소문자 |
+| `lfsPointer`·`checkAttrLfs`·`addedLines`·`gitattributes` | CRLF·확장 키·중복 키·15자리 크기·1024(UTF-16 단위) 경계(한글·이모지)·BOM·U+0085/U+FEFF/NBSP 경계 |
+| `gitflowConfig` | 제어 문자·U+2028·U+0085·100(UTF-16 단위) 경계·키 대소문자·같은 키 덮어쓰기 |
+| `timeStream`(7)·`bucketize` | 청크 1·3·5·7 분할, 2^32 감김·2^53 반올림·309자리 이상(Infinity), `now` 고정 인자·구간 단위(1h·6h·1d·1w·30d·1y) 경계·미래 허용 폭 정확히 2일 |
+| `defaultBranch` | origin/HEAD 우선·JS trim 경계(BOM·U+0085·NBSP)·같은 이름이 두 리모트에 |
+| `filterOverrides` | git-lfs 정확 일치·뒤에 명령을 붙인 값·`=` 든 이름은 오류·`.` 든 이름·U+0085/U+FEFF/NBSP·값에 개행·순서·접미사가 어긋난 키 |
+| `relPath`·`shortName`·`submodulePath` | `..`·`.git`·`.GIT`·드라이브 문자·백슬래시·`GIT~1`·`.git.`·4096(UTF-16 단위) 경계(한글·이모지)·비문자열 |
+
+**대응표**(`tests/golden/channels/test-map.json`): 대상 TS 테스트 15개(`codeBrowse`·`activity`·`activityRepo`·`lfsGitflow`·`refs`·`refsDetails`·`search`·`wip`·`wipFilter`·`wipFilterNonUtf8`·`hostileRepo`·`submodule`·`defaultBranch`·`repoWatcher`, `repoService` 는 첫 페이지 문·저장소 추가·`ConfigStore` 만 — `RepoService.log` 는 Phase 2 몫)의 모든 `it` 199개가 있어야 한다.
+vitest(`tests/golden6a.test.ts`)와 Rust(`golden.rs::phase6a_대응표가_가리키는_rust_테스트가_있다`)가 같은 규칙으로 강제한다. 값은 `<파일>.rs::<fn>`(그 fn 이 있다) · `N/A: PR n[a|b]`(뒤 PR 몫) · `N/A: <사유>`(renderer 전용·6b·수동 측정)다.
+이번 PR 에서 `<파일>.rs::<fn>` 은 54개, `N/A: PR n` 은 90개, 사유 있는 N/A 는 43개다. `<파일>.rs::<fn>` 으로 옮긴 것은 TS 테스트와 같은 입력을 쓰는 Rust 단위 테스트이거나(activity·lfs·defaultBranch·isSafeSubmodulePath),
+Phase 2 가 이미 옮긴 파서의 골든(`parseRefs`·`parseWorktrees`·`parseStashes`·`parseGitlinks`·`parseGitmodules`·`parseProbe` — TS 가 인라인 입력을 쓰는 곳은 Phase 2 의 edge fixture 가 대신한다)이거나, `exec.rs`(`hostileRepo` 5개)다.
+실제 git·`RepoService` 가 있어야 하는 `it` 은 그 채널이 오는 PR 의 `N/A: PR n` 이다.
+
+**#113 방어의 옮김(D4)** — 파일 시스템을 보지 않는 것은 이번 PR 에서, 채널에 묶인 것은 그 채널 PR 에서 옮긴다:
+
+| 방어(TS) | Rust | 상태 |
+|---|---|---|
+| `assertRelPath`(NUL·4096·`/`·`\`·드라이브·`..`·`.git`) | `wip::assert_rel_path` | 이번 PR(골든) |
+| untracked 허용 목록(정확히 일치, 목록 없으면 거부) | `wip::validate_wip_diff_request` 가 `Option<&HashSet<String>>` 을 받는다 | 판정은 이번 PR, **목록의 보관(저장소별 마지막 `wipStatus` 가 보고한 경로, 저장소 제거 시 정리)은 PR 6** |
+| unstaged `~숫자` 구성 요소 거부 | `wip::has_short_name_segment`(골든) | 이번 PR |
+| `isSafeSubmodulePath`(절대·드라이브·빈/`.`/`..`) | `refs_service::is_safe_submodule_path`(골든) | 이번 PR, 호출은 PR 3b(서브모듈 확인) |
+| 정션·symlink 거부(`assertNoLinkEscape`)·`assertInsideRoot`(realpath, 8.3 이름, `.git`) | `link_guard::assert_no_link_escape`·`assert_inside_root` | 이번 PR 에 구현·시험(실제 정션·`GIT~1`). **호출은 로컬 저장소 한정 — untracked·unstaged 는 PR 6, 서브모듈 경로는 PR 3b** |
+| FilterGuard(`filter.<d>.*` 덮어쓰기, 이름의 `=` 거부) | `wip::FilterGuard` | 이번 PR(골든), `-c` 인자 소스 검사 시험은 PR 6 |
+
+- `link_guard` 는 TS 가 쓰는 두 사실을 실제로 확인하고 지었다(`link_guard.rs` 시험, 이 PC 의 NTFS): Rust `symlink_metadata` 가 정션(`mklink /J`)을 symlink 로 보고하고, `canonicalize` 가 8.3 `GIT~1` 을 긴 이름 `.git` 으로 편다(이 볼륨이 짧은 이름을 만들지 않으면 그 시험은 건너뛴다 — TS 의 `skipIf` 와 같다).
+- TS 보다 엄격한 곳: `assert_no_link_escape` 는 `.`·`..` 구성 요소를 어휘적으로 걷어 내지 않고 거부한다(TS 는 `path.join` 이 걷어 낸다), Windows 에서 `:` 가 든 구성 요소(드라이브 상대·대체 데이터 스트림)도 거부한다.
+  `.` 를 건너뛰면 `j/.`(`j` 가 정션)에서 `j` 가 마지막 구성 요소가 되어 `allow_leaf_link`(unstaged)로 통과하므로 거부로 닫았다. `assert_rel_path` 는 `..` 만 거르고 `.`·`:` 는 통과시키므로 이 두 곳은 닿을 수 있는 입력이다(정상 경로는 git 이 `./`·`a:b` 를 보고하지 않는다).
+- WSL·SSH 저장소에서는 호출하지 않는다(TS 와 같다 — Rust 가 그 파일 시스템을 보지 못한다. Linux git 이 디렉터리 symlink 를 따라 들어가지 않는다는 가정은 여전히 실측하지 않았다, `docs/security.md`). 검사와 열기 사이의 경쟁(TOCTOU)은 막지 못한다(TS 와 같다).
+- 문자열 검사(`assert_rel_path`)는 `GIT~1/config`·`.git./config`·`.git /config` 를 **통과시킨다**(골든이 이를 고정한다). 막는 것은 허용 목록(untracked)·`~숫자` 거부(unstaged)·실제 경로 확인(둘 다, 로컬)이다 — 이 셋을 모두 PR 6 이 갖춰야 한다.
+
+**TS 와 다른 점**
+- `image_mime` 은 객체 프로토타입 이름(`a.constructor`·`a.toString`·`a.__proto__`)을 확장자로 쳐 주지 않는다. **TS 는 `IMAGE_MIME[ext]` 객체 조회라 이런 확장자가 함수·객체로 잡혀 이미지로 취급되고 `data:function Object()…` 가 만들어진다**(발견만 하고 고치지 않았다 — TS 쪽 수정은 따로).
+  이 입력은 골든에 넣지 않았다. 이 PR 의 범위 밖이라 TS 는 그대로다.
+- `bucketize` 는 `times: &[T]`(`T: Into<f64>`)와 `now` 를 받고 `n` 은 슬라이스 길이다. 계산은 TS 와 같은 f64 연산이고 정수 필드는 `JsNumber` 로 같은 JSON 모양이다.
+- `LfsPointer.size` 는 `u64`(TS `Number`, 15자리 상한이라 정밀도 손실 없음). `parse_lfs_pointer` 의 입력은 `&str` 이다(`Buffer.toString` 이 아닌 호출자가 `from_utf8_lossy`).
+- 오류는 `Result<_, &'static str>`(TS 의 `Error('invalid …')` 문구 그대로)이다. 비문자열 입력은 라우터 경계(PR 2~)에서 같은 문구로 거절한다 — 골든은 `5`·`null` 케이스를 harness 가 같은 문구로 바꿔 비교하므로 이 경계 자체는 시험하지 않는다.
+- 새 크레이트는 없다. 이미 lock 에 있는 판만 쓴다.
+
+**발견했지만 이 PR 에서 손대지 않은 것**
+- `parsers/mod.rs` 의 `js_trim`(`char::is_whitespace` + BOM)은 U+0085 를 지운다 — JS `trim` 은 지우지 않는다(`fetch::js_trim`·`scope::is_js_space` 는 맞다). 새 코드는 모두 후자를 쓴다. 기존 파서가 이 차이에 걸리는지는 확인하지 않았다.
+- `filterOverrides`: `config -z` 출력은 첫 개행에서 키와 값을 가르므로, 서브섹션 이름에 개행이 든 드라이버는 키가 잘려 드라이버로 보이지 않는다(덮어쓰지 않는다). git 설정 문법이 서브섹션의 개행을 허용하지 않는다고 알고 있어 실제 영향은 없을 것으로 보지만 실측하지 않았다.
+  골든이 이 동작을 고정한다(TS 와 같다).
+
+**시험**: `cargo test --features test-hooks --lib --test golden`(CI 목록 그대로 — 새 바이너리 없음). lib 241개 중 새 것 62개(`activity` 9·`code_browse` 10·`lfs` 18·`link_guard` 6·`refs_service` 8·`wip` 10·`parsers/refs` 1), golden 2개(`rust_parsers_match_ts_golden` 149개 비교·건너뜀 0, 대응표 검사).
+vitest: `golden`(151)·`golden6a`(1)와 `codeBrowse`·`wip`·`wipFilter`·`lfsGitflow`·`activity`·`activityRepo`·`defaultBranch`·`submodule`·`hostileRepo`·`goldenChannels`·`goldenExec`(13개 파일 301개 통과).
+
+**남은 위험**
+- 골든이 TS 와 같다는 것은 입력 표(390 케이스·manifest 26개)의 범위만큼만 보장한다. 정렬(`compare_names`)은 `js_to_lowercase` 의 변환표와 UTF-16 비교에 기대므로 새 유니코드 경계가 발견되면 `tree-edge.dat` 에 더한다.
+- `link_guard` 는 로컬 NTFS 에서만 실측했다(ReFS·네트워크 드라이브·서브스트 드라이브의 `canonicalize` 는 시험하지 않았다). 실패는 모두 거부 쪽(`invalid path`)으로 기운다.
+- 대응표의 `<파일>.rs::<fn>` 은 fn 이 있는지만 본다(내용이 TS 와 같은 입력인지는 이 문서의 기준으로 사람이 본다).
+- 링크 확인의 마지막 구성 요소 면제(`allow_leaf_link`)는 디렉터리 정션 자체(`j`, `j/`)에도 적용된다(TS 와 같다). 조작된 index 로 그 경로의 unstaged diff 가 링크 안을 읽는지는 PR 6 이 확인한다.
+- 이 PR 에서 돌린 시험은 `--lib`·`golden` 외에 소스를 훑는 `fetch_guard`·`fetch_service`·`fetch_route`·`api_route`·`net`·`ssh_golden`·`ssh_route` 다. `exec`·`fetch`·`channels`·`ssh`·`log` 는 돌리지 않았다(WSL 배포판이 있으면 wsl.exe 를 부를 수 있고, 이 PR 은 그 코드를 건드리지 않았다).
 
 ## Phase 0 에서 확인한 것
 

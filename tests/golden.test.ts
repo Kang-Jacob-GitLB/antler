@@ -1,7 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { FileDiff } from '../src/shared/types'
+import type { Branch, FileDiff, RemoteGroup } from '../src/shared/types'
+import { bucketize, TimeStreamParser } from '../src/main/git/activity'
+import { assertCommitId, imageMime, isResolvableRef, normalizeDir, normalizeFilePath, parseTree } from '../src/main/git/codeBrowse'
+import { isSafeSubmodulePath } from '../src/main/git/commands'
+import { pickDefaultBranch } from '../src/main/git/defaultBranch'
+import { assertRelPath, filterOverrideArgs, hasShortNameSegment, parseFilterDrivers } from '../src/main/git/wip'
+import { addedLines, gitattributesUsesLfs, parseCheckAttrLfs, parseLfsPointer } from '../src/shared/lfs'
+import { parseGitflowConfig } from '../src/shared/gitflow'
 import { parseBlame } from '../src/main/git/parsers/blame'
 import { parseChanges, parseNameStatus, parseNumstat } from '../src/main/git/parsers/changes'
 import { parseCommitMeta } from '../src/main/git/parsers/commit'
@@ -77,7 +84,79 @@ const PARSERS: Record<string, Parser> = {
   gitlinks: (b) => parseGitlinks(b),
   // Map → 삽입 순서를 지킨 [{path, name, url?, branch?}]
   gitmodules: (b) => [...parseGitmodules(b)].map(([path, m]) => ({ path, ...m })),
-  probe: (b) => parseProbe(b.toString('utf8'))
+  probe: (b) => parseProbe(b.toString('utf8')),
+
+  // ---- Phase 6a PR 1: 코드 탐색기·LFS·gitflow·활동·기본 브랜치·WIP 경로 검증 ----
+  // args.dir: 정규화된 디렉터리(경로 접두)
+  tree: (b, a) => parseTree(b, a.dir ?? ''),
+  // JSON 입력 목록의 각 케이스를 `{in, out}`(던지면 `{in, error}`)로 바꾼다. 비문자열 케이스(5·null)는 TS 가 던지는지 본다
+  commitId: (b) =>
+    cases(b, (c) => {
+      assertCommitId(c)
+      return true
+    }),
+  // args.file: 파일 경로 정규화(빈 경로 거부)
+  normalizeDir: (b, a) => cases(b, (c) => (a.file ? normalizeFilePath(c) : normalizeDir(c))),
+  resolveRef: (b) => cases(b, (c) => isResolvableRef(c as string)),
+  imageMime: (b) => cases(b, (c) => imageMime(c as string) ?? null),
+  lfsPointer: (b) => cases(b, (c) => parseLfsPointer(c as string)),
+  checkAttrLfs: (b) => cases(b, (c) => parseCheckAttrLfs(c as string)),
+  addedLines: (b) => cases(b, (c) => addedLines(c as string)),
+  gitattributes: (b) => cases(b, (c) => gitattributesUsesLfs(c as string)),
+  gitflowConfig: (b) => cases(b, (c) => parseGitflowConfig(c as string)),
+  // args.chunk: 청크 크기. 값은 Uint32Array 에 담겨 2^32 로 감긴다
+  timeStream: (b, a) => {
+    const p = new TimeStreamParser()
+    const size = a.chunk === undefined ? 0 : Number(a.chunk)
+    if (size) for (let i = 0; i < b.length; i += size) p.push(b.subarray(i, i + size))
+    else p.push(b)
+    p.end()
+    return { n: p.n, values: Array.from(p.values.subarray(0, p.n)) }
+  },
+  // 케이스: {times, now} — `now` 를 고정해 결정적으로 만든다
+  bucketize: (b) => cases(b, (c) => bucketize((c as { times: number[] }).times, (c as { times: number[] }).times.length, (c as { now: number }).now)),
+  defaultBranch: (b) =>
+    cases(b, (c) => {
+      const x = c as { originHead: string | null; local: Branch[]; remotes: RemoteGroup[] }
+      return pickDefaultBranch(x.originHead, x.local, x.remotes) ?? null
+    }),
+  // 케이스는 `git config -z --get-regexp` stdout 전체: 문자열(UTF-8) 또는 `{parts: [문자열 | {hex} | {repeat: [단위, 횟수]}]}`(바이트 — 단위의 `{i}` 는 0 부터의 번호).
+  // 결과는 덮어쓰기 `-c` 인자 목록, 덮을 수 없으면(이름에 "=" · 잘못된 UTF-8 · 개수·길이 상한) 오류
+  filterOverrides: (b) => cases(b, (c) => filterOverrideArgs(caseBytes(c))),
+  // 같은 케이스에서 `parseFilterDrivers` 의 결과(드라이버 이름 목록, 개수 상한까지만 — 길이 상한은 위 filterOverrides 몫)
+  filterDrivers: (b) => cases(b, (c) => parseFilterDrivers(caseBytes(c))),
+  relPath: (b) =>
+    cases(b, (c) => {
+      assertRelPath(c)
+      return true
+    }),
+  shortName: (b) => cases(b, (c) => hasShortNameSegment(c as string)),
+  submodulePath: (b) => cases(b, (c) => isSafeSubmodulePath(c as string))
+}
+
+/** filterOverrides 케이스를 바이트로 푼다. 문자열은 UTF-8, `{parts}` 는 조각을 이어 붙인다(잘못된 UTF-8 은 `{hex}` 로 쓴다) */
+function caseBytes(c: unknown): Buffer {
+  if (typeof c === 'string') return Buffer.from(c, 'utf8')
+  const parts = (c as { parts: (string | { hex: string } | { repeat: [string, number] })[] }).parts
+  return Buffer.concat(
+    parts.map((p) => {
+      if (typeof p === 'string') return Buffer.from(p, 'utf8')
+      if ('hex' in p) return Buffer.from(p.hex, 'hex')
+      const [unit, n] = p.repeat
+      return Buffer.from(Array.from({ length: n }, (_, i) => unit.replaceAll('{i}', String(i))).join(''), 'utf8')
+    })
+  )
+}
+
+/** JSON 입력 목록의 각 케이스를 `{in, out}`(던지면 `{in, error: 메시지}`)로 바꾼다. out 이 undefined 면 null */
+function cases(input: Buffer, fn: (c: unknown) => unknown): unknown[] {
+  return (JSON.parse(input.toString('utf8')) as unknown[]).map((c) => {
+    try {
+      return { in: c, out: fn(c) ?? null }
+    } catch (e) {
+      return { in: c, error: (e as Error).message }
+    }
+  })
 }
 
 function summarizeDiff(d: FileDiff): unknown {
@@ -176,6 +255,37 @@ for (const f of ['gitlinks.dat', 'gitlinks-edge.dat', 'empty.bin']) add('gitlink
 for (const f of ['gitmodules.dat', 'gitmodules-edge.dat', 'empty.bin']) add('gitmodules', E(f))
 for (const f of ['probe-ok', 'probe-nohead', 'probe-crlf-upper', 'probe-sha256', 'probe-bad-length', 'probe-dir-only', 'probe-empty-dir']) add('probe', E(`${f}.txt`))
 add('probe', E('empty.bin'))
+
+// ---- Phase 6a PR 1 ----
+add('tree', E('tree-edge.dat'))
+add('tree', E('tree-edge.dat'), { dir: 'src/sub' }, '@dir')
+add('tree', E('empty.bin'))
+for (const [parser, f] of [
+  ['commitId', 'commit-id'],
+  ['resolveRef', 'resolve-ref'],
+  ['imageMime', 'image-mime'],
+  ['lfsPointer', 'lfs-pointer'],
+  ['checkAttrLfs', 'check-attr'],
+  ['addedLines', 'added-lines'],
+  ['gitattributes', 'gitattributes'],
+  ['gitflowConfig', 'gitflow'],
+  ['bucketize', 'bucketize'],
+  ['defaultBranch', 'default-branch'],
+  ['filterOverrides', 'filter-overrides'],
+  ['filterDrivers', 'filter-overrides'],
+  ['relPath', 'rel-path'],
+  ['shortName', 'short-name'],
+  ['submodulePath', 'submodule-path']
+] as const) {
+  add(parser, E(`${f}-cases.json`))
+}
+add('normalizeDir', E('normalize-dir-cases.json'))
+add('normalizeDir', E('normalize-dir-cases.json'), { file: '1' }, '@file')
+add('timeStream', E('time-stream.txt'))
+for (const chunk of ['1', '3', '7']) add('timeStream', E('time-stream.txt'), { chunk }, `@chunk${chunk}`)
+add('timeStream', E('time-stream-huge.txt'))
+add('timeStream', E('time-stream-huge.txt'), { chunk: '5' }, '@chunk5')
+add('timeStream', E('empty.bin'))
 
 // nulRecords 는 NUL 구분 fixture 전부(.bin)에 돌린다
 for (const f of readdirSync(FIXTURES).filter((n) => n.endsWith('.bin')).sort()) add('nulRecords', f)

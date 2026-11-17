@@ -32,14 +32,14 @@ const IMAGE_MIME: Record<string, string> = {
   avif: 'image/avif'
 }
 
-function imageMime(path: string): string | undefined {
+export function imageMime(path: string): string | undefined {
   const base = path.slice(path.lastIndexOf('/') + 1)
   const dot = base.lastIndexOf('.')
   return dot < 0 ? undefined : IMAGE_MIME[base.slice(dot + 1).toLowerCase()]
 }
 
 /** git:tree·git:blob 의 rev 는 전체 해시(40·64자)만 받는다. 짧은 해시는 모호하고 캐시 키도 갈린다 */
-function assertCommitId(rev: unknown): asserts rev is string {
+export function assertCommitId(rev: unknown): asserts rev is string {
   if (typeof rev !== 'string' || !COMMIT_ID_RE.test(rev)) throw new Error('invalid commit hash')
 }
 
@@ -69,14 +69,18 @@ function isHexRef(ref: string): boolean {
   }
 }
 
+/** resolveRev 가 받는 ref 모양: 'HEAD' · 16진수 4~64자 · 전체 ref 이름(리모트 전체 패턴 `refs/remotes/x/*` 는 하나의 ref 가 아니라 제외) */
+export function isResolvableRef(ref: string): boolean {
+  return ref === 'HEAD' || isHexRef(ref) || (isValidScopeRef(ref) && !ref.endsWith('/*'))
+}
+
 /**
  * 'HEAD' · 전체 ref 이름 · 커밋 해시를 커밋 해시로 푼다. 단축 이름(main)·리비전 식(HEAD~1)·옵션처럼 보이는 값은 거부한다.
  * `--end-of-options` 로 ref 가 옵션으로 해석되는 일을 막고 `^{commit}` 으로 태그 객체 등을 벗긴다.
  */
 export async function resolveRev(exec: GitExecutor, repoPath: string, ref: unknown, opts?: RunOpts): Promise<string> {
   if (typeof ref !== 'string') throw new Error('invalid ref')
-  // 리모트 전체 패턴(refs/remotes/x/*)은 isValidScopeRef 를 통과하지만 하나의 ref 가 아니다
-  if (ref !== 'HEAD' && !isHexRef(ref) && (!isValidScopeRef(ref) || ref.endsWith('/*'))) throw new Error('invalid ref')
+  if (!isResolvableRef(ref)) throw new Error('invalid ref')
   const r = await exec.run(repoPath, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], opts)
   const hash = r.code === 0 ? r.stdout.toString('utf8').trim() : ''
   if (!COMMIT_ID_RE.test(hash)) throw new Error(`커밋을 찾을 수 없습니다: ${ref}`)
@@ -91,14 +95,14 @@ function kindOf(mode: string, type: string): CodeEntryKind {
 }
 
 /** 대소문자를 무시하고(로캘과 무관하게 코드 유닛 순) 비교한 뒤 같으면 원문으로 비교한다 */
-function compareNames(a: string, b: string): number {
+export function compareNames(a: string, b: string): number {
   const la = a.toLowerCase()
   const lb = b.toLowerCase()
   if (la !== lb) return la < lb ? -1 : 1
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-function parseTree(buf: Buffer, dir: string): CodeTreeEntry[] {
+export function parseTree(buf: Buffer, dir: string): CodeTreeEntry[] {
   const entries: CodeTreeEntry[] = []
   for (const rec of buf.toString('utf8').split('\0')) {
     if (!rec) continue

@@ -4,6 +4,7 @@
 // 사용: node scripts/make-edge-fixtures.mjs  →  tests/fixtures/edge/*
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { make6aFixtures } from './lib/edgeFixtures6a.mjs'
 
 const OUT = resolve(import.meta.dirname, '..', 'tests', 'fixtures', 'edge')
 mkdirSync(OUT, { recursive: true })
@@ -566,3 +567,6 @@ out('probe-sha256.txt', `/r/.git\n${'a1'.repeat(32)}\n`)
 out('probe-bad-length.txt', `/r/.git\n${'a'.repeat(41)}\n`)
 out('probe-dir-only.txt', '/r/.git')
 out('probe-empty-dir.txt', `\n${H('a')}\n`)
+
+// Phase 6a PR 1: 코드 탐색기·LFS·gitflow·활동 집계·기본 브랜치·WIP 경로 검증 입력
+make6aFixtures({ out, H, NUL })

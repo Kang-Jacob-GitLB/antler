@@ -1,0 +1,86 @@
+[
+  {
+    "in": "",
+    "out": false
+  },
+  {
+    "in": "*.psd filter=lfs diff=lfs merge=lfs -text\n",
+    "out": true
+  },
+  {
+    "in": "# *.psd filter=lfs\n",
+    "out": false
+  },
+  {
+    "in": "  # indented comment filter=lfs\n",
+    "out": false
+  },
+  {
+    "in": "*.bin\tfilter=lfs\r\n",
+    "out": true
+  },
+  {
+    "in": "filter=lfs",
+    "out": true
+  },
+  {
+    "in": "filter=lfs\n",
+    "out": true
+  },
+  {
+    "in": "*.a filter=lfsx\n*.b xfilter=lfs\n*.c filter=lfs2\n*.d filter=lfs-extra\n",
+    "out": false
+  },
+  {
+    "in": "*.a filter==lfs\n",
+    "out": false
+  },
+  {
+    "in": "*.a filter = lfs\n",
+    "out": false
+  },
+  {
+    "in": "*.a -filter=lfs\n",
+    "out": false
+  },
+  {
+    "in": "*.a filter=LFS\n",
+    "out": false
+  },
+  {
+    "in": "a filter=lfsx filter=lfs",
+    "out": true
+  },
+  {
+    "in": "*.afilter=lfs\n",
+    "out": false
+  },
+  {
+    "in": "*.a﻿filter=lfs \n",
+    "out": true
+  },
+  {
+    "in": "*.a filter=lfs　\n",
+    "out": true
+  },
+  {
+    "in": "# not trimmed so not a commentfilter=lfs\n",
+    "out": false
+  },
+  {
+    "in": "﻿# bom comment filter=lfs\n",
+    "out": false
+  },
+  {
+    "in": "x\n\n   \n# c\n*.z filter=lfs\n",
+    "out": true
+  },
+  {
+    "in": "*.a filter=lfs\n",
+    "out": false
+  },
+  {
+    "in": "*.a diff=lfs\n",
+    "out": false
+  }
+]

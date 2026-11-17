@@ -12,7 +12,7 @@ function unquote(quote: string, body: string): string {
 export function itKeys(source: string): string[] {
   const keys: string[] = []
   let describeTitle = ''
-  const token = new RegExp(String.raw`^describe\(\s*${STRING}|^\s*it(\.each)?\b`, 'gm')
+  const token = new RegExp(String.raw`^describe\(\s*${STRING}|^\s*it(\.each|\.skipIf|\.runIf)?\b`, 'gm')
   const each = new RegExp(String.raw`\)\(\s*${STRING}`, 'g')
   const plain = new RegExp(String.raw`\(\s*${STRING}`, 'y')
   for (let m = token.exec(source); m; m = token.exec(source)) {

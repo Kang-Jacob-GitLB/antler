@@ -1,0 +1,70 @@
+[
+  {
+    "in": "",
+    "out": []
+  },
+  {
+    "in": "a.bin\u0000filter\u0000lfs\u0000",
+    "out": [
+      "a.bin"
+    ]
+  },
+  {
+    "in": "a.bin\u0000filter\u0000lfs\u0000b.txt\u0000filter\u0000unspecified\u0000c d\ne.psd\u0000filter\u0000lfs\u0000",
+    "out": [
+      "a.bin",
+      "c d\ne.psd"
+    ]
+  },
+  {
+    "in": "a\u0000filter\u0000lfs",
+    "out": [
+      "a"
+    ]
+  },
+  {
+    "in": "a\u0000filter\u0000",
+    "out": []
+  },
+  {
+    "in": "a\u0000filter",
+    "out": []
+  },
+  {
+    "in": "a\u0000diff\u0000lfs\u0000",
+    "out": []
+  },
+  {
+    "in": "a\u0000filter\u0000LFS\u0000",
+    "out": []
+  },
+  {
+    "in": "a\u0000filter\u0000lfs2\u0000",
+    "out": []
+  },
+  {
+    "in": "filter\u0000filter\u0000lfs\u0000",
+    "out": [
+      "filter"
+    ]
+  },
+  {
+    "in": "\u0000filter\u0000lfs\u0000",
+    "out": [
+      ""
+    ]
+  },
+  {
+    "in": "한글 경로.psd\u0000filter\u0000lfs\u0000",
+    "out": [
+      "한글 경로.psd"
+    ]
+  },
+  {
+    "in": "x\u0000filter\u0000lfs\u0000y\u0000filter\u0000lfs\u0000z\u0000filter\u0000set\u0000",
+    "out": [
+      "x",
+      "y"
+    ]
+  }
+]
