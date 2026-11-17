@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -163,11 +163,11 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 `antler_invoke` 는 이제 라우터를 거친다. 채널이 Rust 에서 처리할 수 있는 것이면 Rust 가 envelope 를 만들고, 아니면 사이드카에 인자를 **그대로** 넘긴다.
 
 ```
-renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit·git:log·git:compare·git:fileDiff·git:fileHistory·git:blame·git:fetch — ssh 는 `ANTLER_RUST_SSH` 가 켜졌을 때)
+renderer → antler_invoke → Router::route ─ Done(envelope) ──────────────→ renderer      (Rust 경로: 지금은 git:commit·git:log·git:compare·git:fileDiff·git:fileHistory·git:blame·git:fetch·git:resolveRev·git:tree·git:blob·git:onRemote — ssh 는 `ANTLER_RUST_SSH` 가 켜졌을 때)
                                          └ Sidecar → Node 사이드카 → envelope → renderer (그 밖의 모든 것)
 ```
 
-- **Rust 경로 조건**(전부): 채널이 `RUST_CHANNELS` 에 있다 · 인자의 저장소 id 가 미러에 있다 · 그 kind 가 local 또는 wsl 이다(github 소스는 사이드카. **ssh 는 `ANTLER_RUST_SSH` 가 켜져 있으면 `git:fetch` 를 포함한 7개 채널 모두 Rust 가 처리**한다 — 아래 "SSH PR 3"·"SSH PR 4") ·
+- **Rust 경로 조건**(전부): 채널이 `RUST_CHANNELS` 에 있다 · 인자의 저장소 id 가 미러에 있다 · 그 kind 가 local 또는 wsl 이다(github 소스는 사이드카. **ssh 는 `ANTLER_RUST_SSH` 가 켜져 있으면 `git:fetch` 를 포함한 11개 채널 모두 Rust 가 처리**한다 — 아래 "SSH PR 3"·"SSH PR 4") ·
   환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아니다. 미러에 없는 id 는 사이드카로 가서 오류 문구를 사이드카가 만든다.
 - **되돌리기 스위치**: `ANTLER_RUST_GIT=0` 으로 실행하면 모든 채널이 사이드카로 간다(Electron 판과 같은 경로). 확인용으로 `ANTLER_ROUTE_LOG=1` 이면
   `RUST_CHANNELS` 채널이 어디로 갔는지 stderr 에 `[route] git:commit -> rust|sidecar` 로 남긴다(기본은 조용하다. drive 는 `ANTLER_DRIVE_DEBUG=1` 로 stderr 를 본다).
@@ -268,7 +268,7 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
   상한을 넘기고 세기도 끝났으면 스트림을 버려 git 을 끊고, EOF 까지 읽었으면 `finish()` 로 종료 코드를 확인한다(없는 해시는 `GIT`). `full` 은 JS 참 거짓으로 읽는다(`1`·`"no"` 는 참, `0`·`""`·`null` 은 거짓).
   blame 은 512KiB 가 넘는 파일이면 blame 하지 않고 `tooLarge`, 그 시점에 경로가 없거나 파일이 아니면(`cat-file -s` 실패) `missing`, 출력에 NUL 이 있으면 `binary`, HEAD 를 풀 수 없으면 `no commits yet`(ERROR).
   fileHistory 는 `skip` 이 10만 이상이면 git 을 부르지 않고 `{entries:[], hasMore:false}`, 커밋 없는 저장소도 같다(`rev` 키 없음).
-- **LFS·lenient·캐시 비우기**: 이 네 채널의 TS 코드(`commands.ts`·`fileInsight.ts`)에는 LFS 처리가 없어 그대로 옮겼다(LFS 판정은 `git:blob`·`git:lfsPaths` 쪽이고 둘 다 사이드카에 남는다).
+- **LFS·lenient·캐시 비우기**: 이 네 채널의 TS 코드(`commands.ts`·`fileInsight.ts`)에는 LFS 처리가 없어 그대로 옮겼다(LFS 판정은 `git:blob`·`git:lfsPaths` 쪽이다 — `git:blob` 은 Phase 6a PR 2 에서 옮겼고 `git:lfsPaths` 는 아직 사이드카에 남는다).
   TS 의 `lenient`(blob 을 못 받아도 목록만 돌려주기)는 GitHub 원격 전용 저장소용이라 옮기지 않았다 — 그 저장소는 사이드카로 간다.
   TS 는 `RepoService.dispose` 에서만 compare·diff 캐시를 비우고(해시 기준 불변) Rust 도 `git:commit` 캐시와 마찬가지로 앱 수명 동안 둔다.
 - **검증(보안 경계)** — renderer 값이 argv 에 들어가는 길은 둘뿐이고 둘 다 검증된 newtype 이다:
@@ -1097,7 +1097,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 | PR | 내용 | 앱 연결 | 상태 |
 |---|---|---|---|
 | 1 | 순수 로직·골든: 코드 탐색기 트리 파서·정렬·입력 검증, LFS·gitflow 파서, 활동 집계, 기본 브랜치, filter 가드, WIP 경로 검증·링크 확인. TS 는 순수 함수 export 만 | 없음 | **완료** |
-| 2 | 코드 탐색기 4채널(`resolveRev`·`tree`·`blob`·`onRemote`) | 있음 | |
+| 2 | 코드 탐색기 4채널(`resolveRev`·`tree`·`blob`·`onRemote`) | 있음 | **완료** |
 | 3a / 3b | 3a: 공유 상태(첫 페이지 문·ref 시그니처 저장소, `signature.rs` 추출, note 팬아웃). 3b: `refs`·`refsDetails`(서브모듈 확인 포함) | 3a 없음 / 3b 있음 | |
 | 4 | `search`·`activity` | 있음 | |
 | 5 | `repoExtras`·`lfsPaths` | 있음 | |
@@ -1182,6 +1182,62 @@ vitest: `golden`(151)·`golden6a`(1)와 `codeBrowse`·`wip`·`wipFilter`·`lfsGi
 - 대응표의 `<파일>.rs::<fn>` 은 fn 이 있는지만 본다(내용이 TS 와 같은 입력인지는 이 문서의 기준으로 사람이 본다).
 - 링크 확인의 마지막 구성 요소 면제(`allow_leaf_link`)는 디렉터리 정션 자체(`j`, `j/`)에도 적용된다(TS 와 같다). 조작된 index 로 그 경로의 unstaged diff 가 링크 안을 읽는지는 PR 6 이 확인한다.
 - 이 PR 에서 돌린 시험은 `--lib`·`golden` 외에 소스를 훑는 `fetch_guard`·`fetch_service`·`fetch_route`·`api_route`·`net`·`ssh_golden`·`ssh_route` 다. `exec`·`fetch`·`channels`·`ssh`·`log` 는 돌리지 않았다(WSL 배포판이 있으면 wsl.exe 를 부를 수 있고, 이 PR 은 그 코드를 건드리지 않았다).
+
+### PR 2 — 코드 탐색기 4채널(앱에 연결한다)
+
+`git:resolveRev`·`git:tree`·`git:blob`·`git:onRemote` 를 Rust 가 처리한다(local·WSL·SSH 세 실행기 — 라우팅·미러·취소·envelope 는 `git:fileDiff` 등과 같다). TS: `RepoService.ts` 의 `resolveRev`·`codeTree`·`codeBlob`·`codeOnRemote` + `codeBrowse.ts`.
+소유 판정은 새로 만든 것이 없다 — 한 술어 `RepoMirror::resolve`(미러에 있고 local·wsl·(켜진) ssh)와 스위치 `ANTLER_RUST_GIT`·`ANTLER_RUST_SSH` 뿐이고, 사이드카는 이 채널에 소유 env 가 없다(미러가 사이드카로 푸는 저장소 — 없는 id·github·풀 없는 ssh — 와 스위치가 꺼진 라우터만 사이드카로 간다. 단위 시험 `코드_탐색기_채널의_소유는_다른_git_채널과_같은_한_술어다`).
+
+| 채널 | 인자 | git(상수 + 검증된 값) | 캐시 | 취소 |
+|---|---|---|---|---|
+| `git:resolveRev` | `repoId, ref` | `rev-parse --verify --end-of-options <ref>^{commit}` | 없음(ref 는 움직인다) | 없음 |
+| `git:tree` | `repoId, {rev, dir}, requestId?` | (dir 이 있으면 `cat-file -t <rev>:<dir>` 로 트리인지) → `ls-tree -z --end-of-options <rev>[:<dir>]` — **`-l` 은 쓰지 않는다**(크기 조회가 lazy fetch 를 부른다) | 키 `repoId\0rev 소문자\0정규화 dir`, 200개·8MB(항목 비용 200×(항목+1)), **missing 은 캐시하지 않는다** | 프로세스에 바로 닿는다(`queue.run(None, Some(token))`) |
+| `git:blob` | `repoId, {rev, path}, requestId?` | `cat-file -t <rev>:<path>` → `cat-file -s` → (상한 이하일 때만) `cat-file blob` | 키 `repoId\0rev 소문자\0정규화 경로`, 64개·32MB(비용 text×2 + dataUrl + 1024, 길이는 UTF-16 단위), missing 제외 | 프로세스에 바로 닿는다 |
+| `git:onRemote` | `repoId, rev` | `for-each-ref --count=1 --contains <rev 소문자> --format=%(refname) refs/remotes/` | **true 만** 기억(`repoId:rev 소문자`, 2000개가 되면 비운다) | 없음 |
+
+- **파일 내용은 `cat-file blob` 으로만 읽는다**(`git show`·diff 계열·`--textconv`·`--filters` 없음 — textconv·필터·속성이 돌지 않는다). 소스 검사 시험이 `code_browse.rs` 에 그 인자가 없음을 강제하고,
+  `악성_저장소의_textconv_와_filter_는_코드_탐색기가_실행하지_않는다`(`codeBrowse.test.ts` 의 같은 시험)가 저장소에 심은 `diff.*.textconv`·`filter.*.smudge|clean|process` 가 표식 파일을 만들지 않음을 본다.
+- **검증(보안 경계)**: renderer 값이 argv 에 들어가는 길은 셋이고 모두 검증된 값이다 — ①`ref`: `HEAD`·16진수 4~64자·전체 ref 이름(`is_valid_scope_ref`, 리모트 전체 패턴 `/*` 제외), `--end-of-options` 뒤 ②`rev`: `CommitId`(40·64자 16진수, **대소문자 무시**, `-` 로 시작할 수 없다)
+  ③`dir`·`path`: `normalize_dir`(NUL·`.`·`..`·빈 구성 요소 거부). ②③은 `<rev>:<경로>` **한 인자**라 첫 글자가 16진수여서 옵션이 될 수 없다. 검증 실패는 git 도 취소 레지스트리도 건드리지 않는다.
+  검증 순서·문구는 TS 와 같다: `invalid ref`(resolveRev) · `invalid commit hash` → `invalid path`(rev 먼저, **`dir` 키가 없으면 최상위가 아니라 `invalid path`**) · onRemote 의 rev 는 `invalid commit hash`. 문자열·숫자·배열·`{}` 요청은 `invalid commit hash`(TS 도 `req.rev` 가 undefined 라 같다),
+  요청이 `null`·인자 없음이면 TS 는 TypeError(code ERROR)라 Rust 는 `invalid request`(code ERROR)로 거절한다 — 문구만 다르다.
+- **blob 판정**(TS 와 같은 순서): 종류가 `blob` 이 아니거나(디렉터리·서브모듈·없는 경로·로컬에 없는 객체) 크기를 못 읽으면 `missing`(size 0) → 크기가 상한(텍스트 2MB·이미지 10MB, 이미지는 확장자 대소문자 무관)을 넘으면 **내용을 읽지 않고** `tooLarge` →
+  `cat-file blob`(최대 상한 + 64KB) → 이미지이고 크기 ≤ 1024 면 LFS 포인터 먼저(`lfs`) → 이미지(`image`, `data:<mime>;base64,…`) → 앞 8000바이트에 NUL 이 있으면 `binary` → LFS 포인터 → `text`. 텍스트는 깨진 바이트를 U+FFFD 로(`invalidUtf8: true` 는 엄격 디코드가 실패할 때만 키를 넣는다) 선두 BOM 을 한 번 벗긴다.
+- **응답의 `rev` 는 보낸 표기 그대로**(대문자 유지)이고 소문자화는 캐시 키뿐이다. 그래서 캐시에 걸린 대문자 요청은 먼저 캐시한 요청의 표기를 돌려준다(TS 도 같다 — 골든이 이를 고정한다).
+- **SSH(16MB 선읽기)**: 이 네 채널은 모두 `run`(stdout 을 전부 모으는 호출)이고 `stream` 이 아니다. 선읽기 상한(16MB)은 `stream` 에만 걸리므로 **해당 없다** — 읽는 양은 `run` 의 `max_buffer` 가 정한다(트리·ref·크기 조회는 기본 64MB, blob 은 상한 + 64KB = 최대 10MB + 64KB).
+  `ls-tree` 출력이 64MB 를 넘는 디렉터리는 `GIT` 오류(`output exceeded …`, TS 와 같다). 이미지 10MB 는 base64 로 13.3MB 문자열이 되어 envelope 에 실린다(TS·사이드카 경로도 같다).
+  호스트당 연결 하나를 나눠 쓴다(골든이 끝에 `connections()==1` 을 확인한다). 6a 계획 §6 의 선읽기 표는 stream 채널(search·activity·wip)만 해당한다.
+- **WSL**: 새 종류의 자유 문자열(경로·ref)은 `<rev>:<경로>`·`<ref>^{commit}` 한 인자로 `wsl.exe` argv 에 실린다. 이 PC 에는 WSL 이 없어 **실행해 보지 않았다** — argv 단위 시험(`argv_는_ts_와_바이트까지_같다`)과 기존 `tests/exec.rs` 의 `wsl_통합`(한 인자 도착)이 덮는다.
+
+**골든**: `tests/fixtures/repos/code.fi`(새 fixture — `scripts/make-repo-fixtures.mjs` 가 만든다. 텍스트·BOM·깨진 UTF-8·NUL(8000바이트 밖 포함)·이미지(대문자 `PNG`·`JPG`·svg)·LFS 포인터(`model.bin`·`logo.png`)·심볼릭 링크(120000)·서브모듈(160000)·`-x`·`--output=x.txt`·한글·비 BMP 이름·`dir.png/`·중첩 디렉터리·가벼운/주석 태그·가지 둘)와
+`code.scenarios.json`(resolveRev 37·tree 50·blob 55·onRemote 22)을 TS(`goldenChannels.test.ts` → `RepoService`)와 Rust(`channels.rs` → `Router::route`)가 **한 서비스 인스턴스로 순서대로** 돌아 캐시 적중까지 본다. 결과는 `tests/golden/channels/{resolveRev,tree,blob,onRemote}.json`.
+`branchy.fi`(원격 추적 ref)·`many.fi`(`f/` 에 5001개 → 5000개 + `truncated`)·`empty.fi` 도 쓴다. 시나리오 값에 `{"$short": [값, n]}` 이 더해졌다. 2MB·10MB 경계(`big.txt` 2MB+1 → `tooLarge`, `limit.txt` 정확히 2MB → text, `huge.png` 10MB+1 → `tooLarge`, `limit.png` 정확히 10MB → image)는
+`setup` 으로 **시험 시점에** 고아 커밋을 만든다(`hash-object`·`mktree`·`commit-tree`, 작성자·시각 고정이라 해시가 결정적 — TS·Rust 가 같은 명령). 응답이 크면 text·dataUrl 은 200 글자를 넘을 때 `{len, head, tail}` 로, tree 항목은 20개를 넘으면 `{count, first, last}` 로 줄여 비교한다.
+Rust 는 local 과 SSH(127.0.0.1 하네스) 둘 다 같은 골든과 같다. 악성 입력 시나리오: 옵션 주입(`--output`·`-x`·`-` 로 시작하는 40자 해시·`--end-of-options`), `..`·`.`·빈 구성 요소·NUL, 39·41·63·65자 해시·개행·앞 공백, 비문자열(숫자·null·배열·객체).
+
+**그 밖의 시험**(`channels.rs`): `적대적_코드_탐색기_입력은_git_을_띄우지도_파일을_쓰지도_않는다`(저장소 경로가 없는 곳 — git 을 띄웠다면 GIT 오류가 난다. 거부된 요청은 `rust_handled` 에 세지 않는다),
+`코드_탐색기_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카`, `등록_전에_온_cancel_은_코드_탐색기_요청을_git_없이_취소한다`, `진행_중_코드_탐색기_요청을_취소해도_멈추지_않는다`(10MB 이미지 포함),
+`트리와_파일_내용은_캐시에서_나온다`(저장소를 지워도), `없던_커밋이_들어오면_missing_이_아니게_된다`(missing 비캐시), `원격_여부는_true_만_기억한다`(false → 원격 ref 생성 → true). `ssh_route.rs` 의 "잘못된 호스트면 연결 없이 ERROR"·"스위치가 꺼지면 사이드카" 표에 네 채널이 더해졌다.
+`code_browse.rs` 단위 시험은 요청 검증 순서·캐시 키·argv·디코드·캐시 비용을 본다.
+
+**대응표**(`test-map.json`): `codeBrowse` 24개 `it` 의 `N/A: PR 2` 를 Rust 대응(`channels.rs::…`)으로 바꿨다. `golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `channels.rs` 를 더했다.
+이 PR 뒤 `<파일>.rs::<fn>` 87개, `N/A: PR n` 69개, 사유 있는 N/A 43개(합 199, PR 2 직전 실측은 63·93·43 — 위 PR 1 절의 54·90·43 은 그 PR 시점의 숫자이고 이후 바뀌었다).
+
+**TS 와 다른 점**
+- 요청이 `null`·인자 없음일 때 문구가 `invalid request` 다(TS 는 TypeError 문구). code 는 같은 ERROR 이고 골든은 이 입력의 문구를 비교하지 않는다.
+- `image_mime` 은 객체 프로토타입 이름(`a.constructor` 등)을 확장자로 치지 않는다(PR 1 의 알려진 차이 그대로 — TS 쪽 수정은 따로).
+- 같은 키의 동시 요청을 합치지 않는다 — TS 도 tree·blob 은 합치지 않는다(commit·compare·diff 와 달리 `cached_shared` 를 쓰지 않고 조회 → 큐 → 조건부 저장이다).
+- `git:onRemote` 의 GitHub 원격 전용 분기(항상 true)는 옮기지 않았다 — github 소스는 미러가 사이드카로 보낸다.
+
+**사람 확인(자동화 불가·실환경)**
+- `pnpm tauri:build:cdp` 뒤 `ANTLER_ROUTE_LOG=1 ANTLER_DRIVE_DEBUG=1 node scripts/drive.mjs <저장소> --tauri …` 로 코드 탭을 열어 네 채널이 `-> rust` 인지 본다. `ANTLER_RUST_GIT=0`(사이드카)·Electron 과 같은 화면인지 비교한다: 트리 정렬(대소문자·한글), 이미지·LFS·큰 파일(`tooLarge`)·바이너리·BOM·깨진 UTF-8 표시, README 이미지(`git:blob` 을 쓴다), 줄 링크의 "push 안 된 커밋" 경고(`git:onRemote`).
+- WSL 저장소에서 같은 코드 탭 동작(이 PC 에서는 실행할 수 없었다), 실제 sshd 의 SSH 저장소에서 큰 이미지(10MB)·5000개 넘는 디렉터리가 호스트당 연결 하나로 열리는지(원격 `ss`/`who`).
+- 큰 저장소의 트리·파일 첫 응답 시간(Electron·사이드카 대비). 측정은 하지 않았다.
+
+**남은 위험**
+- 골든이 TS 와 같다는 것은 시나리오(164개)의 범위만큼만 보장한다. `ls-tree` 의 "객체 없음" 판정은 git 의 stderr 문구(`not a valid object name`·`bad object`·…)에 기대므로 다른 로캘·git 판에서 문구가 다르면 `missing` 이 `GIT` 오류로 보일 수 있다(TS 도 같은 정규식이다).
+- 10MB 이미지의 base64(13.3MB)가 Tauri invoke 의 JSON 응답으로 가는 비용을 측정하지 않았다(계획 Q3 — 사이드카 경로도 같은 크기라 회귀는 아니다).
+- `RUST_CHANNELS` 가 11개가 되면서 사이드카는 이 채널을 local·wsl·ssh 저장소에서 받지 않는다. 사이드카의 `gh:repo` 등이 같은 저장소의 git 을 계속 돌리는 문제(SSH 이중 연결)는 PR 8 결정에 달려 있다.
 
 ## Phase 0 에서 확인한 것
 

@@ -18,14 +18,14 @@
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
-//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
-//!   파일 경로는 항상 `--` 뒤(blame 의 크기 조회만 `<해시>:<경로>` 한 인자)다. 이 파일은 인자를 만들지 않는다.
+//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
+//!   파일 경로는 항상 `--` 뒤(blame 의 크기 조회·코드 탐색기의 `cat-file`·`ls-tree` 만 `<해시>:<경로>` 한 인자)다. 이 파일은 인자를 만들지 않는다.
 //! - 취소: `requestId → CancellationToken` 레지스트리. cancel 이 등록보다 먼저 도착해도(별개 호출이라 순서가 보장되지 않는다)
 //!   tombstone 이 기억했다가 등록 때 이미 취소된 토큰을 준다.
 //!
 //! 이 모듈은 `Sidecar`·`AppHandle` 에 기대지 않는다 — 통합 테스트(`tests/channels.rs`)가 그대로 돌릴 수 있다.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -35,9 +35,12 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api_host::{self, GithubHost, JiraHost};
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
+use crate::git::code_browse::{
+    blob_cost, is_on_remote, list_tree, parse_ref, parse_rev, read_blob, resolve_rev, tree_cost, BlobRequest, CommitId, TreeRequest, CODE_TREE_MAX_ENTRIES,
+};
 use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, SSH_LIMIT, WSL_LIMIT};
 use crate::git::exec::ssh::SshPool;
-use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, WslExecutor};
+use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, RunOpts, WslExecutor};
 use crate::git::fetch::service::{FetchControl, FetchPrefs};
 use crate::git::file_channels::{
     compare, estimate_compare_bytes, estimate_diff_bytes, file_blame, file_diff, file_history, parse_compare, BlameRequest, DiffRequest, HistoryRequest,
@@ -48,7 +51,19 @@ use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
 /// (`tests/channels.rs` 가 `tests/golden/exec/channels.json` 으로 강제한다)
-pub const RUST_CHANNELS: &[&str] = &["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame", "git:fetch"];
+pub const RUST_CHANNELS: &[&str] = &[
+    "git:commit",
+    "git:log",
+    "git:compare",
+    "git:fileDiff",
+    "git:fileHistory",
+    "git:blame",
+    "git:fetch",
+    "git:resolveRev",
+    "git:tree",
+    "git:blob",
+    "git:onRemote",
+];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
 /// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 하고, `IPC_CHANNELS` 의 `jira:`·`gh:` 채널에서 [`API_SIDECAR_CHANNELS`] 를 뺀 것과 정확히 같아야 한다(`tests/api_route.rs` 가 강제한다)
@@ -140,6 +155,13 @@ const COMMIT_CACHE_BYTES: u64 = 24 * 1024 * 1024;
 /// 파일 diff 캐시(`DIFF_CACHE_ENTRIES`·`DIFF_CACHE_BYTES`). 비교 결과 캐시는 커밋 상세와 같은 크기다
 const DIFF_CACHE_ENTRIES: usize = 500;
 const DIFF_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+/// 코드 탐색기 트리 캐시(항목 하나를 200바이트로 추정)·파일 내용 캐시(항목 수를 작게 잡아 큰 파일이 메모리를 채우지 못하게 한다) — `TREE_CACHE_*`·`BLOB_CACHE_*`
+const TREE_CACHE_ENTRIES: usize = 200;
+const TREE_CACHE_BYTES: u64 = 8 * 1024 * 1024;
+const BLOB_CACHE_ENTRIES: usize = 64;
+const BLOB_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+/// `git:onRemote` 가 true 였던 (저장소, 커밋)을 기억하는 개수 상한(넘으면 비운다)
+const ON_REMOTE_MAX: usize = 2000;
 
 /// 등록보다 먼저 도착한 cancel 을 기억하는 시간·개수
 const TOMBSTONE_TTL: Duration = Duration::from_secs(10);
@@ -152,6 +174,14 @@ enum FileJob {
     History(HistoryRequest),
     Blame(BlameRequest),
 }
+/// 검증을 마친 코드 탐색기 채널 요청
+enum CodeJob {
+    Resolve(String),
+    Tree(TreeRequest),
+    Blob(BlobRequest),
+    OnRemote(CommitId),
+}
+
 
 fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ExecError> {
     serde_json::to_value(v).map_err(|e| ExecError::Other { message: e.to_string() })
@@ -304,6 +334,10 @@ pub struct Router {
     commit_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
     compare_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
     diff_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
+    tree_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
+    blob_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
+    /// `git:onRemote` 가 true 였던 `repoId:rev 소문자`. 원격 ref 가 사라질 수 있지만 경고용이라 허용한다(false 는 fetch 로 바뀔 수 있어 기억하지 않는다)
+    on_remote_yes: Mutex<HashSet<String>>,
     logs: LogService,
     rust_handled: AtomicU64,
     /// fetch 서비스(앱이 켜져 있을 때만 주입한다). 없으면 fetch 채널은 오류다
@@ -341,6 +375,9 @@ impl Router {
             commit_cache: Arc::new(Mutex::new(LruCache::new(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES))),
             compare_cache: Arc::new(Mutex::new(LruCache::new(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES))),
             diff_cache: Arc::new(Mutex::new(LruCache::new(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES))),
+            tree_cache: Arc::new(Mutex::new(LruCache::new(TREE_CACHE_ENTRIES, TREE_CACHE_BYTES))),
+            blob_cache: Arc::new(Mutex::new(LruCache::new(BLOB_CACHE_ENTRIES, BLOB_CACHE_BYTES))),
+            on_remote_yes: Mutex::default(),
             logs: LogService::new(mirror),
             rust_handled: AtomicU64::new(0),
             fetch: Mutex::default(),
@@ -600,6 +637,7 @@ impl Router {
             "git:log" => self.git_log(&args).await,
             "git:compare" | "git:fileDiff" | "git:fileHistory" | "git:blame" => self.git_file_channel(channel, &args).await,
             "git:fetch" => self.git_fetch(&args).await,
+            "git:resolveRev" | "git:tree" | "git:blob" | "git:onRemote" => self.git_code_channel(channel, &args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -815,6 +853,110 @@ impl Router {
         }
     }
 
+    /// 코드 탐색기 채널: `git:resolveRev(repoId, ref)`·`git:tree(repoId, {rev, dir}, requestId?)`·`git:blob(repoId, {rev, path}, requestId?)`·`git:onRemote(repoId, rev)`.
+    /// 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다) 통과한 값만 `git::code_browse` 의 argv 빌더로 간다. github 소스는 미러가 사이드카로 보낸다
+    async fn git_code_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note(channel, "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        let arg = |i: usize| args.get(i).copied().flatten();
+        let job = match channel {
+            "git:resolveRev" => parse_ref(arg(1)).map(|r| CodeJob::Resolve(r.to_string())),
+            "git:tree" => TreeRequest::parse(arg(1)).map(CodeJob::Tree),
+            "git:blob" => BlobRequest::parse(arg(1)).map(CodeJob::Blob),
+            _ => parse_rev(arg(1)).map(CodeJob::OnRemote),
+        };
+        let job = match job {
+            Ok(j) => j,
+            Err(e) => return Routed::Done(err_env(&e.to_string(), e.envelope_code())),
+        };
+        // 취소할 수 있는 것은 tree·blob 뿐이다(requestId 는 셋째 인자). 등록은 첫 await 전에 한다
+        let reg = match (&job, args.get(2)) {
+            (CodeJob::Tree(_) | CodeJob::Blob(_), Some(Some(Value::String(id)))) if is_request_id(id) => Some(self.cancels.register(id)),
+            _ => None,
+        };
+        let token = reg.as_ref().map_or_else(CancellationToken::new, |r| r.token.clone());
+        self.note(channel, "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let result = self.code_job(repo_id, &target, job, &token).await;
+        drop(reg);
+        Routed::Done(match result {
+            Ok(data) => ok_env(Arc::try_unwrap(data).unwrap_or_else(|a| (*a).clone())),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    /// 코드 탐색기 한 요청. TS `RepoService` 와 같다: 캐시 조회 → 큐 슬롯(키 없음 — 합치지 않는다) 안에서 git → 조건부 캐시.
+    /// 취소는 이 요청의 프로세스에 바로 닿는다(`queue.run(None, Some(token))` + `RunOpts::with_cancel`)
+    async fn code_job(&self, repo_id: &str, target: &Target, job: CodeJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+        let rt = self.runtime(target)?;
+        let (exec, path) = (rt.exec.clone(), target.path().to_string());
+        let t = token.clone();
+        match job {
+            // ref 는 움직이므로 캐시하지 않는다
+            CodeJob::Resolve(r) => rt.queue.run(None, None, move || async move { resolve_rev(&exec, &path, &r, &RunOpts::default()).await.map(|h| Arc::new(json!(h))) }).await,
+            // missing 은 캐시하지 않는다(커밋이 나중에 fetch 로 들어올 수 있다)
+            CodeJob::Tree(req) => {
+                let key = req.key(repo_id);
+                if let Some(hit) = self.tree_cache.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+                    return Ok(hit);
+                }
+                let cache = self.tree_cache.clone();
+                rt.queue
+                    .run(None, Some(token.clone()), move || async move {
+                        let result = list_tree(&exec, &path, &req, &RunOpts::with_cancel(t), CODE_TREE_MAX_ENTRIES).await?;
+                        let value = Arc::new(to_value(&result)?);
+                        if !result.missing {
+                            cache.lock().unwrap_or_else(PoisonError::into_inner).set(&key, value.clone(), tree_cost(&result));
+                        }
+                        Ok(value)
+                    })
+                    .await
+            }
+            CodeJob::Blob(req) => {
+                let key = req.key(repo_id);
+                if let Some(hit) = self.blob_cache.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+                    return Ok(hit);
+                }
+                let cache = self.blob_cache.clone();
+                rt.queue
+                    .run(None, Some(token.clone()), move || async move {
+                        let value = read_blob(&exec, &path, &req, &RunOpts::with_cancel(t)).await?;
+                        let cost = blob_cost(&value);
+                        let missing = value["kind"] == "missing";
+                        let value = Arc::new(value);
+                        if !missing {
+                            cache.lock().unwrap_or_else(PoisonError::into_inner).set(&key, value.clone(), cost);
+                        }
+                        Ok(value)
+                    })
+                    .await
+            }
+            // true 만 기억한다(원격 ref 가 사라질 수 있지만 경고용이라 허용)
+            CodeJob::OnRemote(rev) => {
+                let key = format!("{repo_id}:{}", rev.lower());
+                if self.on_remote_yes.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+                    return Ok(Arc::new(json!(true)));
+                }
+                let yes = rt.queue.run(None, None, move || async move { is_on_remote(&exec, &path, &rev, &RunOpts::default()).await.map(|b| Arc::new(json!(b))) }).await?;
+                if *yes == json!(true) {
+                    let mut set = self.on_remote_yes.lock().unwrap_or_else(PoisonError::into_inner);
+                    if set.len() >= ON_REMOTE_MAX {
+                        set.clear();
+                    }
+                    set.insert(key);
+                }
+                Ok(yes)
+            }
+        }
+    }
+
     /// 불변 결과의 캐시 → 같은 키 요청 합치기 → 큐 슬롯 안에서 `task`. `commit` 과 같은 방식이다:
     /// 요청 토큰은 실행기에 넘기지 않고(합쳐진 다른 호출자의 프로세스까지 죽이게 된다) 이 호출자는 기다리기만 그만둔다
     async fn cached_shared<F, Fut>(
@@ -1007,6 +1149,41 @@ mod tests {
         let off = Router::new(false, false, m);
         assert!(is_sidecar(&off.route("git:commit", &json!(["a", "abcd"])).await));
         assert_eq!(off.rust_handled() + r.rust_handled(), 0);
+    }
+
+    /// 코드 탐색기 채널의 소유 판정은 다른 git 채널과 같은 한 술어(`mirror.resolve` — 미러에 있고 local·wsl·(켜진) ssh 인 저장소)와 스위치뿐이다.
+    /// 사이드카는 이 채널을 따로 소유하지 않는다(소유 env 가 없다): 미러가 사이드카로 푸는 저장소(없는 id·github·풀 없는 ssh)와 스위치가 꺼진 라우터만 사이드카로 간다
+    #[tokio::test]
+    async fn 코드_탐색기_채널의_소유는_다른_git_채널과_같은_한_술어다() {
+        let rev = "a".repeat(40);
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
+        let r = Router::new(true, false, m.clone());
+        let off = Router::new(false, false, m);
+        let calls = |id: &str| {
+            [
+                ("git:resolveRev", json!([id, "HEAD"])),
+                ("git:tree", json!([id, { "rev": rev, "dir": "" }])),
+                ("git:blob", json!([id, { "rev": rev, "path": "a" }])),
+                ("git:onRemote", json!([id, rev])),
+            ]
+        };
+        for ch in ["git:resolveRev", "git:tree", "git:blob", "git:onRemote"] {
+            assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+        }
+        for id in ["nope", "s", "g"] {
+            for (ch, args) in calls(id) {
+                assert!(is_sidecar(&r.route(ch, &args).await), "{id} {ch}");
+            }
+        }
+        for (ch, args) in calls("a") {
+            assert!(is_sidecar(&off.route(ch, &args).await), "{ch}");
+        }
+        // 미러 검사에 걸린 저장소는 사이드카가 아니라 ERROR 다(다른 채널과 같다)
+        for (ch, args) in calls("unc") {
+            let env = envelope(r.route(ch, &args).await);
+            assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+        }
+        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
     }
 
     #[tokio::test]

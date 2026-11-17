@@ -285,7 +285,7 @@ fn phase6a_대응표가_가리키는_rust_테스트가_있다() {
         let tests = root.join("src-tauri/tests");
         let git = root.join("src-tauri/src/git");
         match file {
-            "golden.rs" | "exec.rs" => tests.join(file),
+            "golden.rs" | "exec.rs" | "channels.rs" => tests.join(file),
             "refs.rs" | "submodule.rs" => git.join("parsers").join(file),
             "activity.rs" | "code_browse.rs" | "lfs.rs" | "link_guard.rs" | "refs_service.rs" | "wip.rs" => git.join(file),
             other => panic!("알 수 없는 Rust 파일 {other}"),
