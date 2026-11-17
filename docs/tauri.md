@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -1098,7 +1098,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 |---|---|---|---|
 | 1 | 순수 로직·골든: 코드 탐색기 트리 파서·정렬·입력 검증, LFS·gitflow 파서, 활동 집계, 기본 브랜치, filter 가드, WIP 경로 검증·링크 확인. TS 는 순수 함수 export 만 | 없음 | **완료** |
 | 2 | 코드 탐색기 4채널(`resolveRev`·`tree`·`blob`·`onRemote`) | 있음 | **완료** |
-| 3a / 3b | 3a: 공유 상태(첫 페이지 문·ref 시그니처 저장소, `signature.rs` 추출, note 팬아웃). 3b: `refs`·`refsDetails`(서브모듈 확인 포함) | 3a 없음 / 3b 있음 | |
+| 3a / 3b | 3a: 공유 상태(첫 페이지 문·ref 시그니처 저장소, `signature.rs` 추출, note 팬아웃). 3b: `refs`·`refsDetails`(서브모듈 확인 포함) | 3a 없음 / 3b 있음 | 3a **완료** |
 | 4 | `search`·`activity` | 있음 | |
 | 5 | `repoExtras`·`lfsPaths` | 있음 | |
 | 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | |
@@ -1238,6 +1238,47 @@ Rust 는 local 과 SSH(127.0.0.1 하네스) 둘 다 같은 골든과 같다. 악
 - 골든이 TS 와 같다는 것은 시나리오(164개)의 범위만큼만 보장한다. `ls-tree` 의 "객체 없음" 판정은 git 의 stderr 문구(`not a valid object name`·`bad object`·…)에 기대므로 다른 로캘·git 판에서 문구가 다르면 `missing` 이 `GIT` 오류로 보일 수 있다(TS 도 같은 정규식이다).
 - 10MB 이미지의 base64(13.3MB)가 Tauri invoke 의 JSON 응답으로 가는 비용을 측정하지 않았다(계획 Q3 — 사이드카 경로도 같은 크기라 회귀는 아니다).
 - `RUST_CHANNELS` 가 11개가 되면서 사이드카는 이 채널을 local·wsl·ssh 저장소에서 받지 않는다. 사이드카의 `gh:repo` 등이 같은 저장소의 git 을 계속 돌리는 문제(SSH 이중 연결)는 PR 8 결정에 달려 있다.
+
+### PR 3a — 공유 상태(앱 노출 변화 없음, 내부만)
+
+TS `RepoService` 가 쥔 상태 둘을 Rust 에 둔다. 소비자(`refsDetails`·`activity`·`wipStatus`·감시)는 아직 없어 **보이는 동작은 그대로다** — 알림이 Rust 상태에도 먼저 반영될 뿐이다.
+
+| 파일 | 내용 |
+|---|---|
+| `git/signature.rs`(새) | `refs_signature`(fetch 서비스에서 꺼냈다 — 비공개 → `pub`, argv 3개·`join!`·`for-each-ref` 종료 코드만 보는 조건은 바이트까지 그대로)·`refs_signature_digest`(같은 조회의 SHA-256 요약 `Signature`). fetch 서비스는 호출만 바뀌었다 |
+| `git/repo_state.rs`(새) | `RepoState`: 첫 페이지 문(`arm`·`after_first_page`·`open`)·시그니처 저장소(`known_signature`·`invalidate_signature`·`compute_signature`·`shared_signature`)·`note(NoteOp)`·`dispose` |
+| `router.rs` | `Router` 가 `RepoState` 를 쥔다(`repo_state()`). 알림 길 `note_sink()`(팬아웃: **상태에 먼저, 그다음 앱이 단 싱크(사이드카)로**)를 `Router::new` 에서 로그 서비스에 달고(`with_log_timing` 뒤에도), `repos:watch` 가로채기에서 `arm`, `shutdown` 에서 `dispose` |
+| `fetch_host.rs` | `AppFetchHost::note` 가 `Router::note_sink()` 를 거친다(사이드카에 직접 보내지 않는다). `FetchHost` 트레이트는 그대로라 가짜 호스트를 쓰는 시험은 바뀌지 않았다 |
+
+**TS 와 같은 의미(`RepoService.ts:586-687`)**
+- **문**: `arm` 은 항상 시그니처를 **먼저** 무효화하고, 문이 이미 있으면 유예를 다시 걸지 않는다(1.5초). 첫 로그 페이지(`logFirstPage`) 또는 유예가 지나면 열린다. 문이 없는 저장소는 기다리지 않는다.
+- **시그니처**: 계산은 시작할 때(`compute_signature` 를 **부르는 순간**) 순번을 받고, 성공했을 때만 `seq > applied` 이면 기억한다. 무효화(`logStale`·`fetchChanged`·재 `arm`)는 기억·진행 중 계산을 버리고 순번을 올려 그 전에 시작한 계산이 다시 기록하지 못하게 한다.
+  토큰을 건 계산(감시 확인·fetch 전후)은 합치지 않고 따로 하며, 토큰 없는 호출(`shared_signature`)은 진행 중인 계산에 합류한다(제한 20초). `dispose`(앱 종료)는 기다리는 문을 모두 열고 기억을 비운다(TS `dispose`).
+- **알림**: `logFirstPage` 는 문을 열고 `logStale`·`fetchChanged` 는 시그니처를 버린다. `fetchChanged` 는 `repo:changed` 보다 먼저다(순서는 그대로 — 서비스가 `note` 를 먼저 부른다). 모르는 저장소를 무시하는 것(TS `noteLog` 의 `config.repo`)은 **미러가 Rust 로 푸는 저장소만 반영**하는 것으로 옮겼다 — github·풀 없는 ssh·없는 id 는 상태를 만지지 않고 사이드카에만 간다.
+- `repos:watch`: TS 의 `if (repoId && config.repo(repoId)) armFirstPage` 와 같다. 스위치(`ANTLER_RUST_GIT=0`)가 꺼져 있으면 하지 않는다. 응답은 사이드카가 하고 renderer 는 기다리지 않는다.
+- 저장소가 제거돼도 TS 는 문·기억을 지우지 않는다(`dispose` 에서만) — 그대로 따랐다(저장소 수에 비례한 작은 표).
+
+**TS 와 다른 점**
+- **타이머가 없다**: TS 는 `setTimeout` 으로 문을 연다. Rust 는 문에 **마감 시각**을 두고 대기자가 마감까지만 기다리며(`timeout_at`), 마감이 지난 문은 다음에 만지는 순간 치운다. 관찰되는 동작은 같고, 재활성화한 새 문을 낡은 타이머가 일찍 열 수 없다(시험으로 고정).
+- **기억은 요약이다**: 저장하는 값은 원문이 아니라 SHA-256 이다(ref 수에 비례해 커지지 않는다). TS 는 SHA-1 요약이다 — 같은지만 비교하므로 의미는 같다. **원시 바이트를 해시한다**(TS 도 Buffer 를 해시한다). fetch 서비스의 비교 값(원문 문자열)은 그대로다.
+- 공유 계산은 spawn 한 태스크이고 제한 시간이 지나면 계산에 취소를 보낸다(TS 는 `AbortSignal.timeout`). 대기자가 모두 떠나도 끝까지 간다.
+- 패닉한 계산은 `Failed` 로 돌려주고 진행 중 표에서 빠진다(TS 에는 해당 없음).
+
+**소비 금지**: `known_signature` 는 **감시(PR 7b)가 갱신하기 전까지 소비하지 않는다** — 감시와 `activity` 가 다른 프로세스에 있으면 기억값이 낡는다(계획 §2). PR 4 의 `activity` 는 기억값을 쓰지 않고 `shared_signature` 로 매번 얻는다.
+이 PR 은 사이드카가 보내는 `repo:changed`(감시 이벤트)는 **연결하지 않았다** — 감시는 PR 7 의 몫이고, 지금 Rust 상태를 갱신할 감시자가 없다.
+
+**대응표**(`test-map.json`): `repoService` 의 첫 페이지 문·시그니처 `it` 6개의 `N/A: PR 3a` 를 `repo_state.rs::…` 로 바꿨다(`golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `repo_state.rs` 를 더했다).
+TS 가 `activity` 로 관찰하던 4개(`logStale`·`fetchChanged`·시그니처 재사용·`StaleLogError`)는 소비자가 없어 **상태 수준**(기억이 비었는가·합류했는가·낡은 계산이 덮지 못하는가)으로 옮겼다 — `activity` 수준의 확인은 PR 4 가 한다.
+이 PR 뒤 `<파일>.rs::<fn>` 93개, `N/A: PR n` 63개, 사유 있는 N/A 43개(합 199).
+
+**시험**: `repo_state.rs` 단위 17개(문: 활성화·유예·재 arm 이 유예를 안 미룸·낡은 유예가 새 문을 못 엶·저장소별·dispose / 시그니처: 실패 비기록·늦게 시작한 계산 우선·무효화 전 계산 비기록·순번 시점·note·합류·합류 끊김·기다림 취소·제한 시간·패닉·동시 16개 저장소, 멈춘 시계(`start_paused`)와 손으로 푸는 future),
+`signature.rs` 1개, `router.rs` 6개(`repos:watch` arm 대상·재 arm 이 기억을 버림·**팬아웃 순서**(싱크 안에서 상태가 이미 반영됨)·싱크 없이도 반영/나중에 단 싱크도 받음·`with_log_timing` 뒤에도 로그 알림이 상태를 엶·종료가 문을 풂).
+fetch 서비스는 `fetch_service`·`fetch_route`·`fetch` 시험으로 동작 불변을 확인했다.
+
+**남은 위험**
+- `repos:watch` 와 `git:log`(첫 페이지)의 도착 순서가 뒤집히면 문이 열린 뒤 다시 닫혀 유예(1.5초)만큼 기다린다 — 사이드카와 같은 한계다.
+- `RepoState` 의 표는 저장소 제거 시 줄지 않는다(TS 와 같다).
+- 공유 계산이 아직 쓰이지 않아 실제 git 과 돌려 본 적은 없다(`refs_signature_digest` 는 PR 3b 이후 소비자가 부른다).
 
 ## Phase 0 에서 확인한 것
 

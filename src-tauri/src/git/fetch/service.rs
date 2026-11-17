@@ -36,8 +36,9 @@ use super::guard::{classify_failure, next_delay_ms, version_at_least, FetchFailu
 use super::run::{git_version, inspect_config, run_fetch, FetchRunOpts, GitRunner};
 use super::slice_utf16_lossy;
 use crate::git::exec::queue::ProcessQueue;
-use crate::git::exec::{ExecError, RunOpts};
+use crate::git::exec::ExecError;
 use crate::git::log_service::NoteOp;
+use crate::git::signature::refs_signature;
 use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// 자동 fetch 기본 주기(분). TS `DEFAULT_AUTO_FETCH_MINUTES`. 기본값을 정하는 곳은 사이드카 한 곳이라(`fetchPrefs.autoFetchMinutes` 는 이미 해석된 값) 이 상수는 테스트·문서용이다
@@ -281,22 +282,6 @@ fn now_ms() -> u64 {
 
 fn delay_for(minutes: f64, failures: u32) -> Duration {
     Duration::try_from_secs_f64(next_delay_ms(minutes, failures) / 1000.0).unwrap_or(DELAY_CAP)
-}
-
-/// 시그니처 비교용: HEAD(브랜치·해시)와 모든 ref 해시의 원문. TS `refsSignature` 는 이것을 sha1 로 줄일 뿐이라 같은지만 보면 되는 여기서는 원문을 비교한다
-async fn refs_signature<R: GitRunner>(r: &R, repo_path: &str, cancel: &CancellationToken) -> Result<String, ExecError> {
-    let opts = RunOpts::with_cancel(cancel.clone());
-    let s = |a: &[&str]| a.iter().map(|x| (*x).to_string()).collect::<Vec<String>>();
-    let (list_args, head_ref_args, head_hash_args) =
-        (s(&["for-each-ref", "--format=%(objectname) %(refname)"]), s(&["symbolic-ref", "--quiet", "HEAD"]), s(&["rev-parse", "--verify", "--quiet", "HEAD"]));
-    let (refs, head_ref, head_hash) =
-        tokio::join!(r.run(repo_path, &list_args, &opts), r.run(repo_path, &head_ref_args, &opts), r.run(repo_path, &head_hash_args, &opts));
-    let (refs, head_ref, head_hash) = (refs?, head_ref?, head_hash?);
-    if refs.code != 0 {
-        return Err(ExecError::Other { message: if refs.stderr.trim().is_empty() { "for-each-ref failed".into() } else { refs.stderr.trim().to_string() } });
-    }
-    let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-    Ok(format!("{}\0{}\0{}", text(&refs.stdout), text(&head_ref.stdout), text(&head_hash.stdout)))
 }
 
 impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
