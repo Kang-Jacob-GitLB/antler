@@ -213,6 +213,8 @@ export class RepoService {
   private readonly firstPageGates = new Map<string, { promise: Promise<void>; open: () => void }>()
   /** 가장 최근에 계산한 ref 시그니처(활성 저장소의 변경 감시·활동 캐시가 같은 값을 쓴다) */
   private readonly knownSigs = new Map<string, string>()
+  /** 저장소별 마지막 wipStatus 가 보고한 추적 안 되는 경로(untracked diff 허용 목록) */
+  private readonly untrackedAllow = new Map<string, ReadonlySet<string>>()
   /** 공유 시그니처 계산의 진행 중 요청(감시의 기준 계산과 활동 조회가 합쳐진다. 자체 제한 시간이 있다) */
   private readonly sigInflight = new Map<string, Promise<string>>()
   /** 시그니처 계산 시작 순번. 늦게 끝난 오래된 계산이 더 새로운 값을 덮어쓰지 못하게 한다 */
@@ -963,8 +965,16 @@ export class RepoService {
     if (this.isGithub(repoId)) return Promise.resolve(new WipStatusParser().finish())
     return this.shared(`wip\0${repoId}`, requestId, async (signal) => {
       await this.afterFirstPage(repoId)
-      return rt.queue.run(() => wip.wipStatus(rt.exec, repo.path, { signal }), { signal })
+      const status = await rt.queue.run(() => wip.wipStatus(rt.exec, repo.path, { signal }), { signal })
+      // untracked diff 허용 목록: git 이 보고한 경로만 wipDiff 가 연다(wip.ts wipFileDiff 주석 참고)
+      this.untrackedAllow.set(repoId, new Set(status.untracked))
+      return status
     })
+  }
+
+  /** 저장소를 목록에서 지울 때: 그 저장소의 untracked diff 허용 목록을 버린다 */
+  forgetWip(repoId: string): void {
+    this.untrackedAllow.delete(repoId)
   }
 
   /** 작업 트리 파일 하나의 diff. 파일이 계속 바뀔 수 있어 캐시하지 않는다 */
@@ -972,7 +982,7 @@ export class RepoService {
     const { repo, rt } = this.resolve(repoId)
     if (this.isGithub(repoId)) return Promise.resolve(new DiffParser(typeof req?.path === 'string' ? req.path : '').finish())
     return this.withSignal(requestId, (signal) =>
-      rt.queue.run(() => wip.wipFileDiff(rt.exec, repo.path, req, signal ? { signal } : {}), signal ? { signal } : {})
+      rt.queue.run(() => wip.wipFileDiff(rt.exec, repo.path, req, signal ? { signal } : {}, this.untrackedAllow.get(repoId)), signal ? { signal } : {})
     )
   }
 
@@ -1122,6 +1132,7 @@ export class RepoService {
     for (const g of this.firstPageGates.values()) g.open()
     this.firstPageGates.clear()
     this.knownSigs.clear()
+    this.untrackedAllow.clear()
     this.sigInflight.clear()
     this.sigApplied.clear()
     this.commitCache.clear()

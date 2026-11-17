@@ -88,7 +88,7 @@ export function parseLxssQuery(text: string): string[] {
  * 레지스트리(`HKCU\…\Lxss\{GUID}\DistributionName`)에 등록된 배포판이 있는지. wsl.exe 를 띄우지 않는다 —
  * WSL 을 지운 PC 에도 system32 의 wsl.exe 스텁이 남아, 부르기만 하면 "WSL 설치" 창(키를 누르면 설치 시작)이 뜬다.
  */
-function hasRegisteredWslDistro(): Promise<boolean> {
+export function hasRegisteredWslDistro(): Promise<boolean> {
   return new Promise((resolve) => {
     execFile(
       'reg.exe',

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseWslList, WslExecutor } from '../src/main/executors/WslExecutor'
+import { hasRegisteredWslDistro, parseWslList, WslExecutor } from '../src/main/executors/WslExecutor'
 import { isWslUnc, uncFromWsl, wslFromUnc } from '../src/main/executors/wslPaths'
 
 describe('parseWslList', () => {
@@ -33,7 +33,9 @@ describe('parseWslList', () => {
 })
 
 describe.runIf(process.platform === 'win32')('WslExecutor 실패 메시지', () => {
-  it('없는 배포판이면 wsl.exe 의 안내를 읽을 수 있는 오류로 돌려준다', async () => {
+  it('없는 배포판이면 wsl.exe 의 안내를 읽을 수 있는 오류로 돌려준다', async (ctx) => {
+    // WSL 을 지운 PC 의 wsl.exe 스텁은 부르기만 해도 "WSL 설치" 창을 띄운다 — 등록된 배포판이 있는 PC 에서만 돌린다
+    if (!(await hasRegisteredWslDistro())) ctx.skip()
     const ex = new WslExecutor('antler-no-such-distro')
     const r = await ex.run('.', ['--version'])
     expect(r.code).not.toBe(0)

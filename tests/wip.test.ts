@@ -56,6 +56,8 @@ beforeAll(() => {
 })
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
+const untrackedOf = async (dir: string): Promise<Set<string>> => new Set((await wipStatus(exec, dir)).untracked)
+
 describe('wipStatus', () => {
   it('스테이지됨·변경됨·추적 안 됨을 나눠 담는다', async () => {
     const s = await wipStatus(exec, repo)
@@ -141,21 +143,26 @@ describe('wipFileDiff', () => {
   })
 
   it('추적 안 되는 파일은 전부 추가된 diff (종료 코드 1 은 오류가 아니다)', async () => {
-    const d = await wipFileDiff(exec, repo, { area: 'untracked', path: 'untracked 파일.txt' })
+    const allow = await untrackedOf(repo)
+    const d = await wipFileDiff(exec, repo, { area: 'untracked', path: 'untracked 파일.txt' }, undefined, allow)
     expect(added(d)).toEqual(['u1', 'u2'])
     expect(removed(d)).toEqual([])
     expect(d.meta.some((m) => m.startsWith('new file mode'))).toBe(true)
-    const deep = await wipFileDiff(exec, repo, { area: 'untracked', path: 'dir/nested/deep.txt' })
+    const deep = await wipFileDiff(exec, repo, { area: 'untracked', path: 'dir/nested/deep.txt' }, undefined, allow)
     expect(added(deep)).toEqual(['deep'])
   })
 
   it('추적 안 되는 바이너리는 binary 로 표시한다', async () => {
-    const d = await wipFileDiff(exec, repo, { area: 'untracked', path: 'bin.dat' })
+    const d = await wipFileDiff(exec, repo, { area: 'untracked', path: 'bin.dat' }, undefined, await untrackedOf(repo))
     expect(d.binary).toBe(true)
   })
 
+  it('허용 목록에 있어도 파일을 못 열면(rc 1 + 출력 없음) 빈 diff 로 가리지 않고 오류로 올린다', async () => {
+    await expect(wipFileDiff(exec, repo, { area: 'untracked', path: 'gone.txt' }, undefined, new Set(['gone.txt']))).rejects.toThrow()
+  })
+
   it('잘못된 입력은 거부한다', async () => {
-    const bad = (req: object) => wipFileDiff(exec, repo, req as never)
+    const bad = (req: object) => wipFileDiff(exec, repo, req as never, undefined, new Set(['.git/config', '../outside.txt']))
     await expect(bad({ area: 'nope', path: 'a.txt' })).rejects.toThrow('invalid area')
     await expect(bad({ area: 'untracked', path: '../outside.txt' })).rejects.toThrow('invalid path')
     await expect(bad({ area: 'untracked', path: 'C:\\Windows\\win.ini' })).rejects.toThrow('invalid path')
@@ -163,6 +170,68 @@ describe('wipFileDiff', () => {
     await expect(bad({ area: 'untracked', path: '.git/config' })).rejects.toThrow('invalid path')
     await expect(bad({ area: 'unstaged', path: 'a\0b' })).rejects.toThrow('invalid path')
     await expect(bad({ area: 'unstaged', path: '' })).rejects.toThrow('invalid path')
+  })
+})
+
+describe('untracked diff 허용 목록', () => {
+  const allowOnly = (area: 'untracked', path: string, allow?: ReadonlySet<string>) => wipFileDiff(exec, repo, { area, path }, undefined, allow)
+
+  it('목록이 없거나 목록에 없는 경로·대소문자 변형·8.3 이름은 거부한다', async () => {
+    const allow = await untrackedOf(repo)
+    await expect(allowOnly('untracked', 'untracked 파일.txt')).rejects.toThrow('invalid path')
+    await expect(allowOnly('untracked', 'a.txt', allow)).rejects.toThrow('invalid path') // 추적 중인 파일
+    await expect(allowOnly('untracked', 'UNTRACKED 파일.txt', allow)).rejects.toThrow('invalid path')
+    await expect(allowOnly('untracked', 'dir', allow)).rejects.toThrow('invalid path') // 접두사 허용 없음
+    await expect(allowOnly('untracked', 'dir/nested/../nested/deep.txt', allow)).rejects.toThrow('invalid path')
+    for (const p of ['GIT~1/config', 'git~1/config', 'GIT~1\\config']) await expect(allowOnly('untracked', p, allow)).rejects.toThrow('invalid path')
+  })
+
+  it('목록에 있는 공백·한글 파일명은 허용한다', async () => {
+    const d = await allowOnly('untracked', 'untracked 파일.txt', await untrackedOf(repo))
+    expect(d.hunks.length).toBe(1)
+  })
+
+  // NTFS 8.3 짧은 이름이 실제로 생기는 볼륨에서만 의미가 있다(Windows 전용, 볼륨이 짧은 이름 생성을 끄면 skip)
+  const shortGit = (() => {
+    if (process.platform !== 'win32') return null
+    try {
+      const d = mkdtempSync(join(tmpdir(), 'antler-83-'))
+      execFileSync('git', ['init', '-q', d])
+      const out = execFileSync('cmd', ['/c', 'dir', '/x', '/a:h', d], { encoding: 'utf8' })
+      const m = /(\S+~\d)\s+\.git\b/i.exec(out)
+      return m ? { dir: d, short: m[1]! } : (rmSync(d, { recursive: true, force: true }), null)
+    } catch {
+      return null
+    }
+  })()
+  it.skipIf(!shortGit)('GIT~1/config 로 .git/config 를 읽을 수 없다(짧은 이름 유출 회귀)', async () => {
+    const { dir, short } = shortGit!
+    try {
+      writeFileSync(join(dir, 'plain.txt'), 'p\n')
+      const allow = await untrackedOf(dir)
+      expect([...allow]).toEqual(['plain.txt'])
+      for (const p of [`${short}/config`, `${short.toLowerCase()}/config`, `${short}\\config`]) {
+        await expect(wipFileDiff(exec, dir, { area: 'untracked', path: p }, undefined, allow)).rejects.toThrow('invalid path')
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('RepoService: wipStatus 전에는 거부하고, 이후엔 보고된 경로만 연다', async () => {
+    const config = new ConfigStore(join(mkdtempSync(join(root, 'cfg-')), 'antler.config.json'))
+    const r = config.addRepo({ sourceId: 'local', path: repo, name: 'repo' })
+    const svc = new RepoService(config)
+    try {
+      await expect(svc.wipDiff(r.id, { area: 'untracked', path: 'untracked 파일.txt' })).rejects.toThrow('invalid path')
+      await svc.wipStatus(r.id)
+      expect((await svc.wipDiff(r.id, { area: 'untracked', path: 'untracked 파일.txt' })).hunks.length).toBe(1)
+      await expect(svc.wipDiff(r.id, { area: 'untracked', path: 'GIT~1/config' })).rejects.toThrow('invalid path')
+      svc.forgetWip(r.id)
+      await expect(svc.wipDiff(r.id, { area: 'untracked', path: 'untracked 파일.txt' })).rejects.toThrow('invalid path')
+    } finally {
+      await svc.dispose()
+    }
   })
 })
 
