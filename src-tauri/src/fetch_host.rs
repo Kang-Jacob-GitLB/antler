@@ -13,18 +13,20 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::dialogs;
 use crate::git::fetch::confirm_text::ConfirmBox;
 use crate::git::fetch::service::{ApprovalKind, FetchHost, HostEvent};
-use crate::git::log_service::NoteOp;
+use crate::git::log_service::{NoteOp, NoteSink};
 use crate::mirror::RepoMirror;
 use crate::sidecar::Sidecar;
 
 pub struct AppFetchHost {
     app: AppHandle,
     mirror: RepoMirror,
+    /// 라우터의 알림 길(`Router::note_sink`) — Rust 의 공유 상태에 먼저 반영하고 사이드카로 보낸다
+    notes: NoteSink,
 }
 
 impl AppFetchHost {
-    pub fn new(app: AppHandle, mirror: RepoMirror) -> Self {
-        AppFetchHost { app, mirror }
+    pub fn new(app: AppHandle, mirror: RepoMirror, notes: NoteSink) -> Self {
+        AppFetchHost { app, mirror, notes }
     }
 }
 
@@ -63,9 +65,7 @@ impl FetchHost for AppFetchHost {
     }
 
     fn note(&self, op: NoteOp, repo_id: &str) {
-        if let Some(sidecar) = self.app.try_state::<Sidecar>() {
-            sidecar.note(op, repo_id);
-        }
+        (self.notes)(op, repo_id);
     }
 
     fn repo_name(&self, repo_id: &str) -> Option<String> {

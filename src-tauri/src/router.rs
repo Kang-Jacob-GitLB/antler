@@ -47,6 +47,7 @@ use crate::git::file_channels::{
 };
 use crate::git::log_service::{parse_query, LogService, NoteSink};
 use crate::git::lru::LruCache;
+use crate::git::repo_state::RepoState;
 use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
@@ -209,8 +210,23 @@ fn err_env(error: &str, code: &str) -> Value {
     json!({ "ok": false, "error": error, "code": code })
 }
 
+/// 알림 팬아웃: 상태에 먼저 반영하고 사이드카로 보낸다. 상태는 Rust 가 푸는 저장소만 만진다(TS `noteLog` 가 모르는 저장소를 무시하는 것과 같다).
+/// 순서가 중요하다 — `fetchChanged` 는 `repo:changed` 보다 먼저 시그니처를 버려야 하고, 싱크는 호출 시점에 읽는다(나중에 달아도 된다)
+fn fanout_sink(state: &RepoState, mirror: &RepoMirror, user: &Arc<Mutex<Option<NoteSink>>>) -> NoteSink {
+    let (state, mirror, user) = (state.clone(), mirror.clone(), user.clone());
+    Arc::new(move |op, repo_id| {
+        if matches!(mirror.resolve(repo_id), Resolved::Rust(_)) {
+            state.note(op, repo_id);
+        }
+        let sink = user.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if let Some(s) = sink {
+            s(op, repo_id);
+        }
+    })
+}
+
 /// 인자 배열의 표식을 None(undefined)으로 되돌린다. 사이드카 `decodeArgs` 와 같다 — 키가 정확히 그것 하나이고 값이 `true` 인 객체만
-pub fn decode_args(raw: &[Value]) -> Vec<Option<&Value>> {
+fn decode_args(raw: &[Value]) -> Vec<Option<&Value>> {
     raw.iter()
         .map(|a| match a.as_object() {
             Some(o) if o.len() == 1 && o.get(UNDEFINED_ARG) == Some(&Value::Bool(true)) => None,
@@ -339,6 +355,10 @@ pub struct Router {
     /// `git:onRemote` 가 true 였던 `repoId:rev 소문자`. 원격 ref 가 사라질 수 있지만 경고용이라 허용한다(false 는 fetch 로 바뀔 수 있어 기억하지 않는다)
     on_remote_yes: Mutex<HashSet<String>>,
     logs: LogService,
+    /// 첫 페이지 문·ref 시그니처 저장소(Phase 6a PR 3a). 소비자(refsDetails·activity·wipStatus·감시)는 뒤 PR 에서 온다
+    repo_state: RepoState,
+    /// 앱이 단 사이드카 알림 싱크. 상태에 먼저 반영한 뒤 부른다(`note_sink`)
+    user_sink: Arc<Mutex<Option<NoteSink>>>,
     rust_handled: AtomicU64,
     /// fetch 서비스(앱이 켜져 있을 때만 주입한다). 없으면 fetch 채널은 오류다
     fetch: Mutex<Option<Arc<dyn FetchControl>>>,
@@ -360,6 +380,10 @@ pub struct Router {
 
 impl Router {
     pub fn new(enabled: bool, log: bool, mirror: RepoMirror) -> Self {
+        let repo_state = RepoState::default();
+        let user_sink: Arc<Mutex<Option<NoteSink>>> = Arc::default();
+        let logs = LogService::new(mirror.clone());
+        logs.set_sink(fanout_sink(&repo_state, &mirror, &user_sink));
         Router {
             enabled,
             ssh_enabled: enabled,
@@ -378,7 +402,9 @@ impl Router {
             tree_cache: Arc::new(Mutex::new(LruCache::new(TREE_CACHE_ENTRIES, TREE_CACHE_BYTES))),
             blob_cache: Arc::new(Mutex::new(LruCache::new(BLOB_CACHE_ENTRIES, BLOB_CACHE_BYTES))),
             on_remote_yes: Mutex::default(),
-            logs: LogService::new(mirror),
+            logs,
+            repo_state,
+            user_sink,
             rust_handled: AtomicU64::new(0),
             fetch: Mutex::default(),
             pending_prefs: Mutex::default(),
@@ -521,12 +547,24 @@ impl Router {
     /// 로그 커서의 유휴 시간·훑는 주기를 바꾼다(테스트용 — 프로세스 목록을 읽는 테스트가 느려도 커서가 먼저 닫히지 않게). 만든 직후에만 부른다
     pub fn with_log_timing(mut self, idle: Duration, sweep: Duration) -> Self {
         self.logs = LogService::with_timing(self.mirror.clone(), idle, sweep);
+        self.logs.set_sink(self.note_sink());
         self
     }
 
     /// `git:log` 가 사이드카에 알릴 일(첫 페이지가 나갔다·이력이 바뀌었다)을 받는 곳. 앱은 사이드카에 `note` 메시지로 보낸다
     pub fn set_note_sink(&self, sink: NoteSink) {
-        self.logs.set_sink(sink);
+        *self.user_sink.lock().unwrap_or_else(PoisonError::into_inner) = Some(sink);
+    }
+
+    /// Rust 가 사이드카에 알릴 일(첫 페이지·이력 변경·fetch 변경)의 **유일한 길**. 공유 상태에 먼저 반영하고(동기), 그다음 [`set_note_sink`](Self::set_note_sink) 의 싱크로 보낸다.
+    /// 로그 서비스는 이것을 쓰고, fetch 호스트도 이것으로 알려야 한다(`AppFetchHost`) — 그래야 사이드카와 Rust 의 기억이 같은 시점에 낡은 것이 된다
+    pub fn note_sink(&self) -> NoteSink {
+        fanout_sink(&self.repo_state, &self.mirror, &self.user_sink)
+    }
+
+    /// 첫 페이지 문·ref 시그니처 저장소
+    pub fn repo_state(&self) -> &RepoState {
+        &self.repo_state
     }
 
     /// 미러가 바뀐 직후 불린다 — 사라졌거나 대상이 바뀐 저장소의 로그 커서를 닫고, 더 이상 쓰지 않는 ssh 호스트의 연결·큐를 정리한다
@@ -552,6 +590,8 @@ impl Router {
     /// 앱 종료: 열려 있는 로그 커서(git 프로세스)를 모두 닫는다
     pub fn shutdown(&self) {
         self.logs.close_all();
+        // 첫 페이지 문을 기다리는 조회를 풀고 시그니처 기억을 비운다
+        self.repo_state.dispose();
         // SSH 연결을 닫는다(런타임 밖 스레드면 정중한 해제 메시지는 보내지 못하고 연결만 버린다 — 프로세스가 끝나며 소켓이 닫힌다)
         if let Some(pool) = self.ssh_pool() {
             pool.dispose_all();
@@ -615,6 +655,13 @@ impl Router {
                 _ => None,
             };
             self.logs.close_others(active);
+            // 활성화된 저장소의 첫 페이지 문을 닫고 기억한 시그니처를 버린다. 응답은 사이드카가 한다(renderer 는 기다리지 않는다).
+            // TS 의 `if (repoId && config.repo(repoId)) armFirstPage(repoId)` — Rust 가 푸는 저장소만(소비자가 Rust 쪽에 있는 저장소). null 은 arm 하지 않는다
+            if self.enabled {
+                if let Some(id) = active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))) {
+                    self.repo_state.arm(id);
+                }
+            }
             // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl, 그리고 Rust 가 ssh 를 풀 때는 ssh)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
             // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
             if self.enabled {
@@ -1041,6 +1088,7 @@ impl Router {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::log_service::NoteOp;
     use crate::mirror::MirrorRepo;
 
     fn mirror_of(repos: Vec<MirrorRepo>) -> RepoMirror {
@@ -1268,6 +1316,114 @@ mod tests {
         let env = envelope(r.route("git:log", &json!(["a", { "skip": 0, "count": "10" }])).await);
         assert_eq!(env["error"], "invalid query");
         assert_eq!(notes.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn repos_watch_는_rust_가_푸는_저장소만_arm_하고_응답은_사이드카가_한다() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("g", "github", "x/y"), repo("s", "ssh", "/srv")]);
+        let r = Router::new(true, false, m.clone());
+        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        assert!(r.repo_state().is_armed("a"));
+        // github·풀 없는 ssh·미러에 없는 id·null 은 arm 하지 않는다
+        for args in [json!(["g"]), json!(["s"]), json!(["nope"]), json!([null]), json!([])] {
+            assert!(is_sidecar(&r.route("repos:watch", &args).await), "{args}");
+        }
+        for id in ["g", "s", "nope"] {
+            assert!(!r.repo_state().is_armed(id), "{id}");
+        }
+        // 스위치가 꺼져 있으면 arm 하지 않는다
+        let off = Router::new(false, false, m);
+        assert!(is_sidecar(&off.route("repos:watch", &json!(["a"])).await));
+        assert!(!off.repo_state().is_armed("a"));
+    }
+
+    #[tokio::test]
+    async fn repos_watch_가_다시_arm_하면_기억한_시그니처를_버린다() {
+        use crate::git::repo_state::SigError;
+        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
+        let sig = crate::git::signature::Signature::from_parts(b"x", b"", b"");
+        r.repo_state().compute_signature("a", async move { Ok::<_, SigError>(sig) }).await.unwrap();
+        assert_eq!(r.repo_state().known_signature("a"), Some(sig));
+        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        assert_eq!(r.repo_state().known_signature("a"), None);
+    }
+
+    #[tokio::test]
+    async fn 알림은_상태에_먼저_반영한_뒤_사이드카_싱크로_간다() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("g", "github", "x/y")]);
+        let r = Router::new(true, false, m);
+        let state = r.repo_state().clone();
+        // (op, 저장소, 문이 닫혀 있는가, 시그니처를 기억하는가)
+        type Seen = (String, String, bool, bool);
+        let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
+        let (log, probe) = (seen.clone(), state.clone());
+        r.set_note_sink(Arc::new(move |op, id| {
+            // 싱크가 불린 시점에 상태가 이미 반영됐는지: (문이 닫혀 있는가, 시그니처를 기억하는가)
+            log.lock().unwrap().push((op.as_str().to_string(), id.to_string(), probe.is_armed(id), probe.known_signature(id).is_some()));
+        }));
+        let sig = crate::git::signature::Signature::from_parts(b"x", b"", b"");
+        let notes = r.note_sink();
+        for id in ["a", "g"] {
+            state.arm(id);
+            state.compute_signature(id, async move { Ok(sig) }).await.unwrap();
+        }
+        // fetch 변경: 시그니처를 버린 뒤에 사이드카로 간다
+        notes(NoteOp::FetchChanged, "a");
+        // 첫 페이지: 문을 연 뒤에 사이드카로 간다
+        notes(NoteOp::FirstPage, "a");
+        // 미러에서 Rust 가 풀지 않는 저장소는 상태를 만지지 않지만 사이드카에는 그대로 간다
+        notes(NoteOp::Stale, "g");
+        notes(NoteOp::FirstPage, "g");
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [
+                ("fetchChanged".to_string(), "a".to_string(), true, false),
+                ("logFirstPage".to_string(), "a".to_string(), false, false),
+                ("logStale".to_string(), "g".to_string(), true, true),
+                ("logFirstPage".to_string(), "g".to_string(), true, true),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn 싱크를_달지_않아도_알림은_상태에_반영되고_나중에_단_싱크도_받는다() {
+        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
+        let notes = r.note_sink();
+        r.repo_state().arm("a");
+        notes(NoteOp::FirstPage, "a");
+        assert!(!r.repo_state().is_armed("a"));
+        let seen: Arc<Mutex<Vec<String>>> = Arc::default();
+        let log = seen.clone();
+        r.set_note_sink(Arc::new(move |op, _| log.lock().unwrap().push(op.as_str().to_string())));
+        // 먼저 만든 팬아웃도 호출 시점에 싱크를 읽는다
+        notes(NoteOp::Stale, "a");
+        assert_eq!(*seen.lock().unwrap(), ["logStale".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn 로그_타이밍을_바꿔도_로그의_첫_페이지_알림이_상태를_연다() {
+        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")])).with_log_timing(Duration::from_secs(60), Duration::from_secs(60));
+        let state = r.repo_state().clone();
+        let seen: Arc<Mutex<Vec<bool>>> = Arc::default();
+        let (log, probe) = (seen.clone(), state.clone());
+        r.set_note_sink(Arc::new(move |_, id| log.lock().unwrap().push(probe.is_armed(id))));
+        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        assert!(state.is_armed("a"));
+        assert!(is_sidecar(&r.route("req:cancel", &json!(["early"])).await));
+        let env = envelope(r.route("git:log", &json!(["a", { "skip": 0, "count": 10 }, "early"])).await);
+        assert_eq!(env["code"], "ABORTED");
+        // 로그가 낸 logFirstPage 가 문을 열었고(싱크 시점에 이미 열려 있다) 사이드카에도 갔다
+        assert_eq!(*seen.lock().unwrap(), [false]);
+        assert!(!state.is_armed("a"));
+    }
+
+    #[tokio::test]
+    async fn 종료하면_기다리던_첫_페이지_문이_풀린다() {
+        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
+        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        assert!(r.repo_state().is_armed("a"));
+        r.shutdown();
+        assert!(!r.repo_state().is_armed("a"));
     }
 
     #[tokio::test]

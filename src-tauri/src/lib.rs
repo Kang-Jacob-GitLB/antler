@@ -128,7 +128,7 @@ pub fn run() {
             // fetch 서비스(local·wsl 저장소). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다
             if router.enabled() {
                 let ssh_pool = router.ssh_pool();
-                let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone());
+                let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone(), router.note_sink());
                 let no_hooks_dir = user_data.join("no-hooks").to_string_lossy().into_owned();
                 let runner_mirror = mirror.clone();
                 let make_runner = move |target: &Target| match target {

@@ -43,6 +43,7 @@ const RUST_SOURCES: Record<string, string> = {
   'lfs.rs': '../src-tauri/src/git/lfs.rs',
   'link_guard.rs': '../src-tauri/src/git/link_guard.rs',
   'refs_service.rs': '../src-tauri/src/git/refs_service.rs',
+  'repo_state.rs': '../src-tauri/src/git/repo_state.rs',
   'wip.rs': '../src-tauri/src/git/wip.rs'
 }
 
