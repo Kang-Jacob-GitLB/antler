@@ -1,0 +1,1102 @@
+{
+  "cases": [
+    {
+      "name": "평문·쉼표 목록·와일드카드",
+      "text": "# c\nexample.com,10.0.0.1 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB comment\n*.corp.local ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "example.com,10.0.0.1",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": "*.corp.local",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        }
+      ],
+      "queries": [
+        {
+          "host": "example.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "10.0.0.1",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "10.0.0.1",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "a.corp.local",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "a.corp.local",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "EXAMPLE.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "other.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "other.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: other.com (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "비표준 포트는 [host]:port 로만 일치한다",
+      "text": "[example.com]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "[example.com]:2222",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        }
+      ],
+      "queries": [
+        {
+          "host": "example.com",
+          "port": 2222,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "[example.com]:2222",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "example.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: example.com (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        },
+        {
+          "host": "example.com",
+          "port": 2223,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "[example.com]:2223",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: [example.com]:2223 (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "해시 항목(HMAC-SHA1), 포트 포함 형태도",
+      "text": "|1|MDEyMzQ1Njc4OWFiY2RlZmdoaWo=|jaHXoMQTU/+rEgquOJTQzPGCF4I= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n|1|MDEyMzQ1Njc4OWFiY2RlZmdoaWo=|/1Vvp7hEMNFdVhU7aIQS7D5skkU= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "|1|MDEyMzQ1Njc4OWFiY2RlZmdoaWo=|jaHXoMQTU/+rEgquOJTQzPGCF4I=",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": "|1|MDEyMzQ1Njc4OWFiY2RlZmdoaWo=|/1Vvp7hEMNFdVhU7aIQS7D5skkU=",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        }
+      ],
+      "queries": [
+        {
+          "host": "example.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "example.com",
+          "port": 2200,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "[example.com]:2200",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "example.com",
+          "port": 2200,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "[example.com]:2200",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "mismatch",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "호스트 키가 known_hosts 의 기록과 다릅니다: [example.com]:2200 (받은 키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 중간자 공격일 수 있어 연결을 거부했습니다. 서버를 재설치한 것이 확실하다면 known_hosts 의 해당 줄을 지우고 ssh CLI 로 다시 확인하세요."
+          }
+        },
+        {
+          "host": "nope.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "nope.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: nope.com (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "같은 종류의 다른 키는 불일치(mismatch)",
+      "text": "example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "example.com",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        }
+      ],
+      "queries": [
+        {
+          "host": "example.com",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "mismatch",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "호스트 키가 known_hosts 의 기록과 다릅니다: example.com (받은 키 지문 SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA). 중간자 공격일 수 있어 연결을 거부했습니다. 서버를 재설치한 것이 확실하다면 known_hosts 의 해당 줄을 지우고 ssh CLI 로 다시 확인하세요."
+          }
+        }
+      ]
+    },
+    {
+      "name": "@revoked 는 거부, @cert-authority 는 무시",
+      "text": "@revoked * ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n@cert-authority *.x.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\nz.x.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n",
+      "entries": [
+        {
+          "marker": "revoked",
+          "hosts": "*",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        },
+        {
+          "marker": "cert-authority",
+          "hosts": "*.x.com",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": "z.x.com",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        }
+      ],
+      "queries": [
+        {
+          "host": "z.x.com",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "z.x.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "revoked",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "폐기된(@revoked) 호스트 키입니다: z.x.com. 연결을 거부했습니다."
+          }
+        },
+        {
+          "host": "z.x.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "z.x.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "a.x.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "a.x.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: a.x.com (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "부정 패턴과 빈 파일",
+      "text": "*.x.com,!bad.x.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "*.x.com,!bad.x.com",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        }
+      ],
+      "queries": [
+        {
+          "host": "good.x.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "good.x.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "bad.x.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "bad.x.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: bad.x.com (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "등록된 키 종류로 serverHostKey 알고리즘을 제한한다",
+      "text": "h ssh-rsa AAAA\nh ecdsa-sha2-nistp256 AAAA\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "h",
+          "keyType": "ssh-rsa",
+          "keyBase64": "AAAA"
+        },
+        {
+          "marker": null,
+          "hosts": "h",
+          "keyType": "ecdsa-sha2-nistp256",
+          "keyBase64": "AAAA"
+        }
+      ],
+      "queries": [
+        {
+          "host": "h",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "h",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [
+            "rsa-sha2-512",
+            "rsa-sha2-256",
+            "ssh-rsa",
+            "ecdsa-sha2-nistp256"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: h (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        },
+        {
+          "host": "zz",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "zz",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: zz (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "추가: 빈 파일·주석·CRLF·공백 모양·알 수 없는 표지",
+      "text": "\r\n# 주석\r\n  \t example.com\tssh-ed25519   AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\r\n@unknown example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\r\nshort ssh-ed25519\r\n@revoked\r\nexample.com ssh-rsa　AAAAB3NzaC1yc2EAAAAgAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=\r\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "example.com",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": "example.com",
+          "keyType": "ssh-rsa",
+          "keyBase64": "AAAAB3NzaC1yc2EAAAAgAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM="
+        }
+      ],
+      "queries": [
+        {
+          "host": "example.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519",
+            "rsa-sha2-512",
+            "rsa-sha2-256",
+            "ssh-rsa"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "example.com",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "mismatch",
+          "algorithms": [
+            "ssh-ed25519",
+            "rsa-sha2-512",
+            "rsa-sha2-256",
+            "ssh-rsa"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "호스트 키가 known_hosts 의 기록과 다릅니다: example.com (받은 키 지문 SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA). 중간자 공격일 수 있어 연결을 거부했습니다. 서버를 재설치한 것이 확실하다면 known_hosts 의 해당 줄을 지우고 ssh CLI 로 다시 확인하세요."
+          }
+        },
+        {
+          "host": "example.com",
+          "port": 22,
+          "key": "rsa",
+          "keyBase64": "AAAAB3NzaC1yc2EAAAAgAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+          "name": "example.com",
+          "type": "ssh-rsa",
+          "fingerprint": "SHA256:sWRFz8itfxc/tF4Osv/NcrDJhrTcTDnKyBcTcwVTaGY",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519",
+            "rsa-sha2-512",
+            "rsa-sha2-256",
+            "ssh-rsa"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "short",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "short",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: short (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "추가: 빈 텍스트",
+      "text": "",
+      "entries": [],
+      "queries": [
+        {
+          "host": "a",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "a",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: a (키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "추가: revoked 는 같은 종류가 아니어도 그 키 자체만 거부한다",
+      "text": "@revoked h ssh-rsa AAAAB3NzaC1yc2EAAAAgAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=\nh ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n@revoked h ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n",
+      "entries": [
+        {
+          "marker": "revoked",
+          "hosts": "h",
+          "keyType": "ssh-rsa",
+          "keyBase64": "AAAAB3NzaC1yc2EAAAAgAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM="
+        },
+        {
+          "marker": null,
+          "hosts": "h",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": "revoked",
+          "hosts": "h",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        }
+      ],
+      "queries": [
+        {
+          "host": "h",
+          "port": 22,
+          "key": "rsa",
+          "keyBase64": "AAAAB3NzaC1yc2EAAAAgAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+          "name": "h",
+          "type": "ssh-rsa",
+          "fingerprint": "SHA256:sWRFz8itfxc/tF4Osv/NcrDJhrTcTDnKyBcTcwVTaGY",
+          "status": "revoked",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "폐기된(@revoked) 호스트 키입니다: h. 연결을 거부했습니다."
+          }
+        },
+        {
+          "host": "h",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "h",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "h",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "h",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "revoked",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "폐기된(@revoked) 호스트 키입니다: h. 연결을 거부했습니다."
+          }
+        },
+        {
+          "host": "h",
+          "port": 22,
+          "key": "ecdsa",
+          "keyBase64": "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAgBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ=",
+          "name": "h",
+          "type": "ecdsa-sha2-nistp256",
+          "fingerprint": "SHA256:AinSN38flPVbKuDrqOcynzgRPKfYpCa4Eu/KEwW1e+Y",
+          "status": "unknown",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: h (키 지문 SHA256:AinSN38flPVbKuDrqOcynzgRPKfYpCa4Eu/KEwW1e+Y). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        }
+      ]
+    },
+    {
+      "name": "추가: 호스트 표기(대문자·IPv6·부정만 있는 목록·빈 항목)",
+      "text": "EXAMPLE.COM,[::1]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n!only.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n,,x ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n*? ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "EXAMPLE.COM,[::1]:2222",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": "!only.com",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": ",,x",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        },
+        {
+          "marker": null,
+          "hosts": "*?",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        }
+      ],
+      "queries": [
+        {
+          "host": "Example.Com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "example.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "::1",
+          "port": 2222,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "[::1]:2222",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "::1",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "::1",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "mismatch",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "호스트 키가 known_hosts 의 기록과 다릅니다: ::1 (받은 키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 중간자 공격일 수 있어 연결을 거부했습니다. 서버를 재설치한 것이 확실하다면 known_hosts 의 해당 줄을 지우고 ssh CLI 로 다시 확인하세요."
+          }
+        },
+        {
+          "host": "only.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "only.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "mismatch",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "호스트 키가 known_hosts 의 기록과 다릅니다: only.com (받은 키 지문 SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA). 중간자 공격일 수 있어 연결을 거부했습니다. 서버를 재설치한 것이 확실하다면 known_hosts 의 해당 줄을 지우고 ssh CLI 로 다시 확인하세요."
+          }
+        },
+        {
+          "host": "x",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "x",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "ab",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "ab",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "추가: 해시 항목의 느슨한 base64(URL-safe·= 없음)와 깨진 항목",
+      "text": "|1|-_v7-_v7-_v7-_v7-_v7-_v7-_s|F0MfIroFlk1hjlP1wIMcdfhPRcw ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n|1|/v7+/v7+/v7+/v7+/v7+/v7+/v4=|xCB8G4ddzAt8M/VxitDlukVXnB0= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n|1|only-salt ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n|1||x ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n|1|MDEyMzQ1Njc4OWFiY2RlZmdoaWo=|AAAAAAAAAAAAAAAAAAAAAAAAAAA= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n|2|a|b ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "|1|-_v7-_v7-_v7-_v7-_v7-_v7-_s|F0MfIroFlk1hjlP1wIMcdfhPRcw",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": "|1|/v7+/v7+/v7+/v7+/v7+/v7+/v4=|xCB8G4ddzAt8M/VxitDlukVXnB0=",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": null,
+          "hosts": "|1|only-salt",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        },
+        {
+          "marker": null,
+          "hosts": "|1||x",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        },
+        {
+          "marker": null,
+          "hosts": "|1|MDEyMzQ1Njc4OWFiY2RlZmdoaWo=|AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        },
+        {
+          "marker": null,
+          "hosts": "|2|a|b",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        }
+      ],
+      "queries": [
+        {
+          "host": "a.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "a.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "b.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "b.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "c.com",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "c.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "unknown",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: c.com (키 지문 SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        },
+        {
+          "host": "A.COM",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "a.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "추가: 이상한 키 blob(짧음·길이 넘침·최상위 비트·빈 키)",
+      "text": "h ssh-ed25519 AAAAC3NzaC3lZDI1NTE5AAAAIAUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF\nh ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "h",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC3lZDI1NTE5AAAAIAUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF"
+        },
+        {
+          "marker": null,
+          "hosts": "h",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        }
+      ],
+      "queries": [
+        {
+          "host": "h",
+          "port": 22,
+          "key": "hi",
+          "keyBase64": "AAAAC3NzaC3lZDI1NTE5AAAAIAUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUF",
+          "name": "h",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:S6aSPbkjXXc0e+b6fNYOCBwFKMmGjKMLh7iP34GFpH8",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        },
+        {
+          "host": "h",
+          "port": 22,
+          "key": "short",
+          "keyBase64": "AQID",
+          "name": "h",
+          "type": "",
+          "fingerprint": "SHA256:A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E",
+          "status": "unknown",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: h (키 지문 SHA256:A5BYxvLAy0ksUzsKTRTvd8wPeKvMztUofYShogEc+4E). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        },
+        {
+          "host": "h",
+          "port": 22,
+          "key": "over",
+          "keyBase64": "AAAAEGFi",
+          "name": "h",
+          "type": "",
+          "fingerprint": "SHA256:njkuzK2bIBcGXz/NbaCsbC52m9n/9e1KXDj4dNumks0",
+          "status": "unknown",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: h (키 지문 SHA256:njkuzK2bIBcGXz/NbaCsbC52m9n/9e1KXDj4dNumks0). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        },
+        {
+          "host": "h",
+          "port": 22,
+          "key": "empty",
+          "keyBase64": "",
+          "name": "h",
+          "type": "",
+          "fingerprint": "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU",
+          "status": "unknown",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": false,
+            "message": "알 수 없는 호스트입니다: h (키 지문 SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU). 터미널에서 ssh CLI 로 한 번 접속해 호스트 키를 수락한 뒤 다시 시도하세요. Antler 는 호스트 키를 자동으로 등록하지 않습니다."
+          }
+        },
+        {
+          "host": "h",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "h",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "추가: 비 ASCII 호스트(대소문자)",
+      "text": "Éxample.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\n@revoked *.É ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC\n",
+      "entries": [
+        {
+          "marker": null,
+          "hosts": "Éxample.com",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB"
+        },
+        {
+          "marker": "revoked",
+          "hosts": "*.É",
+          "keyType": "ssh-ed25519",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC"
+        }
+      ],
+      "queries": [
+        {
+          "host": "Éxample.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "éxample.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          },
+          "rustStatus": "unknown"
+        },
+        {
+          "host": "éxample.com",
+          "port": 22,
+          "key": "k1",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB",
+          "name": "éxample.com",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:RXm/ruZ0eTzRXKwi1AQEDynB0VgHQ2ac9KPSFdf/YnA",
+          "status": "ok",
+          "algorithms": [
+            "ssh-ed25519"
+          ],
+          "verify": {
+            "ok": true
+          },
+          "rustStatus": "unknown"
+        },
+        {
+          "host": "x.é",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "x.é",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "revoked",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "폐기된(@revoked) 호스트 키입니다: x.é. 연결을 거부했습니다."
+          },
+          "rustStatus": "unknown"
+        },
+        {
+          "host": "x.É",
+          "port": 22,
+          "key": "k2",
+          "keyBase64": "AAAAC3NzaC1lZDI1NTE5AAAAIAICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC",
+          "name": "x.é",
+          "type": "ssh-ed25519",
+          "fingerprint": "SHA256:baqJQcVDEweKmw1OiZxGooCG2MGxYtwsQQzzOstxmiA",
+          "status": "revoked",
+          "algorithms": [],
+          "verify": {
+            "ok": false,
+            "message": "폐기된(@revoked) 호스트 키입니다: x.é. 연결을 거부했습니다."
+          },
+          "rustStatus": "unknown"
+        }
+      ]
+    }
+  ]
+}

@@ -4,8 +4,10 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildGitArgs, GIT_ENV, GIT_GLOBAL_ARGS } from '../src/main/executors/GitExecutor'
 import { LocalExecutor } from '../src/main/executors/LocalExecutor'
+import { buildRemoteCommand } from '../src/main/executors/ssh/quote'
 import { WslExecutor, wslArgv } from '../src/main/executors/WslExecutor'
 import { fetchEnv, inspectEntries, parseConfigList, runFetch } from '../src/main/git/fetch'
+import { REMOTE_ENVS, REMOTE_SAMPLES } from './fixtures/sshCases'
 
 // 실행기의 공통 인자·환경변수·WSL argv 를 골든 JSON 으로 고정한다. Rust 이식(src-tauri/tests/exec.rs)이 같은 값을 쓰는지 본다.
 // 골든은 TS 가 기준이다: `UPDATE_GOLDEN=1 npx vitest run tests/goldenExec.test.ts` 로 다시 쓴다.
@@ -93,6 +95,21 @@ async function captureFetch(): Promise<unknown[]> {
   return out
 }
 
+// ssh: 원격 셸이 받는 명령 문자열의 원문 바이트(인용이 곧 주입 방어선이다). 환경은 GIT_ENV 단독과 fetch 환경 둘 — Rust 의 `build_remote_command` 는 닫힌 `FetchEnv` 만 받는다.
+// NUL 이 든 입력은 던진 메시지를 남긴다
+function captureSsh(): unknown[] {
+  return REMOTE_ENVS.flatMap((e) =>
+    REMOTE_SAMPLES.map((s) => {
+      const env = { ...GIT_ENV, ...(e.fetch ? fetchEnv(e.fetch) : {}) }
+      try {
+        return { env: e.label, fetch: e.fetch, repoPath: s.repoPath, args: s.args, command: buildRemoteCommand(s.repoPath, s.args, env) }
+      } catch (err) {
+        return { env: e.label, fetch: e.fetch, repoPath: s.repoPath, args: s.args, error: (err as Error).message }
+      }
+    })
+  )
+}
+
 async function capture(): Promise<unknown> {
   spawned.length = 0
   await new LocalExecutor().run('/r', ['log'])
@@ -103,6 +120,7 @@ async function capture(): Promise<unknown> {
   const fetch = await captureFetch()
   return {
     fetch,
+    ssh: captureSsh(),
     globalArgs: GIT_GLOBAL_ARGS,
     // 순서가 WSL argv 의 `env K=V…` 순서를 정한다
     env: Object.entries(GIT_ENV),
