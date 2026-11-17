@@ -36,6 +36,8 @@ pub const SIGNATURE_TIMEOUT: Duration = Duration::from_secs(20);
 pub enum SigError {
     /// 취소·제한 시간으로 끝났다(TS `AbortError`)
     Aborted,
+    /// git 이 실패했다(TS `GitError` — envelope 의 code 가 GIT 이다)
+    Git(String),
     Failed(String),
 }
 
@@ -43,7 +45,18 @@ impl From<ExecError> for SigError {
     fn from(e: ExecError) -> Self {
         match e {
             ExecError::Aborted => SigError::Aborted,
+            ExecError::Git { message, .. } => SigError::Git(message),
             other => SigError::Failed(other.to_string()),
+        }
+    }
+}
+
+impl From<SigError> for ExecError {
+    fn from(e: SigError) -> Self {
+        match e {
+            SigError::Aborted => ExecError::Aborted,
+            SigError::Git(message) => ExecError::Git { message, code: -1, stderr: String::new(), args: Vec::new() },
+            SigError::Failed(message) => ExecError::Other { message },
         }
     }
 }

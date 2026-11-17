@@ -18,7 +18,7 @@
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
-//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote)·`git::refs_service`(refs·refsDetails — 인자가 저장소 id 뿐) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
+//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote)·`git::refs_service`(refs·refsDetails — 인자가 저장소 id 뿐)·`git::search`·`git::activity`(search·activity — 질의는 `--grep=`·`--author=` 접두가 붙은 한 인자) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
 //!   파일 경로는 항상 `--` 뒤(blame 의 크기 조회·코드 탐색기의 `cat-file`·`ls-tree` 만 `<해시>:<경로>` 한 인자)다. 이 파일은 인자를 만들지 않는다.
 //! - 취소: `requestId → CancellationToken` 레지스트리. cancel 이 등록보다 먼저 도착해도(별개 호출이라 순서가 보장되지 않는다)
 //!   tombstone 이 기억했다가 등록 때 이미 취소된 토큰을 준다.
@@ -35,6 +35,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api_host::{self, GithubHost, JiraHost};
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
+use crate::git::activity::{commit_activity, now_secs, ActivityCache, ActivityRequest};
 use crate::git::code_browse::{
     blob_cost, is_on_remote, list_tree, parse_ref, parse_rev, read_blob, resolve_rev, tree_cost, BlobRequest, CommitId, TreeRequest, CODE_TREE_MAX_ENTRIES,
 };
@@ -48,7 +49,9 @@ use crate::git::file_channels::{
 use crate::git::log_service::{parse_query, LogService, NoteSink};
 use crate::git::lru::LruCache;
 use crate::git::refs_service::{refs_details, refs_snapshot};
-use crate::git::repo_state::RepoState;
+use crate::git::repo_state::{RepoState, SigError};
+use crate::git::search::{search, SearchRequest};
+use crate::git::signature::{refs_signature_digest, Signature};
 use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
@@ -67,6 +70,8 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:onRemote",
     "git:refs",
     "git:refsDetails",
+    "git:search",
+    "git:activity",
 ];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
@@ -166,6 +171,8 @@ const BLOB_CACHE_ENTRIES: usize = 64;
 const BLOB_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 /// `git:onRemote` 가 true 였던 (저장소, 커밋)을 기억하는 개수 상한(넘으면 비운다)
 const ON_REMOTE_MAX: usize = 2000;
+/// 합치기만 하는 큐(`Router::joins`)의 슬롯 수 — 실제 git 은 소스의 큐에서 돌므로 이 큐는 막지 않는다
+const JOIN_SLOTS: usize = 1 << 20;
 
 /// 등록보다 먼저 도착한 cancel 을 기억하는 시간·개수
 const TOMBSTONE_TTL: Duration = Duration::from_secs(10);
@@ -185,10 +192,31 @@ enum CodeJob {
     Blob(BlobRequest),
     OnRemote(CommitId),
 }
+/// 검증을 마친 검색·활동 채널 요청
+enum HistoryJob {
+    Search(SearchRequest),
+    Activity(ActivityRequest),
+}
 
 
 fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ExecError> {
     serde_json::to_value(v).map_err(|e| ExecError::Other { message: e.to_string() })
+}
+
+/// 시그니처 계산 한 번: 소스의 큐 슬롯을 받아(취소 토큰이 슬롯 대기에도 걸린다) 그 안에서 git 을 돌린다(실행에도 같은 토큰이 걸린다).
+/// 공유 계산은 spawn 된 태스크라 future 를 버려도 멈추지 않으므로 제한 시간의 취소가 닿는 길은 이 토큰뿐이다. 큐의 결과 타입이 JSON 이라 값은 셀로 꺼낸다
+async fn queued_signature(queue: ProcessQueue<Arc<Value>>, exec: Arc<GitExecutor>, path: String, token: CancellationToken) -> Result<Signature, SigError> {
+    let cell: Arc<Mutex<Option<Signature>>> = Arc::default();
+    let (out, t) = (cell.clone(), token.clone());
+    queue
+        .run(None, Some(token), move || async move {
+            let sig = refs_signature_digest(exec.as_ref(), &path, &t).await?;
+            *out.lock().unwrap_or_else(PoisonError::into_inner) = Some(sig);
+            Ok(Arc::new(Value::Null))
+        })
+        .await?;
+    let sig = cell.lock().unwrap_or_else(PoisonError::into_inner).take();
+    sig.ok_or_else(|| SigError::Failed("signature missing".to_string()))
 }
 
 pub enum Routed {
@@ -357,8 +385,12 @@ pub struct Router {
     blob_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
     /// `git:onRemote` 가 true 였던 `repoId:rev 소문자`. 원격 ref 가 사라질 수 있지만 경고용이라 허용한다(false 는 fetch 로 바뀔 수 있어 기억하지 않는다)
     on_remote_yes: Mutex<HashSet<String>>,
+    /// 활동 결과 캐시(범위 키 → 시그니처·결과, 8개)
+    activity_cache: Arc<Mutex<ActivityCache>>,
+    /// 슬롯과 무관하게 같은 키의 진행 중 요청을 합치는 큐(TS `RepoService.shared`). 슬롯을 쥔 채 시그니처의 슬롯을 기다리지 않도록 소스의 큐와 분리한다
+    joins: ProcessQueue<Arc<Value>>,
     logs: LogService,
-    /// 첫 페이지 문·ref 시그니처 저장소(Phase 6a PR 3a). 소비자(refsDetails·activity·wipStatus·감시)는 뒤 PR 에서 온다
+    /// 첫 페이지 문·ref 시그니처 저장소(Phase 6a PR 3a). 소비자: refsDetails(문)·activity(문·시그니처). wipStatus·감시는 뒤 PR 에서 온다
     repo_state: RepoState,
     /// 앱이 단 사이드카 알림 싱크. 상태에 먼저 반영한 뒤 부른다(`note_sink`)
     user_sink: Arc<Mutex<Option<NoteSink>>>,
@@ -405,6 +437,8 @@ impl Router {
             tree_cache: Arc::new(Mutex::new(LruCache::new(TREE_CACHE_ENTRIES, TREE_CACHE_BYTES))),
             blob_cache: Arc::new(Mutex::new(LruCache::new(BLOB_CACHE_ENTRIES, BLOB_CACHE_BYTES))),
             on_remote_yes: Mutex::default(),
+            activity_cache: Arc::default(),
+            joins: ProcessQueue::new(JOIN_SLOTS),
             logs,
             repo_state,
             user_sink,
@@ -595,6 +629,7 @@ impl Router {
         self.logs.close_all();
         // 첫 페이지 문을 기다리는 조회를 풀고 시그니처 기억을 비운다
         self.repo_state.dispose();
+        self.activity_cache.lock().unwrap_or_else(PoisonError::into_inner).clear();
         // SSH 연결을 닫는다(런타임 밖 스레드면 정중한 해제 메시지는 보내지 못하고 연결만 버린다 — 프로세스가 끝나며 소켓이 닫힌다)
         if let Some(pool) = self.ssh_pool() {
             pool.dispose_all();
@@ -689,6 +724,7 @@ impl Router {
             "git:fetch" => self.git_fetch(&args).await,
             "git:resolveRev" | "git:tree" | "git:blob" | "git:onRemote" => self.git_code_channel(channel, &args).await,
             "git:refs" | "git:refsDetails" => self.git_refs_channel(channel, &args).await,
+            "git:search" | "git:activity" => self.git_history_channel(channel, &args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -1045,6 +1081,92 @@ impl Router {
         })
     }
 
+    /// 검색·활동 채널: `git:search(repoId, query, scope?, requestId?)`·`git:activity(repoId, scope?, requestId?)`. 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다)
+    /// 통과한 값만 `git::search`·`git::activity` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다(renderer 가 새 질의·범위를 보내면 이전 것을 취소한다). github 소스는 미러가 사이드카로 보낸다
+    async fn git_history_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note(channel, "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        let arg = |i: usize| args.get(i).copied().flatten();
+        let (job, request_id) = if channel == "git:search" {
+            (SearchRequest::parse(arg(1), arg(2)).map(HistoryJob::Search), 3)
+        } else {
+            (ActivityRequest::parse(arg(1)).map(HistoryJob::Activity), 2)
+        };
+        let job = match job {
+            Ok(j) => j,
+            Err(e) => return Routed::Done(err_env(&e.to_string(), e.envelope_code())),
+        };
+        // 등록은 첫 await 전에 한다. 빈 문자열은 requestId 없음이다
+        let reg = match args.get(request_id) {
+            Some(Some(Value::String(id))) if is_request_id(id) => Some(self.cancels.register(id)),
+            _ => None,
+        };
+        let token = reg.as_ref().map_or_else(CancellationToken::new, |r| r.token.clone());
+        self.note(channel, "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let result = self.history_job(repo_id, &target, job, &token).await;
+        drop(reg);
+        Routed::Done(match result {
+            Ok(data) => ok_env(Arc::try_unwrap(data).unwrap_or_else(|a| (*a).clone())),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    async fn history_job(&self, repo_id: &str, target: &Target, job: HistoryJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+        let rt = self.runtime(target)?;
+        let (exec, path) = (rt.exec.clone(), target.path().to_string());
+        match job {
+            // 전체 이력을 훑을 수 있다 — 한 큐 슬롯 안에서 세 갈래가 돌고, 취소는 이 요청의 프로세스에 바로 닿는다(`withSignal`)
+            HistoryJob::Search(req) => {
+                let t = token.clone();
+                rt.queue.run(None, Some(token.clone()), move || async move { search(&exec, &path, &req, &t).await.map(Arc::new) }).await
+            }
+            HistoryJob::Activity(req) => self.activity_job(repo_id, &rt, path, req, token).await,
+        }
+    }
+
+    /// 커밋 활동. TS `RepoService.activity` 와 같은 순서다: 같은 키의 진행 중 요청에 합류(슬롯과 무관) → 첫 페이지 문 → **시그니처(매번 새로 계산)** → 캐시(8개) → 큐 슬롯 안에서 `log --format=%at` 스트림.
+    /// 합친 요청의 취소는 기다리는 쪽이 모두 떠났을 때만 프로세스에 닿는다(기다리는 쪽이 모두 사라지면 future 가 버려져 git 이 정리된다). 각 호출자의 토큰은 그 호출자의 기다림만 끊는다.
+    ///
+    /// **기억한 시그니처(`known_signature`)를 쓰지 않는다**: TS 는 감시가 갱신하는 기억값을 재사용하지만(`knownSigs`) 이 PR 에는 Rust 쪽 감시가 없어 기억값을 갱신할 주체가 없다(낡은 값이 캐시 적중을 만든다).
+    /// 그래서 `shared_signature`(진행 중인 계산에 합류, 제한 20초)로 매번 새로 얻는다 — 감시가 Rust 로 오는 PR 7b 에서 재사용을 켠다
+    async fn activity_job(&self, repo_id: &str, rt: &SourceRuntime, path: String, req: ActivityRequest, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+        let (state, cache, queue, exec) = (self.repo_state.clone(), self.activity_cache.clone(), rt.queue.clone(), rt.exec.clone());
+        let repo = repo_id.to_string();
+        let join_key = format!("activity\0{repo_id}\0{}", req.scope_key());
+        let cache_key = format!("{repo_id}\0{}", req.scope_key());
+        let run = self.joins.run(Some(&join_key), None, move || async move {
+            state.after_first_page(&repo).await;
+            let sig = {
+                let (queue, exec, path) = (queue.clone(), exec.clone(), path.clone());
+                state.shared_signature(&repo, move |tok| queued_signature(queue, exec, path, tok), None).await.map_err(ExecError::from)?
+            };
+            if let Some(hit) = cache.lock().unwrap_or_else(PoisonError::into_inner).get(&cache_key, &sig) {
+                return Ok(hit);
+            }
+            let value = queue
+                .run(None, None, move || async move {
+                    let activity = commit_activity(&exec, &path, &req, &RunOpts::default(), now_secs()).await?;
+                    Ok(Arc::new(to_value(&activity)?))
+                })
+                .await?;
+            cache.lock().unwrap_or_else(PoisonError::into_inner).set(&cache_key, sig, value.clone());
+            Ok(value)
+        });
+        tokio::select! {
+            biased;
+            () = token.cancelled() => Err(ExecError::Aborted),
+            r = run => r,
+        }
+    }
+
     /// 불변 결과의 캐시 → 같은 키 요청 합치기 → 큐 슬롯 안에서 `task`. `commit` 과 같은 방식이다:
     /// 요청 토큰은 실행기에 넘기지 않고(합쳐진 다른 호출자의 프로세스까지 죽이게 된다) 이 호출자는 기다리기만 그만둔다
     async fn cached_shared<F, Fut>(
@@ -1225,7 +1347,7 @@ mod tests {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache")]);
         let r = Router::new(true, false, m.clone());
         // 채널이 등록되지 않았다
-        assert!(is_sidecar(&r.route("git:search", &json!(["a"])).await));
+        assert!(is_sidecar(&r.route("git:lfsPaths", &json!(["a"])).await));
         // 미러에 없는 저장소·ssh·github
         for id in ["nope", "s", "g"] {
             assert!(is_sidecar(&r.route("git:commit", &json!([id, "abcd"])).await), "{id}");
@@ -1288,6 +1410,25 @@ mod tests {
             }
             assert!(is_sidecar(&off.route(ch, &json!(["a"])).await), "{ch}");
             let env = envelope(r.route(ch, &json!(["unc"])).await);
+            assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+        }
+        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+    }
+
+    /// 검색·활동 채널의 소유도 같은 한 술어다 — 새로 만든 소유 판정이 없다(사이드카에는 이 채널의 소유 env 가 없다)
+    #[tokio::test]
+    async fn 검색_활동_채널의_소유는_다른_git_채널과_같은_한_술어다() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
+        let r = Router::new(true, false, m.clone());
+        let off = Router::new(false, false, m);
+        for (ch, tail) in [("git:search", json!(["q"])), ("git:activity", json!([]))] {
+            assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+            let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
+            for id in ["nope", "s", "g"] {
+                assert!(is_sidecar(&r.route(ch, &call(id)).await), "{id} {ch}");
+            }
+            assert!(is_sidecar(&off.route(ch, &call("a")).await), "{ch}");
+            let env = envelope(r.route(ch, &call("unc")).await);
             assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
         }
         assert_eq!(r.rust_handled() + off.rust_handled(), 0);

@@ -42,7 +42,9 @@ async fn read_parts<R: GitRunner>(r: &R, repo_path: &str, cancel: &CancellationT
         tokio::join!(r.run(repo_path, &list_args, &opts), r.run(repo_path, &head_ref_args, &opts), r.run(repo_path, &head_hash_args, &opts));
     let (refs, head_ref, head_hash) = (refs?, head_ref?, head_hash?);
     if refs.code != 0 {
-        return Err(ExecError::Other { message: if refs.stderr.trim().is_empty() { "for-each-ref failed".into() } else { refs.stderr.trim().to_string() } });
+        // TS 는 `GitError`(code GIT)다 — activity 의 envelope 이 같은 code 를 내도록 같은 종류로 둔다(fetch 는 오류의 종류를 보지 않는다 — `.ok()`)
+        let message = if refs.stderr.trim().is_empty() { "for-each-ref failed".into() } else { refs.stderr.trim().to_string() };
+        return Err(ExecError::Git { message, code: refs.code, stderr: refs.stderr, args: Vec::new() });
     }
     Ok(RefsParts { refs: refs.stdout, head_ref: head_ref.stdout, head_hash: head_hash.stdout })
 }

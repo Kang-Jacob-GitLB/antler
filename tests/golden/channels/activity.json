@@ -1,0 +1,1368 @@
+{
+  "scenarios": [
+    {
+      "args": [],
+      "name": "빈 저장소는 빈 결과다",
+      "result": {
+        "data": {
+          "bucketSec": 86400,
+          "buckets": [],
+          "first": 0,
+          "last": 0,
+          "total": 0
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "빈 저장소는 빈 결과다",
+      "result": {
+        "data": {
+          "bucketSec": 86400,
+          "buckets": [],
+          "first": 0,
+          "last": 0,
+          "total": 0
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        {}
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 0,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 5
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 0,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700018000,
+          "total": 4
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/side",
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/nope"
+          ]
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 86400,
+          "buckets": [],
+          "first": 0,
+          "last": 0,
+          "total": 0
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "27c6a149cb8ebeea99612ad939df7c418d87f12d"
+          ]
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 0,
+              "t": 1700013600
+            },
+            {
+              "count": 0,
+              "t": 1700017200
+            },
+            {
+              "count": 0,
+              "t": 1700020800
+            },
+            {
+              "count": 1,
+              "t": 1700024400
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700025200,
+          "total": 4
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        {
+          "hide": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 0,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 5
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        {
+          "hide": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        {
+          "hide": [
+            "refs/heads/main"
+          ],
+          "includeHead": false
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 0,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700018000,
+          "total": 4
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        {
+          "hide": [
+            "refs/heads/main",
+            "refs/heads/side"
+          ],
+          "includeHead": false
+        }
+      ],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 86400,
+          "buckets": [],
+          "first": 0,
+          "last": 0,
+          "total": 0
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [],
+      "name": "활동: 기본·solo·hide·includeHead",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 11
+    },
+    {
+      "args": [],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 0,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700018000,
+          "total": 4
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1699999200
+            },
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700000000,
+          "last": 1700021600,
+          "total": 7
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 0,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700018000,
+          "total": 4
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1699999200
+            },
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 0,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700000000,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        {
+          "hide": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1699999200
+            },
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 0,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700000000,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1699999200
+            },
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 0,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700000000,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [],
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1699999200
+            },
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 0,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700000000,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        null
+      ],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "x"
+      ],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        5
+      ],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "-x"
+          ]
+        }
+      ],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid solo",
+        "ok": false
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        {
+          "solo": "x"
+        }
+      ],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid solo",
+        "ok": false
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        {
+          "hide": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ]
+        }
+      ],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid hide",
+        "ok": false
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        {
+          "includeHead": 1
+        }
+      ],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 6
+    },
+    {
+      "args": [],
+      "name": "활동: 잘못된 범위는 오류다",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [],
+      "name": "활동: basic(병합·빈 커밋)",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        {
+          "solo": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "활동: basic(병합·빈 커밋)",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700021600,
+          "total": 6
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [],
+      "name": "활동: branchy(태그·리모트 추적 ref)",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            },
+            {
+              "count": 1,
+              "t": 1700024400
+            },
+            {
+              "count": 1,
+              "t": 1700028000
+            },
+            {
+              "count": 1,
+              "t": 1700031600
+            },
+            {
+              "count": 1,
+              "t": 1700035200
+            },
+            {
+              "count": 1,
+              "t": 1700038800
+            },
+            {
+              "count": 1,
+              "t": 1700042400
+            },
+            {
+              "count": 1,
+              "t": 1700046000
+            },
+            {
+              "count": 1,
+              "t": 1700049600
+            },
+            {
+              "count": 1,
+              "t": 1700053200
+            },
+            {
+              "count": 1,
+              "t": 1700056800
+            },
+            {
+              "count": 1,
+              "t": 1700060400
+            },
+            {
+              "count": 1,
+              "t": 1700064000
+            },
+            {
+              "count": 1,
+              "t": 1700067600
+            },
+            {
+              "count": 1,
+              "t": 1700071200
+            },
+            {
+              "count": 1,
+              "t": 1700074800
+            },
+            {
+              "count": 1,
+              "t": 1700078400
+            },
+            {
+              "count": 1,
+              "t": 1700082000
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700082800,
+          "total": 23
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        {
+          "hide": [
+            "refs/heads/dev"
+          ]
+        }
+      ],
+      "name": "활동: branchy(태그·리모트 추적 ref)",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            },
+            {
+              "count": 1,
+              "t": 1700024400
+            },
+            {
+              "count": 1,
+              "t": 1700028000
+            },
+            {
+              "count": 1,
+              "t": 1700031600
+            },
+            {
+              "count": 1,
+              "t": 1700035200
+            },
+            {
+              "count": 1,
+              "t": 1700038800
+            },
+            {
+              "count": 1,
+              "t": 1700042400
+            },
+            {
+              "count": 1,
+              "t": 1700046000
+            },
+            {
+              "count": 1,
+              "t": 1700049600
+            },
+            {
+              "count": 1,
+              "t": 1700053200
+            },
+            {
+              "count": 1,
+              "t": 1700056800
+            },
+            {
+              "count": 1,
+              "t": 1700060400
+            },
+            {
+              "count": 1,
+              "t": 1700064000
+            },
+            {
+              "count": 1,
+              "t": 1700067600
+            },
+            {
+              "count": 1,
+              "t": 1700071200
+            },
+            {
+              "count": 1,
+              "t": 1700074800
+            },
+            {
+              "count": 1,
+              "t": 1700078400
+            },
+            {
+              "count": 1,
+              "t": 1700082000
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700082800,
+          "total": 23
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [],
+      "name": "활동·검색: files(작성자 둘·병합)",
+      "result": {
+        "data": {
+          "bucketSec": 3600,
+          "buckets": [
+            {
+              "count": 1,
+              "t": 1700002800
+            },
+            {
+              "count": 1,
+              "t": 1700006400
+            },
+            {
+              "count": 1,
+              "t": 1700010000
+            },
+            {
+              "count": 1,
+              "t": 1700013600
+            },
+            {
+              "count": 1,
+              "t": 1700017200
+            },
+            {
+              "count": 1,
+              "t": 1700020800
+            },
+            {
+              "count": 1,
+              "t": 1700024400
+            },
+            {
+              "count": 1,
+              "t": 1700028000
+            }
+          ],
+          "first": 1700003600,
+          "last": 1700028800,
+          "total": 8
+        },
+        "ok": true
+      },
+      "step": 0
+    }
+  ]
+}

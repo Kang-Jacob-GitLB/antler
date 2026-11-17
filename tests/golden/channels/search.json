@@ -1,0 +1,2170 @@
+{
+  "scenarios": [
+    {
+      "args": [
+        "로그인"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "ALICE"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "alice"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "홍길동"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44",
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "side"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "bob"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572",
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "a"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44",
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572",
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03",
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "  로그인  "
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        "   "
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        ""
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        "없는 문구"
+      ],
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        "--force"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [
+            "6672240828fb53a38a99406f8bafd451bf9d1e73"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "--output=x"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "-1"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "--end-of-options"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "--"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [
+            "6672240828fb53a38a99406f8bafd451bf9d1e73"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "-c alias.x=!echo"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "--author=alice"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "--grep=force"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        "-F"
+      ],
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "result": {
+        "data": {
+          "hashes": [
+            "6672240828fb53a38a99406f8bafd451bf9d1e73"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        "x.y"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "x.*"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "a|b"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "(z)"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "[w]"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "*v*"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "$u"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "^t"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        ".*"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        "."
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44",
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572",
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03",
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        "X.Y"
+      ],
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        "it's"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "say \"hi\""
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "$(echo pwned)"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "`id`"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "a;b"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "a b"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "a\\b"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "%s"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        "~"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        "{x}"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        "<>&|"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        "\n"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 11
+    },
+    {
+      "args": [
+        "a\nb"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44",
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572",
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03",
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 12
+    },
+    {
+      "args": [
+        "😀"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 13
+    },
+    {
+      "args": [
+        "\t로그인\t"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 14
+    },
+    {
+      "args": [
+        " 로그인 "
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 15
+    },
+    {
+      "args": [
+        "로그인"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 16
+    },
+    {
+      "args": [
+        "alice's"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 17
+    },
+    {
+      "args": [
+        "로그인 버그"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 18
+    },
+    {
+      "args": [
+        "x.y (z) [w]"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 19
+    },
+    {
+      "args": [
+        "a|b $u ^t"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 20
+    },
+    {
+      "args": [
+        "refactor: x.y (z) [w] *v* a|b $u ^t"
+      ],
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 21
+    },
+    {
+      "args": [
+        "b38b4eb"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "B38B4EB9"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "6672"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [
+            "6672240828fb53a38a99406f8bafd451bf9d1e73"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "667"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "6672240828fb53a38a99406f8bafd451bf9d1e73"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [
+            "6672240828fb53a38a99406f8bafd451bf9d1e73"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "6672240828fb53a38a99406f8bafd451bf9d1e730"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "92f6ca0a8882"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "deadbeef"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        "abcd"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        "ABCDEF"
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        "  1a7e716ee  "
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        "8456e",
+        {
+          "solo": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 11
+    },
+    {
+      "args": [
+        "side",
+        {
+          "solo": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "side",
+        {
+          "solo": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "solo": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "hide": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "hide": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "hide": [
+            "refs/heads/main"
+          ],
+          "includeHead": false
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "alice",
+        {}
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "solo": []
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        "92f6ca0a8882",
+        {
+          "solo": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        "92f6ca0a8882",
+        {
+          "solo": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        "92f6ca0a8882",
+        {
+          "hide": [
+            "refs/heads/side"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        "27c6a149cb"
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 11
+    },
+    {
+      "args": [
+        "27c6a149cb",
+        {
+          "solo": [
+            "27c6a149cb8ebeea99612ad939df7c418d87f12d"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "27c6a149cb8ebeea99612ad939df7c418d87f12d"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 12
+    },
+    {
+      "args": [
+        "WIP",
+        {
+          "solo": [
+            "27c6a149cb8ebeea99612ad939df7c418d87f12d"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "27c6a149cb8ebeea99612ad939df7c418d87f12d"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 13
+    },
+    {
+      "args": [
+        "WIP"
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 14
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "solo": [
+            "refs/heads/nope"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 15
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "solo": [
+            "refs/heads/nope",
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 16
+    },
+    {
+      "args": [
+        "alice",
+        {
+          "solo": [
+            "refs/heads/main",
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 17
+    },
+    {
+      "args": [
+        "a",
+        null
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "a",
+        "x"
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "a",
+        5
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "a",
+        true
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "a",
+        [
+          "x"
+        ]
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "data": {
+          "hashes": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44",
+            "92f6ca0a88821d25be9ccd427ea9b3b54c91f572",
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97",
+            "6672240828fb53a38a99406f8bafd451bf9d1e73",
+            "80d371b4fdb6a4ca297630f6bdde85acbf859a03",
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "a",
+        {
+          "solo": [
+            "-x"
+          ]
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid solo",
+        "ok": false
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "a",
+        {
+          "solo": [
+            "--output=x"
+          ]
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid solo",
+        "ok": false
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "a",
+        {
+          "solo": "x"
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid solo",
+        "ok": false
+      },
+      "step": 7
+    },
+    {
+      "args": [
+        "a",
+        {
+          "hide": [
+            5
+          ]
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid hide",
+        "ok": false
+      },
+      "step": 8
+    },
+    {
+      "args": [
+        "a",
+        {
+          "hide": [
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44"
+          ]
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid hide",
+        "ok": false
+      },
+      "step": 9
+    },
+    {
+      "args": [
+        "a",
+        {
+          "solo": [
+            "refs/heads/a..b"
+          ]
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid solo",
+        "ok": false
+      },
+      "step": 10
+    },
+    {
+      "args": [
+        "a",
+        {
+          "includeHead": "no"
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 11
+    },
+    {
+      "args": [
+        "a",
+        {
+          "solo": [
+            "refs/heads/b0",
+            "refs/heads/b1",
+            "refs/heads/b2",
+            "refs/heads/b3",
+            "refs/heads/b4",
+            "refs/heads/b5",
+            "refs/heads/b6",
+            "refs/heads/b7",
+            "refs/heads/b8",
+            "refs/heads/b9",
+            "refs/heads/b10",
+            "refs/heads/b11",
+            "refs/heads/b12",
+            "refs/heads/b13",
+            "refs/heads/b14",
+            "refs/heads/b15",
+            "refs/heads/b16",
+            "refs/heads/b17",
+            "refs/heads/b18",
+            "refs/heads/b19",
+            "refs/heads/b20",
+            "refs/heads/b21",
+            "refs/heads/b22",
+            "refs/heads/b23",
+            "refs/heads/b24",
+            "refs/heads/b25",
+            "refs/heads/b26",
+            "refs/heads/b27",
+            "refs/heads/b28",
+            "refs/heads/b29",
+            "refs/heads/b30",
+            "refs/heads/b31",
+            "refs/heads/b32",
+            "refs/heads/b33",
+            "refs/heads/b34",
+            "refs/heads/b35",
+            "refs/heads/b36",
+            "refs/heads/b37",
+            "refs/heads/b38",
+            "refs/heads/b39",
+            "refs/heads/b40",
+            "refs/heads/b41",
+            "refs/heads/b42",
+            "refs/heads/b43",
+            "refs/heads/b44",
+            "refs/heads/b45",
+            "refs/heads/b46",
+            "refs/heads/b47",
+            "refs/heads/b48",
+            "refs/heads/b49",
+            "refs/heads/b50",
+            "refs/heads/b51",
+            "refs/heads/b52",
+            "refs/heads/b53",
+            "refs/heads/b54",
+            "refs/heads/b55",
+            "refs/heads/b56",
+            "refs/heads/b57",
+            "refs/heads/b58",
+            "refs/heads/b59",
+            "refs/heads/b60",
+            "refs/heads/b61",
+            "refs/heads/b62",
+            "refs/heads/b63",
+            "refs/heads/b64",
+            "refs/heads/b65",
+            "refs/heads/b66",
+            "refs/heads/b67",
+            "refs/heads/b68",
+            "refs/heads/b69",
+            "refs/heads/b70",
+            "refs/heads/b71",
+            "refs/heads/b72",
+            "refs/heads/b73",
+            "refs/heads/b74",
+            "refs/heads/b75",
+            "refs/heads/b76",
+            "refs/heads/b77",
+            "refs/heads/b78",
+            "refs/heads/b79",
+            "refs/heads/b80",
+            "refs/heads/b81",
+            "refs/heads/b82",
+            "refs/heads/b83",
+            "refs/heads/b84",
+            "refs/heads/b85",
+            "refs/heads/b86",
+            "refs/heads/b87",
+            "refs/heads/b88",
+            "refs/heads/b89",
+            "refs/heads/b90",
+            "refs/heads/b91",
+            "refs/heads/b92",
+            "refs/heads/b93",
+            "refs/heads/b94",
+            "refs/heads/b95",
+            "refs/heads/b96",
+            "refs/heads/b97",
+            "refs/heads/b98",
+            "refs/heads/b99",
+            "refs/heads/b100",
+            "refs/heads/b101",
+            "refs/heads/b102",
+            "refs/heads/b103",
+            "refs/heads/b104",
+            "refs/heads/b105",
+            "refs/heads/b106",
+            "refs/heads/b107",
+            "refs/heads/b108",
+            "refs/heads/b109",
+            "refs/heads/b110",
+            "refs/heads/b111",
+            "refs/heads/b112",
+            "refs/heads/b113",
+            "refs/heads/b114",
+            "refs/heads/b115",
+            "refs/heads/b116",
+            "refs/heads/b117",
+            "refs/heads/b118",
+            "refs/heads/b119",
+            "refs/heads/b120",
+            "refs/heads/b121",
+            "refs/heads/b122",
+            "refs/heads/b123",
+            "refs/heads/b124",
+            "refs/heads/b125",
+            "refs/heads/b126",
+            "refs/heads/b127",
+            "refs/heads/b128",
+            "refs/heads/b129",
+            "refs/heads/b130",
+            "refs/heads/b131",
+            "refs/heads/b132",
+            "refs/heads/b133",
+            "refs/heads/b134",
+            "refs/heads/b135",
+            "refs/heads/b136",
+            "refs/heads/b137",
+            "refs/heads/b138",
+            "refs/heads/b139",
+            "refs/heads/b140",
+            "refs/heads/b141",
+            "refs/heads/b142",
+            "refs/heads/b143",
+            "refs/heads/b144",
+            "refs/heads/b145",
+            "refs/heads/b146",
+            "refs/heads/b147",
+            "refs/heads/b148",
+            "refs/heads/b149",
+            "refs/heads/b150",
+            "refs/heads/b151",
+            "refs/heads/b152",
+            "refs/heads/b153",
+            "refs/heads/b154",
+            "refs/heads/b155",
+            "refs/heads/b156",
+            "refs/heads/b157",
+            "refs/heads/b158",
+            "refs/heads/b159",
+            "refs/heads/b160",
+            "refs/heads/b161",
+            "refs/heads/b162",
+            "refs/heads/b163",
+            "refs/heads/b164",
+            "refs/heads/b165",
+            "refs/heads/b166",
+            "refs/heads/b167",
+            "refs/heads/b168",
+            "refs/heads/b169",
+            "refs/heads/b170",
+            "refs/heads/b171",
+            "refs/heads/b172",
+            "refs/heads/b173",
+            "refs/heads/b174",
+            "refs/heads/b175",
+            "refs/heads/b176",
+            "refs/heads/b177",
+            "refs/heads/b178",
+            "refs/heads/b179",
+            "refs/heads/b180",
+            "refs/heads/b181",
+            "refs/heads/b182",
+            "refs/heads/b183",
+            "refs/heads/b184",
+            "refs/heads/b185",
+            "refs/heads/b186",
+            "refs/heads/b187",
+            "refs/heads/b188",
+            "refs/heads/b189",
+            "refs/heads/b190",
+            "refs/heads/b191",
+            "refs/heads/b192",
+            "refs/heads/b193",
+            "refs/heads/b194",
+            "refs/heads/b195",
+            "refs/heads/b196",
+            "refs/heads/b197",
+            "refs/heads/b198",
+            "refs/heads/b199",
+            "refs/heads/b200"
+          ]
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid solo",
+        "ok": false
+      },
+      "step": 12
+    },
+    {
+      "args": [
+        5,
+        null
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 13
+    },
+    {
+      "args": [
+        5
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 14
+    },
+    {
+      "args": [
+        null
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 15
+    },
+    {
+      "args": [
+        []
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 16
+    },
+    {
+      "args": [
+        [
+          "a"
+        ]
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 17
+    },
+    {
+      "args": [
+        {
+          "x": 1
+        }
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 18
+    },
+    {
+      "args": [
+        true
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 19
+    },
+    {
+      "args": [],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 20
+    },
+    {
+      "args": [
+        "a\u0000b"
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 21
+    },
+    {
+      "args": [
+        "\u0000"
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 22
+    },
+    {
+      "args": [
+        "  \u0000  "
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "code": "ERROR",
+        "ok": false
+      },
+      "step": 23
+    },
+    {
+      "args": [
+        "로그인"
+      ],
+      "name": "잘못된 범위·질의는 오류다",
+      "result": {
+        "data": {
+          "hashes": [
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 24
+    },
+    {
+      "args": [
+        "brand new"
+      ],
+      "name": "커밋을 더하면 다음 검색에 보인다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "brand new"
+      ],
+      "name": "커밋을 더하면 다음 검색에 보인다",
+      "result": {
+        "data": {
+          "hashes": [
+            "dedb04d793c850d781842cdf718e268726f993ba"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "홍길동"
+      ],
+      "name": "커밋을 더하면 다음 검색에 보인다",
+      "result": {
+        "data": {
+          "hashes": [
+            "dedb04d793c850d781842cdf718e268726f993ba",
+            "1a7e716eeab3ca7b5434d5dc5f0cda9f840a8b44",
+            "b38b4eb9025beb4ee7318e9075b671524d74ef9e"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "side"
+      ],
+      "name": "커밋을 더하면 다음 검색에 보인다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "args": [
+        "bob"
+      ],
+      "name": "커밋을 더하면 다음 검색에 보인다",
+      "result": {
+        "data": {
+          "hashes": [
+            "8456e0d1d3fdfdf8e5ad6dc796629f554d281e97"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": [
+        "아무거나"
+      ],
+      "name": "빈 저장소는 빈 결과다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": [
+        "abcd1234"
+      ],
+      "name": "빈 저장소는 빈 결과다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "a",
+        {
+          "solo": [
+            "refs/heads/main"
+          ]
+        }
+      ],
+      "name": "빈 저장소는 빈 결과다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "   "
+      ],
+      "name": "빈 저장소는 빈 결과다",
+      "result": {
+        "data": {
+          "hashes": [],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "a",
+        null
+      ],
+      "name": "빈 저장소는 빈 결과다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid scope",
+        "ok": false
+      },
+      "step": 4
+    },
+    {
+      "args": [
+        "main"
+      ],
+      "name": "활동: branchy(태그·리모트 추적 ref)",
+      "result": {
+        "data": {
+          "hashes": [
+            "124f17511efb40465fcb3b759e9e0319294bdd95",
+            "c8b0f1fc2a4ed83a2566afb9b40b709332670808",
+            "b15e4c7fc8863a4db70a2ba468dca02453cecfbc",
+            "15c035d322edbac562704126928e629d22527359",
+            "e0f803df3cac6d2df2a5c9cb77118826c73313bb",
+            "e163e87ea6a713f4ac44c7dac726e95649ed1c51",
+            "37f5897762622c66bc076f659cfb5dee99a98b16",
+            "0c1ef4a668134fadcbfd9430a07e3ca12c1ccf24",
+            "7fc0562432ad1873c865e6246a15b452034f95aa",
+            "ef53d19cf10a9c03c0e0788d286f9de4b8b7bb80",
+            "3c7cfe62ba08ace8f981fce110d2158f0b2fbf87"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "feature"
+      ],
+      "name": "활동: branchy(태그·리모트 추적 ref)",
+      "result": {
+        "data": {
+          "hashes": [
+            "66af7e0ee5c5c7aab894665c0db7e82c6654cc02",
+            "400f246be0a60477f1cac28120fa006b55f0d51d",
+            "67f6a749b52060dfc07ba4587392018a43925d8a"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": [
+        "alice"
+      ],
+      "name": "활동·검색: files(작성자 둘·병합)",
+      "result": {
+        "data": {
+          "hashes": [
+            "62a9e11b8e10507012236832d279f9be3bb6f279"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": [
+        "large"
+      ],
+      "name": "활동·검색: files(작성자 둘·병합)",
+      "result": {
+        "data": {
+          "hashes": [
+            "65c3255a2946625134cb709c7be012786dc824fb"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": [
+        "Merge"
+      ],
+      "name": "활동·검색: files(작성자 둘·병합)",
+      "result": {
+        "data": {
+          "hashes": [
+            "b12d65799ed5c9498d26058279355393d9372b78"
+          ],
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    }
+  ]
+}

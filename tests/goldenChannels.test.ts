@@ -22,6 +22,7 @@ import { knownHostsLine, makeHome, newKeyPair, startServer, type TestServer } fr
 //  - tests/golden/channels/{compare,fileDiff,fileHistory,blame}.json: 파일 단위 채널 시나리오(tests/fixtures/repos/files.scenarios.json)
 //  - tests/golden/channels/{resolveRev,tree,blob,onRemote}.json: 코드 탐색기 채널 시나리오(tests/fixtures/repos/code.scenarios.json — 한 서비스 인스턴스가 순서대로 돌아 캐시 적중도 본다. 큰 파일은 setup 으로 시험 시점에 만든다)
 //  - tests/golden/channels/{refs,refsDetails}.json: 사이드바 ref 채널 시나리오(tests/fixtures/repos/refs.scenarios.json — 다단계: 저장소 조작 뒤 조회. knownDiff 는 정렬 근사 때문에 Rust 가 다른 순서를 내는 알려진 차이)
+//  - tests/golden/channels/{search,activity}.json: 검색·활동 채널 시나리오(tests/fixtures/repos/search.scenarios.json — 다단계: 저장소 조작 뒤 조회. 악성 질의·범위·해시 갈래·스태시 같은 닿지 않는 커밋을 포함한다)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 //  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
@@ -485,6 +486,62 @@ describe('사이드바 ref 채널 골든(channels/{refs,refsDetails}.json)', () 
       await svc.dispose()
     }
     for (const channel of ['refs', 'refsDetails'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
+  }, 180_000)
+})
+
+// ── 검색·활동: git:search · git:activity ────────────────
+
+type SearchStep = { git: string[] } | { search: unknown[]; msg?: boolean } | { activity: unknown[]; msg?: boolean }
+interface SearchScenario {
+  name: string
+  repo: string
+  steps: SearchStep[]
+}
+
+describe('검색·활동 채널 골든(channels/{search,activity}.json)', () => {
+  const scenarios = (JSON.parse(readFileSync(join(FIXTURES, 'search.scenarios.json'), 'utf8')) as { scenarios: SearchScenario[] }).scenarios
+  let root: string
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, ...REFS_STEP_ENV, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chansearch-'))
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const out: Record<'search' | 'activity', unknown[]> = { search: [], activity: [] }
+    for (const [si, sc] of scenarios.entries()) {
+      const dir = join(root, `s${si}`)
+      mkdirSync(dir)
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${sc.repo}.fi`)))
+      const config = new ConfigStore(join(root, `s${si}.config.json`))
+      const id = config.addRepo({ sourceId: 'local', path: dir, name: sc.repo }).id
+      const svc = new RepoService(config)
+      const rev = (expr: string): string => git(dir, ['rev-parse', expr])
+      for (const [i, step] of sc.steps.entries()) {
+        if ('git' in step) {
+          git(dir, expand(step.git, rev) as string[])
+          // 앱에서는 감시가 ref 변경을 알아 기억한 시그니처를 새로 계산한다 — 이 하네스에는 감시가 없으므로 같은 효과로 버린다.
+          // Rust(PR 4)는 기억값을 쓰지 않고 매번 새로 계산하므로 이 호출이 없어도 같은 결과여야 한다
+          svc.noteLog('logStale', id)
+          continue
+        }
+        const channel = 'search' in step ? 'search' : 'activity'
+        const list = expand('search' in step ? step.search : step.activity, rev) as unknown[]
+        let result: Record<string, unknown>
+        try {
+          const data = channel === 'search' ? await svc.search(id, list[0] as string, list[1] as never, `req-${i}`) : await svc.activity(id, list[0] as never, `req-${i}`)
+          result = { ok: true, data: JSON.parse(JSON.stringify(data)) }
+        } catch (err) {
+          result = { ok: false, code: codeOf(err), ...(step.msg ? { error: (err as Error).message } : {}) }
+        }
+        out[channel].push({ name: sc.name, step: i, args: list, result })
+      }
+      await svc.dispose()
+    }
+    for (const channel of ['search', 'activity'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
   }, 180_000)
 })
 

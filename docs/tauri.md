@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -1099,7 +1099,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 | 1 | 순수 로직·골든: 코드 탐색기 트리 파서·정렬·입력 검증, LFS·gitflow 파서, 활동 집계, 기본 브랜치, filter 가드, WIP 경로 검증·링크 확인. TS 는 순수 함수 export 만 | 없음 | **완료** |
 | 2 | 코드 탐색기 4채널(`resolveRev`·`tree`·`blob`·`onRemote`) | 있음 | **완료** |
 | 3a / 3b | 3a: 공유 상태(첫 페이지 문·ref 시그니처 저장소, `signature.rs` 추출, note 팬아웃). 3b: `refs`·`refsDetails`(서브모듈 확인 포함) | 3a 없음 / 3b 있음 | 3a·3b **완료** |
-| 4 | `search`·`activity` | 있음 | |
+| 4 | `search`·`activity` | 있음 | **완료** |
 | 5 | `repoExtras`·`lfsPaths` | 있음 | |
 | 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | |
 | 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | |
@@ -1268,7 +1268,7 @@ TS `RepoService` 가 쥔 상태 둘을 Rust 에 둔다. 소비자(`refsDetails`�
 이 PR 은 사이드카가 보내는 `repo:changed`(감시 이벤트)는 **연결하지 않았다** — 감시는 PR 7 의 몫이고, 지금 Rust 상태를 갱신할 감시자가 없다.
 
 **대응표**(`test-map.json`): `repoService` 의 첫 페이지 문 `it` 2개(문 열림·`logFirstPage`)만 `repo_state.rs::…` 로 연결했다(`golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `repo_state.rs` 를 더했다).
-TS 가 `activity` 결과로 관찰하던 4개(`logStale`·`fetchChanged`·시그니처 재사용·`StaleLogError`)는 `N/A: PR 4` 로 되돌렸다 — 이 PR 의 상태 수준 시험(기억이 비었는가·합류했는가·낡은 계산이 덮지 못하는가)은 `activity` 결과를 보증하지 않으므로, **PR 4 가 `activity` 수준 시험으로 다시 매핑해야 한다.**
+TS 가 `activity` 결과로 관찰하던 4개(`logStale`·`fetchChanged`·시그니처 재사용·`StaleLogError`)는 `N/A: PR 4` 로 되돌렸다 — 이 PR 의 상태 수준 시험(기억이 비었는가·합류했는가·낡은 계산이 덮지 못하는가)은 `activity` 결과를 보증하지 않으므로, **PR 4 가 `activity` 수준 시험으로 다시 매핑해야 한다**(PR 4 에서 했다 — 아래).
 이 PR 뒤 `<파일>.rs::<fn>` 89개, `N/A: PR n` 67개, 사유 있는 N/A 43개(합 199).
 
 **시험**: `repo_state.rs` 단위 17개(문: 활성화·유예·재 arm 이 유예를 안 미룸·낡은 유예가 새 문을 못 엶·저장소별·dispose / 시그니처: 실패 비기록·늦게 시작한 계산 우선·무효화 전 계산 비기록·순번 시점·note·합류·합류 끊김·기다림 취소·제한 시간·패닉·동시 16개 저장소, 멈춘 시계(`start_paused`)와 손으로 푸는 future),
@@ -1340,6 +1340,87 @@ git 단계는 작성자·시각을 고정해(`REFS_STEP_ENV`) 커밋·스태시 
 - 서브모듈 실제 경로 검사와 git 의 읽기 사이의 경쟁(TOCTOU)은 막지 못한다(`link_guard` 의 알려진 한계, TS 도 같다).
 - `refsDetails` 의 첫 페이지 대기는 `repos:watch` 와 `git:log` 의 도착 순서에 기댄다(PR 3a 의 남은 위험과 같다).
 - `git:refs` 의 7개 동시 조회가 SSH 에서는 연결당 채널 6개 세마포어에 걸려 일곱 번째가 기다린다(TS 도 같다).
+
+### PR 4 — `git:search`·`git:activity`(앱에 연결한다)
+
+`git:search(repoId, query, scope?, requestId?)`·`git:activity(repoId, scope?, requestId?)` 를 Rust 가 처리한다(local·WSL·SSH 세 실행기 — 라우팅·미러·취소·envelope 는 앞 채널들과 같다). TS: `RepoService.search`·`activity` + `commands.ts` 의 `search`·`reachable`·`mergeInGraphOrder` + `activity.ts` 의 `commitActivity`.
+소유 판정은 새로 만든 것이 없다 — 한 술어 `RepoMirror::resolve` 와 스위치 `ANTLER_RUST_GIT`·`ANTLER_RUST_SSH` 뿐이다(github 소스는 미러가 사이드카로 보낸다. 사이드카에는 이 채널의 소유 env 가 없다).
+
+| 파일 | 내용 |
+|---|---|
+| `git/search.rs`(새) | `SearchRequest`(검증)·argv 빌더 5개·`search`(세 갈래 + 도달 가능성 + 그래프 순서 병합) |
+| `git/activity.rs` | `ActivityRequest`(범위 검증·키)·`commit_activity`(스트림 집계)·`ActivityCache`(8개, 삽입 순서) — 순수 로직(`bucketize`·`TimeStreamParser`)은 PR 1 |
+| `git/signature.rs`·`git/repo_state.rs` | 시그니처 계산 실패를 TS 처럼 GIT 으로(아래), `SigError::Git`·`From<SigError> for ExecError` |
+| `router.rs` | `RUST_CHANNELS` 에 두 채널, `git_history_channel`·`history_job`·`activity_job`·`queued_signature`, 합치기 큐 `joins` |
+
+| 채널 | git(상수 + 검증된 값) | 큐 | 취소 |
+|---|---|---|---|
+| `git:search` | 동시 3갈래: `log --format=%H -z --date-order -i -F --max-count=10001 --grep=<q> <범위> --`·같은 모양의 `--author=<q>`·(해시 갈래) `rev-parse --verify --quiet <q>^{commit}`. 이어서 `rev-list -n1 <해시> --not <범위>`(해시 갈래가 풀렸을 때)·`log --format=%H -z --date-order <범위> --`(스트림 — 두 갈래가 모두 비어 있지 않을 때만) | **큐 슬롯 하나 안에서** 전부(합치지 않는다) | 모든 git 호출에 토큰이 걸린다(`queue.run(None, Some(token))` + `RunOpts::with_cancel`) |
+| `git:activity` | `log --format=%at <범위> --`(스트림). 그 앞에 시그니처(`for-each-ref`·`symbolic-ref`·`rev-parse` 3개) | 합치기는 슬롯 밖, 시그니처·스트림이 각각 슬롯 하나 | 합친 요청은 기다리는 쪽이 모두 떠나야 git 이 죽는다(각 호출자의 토큰은 그 호출자의 기다림만 끊는다) |
+
+**search 검증(보안 — 질의는 자유 문자열이라 git 인자에 들어간다)** — 순서는 TS 와 같다: 저장소(미러) → 범위(`parse_scope` + `scope_args`: `invalid scope`·`invalid solo`·`invalid hide`) → 질의 → 취소 등록. 검증에 걸린 요청은 git 도 취소 레지스트리도 건드리지 않고 `rust_handled` 에도 세지 않는다.
+- 질의는 **옵션 접두가 붙은 한 인자**(`--grep=<q>`·`--author=<q>`)로만 들어가 `-` 로 시작해도 옵션이 될 수 없고, `-F`(고정 문자열)·`-i` 가 상수다. 해시 갈래는 질의(앞뒤 JS 공백을 지운 값)가 16진수 4~**40**자(대소문자 무시 — `HexHash` 의 4~64 와 다르다)일 때만 열리고, git 이 돌려준 해시도 `HexHash` 로 다시 검사한 뒤에야 `rev-list` 의 인자가 된다(아니면 쓰지 않는다).
+- 문자열이 아닌 질의는 `invalid query`(code ERROR — TS 는 `.trim` TypeError 라 문구만 다르다). **NUL 이 든 질의는 git 을 띄우기 전에 `invalid query` 로 거부한다**(TS 는 Node 의 spawn 인자 검사가 막는다 — Rust 는 WSL argv·SSH 인용으로 가기 전에 막아야 한다). 공백뿐인 질의는 git 없이 빈 결과다. U+0085 는 JS `trim` 처럼 지우지 않는다(`fetch::js_trim`).
+- **질의 길이 상한은 없다** — TS 의 `search` 에도 없고(`commands.ts`·`handlers.ts`·renderer `searchStore.ts`·`SearchBar.tsx` 를 읽어 확인했다) 새로 만들지 않았다. TS 에 **있는** 상한은 범위(scope)의 것이고 `scope.rs` 를 그대로 쓰므로 같다: 항목 길이 1024(UTF-16 단위)·목록 항목 200개·합 200개. 아주 긴 질의는 운영체제 명령줄 한도를 넘어 local 은 spawn 오류(ERROR)이고 ssh 는 원격 셸이 갈라서, 공유 골든에는 넣지 않았다.
+- `GIT_LITERAL_PATHSPECS`·`GIT_GLOBAL_ARGS`·`GIT_ENV`(fsmonitor·lazy fetch·replace 끔)는 실행기가 모든 git 에 건다. 이 채널은 pathspec 을 받지 않는다(`--` 뒤에 아무것도 없다).
+
+**결과 크기·스트리밍(TS 와 맞춘 것)** — 각 갈래는 `--max-count=10001` 이고 합집합이 1만 개를 넘으면 앞 1만 개 + `truncated: true` 다. 갈래의 stdout 은 `run` 이라 기본 `max_buffer`(64MB)가 상한이다(1만 해시 ≈ 0.4MB).
+그래프 순서 병합은 `stream` 이고 **합집합을 다 찾는 순간 스트림을 버려 git 을 끊는다**(TS 가 `break` 로 제너레이터를 닫는 것과 같다). 레코드 하나의 상한은 로그 커서와 같은 16MB(`MAX_STREAM_RECORD`)다.
+**SSH 16MB 선읽기**: 이 채널의 소비는 해시 집합 삽입뿐이라 지연으로 상한을 넘는 일은 사실상 없다. 넘으면(원격은 이미 죽었다) `SSH 선읽기 상한(16MB)을 넘어 검색을 중단했습니다`(code ERROR)로 끝나고 다시 검색하면 된다 — TS(ssh2)는 backpressure 라 오류가 없다(2b 의 알려진 차이, 사용자 결정 D3). Local·WSL 은 파이프 backpressure 라 상한이 없다.
+
+**activity 의 순서와 시그니처(핵심 결정)** — TS 와 같은 순서다: 같은 키(`activity\0<repoId>\0<범위 키>`)의 진행 중 요청에 합류 → 첫 페이지 문(`RepoState::after_first_page`) → 시그니처 → 캐시(`(시그니처, 결과)` 8개, **삽입 순서** — 적중해도 순서가 안 바뀌고 같은 키를 다시 넣으면 맨 뒤) → 큐 슬롯 안에서 스트림. 빈 저장소는 빈 결과다.
+- **기억한 시그니처(`known_signature`)를 소비하지 않는다.** TS 는 감시가 갱신하는 `knownSigs` 를 재사용하지만(`RepoService.ts:823`), 이 PR 에는 Rust 쪽 감시가 없어 기억값을 갱신할 주체가 없다 — 소비하면 낡은 값이 캐시 적중을 만든다. 그래서 매번 `shared_signature` 로 새로 계산한다(진행 중인 계산에 합류, 제한 20초).
+  `shared_signature` 가 기록하는 것(`finish`)은 그대로라 기억값은 계속 갱신되고, 읽는 곳이 없을 뿐이다. 7b 가 감시로 기억값을 갱신하기 시작하면 이 한 줄(`activity_job` 의 `shared_signature` 호출)을 `known_signature` 우선으로 바꾼다. 대가: activity 호출마다 git 3번이 는다(캐시 적중이어도).
+- **PR 3a 계약**: 공유 계산은 spawn 된 태스크라 future 를 버려도 멈추지 않으므로, 넘긴 계산(`queued_signature`)은 받은 토큰을 **큐 슬롯 대기**(`queue.run(None, Some(token))`)와 **git 실행**(`refs_signature_digest(.., &token)`) 모두에 건다. 제한 시간의 취소가 닿는 길은 이 토큰뿐이다. 큐의 결과 타입이 JSON 이라 시그니처는 셀로 꺼낸다(큐 밖에서 git 을 돌리지 않는다).
+- **합치기는 슬롯과 분리한다.** 합치기를 소스의 큐 키(`queue.run(Some(key))`)로 하면 합친 작업 안에서 시그니처가 같은 큐의 슬롯을 또 요구한다 — 한도(local 6·wsl 4·ssh 4)만큼 겹치면 서로 슬롯을 쥔 채 기다려 20초 제한까지 막힌다.
+  그래서 합치기 전용 큐(`Router::joins`, 슬롯 2^20 개라 막지 않는다 — 합치기·"기다리는 쪽이 모두 떠나면 버려진다"는 `ProcessQueue` 의 키 요청 구현을 그대로 쓴다)에서 하고, 실제 git 은 소스의 큐에서 슬롯 하나씩만 쥔다(`활동_요청은_합쳐지고_큐_한도보다_많아도_서로_막지_않는다` — 키가 다른 요청 16개를 local·ssh 로 돌린다).
+- 오류: 시그니처 계산 실패는 TS 처럼 **GIT**(`for-each-ref` 가 0 이 아닌 코드로 끝남 — `signature.rs` 가 PR 3a 에서는 `Other`(ERROR)였다. fetch 는 `.ok()` 라 종류를 보지 않아 영향이 없다). 제한 시간·취소는 ABORTED. SSH 선읽기 초과는 ERROR(`활동 집계를 중단했습니다`) — 미니맵만 비고 다시 열면 된다.
+
+**골든**: `tests/fixtures/repos/search.fi`(새 fixture — 작성자 셋(홍길동·Alice·Bob)·`--force` 메시지·정규식 문자가 든 메시지·한글·side 가지·`refs/stash` 만 가리키는 닿지 않는 커밋, 시각이 모두 달라 `--date-order` 가 결정적이다)와
+`search.scenarios.json`(시나리오 15개 — 검색 123단계·활동 35단계)를 TS(`goldenChannels.test.ts` → `RepoService.search·activity`)와 Rust(`channels.rs` → `Router::route`)가 시나리오마다 새 저장소에서 단계(`git`·`search`·`activity`)를 순서대로 돌아 `tests/golden/channels/{search,activity}.json` 과 비교한다(인자도 같은지 본다). local 과 SSH(127.0.0.1 하네스, 끝에 `connections()==1`)에서 같다.
+악성 입력: 옵션 모양(`--output=x`·`-1`·`--end-of-options`·`--`·`-c alias.x=!echo`·`--author=alice`), 정규식 문자(`x.*`·`a|b`·`(z)`·`[w]`·`.*`), 셸·인용 문자(`$(…)`·`` `…` ``·`;`·`'`·`"`·개행·이모지·NBSP·U+0085), NUL·비문자열·누락 질의, 잘못된 범위(`null`·문자열·숫자·`-x`·해시 hide·201개 항목·`includeHead` 비불리언·`..` 든 ref)·`requestId` 자리 이동(범위 생략과 `null` 은 bridge 표식(`UNDEFINED_ARG`)으로 구분한다).
+스크립트 `make-repo-fixtures.mjs` 의 `Stream.commit` 에 작성자 옵션 `by`(기본 `WHO`)를 더했다 — 기존 `.fi` 는 바이트까지 그대로다(`git diff --stat` 로 확인). 기존 `files.fi` 가 넘기는 `who: ALICE` 는 예전부터 무시되는 값이라 건드리지 않았다.
+TS 하네스는 `git` 단계 뒤에 `svc.noteLog('logStale', id)` 를 부른다 — 앱에서는 감시가 ref 변경을 알아 기억한 시그니처를 새로 계산하는데 하네스에는 감시가 없어서, 같은 효과로 버린다. Rust 는 이 호출 없이 같은 골든을 낸다(위 "소비하지 않는다").
+결과에 경로가 들어가지 않아 refs 시험의 시험 루트 스크럽(`root_long`)은 필요 없다 — 다만 러너 TEMP 가 8.3 짧은 이름이어도 같음을 이 PC 에서 짧은 이름 TMP/TEMP 로 한 번 돌려 확인했다(아래 "검증").
+
+**그 밖의 시험**(`channels.rs` 13개 + `search.rs`·`activity.rs`·`router.rs` 단위): `적대적_검색_활동_입력은_git_을_띄우지_않는다`(경로 없는 저장소 — 검증 순서·문구·`rust_handled` 0), `검증을_통과한_요청이_git_실패로_끝나면_git_오류다`(경로 없는 저장소의 검색·활동이 GIT — 시그니처 계산 실패 포함),
+`활동은_첫_페이지_문이_열릴_때까지_기다리고_검색은_기다리지_않는다`(`repos:watch` → 대기 중 → `NoteOp::FirstPage` → 완료), `셸_메타문자_질의는_명령을_실행하지_않는다`(local·ssh — 표식 파일. 골든의 양성 단계 `alice's`·`로그인 버그`·`x.y (z) [w]` 가 인용이 깨지지 않았음을 본다),
+`검색_결과는_1만개에서_자르고_truncated_를_알린다`(커밋 10,010개·두 갈래가 모두 1만 1개라 병합 스트림을 끝까지 훑는다·활동 total 10,010), `검색_활동_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카`, `등록_전에_온_cancel_은_검색과_활동을_git_없이_취소한다`, `진행_중_검색_활동을_취소해도_멈추지_않는다`,
+`활동_요청은_합쳐지고_큐_한도보다_많아도_서로_막지_않는다`(같은 키 셋 중 하나만 취소 + 키가 다른 16개, local·ssh). `ssh_route.rs` 의 "잘못된 호스트면 연결 없이 ERROR"·"스위치가 꺼지면 사이드카" 표에 두 채널이 더해졌다.
+단위: 인자가 TS 와 바이트까지 같음(`search.rs`·`activity.rs`), 옵션 모양 질의가 접두가 붙은 한 인자로만 들어감, 해시 갈래 문턱(4·40·41·대소문자·공백), 검증 순서·문구, 빈 질의가 git 을 안 띄움, 캐시(시그니처 일치·삽입 순서·8개), `router.rs` 의 소유 술어 시험.
+
+**대응표**(`test-map.json`): `N/A: PR 4` 16개를 전부 Rust 대응으로 바꿨다 — `activityRepo` 2개·`search` 10개(검색 질의 `it` 는 `channels.rs::검색_활동_시나리오가_ts_골든과_같다`, 빈 질의는 `search.rs::빈_질의는_git_을_띄우지_않고_빈_결과를_낸다`),
+그리고 PR 3a 가 `N/A: PR 4` 로 돌려놓은 `repoService` 4개를 **activity 수준 시험**(라우터 경유·실제 git 저장소)으로 매핑했다:
+
+| TS `it` | Rust | 단정 |
+|---|---|---|
+| `noteLog(logStale)` | `활동은_logstale_알림_뒤에도_바뀐_저장소를_새로_센다` | 활동 → 커밋 → `NoteOp::Stale` → 활동이 +1, 기억이 비었다, 모르는 저장소는 무시 |
+| `noteLog(fetchChanged)` | `활동은_fetch_변경_알림_뒤에도_…` | 같은 모양(`NoteOp::FetchChanged`) |
+| 시그니처 재사용 | `활동은_기억한_시그니처를_재사용하지_않고_알림_없이도_매번_새로_계산한다` | **TS 와 반대로 "재사용하지 않음"을 단정한다** — 첫 활동 뒤 기억이 있어도 알림 없이 커밋하면 활동이 +1(기억값을 읽는 구현이면 캐시 적중으로 낡은 값이 나온다), 기억이 갱신되고, 바뀐 게 없으면 캐시 적중, ref 삭제도 반영 |
+| `StaleLogError` | `로그가_stale_을_알린_뒤의_활동은_바뀐_이력을_센다` | `git:log` 가 STALE 을 내는 시나리오(`branchy`: 커서를 물리고 `topic` 삭제) 뒤 활동 total = `rev-list --count`(줄었다) |
+
+주의: 앞의 두 알림 시험은 PR 4 에서는 **알림이 없어도 통과한다**(기억값을 안 읽으므로). 알림이 활동 결과를 깨지 않음을 보증할 뿐이고, 알림이 필요해지는 것은 7b 가 재사용을 켜는 때다(그때 알림 없이는 낡은 값이 나오므로 이 시험이 의미를 갖는다 — 7b 에서 "알림 없이는 낡다"를 단정하는 시험을 더한다).
+`golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `search.rs` 를 더했다. 이 PR 뒤 `<파일>.rs::<fn>` 115개, `N/A: PR n` 41개, 사유 있는 N/A 43개(합 199).
+
+**TS 와 다른 점**
+- 비문자열·누락 질의의 문구가 `invalid query` 다(TS 는 `query.trim is not a function` TypeError — code 는 같은 ERROR, 골든은 이 입력의 문구를 비교하지 않는다). NUL 질의는 Rust 가 git 전에 거부하고 TS 는 spawn 검사가 거부한다(둘 다 ERROR).
+- 세 갈래 중 하나가 실패하면 TS 는 가장 먼저 거절된 것의 오류를 내고(`Promise.all`) Rust 는 `try_join!` 로 같다 — 나머지 갈래는 TS 에서는 계속 돌지만 Rust 는 future 를 버려 git 이 정리된다(결과에 영향 없음).
+- SSH 의 선읽기 초과가 검색 병합·활동 집계에서 ERROR 다(위). TS(ssh2)는 backpressure 라 없다.
+- activity 는 호출마다 시그니처를 새로 계산한다(위) — TS 는 감시가 갱신한 기억값을 재사용한다. 7b 에서 맞춘다.
+- 시그니처 계산 실패의 code 를 GIT 으로 맞췄다(`signature.rs`, 위).
+- 같은 키 활동 요청의 합치기는 `futures::Shared`(키 큐)이고 TS 는 `AbortController` + 구독자 수다 — 관찰되는 동작(모두 떠나면 git 종료, 한쪽 취소가 다른 쪽을 죽이지 않음)은 같다.
+
+**사람 확인(자동화 불가·실환경)**
+- `pnpm tauri:build:cdp` 뒤 `ANTLER_ROUTE_LOG=1 ANTLER_DRIVE_DEBUG=1 node scripts/drive.mjs <저장소> --tauri …` 로 검색창(메시지·작성자·해시·`--` 로 시작하는 질의·한글)과 커밋 미니맵이 `-> rust` 인지 보고, `ANTLER_RUST_GIT=0`(사이드카)·Electron 과 결과·순서가 같은지 비교한다. Jira 개발 패널의 이슈 키 검색(`git:search`)도 같다.
+- 10만 커밋 저장소(`scripts/make-big-repo.mjs`)에서 미니맵 첫 표시 시간(시그니처 3 git + 스트림)이 Electron·사이드카와 비슷한지, 검색 중 새 질의로 이전 검색이 바로 취소되는지(작업 관리자에서 git 자식 프로세스가 남지 않는지).
+- 실제 sshd 의 SSH 저장소(큰 저장소)에서 검색·미니맵이 호스트당 연결 하나로 열리는지(원격 `ss`/`who`)와 16MB 선읽기 초과 시 오류가 나지 않는지. 이 PC 에는 WSL 이 없어 WSL 저장소는 **실행해 보지 않았다**(질의는 `--grep=<q>` 한 인자로 `wsl.exe` argv 에 실린다 — 인자 단위 시험과 `tests/exec.rs` 의 `wsl_통합` 이 덮는다).
+
+**남은 위험**
+- activity 가 호출마다 git 3번(시그니처)을 더 돈다 — 느린 SSH·큰 저장소에서 미니맵 지연이 TS 보다 클 수 있다(7b 까지). 캐시 적중이어도 시그니처는 매번 계산한다.
+- `-F -i --grep=` 이 git 판마다 같다고 가정한다(다중 행 질의 `a\nb` 는 줄마다 OR 패턴이 된다 — 골든이 이 동작을 고정한다. 두 판이 같은 git 을 쓰므로 일치하지만 git 판이 바뀌면 골든 갱신이 필요할 수 있다).
+- **SSH 선읽기 초과 분기(검색 병합·활동 집계)는 실행된 적이 없다** — 소비가 빨라 시험에서 상한(16MB, 시험 훅으로 줄일 수 있다)에 닿게 만들지 못했다. 코드는 `log_service` 의 같은 분기를 따랐을 뿐이다. 취소 시험은 2ms 뒤 취소라 스트림 도중에 끊겼는지는 알 수 없다(어느 쪽이든 ABORTED 이거나 정상 끝이어야 하고 슬롯·합치기 표가 풀려 다음 요청이 받아지는 것만 본다).
+- 합치기 큐(`joins`)의 키 표는 버려진 요청의 항목을 다음 요청이 넣을 때 치운다(`ProcessQueue` 의 기존 동작) — 저장소·범위 조합 수에 비례한 작은 표다.
+- 해시 갈래의 `rev-parse` 가 모호한 짧은 해시(여러 객체에 일치)에서 실패하면 조용히 갈래가 비는 것은 TS 와 같다.
 
 ## Phase 0 에서 확인한 것
 

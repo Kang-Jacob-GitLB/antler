@@ -1,0 +1,233 @@
+{
+  "_": "git:search·git:activity 채널 패리티 시나리오. TS(tests/goldenChannels.test.ts → RepoService.search·activity)와 Rust(src-tauri/tests/channels.rs → Router::route)가 시나리오마다 <repo>.fi 를 새 디렉터리에 import 해 steps 를 순서대로 돈다. 단계: { git: [인자…] }(그 저장소에서 날 git 실행 — 작성자·시각은 고정 환경이라 해시가 결정적이다), { search: [질의, 범위?] }(질의 뒤 범위를 생략하면 undefined, null 이면 null — git:search 의 인자 그대로, requestId 는 하네스가 붙인다), { activity: [범위?] }. msg: true 면 ERROR 의 문구도 비교한다(검증이 만든 문구만 — TypeError 문구는 TS·Rust 가 다르다). 인자 안의 '@rev:<식>' 은 git rev-parse 결과 해시로, { '$short': [값, n] }·{ '$upper': 값 }·{ '$cat': [조각…] } 은 로그 시나리오(log.scenarios.json)와 같은 규칙이다. 결과는 tests/golden/channels/{search,activity}.json. 질의 길이 상한은 TS 에 없어 시나리오에 넣지 않는다(local 은 명령줄 한도로 ERROR, ssh 는 원격 셸이 갈라진다).",
+  "scenarios": [
+    {
+      "name": "메시지·작성자(대소문자 무시)·한글·공백 다듬기",
+      "repo": "search",
+      "steps": [
+        { "search": ["로그인"] },
+        { "search": ["ALICE"] },
+        { "search": ["alice"] },
+        { "search": ["홍길동"] },
+        { "search": ["side"] },
+        { "search": ["bob"] },
+        { "search": ["a"] },
+        { "search": ["  로그인  "] },
+        { "search": ["   "] },
+        { "search": [""] },
+        { "search": ["없는 문구"] }
+      ]
+    },
+    {
+      "name": "옵션처럼 보이는 질의는 옵션이 아니다",
+      "repo": "search",
+      "steps": [
+        { "search": ["--force"] },
+        { "search": ["--output=x"] },
+        { "search": ["-1"] },
+        { "search": ["--end-of-options"] },
+        { "search": ["--"] },
+        { "search": ["-c alias.x=!echo"] },
+        { "search": ["--author=alice"] },
+        { "search": ["--grep=force"] },
+        { "search": ["-F"] }
+      ]
+    },
+    {
+      "name": "고정 문자열(-F): 정규식 문자는 글자 그대로다",
+      "repo": "search",
+      "steps": [
+        { "search": ["x.y"] },
+        { "search": ["x.*"] },
+        { "search": ["a|b"] },
+        { "search": ["(z)"] },
+        { "search": ["[w]"] },
+        { "search": ["*v*"] },
+        { "search": ["$u"] },
+        { "search": ["^t"] },
+        { "search": [".*"] },
+        { "search": ["."] },
+        { "search": ["X.Y"] }
+      ]
+    },
+    {
+      "name": "셸·인용 문자가 든 질의는 한 인자로 도착한다",
+      "repo": "search",
+      "steps": [
+        { "search": ["it's"] },
+        { "search": ["say \"hi\""] },
+        { "search": ["$(echo pwned)"] },
+        { "search": ["`id`"] },
+        { "search": ["a;b"] },
+        { "search": ["a b"] },
+        { "search": ["a\\b"] },
+        { "search": ["%s"] },
+        { "search": ["~"] },
+        { "search": ["{x}"] },
+        { "search": ["<>&|"] },
+        { "search": ["\n"] },
+        { "search": ["a\nb"] },
+        { "search": ["😀"] },
+        { "search": ["\t로그인\t"] },
+        { "search": [" 로그인 "] },
+        { "search": ["\u0085로그인"] },
+        { "search": ["alice's"] },
+        { "search": ["로그인 버그"] },
+        { "search": ["x.y (z) [w]"] },
+        { "search": ["a|b $u ^t"] },
+        { "search": ["refactor: x.y (z) [w] *v* a|b $u ^t"] }
+      ]
+    },
+    {
+      "name": "해시 prefix 는 맨 앞에 온다(16진수 4~40자일 때만)",
+      "repo": "search",
+      "steps": [
+        { "search": [{ "$short": ["@rev:main~4", 7] }] },
+        { "search": [{ "$upper": { "$short": ["@rev:main~4", 8] } }] },
+        { "search": [{ "$short": ["@rev:main~2", 4] }] },
+        { "search": [{ "$short": ["@rev:main~2", 3] }] },
+        { "search": ["@rev:main~2"] },
+        { "search": [{ "$cat": ["@rev:main~2", "0"] }] },
+        { "search": [{ "$short": ["@rev:side", 12] }] },
+        { "search": ["deadbeef"] },
+        { "search": ["abcd"] },
+        { "search": ["ABCDEF"] },
+        { "search": [{ "$cat": ["  ", { "$short": ["@rev:main", 9] }, "  "] }] },
+        { "search": [{ "$short": ["@rev:main~1", 5] }, { "solo": ["refs/heads/main"] }] }
+      ]
+    },
+    {
+      "name": "보기 범위: solo·hide·스태시처럼 닿지 않는 커밋",
+      "repo": "search",
+      "steps": [
+        { "search": ["side", { "solo": ["refs/heads/main"] }] },
+        { "search": ["side", { "solo": ["refs/heads/side"] }] },
+        { "search": ["alice", { "solo": ["refs/heads/side"] }] },
+        { "search": ["alice", { "hide": ["refs/heads/side"] }] },
+        { "search": ["alice", { "hide": ["refs/heads/main"] }] },
+        { "search": ["alice", { "hide": ["refs/heads/main"], "includeHead": false }] },
+        { "search": ["alice", {}] },
+        { "search": ["alice", { "solo": [] }] },
+        { "search": [{ "$short": ["@rev:side", 12] }, { "solo": ["refs/heads/main"] }] },
+        { "search": [{ "$short": ["@rev:side", 12] }, { "solo": ["refs/heads/side"] }] },
+        { "search": [{ "$short": ["@rev:side", 12] }, { "hide": ["refs/heads/side"] }] },
+        { "search": [{ "$short": ["@rev:refs/stash", 10] }] },
+        { "search": [{ "$short": ["@rev:refs/stash", 10] }, { "solo": ["@rev:refs/stash"] }] },
+        { "search": ["WIP", { "solo": ["@rev:refs/stash"] }] },
+        { "search": ["WIP"] },
+        { "search": ["alice", { "solo": ["refs/heads/nope"] }] },
+        { "search": ["alice", { "solo": ["refs/heads/nope", "refs/heads/main"] }] },
+        { "search": ["alice", { "solo": ["refs/heads/main", "refs/heads/main"] }] }
+      ]
+    },
+    {
+      "name": "잘못된 범위·질의는 오류다",
+      "repo": "search",
+      "steps": [
+        { "search": ["a", null], "msg": true },
+        { "search": ["a", "x"], "msg": true },
+        { "search": ["a", 5], "msg": true },
+        { "search": ["a", true], "msg": true },
+        { "search": ["a", ["x"]], "msg": true },
+        { "search": ["a", { "solo": ["-x"] }], "msg": true },
+        { "search": ["a", { "solo": ["--output=x"] }], "msg": true },
+        { "search": ["a", { "solo": "x" }], "msg": true },
+        { "search": ["a", { "hide": [5] }], "msg": true },
+        { "search": ["a", { "hide": ["@rev:main"] }], "msg": true },
+        { "search": ["a", { "solo": ["refs/heads/a..b"] }], "msg": true },
+        { "search": ["a", { "includeHead": "no" }], "msg": true },
+        { "search": ["a", { "solo": { "$gen": ["refs/heads/b", 201] } }], "msg": true },
+        { "search": [5, null], "msg": true },
+        { "search": [5] },
+        { "search": [null] },
+        { "search": [[]] },
+        { "search": [["a"]] },
+        { "search": [{ "x": 1 }] },
+        { "search": [true] },
+        { "search": [] },
+        { "search": ["a\u0000b"] },
+        { "search": ["\u0000"] },
+        { "search": ["  \u0000  "] },
+        { "search": ["로그인"] }
+      ]
+    },
+    {
+      "name": "커밋을 더하면 다음 검색에 보인다",
+      "repo": "search",
+      "steps": [
+        { "search": ["brand new"] },
+        { "git": ["commit", "-q", "--allow-empty", "-m", "brand new thing"] },
+        { "search": ["brand new"] },
+        { "search": ["홍길동"] },
+        { "git": ["update-ref", "-d", "refs/heads/side"] },
+        { "search": ["side"] },
+        { "search": ["bob"] }
+      ]
+    },
+    {
+      "name": "빈 저장소는 빈 결과다",
+      "repo": "empty",
+      "steps": [
+        { "search": ["아무거나"] },
+        { "search": ["abcd1234"] },
+        { "search": ["a", { "solo": ["refs/heads/main"] }] },
+        { "search": ["   "] },
+        { "search": ["a", null], "msg": true },
+        { "activity": [] },
+        { "activity": [{ "solo": ["refs/heads/main"] }] }
+      ]
+    },
+    {
+      "name": "활동: 기본·solo·hide·includeHead",
+      "repo": "search",
+      "steps": [
+        { "activity": [] },
+        { "activity": [{}] },
+        { "activity": [{ "solo": ["refs/heads/main"] }] },
+        { "activity": [{ "solo": ["refs/heads/side"] }] },
+        { "activity": [{ "solo": ["refs/heads/side", "refs/heads/main"] }] },
+        { "activity": [{ "solo": ["refs/heads/nope"] }] },
+        { "activity": [{ "solo": ["@rev:refs/stash"] }] },
+        { "activity": [{ "hide": ["refs/heads/side"] }] },
+        { "activity": [{ "hide": ["refs/heads/main"] }] },
+        { "activity": [{ "hide": ["refs/heads/main"], "includeHead": false }] },
+        { "activity": [{ "hide": ["refs/heads/main", "refs/heads/side"], "includeHead": false }] },
+        { "activity": [] }
+      ]
+    },
+    {
+      "name": "활동: 저장소가 바뀌면 시그니처가 달라져 다시 센다",
+      "repo": "search",
+      "steps": [
+        { "activity": [] },
+        { "activity": [{ "solo": ["refs/heads/side"] }] },
+        { "git": ["commit", "-q", "--allow-empty", "-m", "one more"] },
+        { "activity": [] },
+        { "activity": [{ "solo": ["refs/heads/side"] }] },
+        { "git": ["update-ref", "-d", "refs/heads/side"] },
+        { "activity": [] },
+        { "activity": [{ "hide": ["refs/heads/main"] }] },
+        { "git": ["update-ref", "--no-deref", "HEAD", "@rev:main~2"] },
+        { "activity": [] },
+        { "activity": [] }
+      ]
+    },
+    {
+      "name": "활동: 잘못된 범위는 오류다",
+      "repo": "search",
+      "steps": [
+        { "activity": [null], "msg": true },
+        { "activity": ["x"], "msg": true },
+        { "activity": [5], "msg": true },
+        { "activity": [{ "solo": ["-x"] }], "msg": true },
+        { "activity": [{ "solo": "x" }], "msg": true },
+        { "activity": [{ "hide": ["@rev:main"] }], "msg": true },
+        { "activity": [{ "includeHead": 1 }], "msg": true },
+        { "activity": [] }
+      ]
+    },
+    { "name": "활동: basic(병합·빈 커밋)", "repo": "basic", "steps": [{ "activity": [] }, { "activity": [{ "solo": ["refs/heads/main"] }] }] },
+    { "name": "활동: branchy(태그·리모트 추적 ref)", "repo": "branchy", "steps": [{ "activity": [] }, { "activity": [{ "hide": ["refs/heads/dev"] }] }, { "search": ["main"] }, { "search": ["feature"] }] },
+    { "name": "활동·검색: files(작성자 둘·병합)", "repo": "files", "steps": [{ "activity": [] }, { "search": ["alice"] }, { "search": ["large"] }, { "search": ["Merge"] }] }
+  ]
+}
