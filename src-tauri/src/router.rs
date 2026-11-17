@@ -848,6 +848,11 @@ impl Router {
             Target::Local { .. } => SourceRuntime { exec: Arc::new(GitExecutor::Local(LocalExecutor::default())), queue: ProcessQueue::new(LOCAL_LIMIT) },
             Target::Wsl { distro, .. } => SourceRuntime { exec: Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))), queue: ProcessQueue::new(WSL_LIMIT) },
             Target::Ssh { host, .. } => {
+                // resolve 와 이 사이에 미러가 바뀌어 정리된 호스트면 다시 만들지 않는다(낡은 대상이 지운 호스트로 접속·등록하지 않게).
+                // sources 잠금 안에서 본다 — 정리(sync_ssh_hosts)도 이 잠금을 잡으므로, 여기서 통과하면 뒤이은 정리가 지운다
+                if !self.mirror.ssh_hosts().contains(host) {
+                    return Err(ExecError::Other { message: "저장소 목록이 바뀌었습니다. 다시 시도하세요".to_string() });
+                }
                 let pool = self.ssh_pool().ok_or_else(|| ExecError::Other { message: "SSH 를 사용할 수 없습니다".to_string() })?;
                 SourceRuntime { exec: Arc::new(GitExecutor::Ssh(pool.get(host))), queue: ProcessQueue::new(SSH_LIMIT) }
             }
