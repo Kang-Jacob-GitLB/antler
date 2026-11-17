@@ -63,6 +63,10 @@
   Windows 는 argv 가 UTF-16 이라 원래 바이트로 `-c` 를 만들 수도 없다. 재현: 악성 `.git/config` + `.gitattributes` 로 status 가 저장소가 심은 명령을 실행했다), 드라이버가 256개를 넘거나 `-c` 총 길이가 24000자를 넘음(Windows 명령줄 한계 32767자).
   WSL·SSH 실행기는 Node 가 그 파일 시스템을 볼 수 없어 이 검사를 하지 않는다. Linux git 의 status 는 디렉터리 symlink 를 따라 들어가지 않고 링크 자체를 한 항목으로 보고하므로 `j/config` 가 허용 목록에 들어오지 않는다고 본다 — **미확인**(실측하지 않았다).
   확인과 git 의 읽기 사이 경쟁(TOCTOU)은 막지 못한다. **알려진 한계**: 정션이 순환(`mklink /J a .`)하면 status 의 재귀가 길어지는 로컬 DoS 가 가능하다 — 이 가드의 범위 밖이다.
+  **`git diff --no-index` 도 필터를 돈다**(실측, git 2.49): "저장소 속성을 읽지 않는다"는 전제는 틀렸다. `-C` 저장소의 설정에 `filter.<이름>.clean|process` 가 있고 `.gitattributes`·`.git/info/attributes` 규칙이 읽는 파일에 맞으면
+  그 명령이 실행된다. 그래서 `--no-index` 를 쓰는 모든 호출에 같은 가드를 건다 — untracked diff(`wipFileDiff`, 모든 area 공통)와 LFS 판정용 파일 읽기(`repoExtras.ts` `fileUsesLfs`: 작업 트리 `.gitattributes`·`info/attributes`, 저장소를 열 때마다 돈다.
+  가드 조회는 저장소당 한 번). 무력화할 수 없으면 wip 는 오류로 거부하고, repoExtras 는 그 파일을 읽지 않고 기존 실패 처리(`lfs: false`)와 같게 둔다.
+  작업 트리를 읽지 않는 호출(`blame`·`cat-file blob`·`ls-files`·`stash list`·`check-attr`·`ls-tree`)은 필터를 돌리지 않아 가드 대상이 아니다.
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
