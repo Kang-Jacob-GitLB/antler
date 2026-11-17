@@ -1,0 +1,791 @@
+{
+  "scenarios": [
+    {
+      "name": "basic: 로컬 브랜치 둘·origin/HEAD 없음(기본 브랜치는 로컬 main)",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+            "name": "main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/feature",
+              "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+              "isHead": false,
+              "name": "feature"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": true,
+              "name": "main"
+            }
+          ],
+          "remotes": [],
+          "stashes": [],
+          "submodules": [],
+          "tags": [],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s0/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "branchy: 태그·리모트 추적 ref(리모트 설정 없음 — 첫 '/' 앞이 그룹 이름)",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "124f17511efb40465fcb3b759e9e0319294bdd95",
+            "name": "main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "124f17511efb40465fcb3b759e9e0319294bdd95"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/dev",
+              "hash": "ba561feb51a8655b67528c9146d7b7408d6d919e",
+              "isHead": false,
+              "name": "dev"
+            },
+            {
+              "fullName": "refs/heads/feature/a",
+              "hash": "400f246be0a60477f1cac28120fa006b55f0d51d",
+              "isHead": false,
+              "name": "feature/a"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "124f17511efb40465fcb3b759e9e0319294bdd95",
+              "isHead": true,
+              "name": "main"
+            },
+            {
+              "fullName": "refs/heads/release/1.0",
+              "hash": "297ae182df6d61f5e25ffcee400bb72456ca9058",
+              "isHead": false,
+              "name": "release/1.0"
+            },
+            {
+              "fullName": "refs/heads/topic",
+              "hash": "50ffab607a496b9a4e826bc3cbffea2f5135e22d",
+              "isHead": false,
+              "name": "topic"
+            }
+          ],
+          "remotes": [
+            {
+              "branches": [
+                {
+                  "fullName": "refs/remotes/origin/dev",
+                  "hash": "a1f7adbbb1ce59242e82b624c3792085c1814d08",
+                  "isHead": false,
+                  "name": "origin/dev"
+                },
+                {
+                  "fullName": "refs/remotes/origin/main",
+                  "hash": "37f5897762622c66bc076f659cfb5dee99a98b16",
+                  "isHead": false,
+                  "name": "origin/main"
+                }
+              ],
+              "name": "origin"
+            },
+            {
+              "branches": [
+                {
+                  "fullName": "refs/remotes/team/alice/work",
+                  "hash": "400f246be0a60477f1cac28120fa006b55f0d51d",
+                  "isHead": false,
+                  "name": "team/alice/work"
+                }
+              ],
+              "name": "team"
+            }
+          ],
+          "stashes": [],
+          "submodules": [],
+          "tags": [
+            {
+              "annotated": true,
+              "date": 1700057600,
+              "fullName": "refs/tags/v2.0",
+              "hash": "e0f803df3cac6d2df2a5c9cb77118826c73313bb",
+              "name": "v2.0",
+              "targetsCommit": true
+            },
+            {
+              "annotated": false,
+              "date": 1700018000,
+              "fullName": "refs/tags/v1.0",
+              "hash": "0c1ef4a668134fadcbfd9430a07e3ca12c1ccf24",
+              "name": "v1.0",
+              "targetsCommit": true
+            }
+          ],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "124f17511efb40465fcb3b759e9e0319294bdd95",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s1/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "branchy: 리모트 설정·업스트림·gone·origin/HEAD·이름에 / 가 든 리모트",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "37f5897762622c66bc076f659cfb5dee99a98b16",
+            "name": "origin/main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "124f17511efb40465fcb3b759e9e0319294bdd95"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/dev",
+              "hash": "ba561feb51a8655b67528c9146d7b7408d6d919e",
+              "isHead": false,
+              "name": "dev",
+              "upstream": "origin/dev"
+            },
+            {
+              "fullName": "refs/heads/feature/a",
+              "hash": "400f246be0a60477f1cac28120fa006b55f0d51d",
+              "isHead": false,
+              "name": "feature/a"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "124f17511efb40465fcb3b759e9e0319294bdd95",
+              "isHead": true,
+              "name": "main",
+              "upstream": "origin/main"
+            },
+            {
+              "fullName": "refs/heads/release/1.0",
+              "hash": "297ae182df6d61f5e25ffcee400bb72456ca9058",
+              "isHead": false,
+              "name": "release/1.0"
+            },
+            {
+              "fullName": "refs/heads/topic",
+              "hash": "50ffab607a496b9a4e826bc3cbffea2f5135e22d",
+              "isHead": false,
+              "name": "topic",
+              "upstream": "origin/vanished"
+            }
+          ],
+          "remotes": [
+            {
+              "branches": [
+                {
+                  "fullName": "refs/remotes/origin/dev",
+                  "hash": "a1f7adbbb1ce59242e82b624c3792085c1814d08",
+                  "isHead": false,
+                  "name": "origin/dev"
+                },
+                {
+                  "fullName": "refs/remotes/origin/main",
+                  "hash": "37f5897762622c66bc076f659cfb5dee99a98b16",
+                  "isHead": false,
+                  "name": "origin/main"
+                }
+              ],
+              "name": "origin"
+            },
+            {
+              "branches": [
+                {
+                  "fullName": "refs/remotes/team/alice/work",
+                  "hash": "400f246be0a60477f1cac28120fa006b55f0d51d",
+                  "isHead": false,
+                  "name": "team/alice/work"
+                }
+              ],
+              "name": "team/alice"
+            }
+          ],
+          "stashes": [],
+          "submodules": [],
+          "tags": [
+            {
+              "annotated": true,
+              "date": 1700057600,
+              "fullName": "refs/tags/v2.0",
+              "hash": "e0f803df3cac6d2df2a5c9cb77118826c73313bb",
+              "name": "v2.0",
+              "targetsCommit": true
+            },
+            {
+              "annotated": false,
+              "date": 1700018000,
+              "fullName": "refs/tags/v1.0",
+              "hash": "0c1ef4a668134fadcbfd9430a07e3ca12c1ccf24",
+              "name": "v1.0",
+              "targetsCommit": true
+            }
+          ],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "124f17511efb40465fcb3b759e9e0319294bdd95",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s2/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "name": "branchy: detached HEAD",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "124f17511efb40465fcb3b759e9e0319294bdd95",
+            "name": "main"
+          },
+          "head": {
+            "branch": null,
+            "hash": "124f17511efb40465fcb3b759e9e0319294bdd95"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/dev",
+              "hash": "ba561feb51a8655b67528c9146d7b7408d6d919e",
+              "isHead": false,
+              "name": "dev"
+            },
+            {
+              "fullName": "refs/heads/feature/a",
+              "hash": "400f246be0a60477f1cac28120fa006b55f0d51d",
+              "isHead": false,
+              "name": "feature/a"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "124f17511efb40465fcb3b759e9e0319294bdd95",
+              "isHead": false,
+              "name": "main"
+            },
+            {
+              "fullName": "refs/heads/release/1.0",
+              "hash": "297ae182df6d61f5e25ffcee400bb72456ca9058",
+              "isHead": false,
+              "name": "release/1.0"
+            },
+            {
+              "fullName": "refs/heads/topic",
+              "hash": "50ffab607a496b9a4e826bc3cbffea2f5135e22d",
+              "isHead": false,
+              "name": "topic"
+            }
+          ],
+          "remotes": [
+            {
+              "branches": [
+                {
+                  "fullName": "refs/remotes/origin/dev",
+                  "hash": "a1f7adbbb1ce59242e82b624c3792085c1814d08",
+                  "isHead": false,
+                  "name": "origin/dev"
+                },
+                {
+                  "fullName": "refs/remotes/origin/main",
+                  "hash": "37f5897762622c66bc076f659cfb5dee99a98b16",
+                  "isHead": false,
+                  "name": "origin/main"
+                }
+              ],
+              "name": "origin"
+            },
+            {
+              "branches": [
+                {
+                  "fullName": "refs/remotes/team/alice/work",
+                  "hash": "400f246be0a60477f1cac28120fa006b55f0d51d",
+                  "isHead": false,
+                  "name": "team/alice/work"
+                }
+              ],
+              "name": "team"
+            }
+          ],
+          "stashes": [],
+          "submodules": [],
+          "tags": [
+            {
+              "annotated": true,
+              "date": 1700057600,
+              "fullName": "refs/tags/v2.0",
+              "hash": "e0f803df3cac6d2df2a5c9cb77118826c73313bb",
+              "name": "v2.0",
+              "targetsCommit": true
+            },
+            {
+              "annotated": false,
+              "date": 1700018000,
+              "fullName": "refs/tags/v1.0",
+              "hash": "0c1ef4a668134fadcbfd9430a07e3ca12c1ccf24",
+              "name": "v1.0",
+              "targetsCommit": true
+            }
+          ],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": null,
+              "detached": true,
+              "head": "124f17511efb40465fcb3b759e9e0319294bdd95",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s3/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "basic: 커밋 없는 브랜치를 가리키는 HEAD",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+            "name": "main"
+          },
+          "head": {
+            "branch": "orphan-x",
+            "hash": null
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/feature",
+              "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+              "isHead": false,
+              "name": "feature"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": false,
+              "name": "main"
+            }
+          ],
+          "remotes": [],
+          "stashes": [],
+          "submodules": [],
+          "tags": [],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "orphan-x",
+              "detached": false,
+              "head": null,
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s4/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "empty: 빈 저장소",
+      "result": {
+        "data": {
+          "head": {
+            "branch": "main",
+            "hash": null
+          },
+          "local": [],
+          "remotes": [],
+          "stashes": [],
+          "submodules": [],
+          "tags": [],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": null,
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s5/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "code: 태그(annotated·lightweight)·가지 둘",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+            "name": "main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "a4827a9ec94cf7d010fab3ae6413a356e23858d7"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/feature/x",
+              "hash": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+              "isHead": false,
+              "name": "feature/x"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+              "isHead": true,
+              "name": "main"
+            }
+          ],
+          "remotes": [],
+          "stashes": [],
+          "submodules": [],
+          "tags": [
+            {
+              "annotated": true,
+              "date": 1700010800,
+              "fullName": "refs/tags/v2",
+              "hash": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+              "name": "v2",
+              "targetsCommit": true
+            },
+            {
+              "annotated": false,
+              "date": 1700003600,
+              "fullName": "refs/tags/v1",
+              "hash": "385845e9bf985a71211be8ea1f43572243b010e5",
+              "name": "v1",
+              "targetsCommit": true
+            }
+          ],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "a4827a9ec94cf7d010fab3ae6413a356e23858d7",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s6/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "스태시 둘(한글 메시지)",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+            "name": "main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/feature",
+              "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+              "isHead": false,
+              "name": "feature"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": true,
+              "name": "main"
+            }
+          ],
+          "remotes": [],
+          "stashes": [
+            {
+              "date": 1700000000,
+              "hash": "0f1f11c728d5b0771aa00ae99348ea24d2fe9cb4",
+              "index": 0,
+              "message": "On main: 두 번째",
+              "ref": "stash@{0}"
+            },
+            {
+              "date": 1700000000,
+              "hash": "9f0af4912bcb88e0f16d7518f02cef974e9d36eb",
+              "index": 1,
+              "message": "On main: 첫 번째 wip",
+              "ref": "stash@{1}"
+            }
+          ],
+          "submodules": [],
+          "tags": [],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s7/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "name": "작업 트리(브랜치·detached·잠금·한글 경로)",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+            "name": "main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/feature",
+              "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+              "isHead": false,
+              "name": "feature"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": true,
+              "name": "main"
+            },
+            {
+              "fullName": "refs/heads/wtb",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": false,
+              "name": "wtb"
+            }
+          ],
+          "remotes": [],
+          "stashes": [],
+          "submodules": [],
+          "tags": [],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s8/repo",
+              "prunable": false
+            },
+            {
+              "bare": false,
+              "branch": "wtb",
+              "detached": false,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": false,
+              "locked": false,
+              "path": "<ROOT>/s8/wt",
+              "prunable": false
+            },
+            {
+              "bare": false,
+              "branch": null,
+              "detached": true,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": false,
+              "locked": true,
+              "path": "<ROOT>/s8/wt2",
+              "prunable": false
+            },
+            {
+              "bare": false,
+              "branch": null,
+              "detached": true,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": false,
+              "locked": false,
+              "path": "<ROOT>/s8/한글 작업",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 5
+    },
+    {
+      "name": "서브모듈: clean·modified·uninitialized(없는 디렉터리·빈 디렉터리)·.gitmodules 이름·한글·공백 경로",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+            "name": "main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/feature",
+              "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+              "isHead": false,
+              "name": "feature"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": true,
+              "name": "main"
+            }
+          ],
+          "remotes": [],
+          "stashes": [],
+          "submodules": [],
+          "tags": [],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s9/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 19
+    },
+    {
+      "name": "알려진 차이: 악센트 문자가 든 브랜치 이름의 정렬(TS 는 ICU 라 é 가 e 와 f 사이, Rust 근사는 코드 포인트라 z 뒤)",
+      "result": {
+        "data": {
+          "defaultBranch": {
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+            "name": "main"
+          },
+          "head": {
+            "branch": "main",
+            "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58"
+          },
+          "local": [
+            {
+              "fullName": "refs/heads/eagle",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": false,
+              "name": "eagle"
+            },
+            {
+              "fullName": "refs/heads/éclair",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": false,
+              "name": "éclair"
+            },
+            {
+              "fullName": "refs/heads/feature",
+              "hash": "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+              "isHead": false,
+              "name": "feature"
+            },
+            {
+              "fullName": "refs/heads/fzzz",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": false,
+              "name": "fzzz"
+            },
+            {
+              "fullName": "refs/heads/main",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": true,
+              "name": "main"
+            },
+            {
+              "fullName": "refs/heads/zebra",
+              "hash": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isHead": false,
+              "name": "zebra"
+            }
+          ],
+          "remotes": [],
+          "stashes": [],
+          "submodules": [],
+          "tags": [],
+          "worktrees": [
+            {
+              "bare": false,
+              "branch": "main",
+              "detached": false,
+              "head": "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+              "isMain": true,
+              "locked": false,
+              "path": "<ROOT>/s10/repo",
+              "prunable": false
+            }
+          ]
+        },
+        "ok": true
+      },
+      "step": 4
+    }
+  ]
+}

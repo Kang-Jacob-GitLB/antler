@@ -509,7 +509,7 @@ async fn 등록_전에_온_cancel_은_조회를_취소하지만_전환은_취소
 #[tokio::test]
 async fn 다른_채널은_영향을_받지_않는다() {
     let r = router_with_both();
-    for ch in ["gh:repo", "git:refs", "repos:list", "app:version"] {
+    for ch in ["gh:repo", "git:search", "repos:list", "app:version"] {
         assert!(matches!(r.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
     }
     assert_eq!(r.rust_handled(), 0);

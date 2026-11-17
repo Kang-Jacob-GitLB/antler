@@ -18,7 +18,7 @@
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
-//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
+//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote)·`git::refs_service`(refs·refsDetails — 인자가 저장소 id 뿐) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
 //!   파일 경로는 항상 `--` 뒤(blame 의 크기 조회·코드 탐색기의 `cat-file`·`ls-tree` 만 `<해시>:<경로>` 한 인자)다. 이 파일은 인자를 만들지 않는다.
 //! - 취소: `requestId → CancellationToken` 레지스트리. cancel 이 등록보다 먼저 도착해도(별개 호출이라 순서가 보장되지 않는다)
 //!   tombstone 이 기억했다가 등록 때 이미 취소된 토큰을 준다.
@@ -47,6 +47,7 @@ use crate::git::file_channels::{
 };
 use crate::git::log_service::{parse_query, LogService, NoteSink};
 use crate::git::lru::LruCache;
+use crate::git::refs_service::{refs_details, refs_snapshot};
 use crate::git::repo_state::RepoState;
 use crate::mirror::{RepoMirror, Resolved, Target};
 
@@ -64,6 +65,8 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:tree",
     "git:blob",
     "git:onRemote",
+    "git:refs",
+    "git:refsDetails",
 ];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
@@ -685,6 +688,7 @@ impl Router {
             "git:compare" | "git:fileDiff" | "git:fileHistory" | "git:blame" => self.git_file_channel(channel, &args).await,
             "git:fetch" => self.git_fetch(&args).await,
             "git:resolveRev" | "git:tree" | "git:blob" | "git:onRemote" => self.git_code_channel(channel, &args).await,
+            "git:refs" | "git:refsDetails" => self.git_refs_channel(channel, &args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -1004,6 +1008,43 @@ impl Router {
         }
     }
 
+    /// 사이드바 ref 채널: `git:refs(repoId)`·`git:refsDetails(repoId)`. 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), github 소스는 미러가 사이드카로 보낸다.
+    /// TS `RepoService` 와 같다: 큐 슬롯 안에서 git(키 `refs:<id>`·`refsDetails:<id>` 로 같은 요청을 합친다 — 취소 신호가 없다). 캐시는 없다.
+    /// `refsDetails` 만 첫 로그 페이지 문(`RepoState::after_first_page`)을 **큐에 들어가기 전에** 기다린다 — 비싼 조회가 첫 화면을 늦추지 않게(문이 없으면 바로 간다)
+    async fn git_refs_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note(channel, "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        self.note(channel, "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let details = channel == "git:refsDetails";
+        let result = async {
+            if details {
+                self.repo_state.after_first_page(repo_id).await;
+            }
+            let rt = self.runtime(&target)?;
+            let (exec, path) = (rt.exec.clone(), target.path().to_string());
+            let key = format!("{}:{repo_id}", if details { "refsDetails" } else { "refs" });
+            rt.queue
+                .run(Some(&key), None, move || async move {
+                    let opts = RunOpts::default();
+                    Ok(Arc::new(if details { to_value(&refs_details(&exec, &path, &opts, false).await?)? } else { to_value(&refs_snapshot(&exec, &path, &opts, true).await?)? }))
+                })
+                .await
+        }
+        .await;
+        Routed::Done(match result {
+            Ok(data) => ok_env(Arc::try_unwrap(data).unwrap_or_else(|a| (*a).clone())),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
     /// 불변 결과의 캐시 → 같은 키 요청 합치기 → 큐 슬롯 안에서 `task`. `commit` 과 같은 방식이다:
     /// 요청 토큰은 실행기에 넘기지 않고(합쳐진 다른 호출자의 프로세스까지 죽이게 된다) 이 호출자는 기다리기만 그만둔다
     async fn cached_shared<F, Fut>(
@@ -1184,7 +1225,7 @@ mod tests {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache")]);
         let r = Router::new(true, false, m.clone());
         // 채널이 등록되지 않았다
-        assert!(is_sidecar(&r.route("git:refs", &json!(["a"])).await));
+        assert!(is_sidecar(&r.route("git:search", &json!(["a"])).await));
         // 미러에 없는 저장소·ssh·github
         for id in ["nope", "s", "g"] {
             assert!(is_sidecar(&r.route("git:commit", &json!([id, "abcd"])).await), "{id}");
@@ -1229,6 +1270,24 @@ mod tests {
         // 미러 검사에 걸린 저장소는 사이드카가 아니라 ERROR 다(다른 채널과 같다)
         for (ch, args) in calls("unc") {
             let env = envelope(r.route(ch, &args).await);
+            assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+        }
+        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+    }
+
+    /// 사이드바 ref 채널(`git:refs`·`git:refsDetails`)의 소유도 같은 한 술어다 — 인자는 저장소 id 뿐이다
+    #[tokio::test]
+    async fn ref_채널의_소유는_다른_git_채널과_같은_한_술어다() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
+        let r = Router::new(true, false, m.clone());
+        let off = Router::new(false, false, m);
+        for ch in ["git:refs", "git:refsDetails"] {
+            assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+            for id in ["nope", "s", "g"] {
+                assert!(is_sidecar(&r.route(ch, &json!([id])).await), "{id} {ch}");
+            }
+            assert!(is_sidecar(&off.route(ch, &json!(["a"])).await), "{ch}");
+            let env = envelope(r.route(ch, &json!(["unc"])).await);
             assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
         }
         assert_eq!(r.rust_handled() + off.rust_handled(), 0);

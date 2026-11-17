@@ -11,6 +11,22 @@ use super::{js_number, js_trim, JsNumber};
 pub const REFS_FORMAT: &str = "%(refname)%00%(objectname)%00%(*objectname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track,nobracket)\
 %00%(symref)%00%(objecttype)%00%(*objecttype)%00%(creatordate:unix)";
 
+/// `git for-each-ref` 전체 인자(`REFS_ARGS`)
+pub fn refs_args() -> Vec<String> {
+    ["for-each-ref".to_string(), format!("--format={REFS_FORMAT}"), "refs/heads".into(), "refs/remotes".into(), "refs/tags".into()].into()
+}
+
+/// 첫 화면용 인자(`REFS_ARGS_LITE`): ahead/behind 필드(`%(upstream:track)`)를 비워 둔다(필드 위치는 그대로).
+/// 느슨한 ref 가 수천 개인 저장소에서 track 계산만으로 for-each-ref 가 느려진다 — `REFS_TRACK_ARGS` 로 따로 읽는다.
+pub fn refs_args_lite() -> Vec<String> {
+    let mut args = refs_args();
+    args[1] = format!("--format={}", REFS_FORMAT.replace("%(upstream:track,nobracket)", ""));
+    args
+}
+
+/// 로컬 브랜치의 업스트림 ahead/behind 만 읽는 인자(`REFS_TRACK_ARGS`)
+pub const REFS_TRACK_ARGS: [&str; 3] = ["for-each-ref", "--format=%(refname)%00%(upstream:track,nobracket)", "refs/heads"];
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Branch {

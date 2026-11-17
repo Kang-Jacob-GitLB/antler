@@ -97,7 +97,11 @@ impl Drop for TempDir {
 
 /// `<repo>.fi` 를 `git init` 한 새 디렉터리에 import 한다
 fn import(root: &Path, repo: &str) -> PathBuf {
-    let dir = root.join(repo);
+    import_at(root.join(repo), repo)
+}
+
+/// `<repo>.fi` 를 `dir`(없으면 만든다)에 import 한다
+fn import_at(dir: PathBuf, repo: &str) -> PathBuf {
     fs::create_dir_all(&dir).unwrap();
     let ok = raw_git(&dir).args(["init", "-q", "-b", "main"]).status().unwrap().success();
     assert!(ok, "git init");
@@ -361,7 +365,7 @@ async fn 사이드카로_가야_하는_요청은_건드리지_않는다() {
     let dir = import(&tmp.0, "basic");
     let router = Router::new(true, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(router.route("git:commit", &json!(["unknown-id", "abcd1234"])).await, Routed::Sidecar));
-    assert!(matches!(router.route("git:refs", &json!(["basic"])).await, Routed::Sidecar));
+    assert!(matches!(router.route("git:search", &json!(["basic"])).await, Routed::Sidecar));
     let off = Router::new(false, false, mirror_of(&[("basic", dir.as_path())]));
     assert!(matches!(off.route("git:commit", &json!(["basic", "abcd1234"])).await, Routed::Sidecar));
     assert_eq!(router.rust_handled() + off.rust_handled(), 0);
@@ -1293,6 +1297,359 @@ fn 코드_탐색기_argv_는_상수_뒤_검증된_값뿐이다() {
     for banned in ["\"show\"", "\"diff\"", "\"-l\"", "\"--textconv\"", "\"--filters\""] {
         assert!(!body.contains(banned), "코드 탐색기가 {banned} 를 쓴다");
     }
+}
+
+// ── 사이드바 ref 채널: git:refs · git:refsDetails ────────────────
+
+/// 시나리오의 git 단계가 쓰는 고정 작성자·시각(`tests/goldenChannels.test.ts` 의 `REFS_STEP_ENV` 와 같다)
+fn refs_git(dir: &Path) -> std::process::Command {
+    let mut c = raw_git(dir);
+    for (k, v) in [
+        ("GIT_AUTHOR_NAME", "홍길동"),
+        ("GIT_AUTHOR_EMAIL", "dev@example.com"),
+        ("GIT_AUTHOR_DATE", "1700000000 +0900"),
+        ("GIT_COMMITTER_NAME", "홍길동"),
+        ("GIT_COMMITTER_EMAIL", "dev@example.com"),
+        ("GIT_COMMITTER_DATE", "1700000000 +0900"),
+    ] {
+        c.env(k, v);
+    }
+    c
+}
+
+/// 결과의 문자열에 든 시험 루트 경로(`/`·`\` 두 모양)를 `<ROOT>` 로 바꾼다(`scrubRoot` 와 같다)
+fn scrub_root(v: &Value, root: &str) -> Value {
+    let fwd = root.replace('\\', "/");
+    match v {
+        Value::String(s) => json!(s.replace(&fwd, "<ROOT>").replace(root, "<ROOT>")),
+        Value::Array(a) => Value::Array(a.iter().map(|x| scrub_root(x, root)).collect()),
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), scrub_root(x, root))).collect()),
+        _ => v.clone(),
+    }
+}
+
+/// 응답의 `data.local` 을 이름순으로 다시 놓는다(정렬 근사의 알려진 차이를 빼고 나머지를 비교하려고)
+fn sort_local(v: &Value) -> Value {
+    let mut v = v.clone();
+    if let Some(local) = v["data"]["local"].as_array_mut() {
+        local.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    }
+    v
+}
+
+fn local_names(v: &Value) -> Vec<String> {
+    v["data"]["local"].as_array().expect("local").iter().map(|b| b["name"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 사이드바_ref_채널_시나리오가_ts_골든과_같다() {
+    refs_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 사이드바_ref_채널_시나리오가_ssh_에서도_ts_골든과_같다() {
+    refs_scenarios(&Mode::ssh().await).await;
+}
+
+async fn refs_scenarios(mode: &Mode) {
+    let all = read_json("tests/fixtures/repos/refs.scenarios.json");
+    let scenarios = all["scenarios"].as_array().expect("scenarios");
+    let golden = [read_json("tests/golden/channels/refs.json"), read_json("tests/golden/channels/refsDetails.json")];
+    let tmp = TempDir::new("refs");
+    let root = tmp.0.to_string_lossy().into_owned();
+    // CI(Windows 러너)의 TEMP 는 8.3 짧은 이름(`RUNNER~1`)인데 git(worktree list 등)은 긴 이름으로 보고한다 — 두 꼴을 모두 지운다
+    let root_long = fs::canonicalize(&tmp.0).map(|p| p.to_string_lossy().trim_start_matches(r"\\?\").to_string()).unwrap_or_else(|_| root.clone());
+    let mut cursor = [0usize; 2];
+    let mut diffs = Vec::new();
+    for (si, sc) in scenarios.iter().enumerate() {
+        let name = sc["name"].as_str().unwrap();
+        // 시나리오마다 새 디렉터리에 import 한다 — 작업 트리(`../wt`)가 이 아래 형제 디렉터리로 생긴다
+        let dir = import_at(tmp.0.join(format!("s{si}")).join("repo"), sc["repo"].as_str().unwrap());
+        let id = format!("s{si}");
+        let router = mode.router(&[(id.as_str(), dir.as_path())]);
+        // '@rev:<경로>::<식>' 은 그 하위 저장소의 rev-parse 다
+        let rev = |expr: &str| match expr.split_once("::") {
+            Some((sub, e)) => rev_parse(&dir.join(sub), e),
+            None => rev_parse(&dir, expr),
+        };
+        for (i, step) in sc["steps"].as_array().unwrap().iter().enumerate() {
+            if let Some(m) = step.get("mkdir") {
+                fs::create_dir_all(dir.join(m.as_str().unwrap())).unwrap();
+                continue;
+            }
+            if let Some(args) = step.get("git") {
+                let args = expand(args, &rev);
+                let args: Vec<&str> = args.as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+                let cwd = step.get("in").and_then(Value::as_str).map_or_else(|| dir.clone(), |p| dir.join(p));
+                assert!(refs_git(&cwd).args(&args).status().unwrap().success(), "{name}: git {args:?}");
+                continue;
+            }
+            let (k, route) = if step.get("refs").is_some() { (0, "git:refs") } else { (1, "git:refsDetails") };
+            let env = envelope(router.route(route, &json!([id])).await);
+            let got = if env["ok"] == true { json!({ "ok": true, "data": scrub_root(&scrub_root(&env["data"], &root), &root_long) }) } else { json!({ "ok": false, "code": env["code"] }) };
+            let g = &golden[k]["scenarios"][cursor[k]];
+            cursor[k] += 1;
+            assert_eq!((&g["name"], &g["step"]), (&json!(name), &json!(i)), "{name}/{route}: 골든의 순서가 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+            let (got, want) = match sc.get("knownDiff") {
+                // 알려진 차이(정렬 근사): local 의 순서만 선언한 값이어야 하고 TS 와 달라야 한다 — 나머지는 같다
+                Some(kd) => {
+                    let declared: Vec<String> = kd["rustLocal"].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_string()).collect();
+                    assert_eq!(local_names(&got), declared, "{name}: Rust 의 local 순서");
+                    assert_ne!(local_names(&got), local_names(&g["result"]), "{name}: TS 와 같은 순서가 됐다 — 정렬을 ICU 와 같게 옮겼다면 knownDiff 를 지운다");
+                    (sort_local(&got), sort_local(&g["result"]))
+                }
+                None => (got, g["result"].clone()),
+            };
+            if norm_numbers(&got) != norm_numbers(&want) {
+                diffs.push(format!("{name} / {route} 단계 {i}: 골든과 다르다\n  Rust: {}\n  TS  : {}", short(&got), short(&want)));
+            }
+        }
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+    assert_eq!([golden[0]["scenarios"].as_array().unwrap().len(), golden[1]["scenarios"].as_array().unwrap().len()], cursor, "골든 항목 수가 시나리오와 다르다");
+    mode.finish();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ref_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카() {
+    for ch in ["git:refs", "git:refsDetails"] {
+        assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+    }
+    let m = RepoMirror::default();
+    m.apply(
+        1,
+        vec![
+            MirrorRepo { id: "a".into(), kind: "local".into(), path: "/nonexistent-antler-refs".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "g".into(), kind: "github".into(), path: "/cache".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "s".into(), kind: "ssh".into(), path: "/srv".into(), distro: None, ssh_host: Some("devbox".into()) },
+            MirrorRepo { id: "unc".into(), kind: "local".into(), path: "\\\\evil\\share\\repo".into(), distro: None, ssh_host: None },
+        ],
+    );
+    let router = Router::new(true, false, m.clone());
+    let off = Router::new(false, false, m);
+    for ch in ["git:refs", "git:refsDetails"] {
+        // 미러에 없는 id·github·(풀이 없는) ssh 는 사이드카가 처리한다
+        for id in ["nope", "g", "s"] {
+            assert!(matches!(router.route(ch, &json!([id])).await, Routed::Sidecar), "{id} {ch}");
+        }
+        // 저장소 id 가 문자열이 아니거나 없다
+        for args in [json!([]), json!([null]), json!([5])] {
+            assert!(matches!(router.route(ch, &args).await, Routed::Sidecar), "{ch} {args}");
+        }
+        // 스위치(ANTLER_RUST_GIT=0)를 끄면 미러에 있어도 사이드카다
+        assert!(matches!(off.route(ch, &json!(["a"])).await, Routed::Sidecar), "{ch}");
+        // 미러 검사에 걸린 저장소는 사이드카가 아니라 ERROR 다(다른 채널과 같다)
+        let env = envelope(router.route(ch, &json!(["unc"])).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+    }
+    assert_eq!(router.rust_handled() + off.rust_handled(), 0);
+}
+
+/// `refs` 는 첫 로그 페이지를 기다리지 않고, `refsDetails` 는 문(`repos:watch` 가 닫는다)이 열릴 때까지 기다린다(TS `RepoService.refsDetails` 의 `afterFirstPage`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refs_details_는_첫_페이지_문이_열릴_때까지_기다리고_refs_는_기다리지_않는다() {
+    let tmp = TempDir::new("refsgate");
+    let dir = import(&tmp.0, "basic");
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("b", dir.as_path())])));
+    // 문이 없는 저장소는 바로 간다
+    assert_eq!(envelope(router.route("git:refsDetails", &json!(["b"])).await)["ok"], true);
+    assert!(matches!(router.route("repos:watch", &json!(["b"])).await, Routed::Sidecar));
+    assert!(router.repo_state().is_armed("b"));
+    assert_eq!(envelope(router.route("git:refs", &json!(["b"])).await)["ok"], true, "refs 는 문과 무관하다");
+    let r = router.clone();
+    let pending = tokio::spawn(async move { envelope(r.route("git:refsDetails", &json!(["b"])).await) });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!pending.is_finished(), "문이 닫혀 있는 동안 refsDetails 가 끝났다");
+    // 첫 로그 페이지가 나갔다는 알림이 문을 연다(로그 서비스·fetch 호스트가 쓰는 같은 길)
+    router.note_sink()(NoteOp::FirstPage, "b");
+    let env = tokio::time::timeout(std::time::Duration::from_secs(60), pending).await.expect("문이 열리면 끝나야 한다").unwrap();
+    assert_eq!(env["ok"], true);
+    assert!(env["data"]["tracking"].is_object() && env["data"]["submodules"].is_array());
+}
+
+/// 서브모듈 시험용: 하위 저장소 `rel` 을 만들고 커밋 하나를 둔 뒤 그 해시를 돌려준다
+fn make_sub(dir: &Path, rel: &str) -> String {
+    assert!(refs_git(dir).args(["init", "-q", "-b", "main", rel]).status().unwrap().success());
+    assert!(refs_git(&dir.join(rel)).args(["commit", "-q", "--allow-empty", "-m", "sub 1"]).status().unwrap().success());
+    rev_parse(&dir.join(rel), "HEAD")
+}
+
+/// `update-index --index-info` 에 줄을 먹인다(`--cacheinfo` 는 같은 경로를 한 번에 하나씩이라 많은 gitlink 에 쓸모없다)
+fn index_info(dir: &Path, lines: &str) {
+    use std::io::Write;
+    let mut child = raw_git(dir).args(["update-index", "--add", "--index-info"]).stdin(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(lines.as_bytes()).unwrap();
+    assert!(child.wait().unwrap().success(), "update-index --index-info");
+}
+
+async fn details_of(router: &Router, id: &str) -> Value {
+    let env = envelope(router.route("git:refsDetails", &json!([id])).await);
+    assert_eq!(env["ok"], true, "{env}");
+    env["data"]["submodules"].clone()
+}
+
+/// tests/submodule.test.ts 의 '악성 서브모듈' — 하위 저장소의 .git/config·훅·속성에 심은 명령이 상태 조회 중 실행되지 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 악성_서브모듈의_설정과_훅은_상태_조회가_실행하지_않는다() {
+    let tmp = TempDir::new("subevil");
+    let dir = import(&tmp.0, "basic");
+    let sha = make_sub(&dir, "libs/ok");
+    index_info(&dir, &format!("160000 {sha} 0\tlibs/ok\n"));
+    let marker = tmp.0.join("sub-evil-ran");
+    let m = marker.to_string_lossy().replace('\\', "/");
+    let cmd = format!("sh -c \"echo x > '{m}'; cat\" --");
+    let sub = dir.join("libs/ok");
+    for key in ["core.fsmonitor", "core.sshCommand", "core.pager", "core.editor", "filter.x.clean", "filter.x.smudge", "filter.x.process", "remote.origin.uploadpack"] {
+        assert!(raw_git(&sub).args(["config", key, &cmd]).status().unwrap().success(), "{key}");
+    }
+    let hooks = sub.join(".git").join("hooks");
+    fs::create_dir_all(&hooks).unwrap();
+    for h in ["post-checkout", "post-commit", "reference-transaction", "pre-command"] {
+        fs::write(hooks.join(h), format!("#!/bin/sh\necho x > '{m}'\n")).unwrap();
+    }
+    fs::write(sub.join(".gitattributes"), "* filter=x\n").unwrap();
+    // 대조군: 하드닝 없이 인덱스를 읽는 명령을 돌리면 fsmonitor 페이로드가 실제로 실행된다(시험이 의미 있음을 확인)
+    let _ = raw_git(&sub).args(["status", "--porcelain"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    assert!(marker.exists(), "대조군이 실행되지 않았다 — 이 시험이 아무것도 증명하지 못한다");
+    fs::remove_file(&marker).unwrap();
+
+    let router = Router::new(true, false, mirror_of(&[("p", dir.as_path())]));
+    let subs = details_of(&router, "p").await;
+    assert_eq!(subs[0]["path"], "libs/ok");
+    assert_eq!(subs[0]["status"], "clean");
+    assert_eq!(envelope(router.route("git:refs", &json!(["p"])).await)["ok"], true);
+    assert!(!marker.exists(), "하위 저장소가 심은 명령이 실행됐다");
+}
+
+/// tests/submodule.test.ts 의 'git 명령은 `..` 경로를 인덱스에 넣지 못하게 하므로 인덱스 파일(v2)을 직접 쓴다'
+fn write_gitlink_index(git_dir: &Path, entries: &[(&str, &str)]) {
+    use sha1::{Digest, Sha1};
+    let mut all = Vec::new();
+    all.extend_from_slice(b"DIRC");
+    all.extend_from_slice(&2u32.to_be_bytes());
+    all.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    for (path, sha) in entries {
+        let mut fixed = [0u8; 62];
+        fixed[24..28].copy_from_slice(&0o160000u32.to_be_bytes());
+        for (i, b) in fixed[40..60].iter_mut().enumerate() {
+            *b = u8::from_str_radix(&sha[i * 2..i * 2 + 2], 16).unwrap();
+        }
+        fixed[60..62].copy_from_slice(&(path.len().min(0xfff) as u16).to_be_bytes());
+        let body_len = 62 + path.len();
+        all.extend_from_slice(&fixed);
+        all.extend_from_slice(path.as_bytes());
+        all.extend(std::iter::repeat_n(0u8, 8 - (body_len % 8)));
+    }
+    let digest = Sha1::digest(&all);
+    all.extend_from_slice(&digest);
+    fs::write(git_dir.join("index"), all).unwrap();
+}
+
+/// 저장소 밖을 가리키는 gitlink(`../outside` 등)는 git 을 돌리지 않고 unknown 이다(`isSafeSubmodulePath`)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 저장소_밖을_가리키는_서브모듈_경로는_git_을_돌리지_않고_unknown_이다() {
+    let tmp = TempDir::new("subpath");
+    // evil/inner 에서 `../outside` 가 실제로 가리키는 곳(= evil/outside)에 저장소를 둔다 — 문자열 검사가 없으면 열리는 곳이다
+    let outside = tmp.0.join("evil").join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    assert!(raw_git(&outside).args(["init", "-q", "-b", "main"]).status().unwrap().success());
+    assert!(refs_git(&outside).args(["commit", "-q", "--allow-empty", "-m", "outside"]).status().unwrap().success());
+    let out_head = rev_parse(&outside, "HEAD");
+    let evil = tmp.0.join("evil").join("inner");
+    fs::create_dir_all(&evil).unwrap();
+    assert!(raw_git(&evil).args(["init", "-q", "-b", "main"]).status().unwrap().success());
+    let mut paths = ["../outside", "a/../../outside", "a//b", "./x", "a/./b", "/abs", "C:/abs"];
+    paths.sort_unstable();
+    write_gitlink_index(&evil.join(".git"), &paths.map(|p| (p, out_head.as_str())));
+    // 대조군: 문자열 검사 없이 `../outside` 를 열면 outside 저장소의 HEAD 가 보인다 — 아래에서 head 가 없다는 것이 의미를 가진다
+    assert_eq!(rev_parse(&evil.join("../outside"), "HEAD"), out_head);
+
+    let router = Router::new(true, false, mirror_of(&[("e", evil.as_path())]));
+    let subs = details_of(&router, "e").await;
+    let got: Vec<&str> = subs.as_array().unwrap().iter().map(|s| s["path"].as_str().unwrap()).collect();
+    assert_eq!(got, paths, "git ls-files 가 돌려준 경로가 모두 목록에 있다(TS 와 같다)");
+    for s in subs.as_array().unwrap() {
+        assert_eq!(s["status"], "unknown", "{}", s["path"]);
+        assert!(s.get("head").is_none(), "{}", s["path"]);
+    }
+}
+
+/// 정션이 저장소 밖·`.git` 을 가리키는 서브모듈은 git 을 돌리지 않고 unknown 이다(`assert_inside_root`). Windows 에서만(정션은 `mklink /J`)
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 정션인_서브모듈_경로는_git_을_돌리지_않고_unknown_이다() {
+    /// 정션은 대상을 따라가지 않고 링크만 지워야 한다 — `TempDir` 보다 먼저 떨어지도록 뒤에 선언한다
+    struct Links(Vec<PathBuf>);
+    impl Drop for Links {
+        fn drop(&mut self) {
+            for l in &self.0 {
+                let _ = fs::remove_dir(l);
+            }
+        }
+    }
+    #[allow(clippy::disallowed_methods)] // 시험 준비용: std 에 정션 API 가 없다
+    fn mklink_j(link: &Path, target: &Path) {
+        let out = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(link).arg(target).output().expect("cmd");
+        assert!(out.status.success(), "mklink /J: {}", String::from_utf8_lossy(&out.stdout));
+    }
+    let tmp = TempDir::new("subjunction");
+    let dir = import(&tmp.0, "basic");
+    let outside = tmp.0.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    assert!(raw_git(&outside).args(["init", "-q", "-b", "main"]).status().unwrap().success());
+    assert!(refs_git(&outside).args(["commit", "-q", "--allow-empty", "-m", "outside"]).status().unwrap().success());
+    let out_head = rev_parse(&outside, "HEAD");
+    let links = Links(vec![dir.join("outj"), dir.join("gitj")]);
+    mklink_j(&links.0[0], &outside);
+    mklink_j(&links.0[1], &dir.join(".git"));
+    index_info(&dir, &format!("160000 {out_head} 0\tgitj\n160000 {out_head} 0\toutj\n"));
+    // 대조군: 링크 안은 실제로 저장소 밖 저장소의 HEAD 를 보여 준다
+    assert_eq!(rev_parse(&links.0[0], "HEAD"), out_head);
+
+    let router = Router::new(true, false, mirror_of(&[("j", dir.as_path())]));
+    let subs = details_of(&router, "j").await;
+    let got: Vec<&str> = subs.as_array().unwrap().iter().map(|s| s["path"].as_str().unwrap()).collect();
+    assert_eq!(got, ["gitj", "outj"]);
+    for s in subs.as_array().unwrap() {
+        assert_eq!(s["status"], "unknown", "{}", s["path"]);
+        assert!(s.get("head").is_none(), "{}", s["path"]);
+    }
+    drop(links);
+}
+
+/// 채널(`git:refs`)은 lite 만 부르지만 TS 의 `refs()` 는 서브모듈을 담는 non-lite 도 있다 — `refs_snapshot` 의 `lite` 인자로 옮겼다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn non_lite_스냅샷은_서브모듈을_담고_lite_는_비운다() {
+    use antler_lib::git::exec::RunOpts;
+    use antler_lib::git::refs_service::refs_snapshot;
+    let tmp = TempDir::new("sublite");
+    let dir = import(&tmp.0, "basic");
+    let plain = import(&tmp.0, "empty");
+    let sha = make_sub(&dir, "libs/ok");
+    index_info(&dir, &format!("160000 {sha} 0\tlibs/ok\n160000 {sha} 0\tlibs/gone\n"));
+    let exec = GitExecutor::Local(LocalExecutor::default());
+    let path = |p: &Path| p.to_string_lossy().into_owned();
+    let full = refs_snapshot(&exec, &path(&dir), &RunOpts::default(), false).await.unwrap();
+    assert_eq!(full.submodules.len(), 2);
+    assert!(refs_snapshot(&exec, &path(&dir), &RunOpts::default(), true).await.unwrap().submodules.is_empty(), "lite 는 서브모듈을 비워 둔다");
+    assert!(refs_snapshot(&exec, &path(&plain), &RunOpts::default(), false).await.unwrap().submodules.is_empty(), "서브모듈이 없으면 빈 배열");
+}
+
+/// 서브모듈은 200개까지만 목록에 넣고(`SUBMODULE_MAX`), 앞 50개만 확인한다(`SUBMODULE_PROBE_MAX`) — 나머지는 unknown
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 서브모듈은_200개까지_담고_앞_50개만_확인한다() {
+    let tmp = TempDir::new("subcap");
+    let dir = import(&tmp.0, "basic");
+    let lines: String = (0..205).map(|i| format!("160000 {} 0\tm{i}\n", "a".repeat(40))).collect();
+    index_info(&dir, &lines);
+    let router = Router::new(true, false, mirror_of(&[("c", dir.as_path())]));
+    let subs = details_of(&router, "c").await;
+    let subs = subs.as_array().unwrap();
+    assert_eq!(subs.len(), 200);
+    let count = |status: &str| subs.iter().filter(|s| s["status"] == status).count();
+    // 디렉터리가 없는 gitlink 는 확인한 것만 uninitialized 이고(`cannot change to`) 확인하지 않은 것은 unknown 이다
+    assert_eq!((count("uninitialized"), count("unknown")), (50, 150));
+    assert!(subs[..50].iter().all(|s| s["status"] == "uninitialized") && subs[50..].iter().all(|s| s["status"] == "unknown"));
 }
 
 // ── git:fetch ──────────────────────────────────────────
