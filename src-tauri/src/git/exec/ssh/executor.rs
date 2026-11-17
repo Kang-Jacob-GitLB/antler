@@ -3,6 +3,7 @@
 //! 원격 명령은 `build_remote_command`(PR 1)의 결과만 보낸다 — 이 모듈 밖에서 임의 명령을 보낼 길이 없다.
 
 use super::connection::{Connection, SshOptions};
+use super::stream::SshStream;
 use super::quote::build_remote_command;
 use crate::git::exec::common::{RunOpts, RunResult};
 use crate::git::exec::error::ExecError;
@@ -31,6 +32,24 @@ impl SshExecutor {
         let command = build_remote_command(repo_path, args, opts.fetch_env.as_ref()).map_err(|e| ExecError::Other { message: e.to_string() })?;
         let git_args: Vec<String> = args.iter().map(|a| a.as_ref().to_string()).collect();
         self.conn.run(command, &git_args, opts).await
+    }
+
+    /// 원격 git 의 stdout 을 스트림으로 준다(`run` 과 같은 연결·슬롯·원격 명령 규칙, 환경은 항상 `GIT_ENV` 뿐). 시작(exec 요청)까지 기다리고 돌아온다.
+    /// 채널은 소유 태스크가 즉시 비운다 — 소비자가 느려도 같은 연결의 다른 호출이 멈추지 않고, 선읽기 상한(16MB)을 넘으면 원격을 죽인다(`SshStream`).
+    /// 비정상 종료는 EOF 뒤 `finish` 가 알린다. 버리거나 취소하면 원격 프로세스에 KILL 을 보낸다.
+    pub async fn stream<S: AsRef<str>>(&self, repo_path: &str, args: &[S], opts: &RunOpts) -> Result<SshStream, ExecError> {
+        if opts.cancel.as_ref().is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+            return Err(ExecError::Aborted);
+        }
+        let command = build_remote_command(repo_path, args, None).map_err(|e| ExecError::Other { message: e.to_string() })?;
+        let git_args: Vec<String> = args.iter().map(|a| a.as_ref().to_string()).collect();
+        self.conn.stream(command, &git_args, opts).await
+    }
+
+    /// 선읽기 상한을 바꾼다(시험 전용)
+    #[cfg(feature = "test-hooks")]
+    pub fn set_stream_ahead_limit_for_test(&self, bytes: usize) {
+        self.conn.set_stream_ahead_limit_for_test(bytes);
     }
 
     /// 연결을 닫고 이후 호출을 거부한다

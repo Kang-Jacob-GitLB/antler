@@ -11,7 +11,7 @@
 //! 스폰된 태스크가 채널·슬롯(세마포어 허가)을 쥐고, 호출자가 버려지면(취소 토큰) 태스크가 KILL → close → 닫힘 확인까지 하고 **그 뒤에** 슬롯을 돌려준다.
 
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -19,12 +19,13 @@ use russh::client::{self, ChannelOpenHandle, Handle, Msg, Session};
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PublicKeyOrCertificate};
 use russh::{Channel, ChannelMsg, ChannelOpenFailure, Preferred, Sig};
 use tokio::net::TcpStream;
-use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use super::auth::{self, AgentSetting};
 use super::config::{load_ssh_config, resolve_host, Ctx, RealFs, ResolvedHost};
 use super::known_hosts::{known_host_key_algorithms, read_known_hosts, verify_host_key_text};
+use super::stream::{End, Event, SshStream, EVENT_COST, STREAM_AHEAD_LIMIT};
 use crate::git::exec::common::{to_strings, RunOpts, RunResult, DEFAULT_MAX_BUFFER, MAX_STDERR};
 use crate::git::exec::error::ExecError;
 use crate::git::parsers::js_trim;
@@ -246,6 +247,8 @@ struct Inner {
     idle_gen: AtomicU64,
     /// 걸려 있는 유휴 타이머(새로 걸거나 슬롯을 잡으면 이전 것을 중단한다 — 호출마다 5분짜리 태스크가 쌓이지 않게)
     idle_timer: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// `stream` 이 소비자보다 먼저 읽어 둘 수 있는 바이트 상한(운영은 [`STREAM_AHEAD_LIMIT`], 시험은 줄인다)
+    stream_ahead: AtomicUsize,
 }
 
 /// 호스트 하나의 SSH 연결(프로세스 안에서 재사용)
@@ -623,6 +626,60 @@ async fn drain_until_closed(ch: &mut Channel<Msg>) {
     let _ = tokio::time::timeout(CLOSE_WAIT, async { while ch.wait().await.is_some() {} }).await;
 }
 
+/// 채널을 열고 명령을 exec 한다. 채널 열기와 exec 요청을 두 단계로 나눈다 — exec 단계가 실패·시간 초과하면 이미 열린 채널을
+/// KILL → close → 닫힘 확인으로 정리한 **뒤에** 오류를 돌려준다(슬롯은 호출자가 그 뒤에 돌려준다).
+/// `stop`·`user` 가 취소되면 시작을 멈추고 `Aborted` 를 돌려준다 — 서버가 열기에 느리게 답해도 슬롯을 최대 `OPEN_TIMEOUT` 동안 쥐지 않는다.
+/// 채널 열기 대기를 버릴 때는 future 를 그냥 버리지 않고, 뒤늦게 열린 채널을 닫는 정리 태스크로 넘긴다(서버에 채널이 남지 않게)
+async fn open_exec(live: &Arc<Live>, command: &str, stop: &CancellationToken, user: &Option<CancellationToken>) -> Result<Channel<Msg>, ExecError> {
+    let mut opening = {
+        let live = live.clone();
+        tokio::spawn(async move { tokio::time::timeout(OPEN_TIMEOUT, live.last().channel_open_session()).await })
+    };
+    let joined = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        () = cancelled(user) => None,
+        r = &mut opening => Some(r),
+    };
+    let Some(joined) = joined else {
+        // 열기는 `OPEN_TIMEOUT` 안에 끝나므로 정리 태스크도 그 안에 끝난다
+        tokio::spawn(async move {
+            if let Ok(Ok(Ok(mut ch))) = opening.await {
+                kill_channel(&ch).await;
+                drain_until_closed(&mut ch).await;
+            }
+        });
+        return Err(ExecError::Aborted);
+    };
+    let mut ch = match joined {
+        Ok(Ok(Ok(ch))) => ch,
+        Ok(Ok(Err(e))) => return Err(other(format!("원격 명령을 시작하지 못했습니다: {e}"))),
+        Ok(Err(_)) => return Err(other("원격 명령을 시작하지 못했습니다: 시간 초과")),
+        Err(_) => return Err(other("SSH 실행 작업이 중단되었습니다")),
+    };
+    // 원격 명령 실행은 이 파일(프로브·open_exec)에서만 요청한다(clippy.toml)
+    #[allow(clippy::disallowed_methods)]
+    let sent = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        () = cancelled(user) => None,
+        r = tokio::time::timeout(OPEN_TIMEOUT, ch.exec(true, command)) => Some(r),
+    };
+    let start_error = match sent {
+        None => {
+            kill_channel(&ch).await;
+            drain_until_closed(&mut ch).await;
+            return Err(ExecError::Aborted);
+        }
+        Some(Ok(Ok(()))) => return Ok(ch),
+        Some(Ok(Err(e))) => format!("{e}"),
+        Some(Err(_)) => "시간 초과".to_string(),
+    };
+    kill_channel(&ch).await;
+    drain_until_closed(&mut ch).await;
+    Err(other(format!("원격 명령을 시작하지 못했습니다: {start_error}")))
+}
+
 enum Outcome {
     /// 원격이 끝났다. 종료 코드를 받지 못했으면 `None`(연결이 끊긴 것)
     Done(Option<i32>),
@@ -643,26 +700,7 @@ struct Job {
 impl Job {
     /// 채널을 열어 명령을 실행하고 끝까지 읽는다. **슬롯은 이 함수가 끝난 뒤(닫힘 확인 뒤)** 호출자가 돌려준다
     async fn run(self, token: CancellationToken) -> Result<RunResult, ExecError> {
-        // 채널 열기와 exec 요청을 두 단계로 나눈다 — exec 단계가 실패·시간 초과하면 이미 열린 채널을 KILL → close → 닫힘 확인으로 정리한 뒤에 슬롯을 돌려준다
-        let opened = tokio::time::timeout(OPEN_TIMEOUT, self.live.last().channel_open_session()).await;
-        let mut ch = match opened {
-            Ok(Ok(ch)) => ch,
-            Ok(Err(e)) => return Err(other(format!("원격 명령을 시작하지 못했습니다: {e}"))),
-            Err(_) => return Err(other("원격 명령을 시작하지 못했습니다: 시간 초과")),
-        };
-        // 원격 명령 실행은 이 파일(프로브·Job::run)에서만 요청한다(clippy.toml)
-        #[allow(clippy::disallowed_methods)]
-        let sent = tokio::time::timeout(OPEN_TIMEOUT, ch.exec(true, self.command.as_str())).await;
-        let start_error = match sent {
-            Ok(Ok(())) => None,
-            Ok(Err(e)) => Some(format!("{e}")),
-            Err(_) => Some("시간 초과".to_string()),
-        };
-        if let Some(why) = start_error {
-            kill_channel(&ch).await;
-            drain_until_closed(&mut ch).await;
-            return Err(other(format!("원격 명령을 시작하지 못했습니다: {why}")));
-        }
+        let mut ch = open_exec(&self.live, &self.command, &token, &None).await?;
         let mut stdout: Vec<u8> = Vec::new();
         let mut stderr: Vec<u8> = Vec::new();
         let outcome = self.read_all(&mut ch, &token, &mut stdout, &mut stderr).await;
@@ -729,6 +767,137 @@ impl Job {
     }
 }
 
+/// `stream` 펌프가 소유하는 것들
+struct Pump {
+    live: Arc<Live>,
+    command: String,
+    /// 채널이 닫힌 것을 확인한 뒤에 돌려준다
+    slot: Slot,
+    tx: mpsc::UnboundedSender<Event>,
+    /// 큐에 쌓였지만 소비자가 아직 꺼내지 않은 바이트
+    queued: Arc<AtomicUsize>,
+    cap: usize,
+    /// 스트림이 버려졌다(Drop)
+    stop: CancellationToken,
+    /// 호출자가 준 취소 토큰
+    user: Option<CancellationToken>,
+    started: oneshot::Sender<Result<(), ExecError>>,
+}
+
+/// 펌프가 읽기를 끝낸 이유
+enum PumpExit {
+    /// 원격이 끝났다(종료 알림을 보냈다)
+    Ended,
+    /// 서버가 exec 요청을 거부했다(알림을 보냈다)
+    Rejected,
+    /// 중지(소비자 이탈·취소)나 선읽기 상한 초과 — 원격을 죽여야 한다
+    Kill,
+}
+
+/// 데이터 프레임 하나의 처리
+#[derive(Debug, PartialEq, Eq)]
+enum Admit {
+    /// 빈 프레임 — 버린다(큐에 노드만 쌓는 서버를 막는다)
+    Skip,
+    /// 상한을 넘는다
+    Overflow,
+    /// 큐에 넣는다(과금했다)
+    Queue,
+}
+
+/// 프레임을 큐에 넣을지 정하고 넣으면 과금한다. 비용은 페이로드 + 메시지당 고정 [`EVENT_COST`] 이며 소비자가 같은 값을 뺀다
+fn admit(queued: &AtomicUsize, cap: usize, len: usize) -> Admit {
+    if len == 0 {
+        return Admit::Skip;
+    }
+    let cost = len + EVENT_COST;
+    if queued.load(Ordering::SeqCst) + cost > cap {
+        return Admit::Overflow;
+    }
+    queued.fetch_add(cost, Ordering::SeqCst);
+    Admit::Queue
+}
+
+/// 채널을 소유해 **소비자와 무관하게 즉시 비우는** 태스크. 채널을 읽는 쪽이 느리면 russh 의 세션 루프가 멈추므로(docs/tauri.md R1)
+/// 소비자는 이 태스크가 채운 큐에서 가져간다. 큐가 상한을 넘으면 원격을 죽이고 소비자에게 `Overflow` 를 알린다
+async fn pump(p: Pump) {
+    let Pump { live, command, slot, tx, queued, cap, stop, user, started } = p;
+    let mut ch = match open_exec(&live, &command, &stop, &user).await {
+        Ok(ch) => ch,
+        Err(e) => {
+            let _ = started.send(Err(e));
+            drop(slot);
+            return;
+        }
+    };
+    let _ = started.send(Ok(()));
+    let mut stderr: Vec<u8> = Vec::new();
+    let mut code: Option<i32> = None;
+    let mut eof = false;
+    let exit = loop {
+        let msg = tokio::select! {
+            biased;
+            () = stop.cancelled() => break PumpExit::Kill,
+            () = cancelled(&user) => break PumpExit::Kill,
+            m = ch.wait() => m,
+        };
+        let Some(msg) = msg else {
+            let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
+            break PumpExit::Ended;
+        };
+        match msg {
+            ChannelMsg::Data { data } => match admit(&queued, cap, data.len()) {
+                Admit::Skip => {}
+                Admit::Overflow => {
+                    let _ = tx.send(Event::Overflow);
+                    break PumpExit::Kill;
+                }
+                Admit::Queue => {
+                    if tx.send(Event::Data(data.to_vec())).is_err() {
+                        break PumpExit::Kill;
+                    }
+                }
+            },
+            ChannelMsg::ExtendedData { data, ext: 1 } => {
+                let room = MAX_STDERR.saturating_sub(stderr.len());
+                stderr.extend_from_slice(&data[..data.len().min(room)]);
+            }
+            ChannelMsg::ExitStatus { exit_status } => code = Some(i32::try_from(exit_status).unwrap_or(-1)),
+            // 시그널로 죽었으면 -1(TS 와 같다)
+            ChannelMsg::ExitSignal { .. } => code = Some(-1),
+            ChannelMsg::Eof => eof = true,
+            ChannelMsg::Failure => {
+                let _ = tx.send(Event::End(End { code: None, stderr: Vec::new(), rejected: true }));
+                break PumpExit::Rejected;
+            }
+            ChannelMsg::Close => {
+                let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
+                break PumpExit::Ended;
+            }
+            _ => {}
+        }
+        if eof && code.is_some() {
+            let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
+            break PumpExit::Ended;
+        }
+    };
+    match exit {
+        PumpExit::Ended => {
+            let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
+        }
+        PumpExit::Rejected => {
+            let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
+            drain_until_closed(&mut ch).await;
+        }
+        PumpExit::Kill => {
+            kill_channel(&ch).await;
+            drain_until_closed(&mut ch).await;
+        }
+    }
+    // 슬롯은 채널이 닫힌 뒤에 돌려준다(서버 `MaxSessions` 를 넘지 않게)
+    drop(slot);
+}
+
 impl Connection {
     pub(super) fn new(host_spec: &str, opts: SshOptions) -> Self {
         let max = opts.max_channels.max(1);
@@ -744,6 +913,7 @@ impl Connection {
                 disposed: AtomicBool::new(false),
                 idle_gen: AtomicU64::new(0),
                 idle_timer: Mutex::new(None),
+                stream_ahead: AtomicUsize::new(STREAM_AHEAD_LIMIT),
             }),
         }
     }
@@ -794,6 +964,61 @@ impl Connection {
             _ = cancelled(&opts.cancel) => Err(ExecError::Aborted),
             r = rx => r.unwrap_or_else(|_| Err(other("SSH 실행 작업이 중단되었습니다"))),
         }
+    }
+
+    /// 원격 명령 하나를 실행해 stdout 을 스트림으로 준다(`run` 과 같은 슬롯·연결 규칙). 채널·슬롯은 펌프 태스크가 쥐고 소비자와 무관하게 비운다 —
+    /// 스트림을 버리거나 취소하면 원격에 KILL 을 보내고 슬롯은 채널이 닫힌 뒤에 돌려준다. 시작(exec 요청)까지만 기다리고 돌아온다
+    pub(super) async fn stream(&self, command: String, git_args: &[String], opts: &RunOpts) -> Result<SshStream, ExecError> {
+        if opts.cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+            return Err(ExecError::Aborted);
+        }
+        let inner = &self.inner;
+        let Some(slot) = (tokio::select! {
+            biased;
+            _ = cancelled(&opts.cancel) => None,
+            s = inner.acquire() => Some(s),
+        }) else {
+            return Err(ExecError::Aborted);
+        };
+        let slot = slot?;
+        let live = tokio::select! {
+            biased;
+            _ = cancelled(&opts.cancel) => return Err(ExecError::Aborted),
+            l = inner.live() => l?,
+        };
+        let stop = CancellationToken::new();
+        // 시작 전에 돌아가는 모든 경로에서 버려져 펌프를 멈춘다(성공하면 스트림이 넘겨받는다)
+        let guard = stop.clone().drop_guard();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (started_tx, started_rx) = oneshot::channel();
+        let queued = Arc::new(AtomicUsize::new(0));
+        tokio::spawn(pump(Pump {
+            live,
+            command,
+            slot,
+            tx,
+            queued: queued.clone(),
+            cap: inner.stream_ahead.load(Ordering::SeqCst),
+            stop,
+            user: opts.cancel.clone(),
+            started: started_tx,
+        }));
+        let started = tokio::select! {
+            biased;
+            _ = cancelled(&opts.cancel) => return Err(ExecError::Aborted),
+            r = started_rx => r,
+        };
+        match started {
+            Ok(Ok(())) => Ok(SshStream::new(rx, queued, opts.cancel.clone(), to_strings(git_args), guard)),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(other("SSH 실행 작업이 중단되었습니다")),
+        }
+    }
+
+    /// 선읽기 상한을 바꾼다(시험 전용 — 16MB 를 실제로 보내지 않으려고)
+    #[cfg(feature = "test-hooks")]
+    pub(super) fn set_stream_ahead_limit_for_test(&self, bytes: usize) {
+        self.inner.stream_ahead.store(bytes, Ordering::SeqCst);
     }
 
     /// 연결을 닫고 이후 호출을 거부한다. 슬롯을 기다리던 호출도 깨어나 "이미 종료" 로 실패한다
@@ -872,5 +1097,31 @@ mod tests {
         let (mut h, verdict) = handler(String::new(), "example.com");
         assert!(!check(&mut h, &key).await);
         assert!(verdict.lock().unwrap().as_deref().is_some_and(|m| m.contains("알 수 없는 호스트")));
+    }
+
+    // russh 서버 API 는 빈 CHANNEL_DATA 를 보내지 못한다(하네스로 만들 수 없다) — 악성 서버가 보낼 수 있는 프레임을 직접 먹여 본다
+    #[test]
+    fn 빈_데이터_프레임은_큐에_쌓이지_않고_상한에도_걸리지_않는다() {
+        let queued = AtomicUsize::new(0);
+        for _ in 0..100_000 {
+            assert_eq!(admit(&queued, 1024, 0), Admit::Skip);
+        }
+        assert_eq!(queued.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn 작은_프레임은_메시지마다_고정_비용으로_상한에_걸린다() {
+        let (queued, cap) = (AtomicUsize::new(0), 64 * EVENT_COST);
+        let mut accepted = 0;
+        // 페이로드만 세면 1바이트 프레임 64개(64바이트)가 들어가지만, 메시지당 비용을 더하면 훨씬 일찍 걸린다
+        while admit(&queued, cap, 1) == Admit::Queue {
+            accepted += 1;
+            assert!(accepted <= 64, "상한에 걸리지 않는다");
+        }
+        assert_eq!(accepted, cap / (1 + EVENT_COST));
+        assert_eq!(queued.load(Ordering::SeqCst), accepted * (1 + EVENT_COST));
+        // 걸린 프레임은 과금하지 않는다
+        assert_eq!(admit(&queued, cap, 1), Admit::Overflow);
+        assert_eq!(queued.load(Ordering::SeqCst), accepted * (1 + EVENT_COST));
     }
 }

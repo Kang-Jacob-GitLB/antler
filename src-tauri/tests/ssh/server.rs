@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -142,6 +142,22 @@ struct Shared {
     lingering_channels: AtomicUsize,
     /// 서버가 연 채널의 결과(종류, 결과). `accepted` 이면 클라이언트가 받아들인 것이다
     server_opens: Mutex<Vec<(String, String)>>,
+    /// true 면 세션 채널 열기 응답을 `open_gate` 가 풀어 줄 때까지 미룬다([`TestServer::hold_opens`])
+    hold_opens: AtomicBool,
+    open_gate: OpenGate,
+    /// 응답을 미루고 있는 채널 열기 수
+    held_opens: AtomicUsize,
+    /// 열기 응답을 미룬 세션 채널 중 exec 를 받지 않았고 클라이언트도 닫지 않은 수
+    idle_channels: AtomicUsize,
+}
+
+/// 0 허가로 시작하는 세마포어(`Shared` 의 `Default` 를 위해 감싼다)
+struct OpenGate(tokio::sync::Semaphore);
+
+impl Default for OpenGate {
+    fn default() -> Self {
+        OpenGate(tokio::sync::Semaphore::new(0))
+    }
 }
 
 pub struct TestServer {
@@ -222,6 +238,24 @@ impl TestServer {
         self.shared.server_opens.lock().unwrap().clone()
     }
 
+    /// 이후의 세션 채널 열기 응답을 미룬다(`on`) / 풀고 미뤄 둔 것을 모두 응답한다(`!on`). 연결 직후의 셸 확인(프로브)도 미루므로 연결을 맺은 뒤에 켠다
+    pub fn hold_opens(&self, on: bool) {
+        self.shared.hold_opens.store(on, Ordering::SeqCst);
+        if !on {
+            self.shared.open_gate.0.add_permits(1 << 16);
+        }
+    }
+
+    /// 응답을 미루고 있는 채널 열기 수
+    pub fn held_opens(&self) -> usize {
+        self.shared.held_opens.load(Ordering::SeqCst)
+    }
+
+    /// 열렸지만 exec 를 받지 않았고 클라이언트도 닫지 않은 세션 채널 수(응답을 미룬 뒤 늦게 열린 채널이 정리됐는지 본다)
+    pub fn idle_channels(&self) -> usize {
+        self.shared.idle_channels.load(Ordering::SeqCst)
+    }
+
     /// 서버가 받은 direct-tcpip 목적지들
     pub fn tunnels(&self) -> Vec<String> {
         self.shared.tunnels.lock().unwrap().clone()
@@ -267,6 +301,7 @@ impl server::Server for Srv {
             exec: self.exec,
             auth_counted: false,
             opened: HashSet::new(),
+            gated: HashSet::new(),
             channels: HashMap::new(),
             tokens: HashMap::new(),
             conn: CancellationToken::new(),
@@ -283,6 +318,8 @@ struct Conn {
     auth_counted: bool,
     /// exec 를 거부한 채널 id(`lingering_channels` 장부)
     opened: HashSet<ChannelId>,
+    /// 열기 응답을 미룬 채널 id(`idle_channels` 장부 — exec 를 받거나 닫히면 뺀다)
+    gated: HashSet<ChannelId>,
     channels: HashMap<ChannelId, Channel<Msg>>,
     tokens: HashMap<ChannelId, CancellationToken>,
     /// 이 연결이 끝나면 취소된다(sshd 처럼 연결이 끊기면 세션 프로세스도 정리한다)
@@ -294,6 +331,7 @@ impl Drop for Conn {
         self.conn.cancel();
         self.shared.open.fetch_sub(1, Ordering::SeqCst);
         self.shared.lingering_channels.fetch_sub(self.opened.len(), Ordering::SeqCst);
+        self.shared.idle_channels.fetch_sub(self.gated.len(), Ordering::SeqCst);
     }
 }
 
@@ -341,7 +379,23 @@ impl server::Handler for Conn {
 
     async fn channel_open_session(&mut self, channel: Channel<Msg>, reply: server::ChannelOpenHandle, session: &mut Session) -> Result<(), Self::Error> {
         self.shared.handles.lock().unwrap().push(session.handle());
-        self.channels.insert(channel.id(), channel);
+        let id = channel.id();
+        self.channels.insert(id, channel);
+        if self.shared.hold_opens.load(Ordering::SeqCst) {
+            self.gated.insert(id);
+            self.shared.idle_channels.fetch_add(1, Ordering::SeqCst);
+            // 응답만 미룬다(세션 루프는 계속 돈다 — 다른 채널·정리 요청이 막히지 않게 별도 태스크로)
+            let shared = self.shared.clone();
+            shared.held_opens.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                if let Ok(p) = shared.open_gate.0.acquire().await {
+                    p.forget();
+                }
+                shared.held_opens.fetch_sub(1, Ordering::SeqCst);
+                reply.accept().await;
+            });
+            return Ok(());
+        }
         reply.accept().await;
         Ok(())
     }
@@ -359,6 +413,9 @@ impl server::Handler for Conn {
             session.channel_failure(id)?;
             return Ok(());
         };
+        if self.gated.remove(&id) {
+            self.shared.idle_channels.fetch_sub(1, Ordering::SeqCst);
+        }
         session.channel_success(id)?;
         let command = String::from_utf8_lossy(data).into_owned();
         self.shared.exec_log.lock().unwrap().push(command.clone());
@@ -383,6 +440,9 @@ impl server::Handler for Conn {
             t.cancel();
         }
         self.channels.remove(&id);
+        if self.gated.remove(&id) {
+            self.shared.idle_channels.fetch_sub(1, Ordering::SeqCst);
+        }
         if self.opened.remove(&id) {
             self.shared.lingering_channels.fetch_sub(1, Ordering::SeqCst);
         }

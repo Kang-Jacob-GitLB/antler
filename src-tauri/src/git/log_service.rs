@@ -11,6 +11,12 @@
 //! 보안(앱에 연결하기 전 필수 — docs/tauri.md 실행기 절): 커서를 닫을 때는 **반드시 `GitStream` 을 버린다**. 스트림의 취소 토큰은 다음
 //! `poll_read` 때만 확인되므로 토큰만 취소하고 스트림을 남기면 git 이 파이프에서 멈춘 채 남는다. [`LogCursor::dispose`] 는 토큰을
 //! 취소하고 읽기 태스크를 `abort` 해 태스크가 쥔 스트림이 버려지게(= 프로세스 트리 종료) 한다. 오류로 끝난 읽기 태스크도 스트림을 함께 버린다.
+//!
+//! SSH 대상(Phase 5): 원격 스트림은 파이프 backpressure 가 없다 — 채널을 펌프가 즉시 비우고 선읽기 상한(16MB)을 넘으면 원격 `git log` 를 죽인다.
+//! 읽기가 [`is_read_ahead_exceeded`] 로 끝나면 **오류가 아니라** 그 커서를 못 쓰게(`overflowed`) 하고 지금까지 읽은 만큼만 낸다(`has_more` 는 참).
+//! 앵커(마지막으로 낸 커밋의 위치·해시)는 남으므로 다음 페이지는 기존 STALE 경로(`--skip` + 앵커 확인)로 새 커서를 연다.
+//! 단 **커밋을 하나도 받지 못하고** 끊기면(진척 0) 빈 페이지(`has_more` 참)를 내지 않고 오류로 끝낸다 — 빈 페이지는 renderer 가 백오프 없이 다시 요청하게 만든다.
+//! 이때 커서만 실패로 닫고 기존 앵커는 그대로 둔다.
 //! 인자 주입 방어는 `scope.rs`(solo·hide 형식)와 `parse_query`(숫자만)에 있다.
 
 use std::collections::{HashMap, VecDeque};
@@ -28,6 +34,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use crate::git::exec::ssh::is_read_ahead_exceeded;
 use crate::git::exec::{ExecError, GitExecutor, GitStream, RunOpts, DEFAULT_MAX_BUFFER};
 use crate::git::parsers::log::{parse_log_record, Commit};
 use crate::git::parsers::nul_records::{NulRecordSplitter, MAX_STREAM_RECORD};
@@ -145,6 +152,8 @@ struct Meta {
     closed: bool,
     /// 끝까지 읽어 더 내보낼 커밋이 없다
     exhausted: bool,
+    /// 원격(SSH) 스트림이 선읽기 상한을 넘어 끊겼다. 이어 읽을 수는 없지만 실패는 아니다 — 앵커는 남겨 다음 페이지가 새 커서로 이어 읽는다
+    overflowed: bool,
     /// git 프로세스 PID(테스트용). 읽기 태스크가 띄운 뒤에 채워진다
     pid: Option<u32>,
 }
@@ -199,6 +208,7 @@ impl LogCursor {
             failed: false,
             closed: false,
             exhausted: false,
+            overflowed: false,
             pid: None,
         }));
         let (tx, rx) = mpsc::unbounded_channel();
@@ -208,6 +218,7 @@ impl LogCursor {
             splitter: NulRecordSplitter::with_limit(MAX_STREAM_RECORD),
             buffered: VecDeque::new(),
             done: false,
+            overflowed: false,
             token: token.clone(),
             chunk: vec![0u8; READ_CHUNK],
         };
@@ -220,8 +231,14 @@ impl LogCursor {
         lock(&self.meta).pid
     }
 
-    /// 닫혔거나 실패한 커서는 재사용하면 안 된다
+    /// 닫혔거나 실패했거나 선읽기 상한으로 끊긴 커서는 재사용하면 안 된다
     pub fn usable(&self) -> bool {
+        let m = lock(&self.meta);
+        !m.failed && !m.closed && !m.overflowed
+    }
+
+    /// 마지막 위치·해시를 앵커로 남겨도 되는가(상한으로 끊긴 커서는 재사용은 못 해도 위치는 믿을 수 있다)
+    pub fn anchorable(&self) -> bool {
         let m = lock(&self.meta);
         !m.failed && !m.closed
     }
@@ -312,25 +329,19 @@ struct Reader {
     splitter: NulRecordSplitter,
     buffered: VecDeque<Commit>,
     done: bool,
+    /// 원격 스트림이 선읽기 상한으로 끊겼다(스트림은 이미 버렸다). 쌓인 만큼은 낸다
+    overflowed: bool,
     token: CancellationToken,
     /// 읽기 버퍼(요청마다 새로 잡지 않는다)
     chunk: Vec<u8>,
 }
 
 impl Reader {
-    /// 아직 안 띄웠으면 git 을 띄운다. CreateProcess 가 느려 런타임 스레드를 막지 않게 blocking 풀에서 하고, PID 를 meta 에 적는다.
-    /// 띄우는 도중 커서가 닫히면(abort) 결과가 버려지며 스트림의 Drop 이 프로세스 트리를 죽인다
+    /// 아직 안 띄웠으면 git 을 띄우고(실행기가 blocking 풀·원격 시작을 맡는다) PID 를 meta 에 적는다.
+    /// 띄우는 도중 커서가 닫히면(abort) 결과가 버려지며 스트림의 Drop 이 프로세스 트리·원격 명령을 죽인다
     async fn ensure_started(&mut self, meta: &Mutex<Meta>) -> Result<(), ExecError> {
         let Some(l) = self.launch.take() else { return Ok(()) };
-        let token = self.token.clone();
-        let started = tokio::task::spawn_blocking(move || {
-            if token.is_cancelled() {
-                return Err(ExecError::Aborted);
-            }
-            l.exec.stream(&l.repo_path, &l.args, &RunOpts::with_cancel(token))
-        })
-        .await
-        .map_err(|e| ExecError::Other { message: e.to_string() })??;
+        let started = l.exec.stream(&l.repo_path, &l.args, &RunOpts::with_cancel(self.token.clone())).await?;
         lock(meta).pid = started.pid();
         self.stream = Some(started);
         Ok(())
@@ -350,10 +361,16 @@ impl Reader {
     /// 레코드 상한만으로는 큰 메시지의 커밋 1000개가 페이지 하나에 수 GB 를 쌓을 수 있다(압축돼 저장소는 작아도 된다).
     async fn fill(&mut self, count: usize) -> Result<(), ExecError> {
         let mut read_bytes = 0usize;
-        while self.buffered.len() <= count && !self.done {
+        while self.buffered.len() <= count && !self.done && !self.overflowed {
             let Some(stream) = self.stream.as_mut() else { return Err(ExecError::Aborted) };
             let n = match stream.read(&mut self.chunk).await {
                 Ok(n) => n,
+                // SSH: 소비가 늦어 선읽기 상한을 넘었다. 원격은 이미 죽었다 — 실패가 아니라 이 커서를 접고 쌓인 만큼만 낸다
+                Err(e) if is_read_ahead_exceeded(&e) => {
+                    self.stream = None;
+                    self.overflowed = true;
+                    break;
+                }
                 // 토큰으로 깨어난 읽기 오류는 취소다
                 Err(_) if self.token.is_cancelled() => return Err(ExecError::Aborted),
                 Err(e) => return Err(ExecError::Other { message: e.to_string() }),
@@ -401,6 +418,7 @@ fn commit_progress(meta: &Mutex<Meta>, reader: &Reader, reserved: usize, commits
         m.last_hash = Some(last.hash.clone());
     }
     m.exhausted = reader.done && reader.buffered.is_empty();
+    m.overflowed = reader.overflowed;
     m.last_used = Instant::now();
 }
 
@@ -410,13 +428,25 @@ async fn serve(reader: &mut Reader, meta: &Mutex<Meta>, req: &Req) -> Result<Log
     if let Some(expected) = &req.verify {
         let (head, _) = reader.take(1).await.map_err(CursorError::Exec)?;
         commit_progress(meta, reader, 1, &head);
+        // 확인용 커밋을 받기 전에 상한으로 끊겼다 — 확인하지 못했으니 아무것도 내지 않는다(앵커는 그대로라 다음 요청이 다시 확인한다)
+        if head.is_empty() && reader.overflowed {
+            return Err(no_progress());
+        }
         if head.first().map(|c| c.hash.as_str()) != Some(expected.as_str()) {
             return Err(CursorError::Mismatch);
         }
     }
     let (commits, has_more) = reader.take(req.count).await.map_err(CursorError::Exec)?;
     commit_progress(meta, reader, req.count, &commits);
+    if commits.is_empty() && reader.overflowed {
+        return Err(no_progress());
+    }
     Ok(LogPage { commits, has_more })
+}
+
+/// 선읽기 상한으로 커밋을 하나도 받지 못했다(빈 페이지로 내면 renderer 가 백오프 없이 되풀이한다)
+fn no_progress() -> CursorError {
+    CursorError::Exec(ExecError::Other { message: "SSH 선읽기 상한으로 첫 커밋을 받지 못했습니다".into() })
 }
 
 /// 읽기 태스크. 요청을 도착 순서대로 하나씩 처리한다. 오류가 나면 커서를 실패로 표시하고 끝낸다 — 끝나며 `Reader`(= 스트림)가 버려진다
@@ -528,7 +558,7 @@ impl State {
     /// 커서를 닫는다. 이어 읽을 수 있도록 마지막 위치·해시를 앵커로 남긴다
     fn retire(&mut self, key: &str) {
         let Some(e) = self.cursors.remove(key) else { return };
-        if e.cursor.usable() {
+        if e.cursor.anchorable() {
             if let Some(hash) = e.cursor.last_hash() {
                 self.anchors.insert(key.to_string(), Anchor { repo_id: e.repo_id, target: e.target, position: e.cursor.position(), hash });
             }

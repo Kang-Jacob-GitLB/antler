@@ -131,3 +131,29 @@ pub async fn wait_for(what: &str, mut cond: impl FnMut() -> bool) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+
+/// 일직선 커밋 `n` 개가 든 임시 저장소(`git fast-import`, 한글 메시지). 로그 커서·선읽기 상한 시험용
+pub fn make_linear_repo(n: usize) -> TempDir {
+    use std::io::Write;
+    let dir = TempDir::new("linear");
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    let mut s = String::new();
+    for i in 1..=n {
+        let msg = format!("commit {i} 안녕하세요 lorem ipsum dolor sit amet consectetur adipiscing elit");
+        s += &format!("commit refs/heads/main\nmark :{i}\ncommitter T <t@t> {} +0000\ndata {}\n{msg}\n", 1_700_000_000 + i * 60, msg.len());
+        if i > 1 {
+            s += &format!("from :{}\n", i - 1);
+        }
+        s += "\n";
+    }
+    #[allow(clippy::disallowed_methods)]
+    let mut child = std::process::Command::new("git")
+        .args(["fast-import", "--quiet"])
+        .current_dir(dir.path())
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("git fast-import");
+    child.stdin.take().expect("stdin").write_all(s.as_bytes()).expect("fast-import 입력");
+    assert!(child.wait().expect("대기").success(), "git fast-import");
+    dir
+}

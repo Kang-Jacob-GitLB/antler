@@ -24,11 +24,13 @@ mod connection;
 mod executor;
 pub mod known_hosts;
 pub mod quote;
+mod stream;
 pub mod win32_path;
 
 pub use auth::AgentSetting;
 pub use connection::{EnvFn, SshOptions, Timeouts, DEFAULT_MAX_CHANNELS, SHELL_PROBE};
 pub use executor::SshExecutor;
+pub use stream::{is_read_ahead_exceeded, ReadAheadExceeded, SshStream, STREAM_AHEAD_LIMIT};
 
 /// JS `.` 가 맞추는 코드 단위인가(줄 끝 문자 제외)
 fn dot_matches(unit: u16) -> bool {
