@@ -47,7 +47,8 @@ pub fn usable_token(token: &str) -> bool {
 
 /// `x-access-token:<토큰>` 의 base64(git 의 Basic 인증 헤더 값)
 pub fn git_basic_token(token: &str) -> String {
-    STANDARD.encode(format!("x-access-token:{token}"))
+    let raw = zeroize::Zeroizing::new(format!("x-access-token:{token}"));
+    STANDARD.encode(raw.as_bytes())
 }
 
 /// TS `redactToken`: 토큰과 그 base64 형태를 `***` 로 바꾼다(순서대로 한 번씩). 쓸 수 없는 토큰이면 그대로 둔다
@@ -70,8 +71,8 @@ pub fn redact_secrets(text: &str, secrets: &[&str]) -> String {
 }
 
 /// GitHub 요청에서 오류 문구로 샐 수 있는 모양들: 토큰과 `x-access-token:<토큰>` 의 base64
-pub fn github_secrets(token: &SecretString) -> Vec<String> {
-    vec![token.expose().to_string(), git_basic_token(token.expose())]
+pub fn github_secrets(token: &SecretString) -> zeroize::Zeroizing<Vec<String>> {
+    zeroize::Zeroizing::new(vec![token.expose().to_string(), git_basic_token(token.expose())])
 }
 
 /// Jira Basic 인증에서 샐 수 있는 모양들: 토큰과 `<이메일>:<토큰>` 의 base64(Data Center 는 이메일이 비어 있어 토큰만)

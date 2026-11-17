@@ -693,6 +693,10 @@ Tauri 판에서 `jira:*` 13개 채널을 Rust 가 처리한다(`API_CHANNELS`). 
 - 로그인은 키체인 저장이 실패하면(너무 긴 값 등) 세대를 바꾸기 전에 오류를 낸다(TS 는 세대를 먼저 바꾼다). 로그아웃은 키체인 삭제가 실패해도 연결을 끊고 그 오류를 돌려준다(`async`, "로그아웃했지만 안전 저장소에서 토큰을 지우지 못했습니다: …").
   저장된 토큰이 거부돼 버려질 때의 키체인 삭제 실패는 올릴 곳이 없어 삼킨다.
 - 로그인 검증이 로그아웃으로 취소된다(TS 는 취소되지 않아 로그아웃 뒤에 로그인이 되살아날 수 있다). Device Flow 시작도 세대 토큰의 자식이라 로그아웃이 취소한다.
+- **로그아웃 세대**: 로그인 계열(`login`·`device_poll`·`import_cli_token`)은 첫 await(`client_id`·`cli.token()`) 전에 `logout_gen` 과 `logout_token` 의 자식 취소 토큰을 잡고, `sign_in` 이 change 잠금 안에서 세대가 바뀌었으면 `ABORTED` 다.
+  같은 `requestId` 로 다른 요청이 맵 항목을 덮어써도 로그아웃이 `logout_token` 을 취소하므로 폴링이 멈춘다. 체크 캐시는 세대를 두어, 읽는 동안 `clear` 가 있었으면 그 결과를 넣지 않는다.
+- **`Slug` 재검증**: 사이드카(`RepoQuery`)가 준 owner/repo 는 `Slug::parse`(TS `remoteUrl.ts` 의 `OWNER_RE`·`REPO_RE`·`.`/`..` 거부, 정규식 없이)만 거치고 필드는 비공개다. 실패하면 `NOT_GITHUB` 오류(아바타는 `github:false`)이고 요청은 나가지 않는다.
+  토큰의 평문 복사본(`github_secrets`·`device_code`·Device Flow 요청·응답 본문)은 `Zeroizing` 으로 감싸 버릴 때 덮는다(reqwest 가 쥐는 본문 사본은 제외).
 - Device Flow 의 3xx 는 따라가지 않고 해석할 수 없는 응답 → 일시 오류다(TS `fetch` 는 따라간다). 응답 본문은 1MB 까지만 읽는다. 오류 문구는 `device_code`·토큰으로 가려진다.
 - 응답 해석 실패(TS 라면 `TypeError`)는 고정 문구("GitHub 응답 형식이 올바르지 않습니다")의 `ERROR` 다. 상태의 `user.login`·`avatarUrl` 은 문자열로 바꿔 담는다(문자열이 아닌 값이 와도 TS 는 그대로 흘리지만 이 필드는 항상 문자열이다).
 - 아바타 파일 캐시 키가 sha256 이라 Electron 판의 `avatar-cache.json` 을 읽지 못한다(키 길이가 다르면 버린다). `parse_noreply`·`LOGIN_RE` 는 정규식 없이 손으로 옮겼고 TS 가 바뀌어도 알아채는 장치(`HAND_WRITTEN` 골든)는 **붙이지 않았다** —

@@ -27,20 +27,33 @@ const REVIEWS_MAX_PAGES: usize = 3;
 const EMPTY_PAGE_MAX_EXTRA: usize = 5;
 const KEY_PULLS_MAX: usize = 20;
 
-/// `owner/repo`
+/// `owner/repo`. 사이드카가 준 값이 URL 경로(`..` 등)로 새지 않게 [`Slug::parse`] 로만 만든다(필드는 비공개)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Slug {
-    pub owner: String,
-    pub repo: String,
+    owner: String,
+    repo: String,
+}
+
+impl Slug {
+    /// `remoteUrl.ts` 의 `OWNER_RE`(`^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$`)·`REPO_RE`(`^[A-Za-z0-9._-]{1,100}$`)와 같은 규칙. `repo` 가 `.`·`..` 이면 거부한다
+    pub fn parse(owner: &str, repo: &str) -> Option<Self> {
+        let owner_ok = (1..=39).contains(&owner.len())
+            && owner.bytes().enumerate().all(|(i, b)| b.is_ascii_alphanumeric() || (i > 0 && matches!(b, b'_' | b'-')));
+        let repo_ok = (1..=100).contains(&repo.len()) && repo.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')) && repo != "." && repo != "..";
+        (owner_ok && repo_ok).then(|| Self { owner: owner.to_string(), repo: repo.to_string() })
+    }
+
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    pub fn repo(&self) -> &str {
+        &self.repo
+    }
 }
 
 fn repo_path(r: &Slug) -> String {
-    format!("/repos/{}/{}", encode_uri_component(&r.owner), encode_uri_component(&r.repo))
-}
-
-/// `[A-Za-z0-9._-]{1,100}`
-fn is_slug_part(t: &str) -> bool {
-    (1..=100).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    format!("/repos/{}/{}", encode_uri_component(r.owner()), encode_uri_component(r.repo()))
 }
 
 pub(crate) async fn get(c: &GitHubClient, path: &str, query: &[(&str, Option<&str>)], html: bool, cancel: &CancellationToken) -> Res<GetResult> {
@@ -186,12 +199,9 @@ async fn enrich(c: &GitHubClient, r: &Slug, raws: &[Json], items: &mut [Json], c
 }
 
 /// Jira 이슈 키(호출부에서 ABC-123 형식으로 검증)를 제목·본문에 담은 PR(최근 수정순 최대 20개).
-/// 검색 API 쿼리 언어를 쓰므로 저장소는 형식을 확인해 `repo:` 로 고정하고, 키는 따옴표로 감싸 한 낱말로만 찾는다
+/// 검색 API 쿼리 언어를 쓰므로 저장소는 `Slug`(형식 확인을 마친 값)로 `repo:` 에 고정하고, 키는 따옴표로 감싸 한 낱말로만 찾는다
 pub async fn search_pulls_by_key(c: &GitHubClient, r: &Slug, key: &str, cancel: &CancellationToken) -> Res<Json> {
-    if !is_slug_part(&r.owner) || !is_slug_part(&r.repo) {
-        return Err(GhError::plain("저장소 이름을 해석할 수 없습니다"));
-    }
-    let (q, size) = (format!("repo:{}/{} is:pr \"{key}\"", r.owner, r.repo), KEY_PULLS_MAX.to_string());
+    let (q, size) = (format!("repo:{}/{} is:pr \"{key}\"", r.owner(), r.repo()), KEY_PULLS_MAX.to_string());
     let res = get(c, "/search/issues", &[("q", Some(&q)), ("sort", Some("updated")), ("order", Some("desc")), ("per_page", Some(&size))], false, cancel).await?;
     Ok(Json::Arr(api_map::search_pulls(&res.data)?))
 }

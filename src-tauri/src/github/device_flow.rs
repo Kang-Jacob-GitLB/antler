@@ -13,6 +13,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::Method;
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
+use zeroize::Zeroizing;
 
 use super::device_rules::{interpret_start, DeviceError, PollState, PollStep, EXPIRED_MESSAGE, MISSING_CLIENT_ID_MESSAGE};
 use super::error::{GhError, Res};
@@ -101,7 +102,7 @@ impl DeviceFlow {
         if client_id.is_empty() {
             return Err(GhError::plain(MISSING_CLIENT_ID_MESSAGE));
         }
-        let payload = serde_json::json!({ "client_id": client_id, "scope": SCOPE });
+        let payload = body_json(&StartBody { client_id, scope: SCOPE });
         let (status, body) = match self.post(DEVICE_CODE_URL, &payload, cancel).await {
             Ok(v) => v,
             Err(PostFail::Aborted) => return Err(GhError::aborted()),
@@ -116,7 +117,7 @@ impl DeviceFlow {
     /// 승인될 때까지 폴링해 access token 을 돌려준다. 간격을 지키고(첫 요청도 interval 뒤), authorization_pending 은 계속, slow_down 은 간격 +5초,
     /// 만료·거부는 한국어 오류로 끝낸다. 일시 오류는 세션이 만료될 때까지 조금씩 늘려 가며 다시 시도한다
     pub async fn poll(&self, client_id: &str, session: &DeviceSession, cancel: &CancellationToken) -> Res<SecretString> {
-        let secrets = vec![session.device_code.expose().to_string()];
+        let secrets = Zeroizing::new(vec![session.device_code.expose().to_string()]);
         self.poll_inner(client_id, session, cancel).await.map_err(|e| e.sealed(&secrets))
     }
 
@@ -128,7 +129,7 @@ impl DeviceFlow {
             if PollState::expired(self.clock.now_ms(), session.expires_at_ms) {
                 return Err(GhError::plain(EXPIRED_MESSAGE));
             }
-            let payload = serde_json::json!({ "client_id": client_id, "device_code": session.device_code.expose(), "grant_type": GRANT_TYPE });
+            let payload = body_json(&PollBody { client_id, device_code: session.device_code.expose(), grant_type: GRANT_TYPE });
             let step = match self.post(ACCESS_TOKEN_URL, &payload, cancel).await {
                 Ok((status, body)) => state.on_response(status, &body),
                 Err(PostFail::Transient(_)) => state.on_transient(),
@@ -143,8 +144,8 @@ impl DeviceFlow {
     }
 
     /// POST(JSON). 오류(`error` 필드)도 200 으로 오므로 상태 코드가 아니라 본문으로 판단한다 — 5xx 는 본문을 읽지 않는다
-    async fn post(&self, url: &str, payload: &serde_json::Value, cancel: &CancellationToken) -> Result<(u16, String), PostFail> {
-        let req = self.http.request(Method::POST, url).header(ACCEPT, "application/json").header(CONTENT_TYPE, "application/json").body(payload.to_string());
+    async fn post(&self, url: &str, payload: &Zeroizing<String>, cancel: &CancellationToken) -> Result<(u16, Zeroizing<String>), PostFail> {
+        let req = self.http.request(Method::POST, url).header(ACCEPT, "application/json").header(CONTENT_TYPE, "application/json").body(payload.as_str().to_owned());
         let mut res = match or_abort(Some(cancel), req.send()).await {
             Err(_) => return Err(PostFail::Aborted),
             Ok(Err(e)) => return Err(PostFail::Transient(if classify(&e) == Failure::Timeout { "GitHub 응답이 없습니다(시간 초과)" } else { "GitHub 에 연결할 수 없습니다" })),
@@ -152,14 +153,37 @@ impl DeviceFlow {
         };
         let status = res.status().as_u16();
         if status >= 500 {
-            return Ok((status, String::new()));
+            return Ok((status, Zeroizing::new(String::new())));
         }
         match or_abort(Some(cancel), read_capped(&mut res, MAX_BODY_BYTES)).await {
             Err(_) => Err(PostFail::Aborted),
-            Ok(Ok(bytes)) => Ok((status, String::from_utf8_lossy(&bytes).into_owned())),
+            // 성공 응답에는 access token 이 들어 있다 — 바이트·문자열 모두 버릴 때 덮는다
+            Ok(Ok(bytes)) => {
+                let bytes = Zeroizing::new(bytes);
+                Ok((status, Zeroizing::new(String::from_utf8_lossy(&bytes).into_owned())))
+            }
             Ok(Err(_)) => Err(PostFail::Transient("GitHub 응답을 해석할 수 없습니다")),
         }
     }
+}
+
+/// 요청 본문(키는 `json!` 의 기본 정렬과 같은 알파벳순)
+#[derive(Serialize)]
+struct StartBody<'a> {
+    client_id: &'a str,
+    scope: &'a str,
+}
+
+#[derive(Serialize)]
+struct PollBody<'a> {
+    client_id: &'a str,
+    device_code: &'a str,
+    grant_type: &'a str,
+}
+
+/// 본문 문자열. `device_code` 가 들어 있어 버릴 때 덮는다(`serde_json::Value` 를 거치지 않아 중간 복사본이 없다)
+fn body_json(b: &impl Serialize) -> Zeroizing<String> {
+    Zeroizing::new(serde_json::to_string(b).unwrap_or_default())
 }
 
 fn device_error(e: DeviceError) -> GhError {

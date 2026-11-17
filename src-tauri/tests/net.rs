@@ -4933,6 +4933,10 @@ mod live {
             pushed: Arc<Mutex<Vec<String>>>,
             asked: Arc<Mutex<Vec<String>>>,
             invalidated: Arc<AtomicUsize>,
+            /// `hold_client_id` 를 켜면 `github_client_id` 가 `client_id_gate` 가 열릴 때까지 멈춘다(로그인 계열의 첫 await 와 로그아웃이 겹치는 경합)
+            hold_client_id: Arc<AtomicBool>,
+            client_id_entered: Arc<AtomicUsize>,
+            client_id_gate: Arc<tokio::sync::Notify>,
         }
 
         impl FakeRepos {
@@ -4948,6 +4952,9 @@ mod live {
                     pushed: Arc::new(Mutex::new(Vec::new())),
                     asked: Arc::new(Mutex::new(Vec::new())),
                     invalidated: Arc::new(AtomicUsize::new(0)),
+                    hold_client_id: Arc::new(AtomicBool::new(false)),
+                    client_id_entered: Arc::new(AtomicUsize::new(0)),
+                    client_id_gate: Arc::new(tokio::sync::Notify::new()),
                 }
             }
 
@@ -5007,7 +5014,14 @@ mod live {
             }
 
             fn github_client_id(&self) -> BoxFuture<'_, Option<String>> {
-                async move { self.client_id.lock().unwrap().clone() }.boxed()
+                async move {
+                    self.client_id_entered.fetch_add(1, Ordering::SeqCst);
+                    if self.hold_client_id.load(Ordering::SeqCst) {
+                        self.client_id_gate.notified().await;
+                    }
+                    self.client_id.lock().unwrap().clone()
+                }
+                .boxed()
             }
 
             fn repo_ids(&self) -> BoxFuture<'_, Vec<String>> {
@@ -5112,7 +5126,7 @@ mod live {
         }
 
         fn slug() -> Slug {
-            Slug { owner: "octo".into(), repo: "hello".into() }
+            Slug::parse("octo", "hello").unwrap()
         }
 
         fn query(state: &str, label: Option<&str>, assignee: Option<&str>, page: u32) -> GhListQuery {
@@ -5461,6 +5475,136 @@ mod live {
             assert!(!e.svc.auth().await.signed_in);
             assert!(e.vault.load_github().is_none());
             assert!(e.svc.git_token().is_none());
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_client_id_를_기다리는_사이_로그아웃하면_로그인하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(device_handler);
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().with_client_id("cid"), 0);
+            e.svc.device_start().await.unwrap();
+            e.repos.hold_client_id.store(true, Ordering::SeqCst);
+            let entered = e.repos.client_id_entered.load(Ordering::SeqCst);
+            let svc = e.svc.clone();
+            let poll = tokio::spawn(async move { svc.device_poll(&json!("p1")).await });
+            wait_for(|| e.repos.client_id_entered.load(Ordering::SeqCst) > entered).await;
+            e.svc.logout().await.unwrap();
+            e.repos.hold_client_id.store(false, Ordering::SeqCst);
+            e.repos.client_id_gate.notify_one();
+            assert_eq!(failure(within(poll).await.unwrap()).code, "ABORTED");
+            assert!(e.vault.load_github().is_none());
+            assert!(e.svc.git_token().is_none());
+            assert!(!e.svc.auth().await.signed_in);
+            assert_eq!(count(&m, |r| path_of(r) == "/login/oauth/access_token" || path_of(r) == "/user"), 0);
+        }
+
+        /// 토큰을 `gate` 가 열릴 때까지 붙잡는 gh CLI 가짜
+        struct GatedCli {
+            entered: Arc<AtomicUsize>,
+            gate: Arc<tokio::sync::Notify>,
+        }
+
+        impl ExternalTokenProvider for GatedCli {
+            fn available(&self) -> BoxFuture<'_, bool> {
+                async { true }.boxed()
+            }
+
+            fn token(&self) -> BoxFuture<'_, Result<SecretString, ExternalTokenError>> {
+                async move {
+                    self.entered.fetch_add(1, Ordering::SeqCst);
+                    self.gate.notified().await;
+                    Ok(SecretString::new("ghp_fromcli"))
+                }
+                .boxed()
+            }
+        }
+
+        #[tokio::test]
+        async fn gh_cli_토큰_가져오기는_토큰을_기다리는_사이_로그아웃하면_로그인하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| user_ok());
+            let (entered, gate) = (Arc::new(AtomicUsize::new(0)), Arc::new(tokio::sync::Notify::new()));
+            let cli: Arc<dyn ExternalTokenProvider> = Arc::new(GatedCli { entered: entered.clone(), gate: gate.clone() });
+            let e = env_full(&m.base(), new_vault(), FakeRepos::new(), 0, ServiceOptions::default(), Some(cli));
+            let svc = e.svc.clone();
+            let import = tokio::spawn(async move { svc.import_cli_token().await });
+            wait_for(|| entered.load(Ordering::SeqCst) >= 1).await;
+            e.svc.logout().await.unwrap();
+            gate.notify_one();
+            assert_eq!(failure(within(import).await.unwrap()).code, "ABORTED");
+            assert!(e.vault.load_github().is_none());
+            assert!(e.svc.git_token().is_none());
+            assert!(!e.svc.auth().await.signed_in);
+        }
+
+        #[tokio::test]
+        async fn gh_device_poll_은_같은_request_id_로_다른_요청이_등록돼도_로그아웃이_멈춘다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if path_of(r) == "/login/device/code" { device_handler(0, r) } else { ok(json!({"error": "authorization_pending"})) });
+            let e = env_on(&m.base(), new_vault(), FakeRepos::new().with_client_id("cid"), 5);
+            e.svc.device_start().await.unwrap();
+            let svc = e.svc.clone();
+            let poll = tokio::spawn(async move { svc.device_poll(&json!("x")).await });
+            wait_for(|| count(&m, |r| path_of(r) == "/login/oauth/access_token") >= 1).await;
+            // 같은 id 의 다른 채널 호출이 맵의 항목을 덮어쓰고 끝나면서 지운다
+            e.svc.launchpad(&json!("x"), &json!(false)).await.unwrap();
+            e.svc.logout().await.unwrap();
+            assert_eq!(failure(within(poll).await.unwrap()).code, "ABORTED");
+        }
+
+        #[tokio::test]
+        async fn gh_저장소_이름이_slug_규칙에_어긋나면_요청_없이_거부한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| ok(json!([])));
+            let e = signed_in_env(&m, "ghp_tok", GithubMethod::Pat);
+            let sha = "a".repeat(40);
+            for (owner, repo) in [("x", ".."), ("..", "user"), (".", "a"), ("a", "."), ("-a", "r"), ("a/b", "r"), ("a", "r/s"), ("", "r"), ("a", ""), ("a_", "r%2f"), ("o".repeat(40).as_str(), "r"), ("o", "r".repeat(101).as_str())] {
+                *e.repos.repo.lock().unwrap() = Some(GhRepoRef { owner: owner.into(), repo: repo.into(), remote: "origin".into() });
+                let id = json!("r");
+                let errs = [
+                    e.svc.issues(&id, &json!({"state": "open"})).await.map(|_| ()),
+                    e.svc.pulls_for_key(&id, &json!("ABC-1")).await.map(|_| ()),
+                    e.svc.commit_checks(&id, &json!([sha])).await.map(|_| ()),
+                    e.svc.runs(&id, &json!(1)).await.map(|_| ()),
+                ];
+                for r in errs {
+                    let err = failure(r);
+                    assert!(err.message.contains("GitHub"), "{owner}/{repo}: {err}");
+                }
+                assert_eq!(m.requests().len(), 0, "{owner}/{repo}");
+            }
+            // 규칙에 맞는 값은 그대로 쓴다
+            *e.repos.repo.lock().unwrap() = Some(GhRepoRef { owner: "a-b_1".into(), repo: "r.s_t-1".into(), remote: "origin".into() });
+            e.svc.issues(&json!("r"), &json!({"state": "open"})).await.unwrap();
+            assert_eq!(path_of(&m.requests()[0]), "/repos/a-b_1/r.s_t-1/issues");
+            assert!(Slug::parse("o", "r").is_some() && Slug::parse("o".repeat(39).as_str(), "r".repeat(100).as_str()).is_some());
+        }
+
+        #[tokio::test]
+        async fn gh_일괄_체크는_응답을_기다리는_사이_캐시가_비워지면_그_결과를_넣지_않는다() {
+            let _g = Guard;
+            let gate = Gate::default();
+            let g2 = gate.clone();
+            let inner = graphql_handler(rollups(&[(1, Some("SUCCESS"))]));
+            let m = Mock::start(move |n, r| {
+                g2.wait();
+                inner(n, r)
+            });
+            let c = gh(&m.base(), Some(TOKEN), 5000, 0);
+            let cache = cache(FakeClock::at(CLOCK0));
+            let shas = [sha(1)];
+            // 취소되지 않는 토큰: 응답이 온 뒤 캐시에 넣기 직전의 경합만 본다
+            let cancel = CancellationToken::new();
+            let sl = slug();
+            let (first, _) = tokio::join!(checks::fetch_commit_checks(&c, &sl, &shas, &cache, &cancel), async {
+                wait_for(|| !m.requests().is_empty()).await;
+                cache.clear();
+                gate.open();
+            });
+            assert_eq!(jv(&first.unwrap()), json!({sha(1): "success"}));
+            // 낡은 결과가 캐시에 없으니 다시 묻는다
+            checks::fetch_commit_checks(&c, &slug(), &shas, &cache, &cancel).await.unwrap();
+            assert_eq!(m.requests().len(), 2);
         }
 
         #[tokio::test]

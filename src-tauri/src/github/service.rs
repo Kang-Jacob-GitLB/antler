@@ -133,6 +133,11 @@ struct Inner {
     cli_available: Option<bool>,
     /// 접근 가능한 저장소 목록 캐시(결과, 받은 시각 ms). 계정이 바뀌면 보이는 범위가 달라지므로 로그인·로그아웃 때 비운다
     accessible: Option<(Json, f64)>,
+    /// 로그아웃만 올리는 세대. 로그인 계열(login·device_poll·import_cli_token)은 진입 직후(첫 await 전)에 잡고, 저장 직전(change 잠금 안)에 같은지 본다
+    /// (토큰 폐기·다른 로그인으로 오르는 `epoch` 와 달리, 로그인 도중 로그아웃이 있었는지만 가린다)
+    logout_gen: u64,
+    /// 로그인 계열이 자식 토큰으로 쓰는 취소 신호. 로그아웃이 취소하고 새것으로 바꾼다(requestId 맵과 무관하게 모든 진행 중 로그인을 멈춘다)
+    logout_token: CancellationToken,
 }
 
 impl Inner {
@@ -237,6 +242,8 @@ impl GitHubService {
             device: None,
             cli_available: None,
             accessible: None,
+            logout_gen: 0,
+            logout_token: CancellationToken::new(),
         };
         let avatars = AvatarResolver::new(client.clone(), opts.avatar_cache_file, clock.clone());
         let checks = CheckStateCache::new(clock.clone());
@@ -380,12 +387,18 @@ impl GitHubService {
         format!("\u{0}login#{seq}")
     }
 
-    /// 토큰으로 로그인한다: 검증 → 저장 → 세대 교체. 저장에 실패하면 상태를 바꾸지 않는다
-    async fn sign_in(&self, token: SecretString, method: GithubMethod, user: GhUser, cancel: &CancellationToken) -> Res<GhAuthState> {
+    /// 로그인 계열의 시작: 로그아웃 세대와 그 자식 취소 토큰을 잡는다. **첫 await 전에** 불러야 그 사이의 로그아웃을 놓치지 않는다
+    fn login_scope(&self) -> (u64, CancellationToken) {
+        let g = self.st.lock();
+        (g.logout_gen, g.logout_token.child_token())
+    }
+
+    /// 토큰으로 로그인한다: 검증 → 저장 → 세대 교체. 저장에 실패하면 상태를 바꾸지 않는다. `logout_gen` 은 로그인을 시작할 때 잡은 [`Inner::logout_gen`]
+    async fn sign_in(&self, token: SecretString, method: GithubMethod, user: GhUser, logout_gen: u64, cancel: &CancellationToken) -> Res<GhAuthState> {
         let state = {
             let _change = self.st.change.lock().await;
-            // 검증하는 동안 로그아웃했으면 되살리지 않는다
-            if cancel.is_cancelled() {
+            // 검증하는 동안(또는 그 전에) 로그아웃했으면 되살리지 않는다
+            if cancel.is_cancelled() || self.st.lock().logout_gen != logout_gen {
                 return Err(GhError::aborted());
             }
             self.st.vault.save_github(&token, method).map_err(|e| GhError::plain(e.to_string()))?;
@@ -450,27 +463,28 @@ impl GitHubService {
     }
 
     async fn login(&self, token: SecretString, method: GithubMethod) -> Res<GhAuthState> {
-        let cancel = CancellationToken::new();
+        let (logout_gen, cancel) = self.login_scope();
         let _guard = self.register(&self.login_id(), &cancel);
         let user = self.verify(&token, &cancel).await?;
-        self.sign_in(token, method, user, &cancel).await
+        self.sign_in(token, method, user, logout_gen, &cancel).await
     }
 
     /// `gh:importCliToken`: 밖의 출처(GitHub CLI)의 로그인 토큰을 가져와 로그인한다. 토큰은 이 함수 안에서만 쓰이고 반환값·오류·로그에 실리지 않는다
     pub async fn import_cli_token(&self) -> Res<GhAuthState> {
         let Some(cli) = self.st.cli.clone() else { return Err(GhError::plain(NO_CLI)) };
+        // 외부 토큰을 기다리는 동안의 로그아웃도 막도록 취소·세대를 먼저 잡고 등록한다
+        let (logout_gen, cancel) = self.login_scope();
+        let _guard = self.register(&self.login_id(), &cancel);
         let raw = cli.token().await.map_err(|e| GhError::plain(e.message))?;
         let token = validate::parse_pat_str(raw.expose()).map_err(|_| GhError::plain(BAD_CLI_TOKEN))?;
         drop(raw);
         let secrets = github_secrets(&token);
-        let cancel = CancellationToken::new();
-        let _guard = self.register(&self.login_id(), &cancel);
         let result = async {
             match self.verify(&token, &cancel).await {
                 // 검증이 거부한 토큰의 안내는 gh 쪽 안내를 덧붙인다(GitHub API 오류·취소는 그대로)
                 Err(e) if e.code == "ERROR" => Err(GhError::plain(format!("{}{CLI_HINT}", e.message))),
                 Err(e) => Err(e),
-                Ok(user) => self.sign_in(token.clone(), GithubMethod::GhCli, user, &cancel).await,
+                Ok(user) => self.sign_in(token.clone(), GithubMethod::GhCli, user, logout_gen, &cancel).await,
             }
         }
         .await;
@@ -496,11 +510,15 @@ impl GitHubService {
     /// `gh:devicePoll`: 사용자가 승인할 때까지 폴링하고 로그인한다. 취소(`ABORTED`)면 세션을 남겨 다시 폴링할 수 있다
     pub async fn device_poll(&self, request_id: &Value) -> Res<GhAuthState> {
         let id = validate::parse_id(request_id, "요청 ID").map_err(GhError::plain)?;
-        let (seq, session) = self.st.lock().device.clone().ok_or_else(|| GhError::plain(NO_FLOW))?;
-        let client_id = self.client_id().await?;
-        let cancel = CancellationToken::new();
+        // 세션을 복사한 뒤 client_id 를 기다리는 동안의 로그아웃도 막도록, 세션·취소·세대를 같은 잠금 안에서 잡고 첫 await 전에 등록한다
+        let (seq, session, logout_gen, cancel) = {
+            let g = self.st.lock();
+            let (seq, session) = g.device.clone().ok_or_else(|| GhError::plain(NO_FLOW))?;
+            (seq, session, g.logout_gen, g.logout_token.child_token())
+        };
         let _guard = self.register(&id, &cancel);
-        let secrets = vec![session.device_code.expose().to_string()];
+        let client_id = self.client_id().await?;
+        let secrets = zeroize::Zeroizing::new(vec![session.device_code.expose().to_string()]);
         let result = async {
             let token = match self.st.flow.poll(&client_id, &session, &cancel).await {
                 Ok(t) => t,
@@ -515,7 +533,7 @@ impl GitHubService {
             self.finish_device(seq);
             let token_secrets = github_secrets(&token);
             let user = self.verify(&token, &cancel).await.map_err(|e| e.sealed(&token_secrets))?;
-            self.sign_in(token, GithubMethod::Device, user, &cancel).await
+            self.sign_in(token, GithubMethod::Device, user, logout_gen, &cancel).await
         }
         .await;
         result.map_err(|e| e.sealed(&secrets))
@@ -536,6 +554,10 @@ impl GitHubService {
             let state = {
                 let mut g = self.st.lock();
                 g.device = None;
+                // 로그인 계열은 requestId 맵에서 밀려났어도 이 토큰의 자식이라 모두 멈춘다
+                g.logout_gen += 1;
+                g.logout_token.cancel();
+                g.logout_token = CancellationToken::new();
                 for (_, t) in g.requests.values() {
                     t.cancel();
                 }
@@ -554,7 +576,8 @@ impl GitHubService {
 
     async fn slug(&self, repo_id: &str) -> Res<Slug> {
         let r: Option<GhRepoRef> = self.st.repos.gh_repo(repo_id).await.map_err(GhError::plain)?;
-        r.map(|r| Slug { owner: r.owner, repo: r.repo }).ok_or_else(|| GhError::plain(NOT_GITHUB))
+        // 사이드카가 준 값은 믿지 않는다 — `..` 같은 값이 URL 경로로 새지 않게 형식을 다시 확인한다(TS 의 `parseGithubRemote` 와 같은 규칙)
+        r.and_then(|r| Slug::parse(&r.owner, &r.repo)).ok_or_else(|| GhError::plain(NOT_GITHUB))
     }
 
     /// 데이터 호출 공통 처리: 현재 세대의 신호를 싣고, 토큰이 있는데 401(`GH_AUTH`)이면 `GET /user` 로 한 번 다시 확인해 그것도 거부되면 토큰을 버린다
@@ -686,7 +709,7 @@ impl GitHubService {
         let authors = validate::parse_avatar_authors(authors).map_err(GhError::plain)?;
         let cancel = self.st.lock().epoch.token.child_token();
         let _guard = self.register(&rid, &cancel);
-        let slug: Option<Slug> = self.st.repos.gh_repo(&id).await.ok().flatten().map(|r| Slug { owner: r.owner, repo: r.repo });
+        let slug: Option<Slug> = self.st.repos.gh_repo(&id).await.ok().flatten().and_then(|r| Slug::parse(&r.owner, &r.repo));
         // 고른 커밋이 push 안 된 것이라 404 면, 같은 작성자의 push 된 커밋으로 다시 묻는다
         let fallback: Fallback = {
             let (repos, id, cancel) = (self.st.repos.clone(), id, cancel.clone());

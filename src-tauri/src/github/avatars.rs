@@ -245,11 +245,11 @@ fn ttl_of(e: &Entry) -> f64 {
 }
 
 fn slug_key(slug: &Slug) -> String {
-    js_to_lowercase(&format!("{}/{}", slug.owner, slug.repo))
+    js_to_lowercase(&format!("{}/{}", slug.owner(), slug.repo()))
 }
 
 fn commits_path(slug: &Slug) -> String {
-    format!("/repos/{}/{}/commits", encode_uri_component(&slug.owner), encode_uri_component(&slug.repo))
+    format!("/repos/{}/{}/commits", encode_uri_component(slug.owner()), encode_uri_component(slug.repo()))
 }
 
 impl AvatarResolver {
@@ -531,7 +531,7 @@ impl AvatarResolver {
             p.checking = true;
             g.calls += 1;
         }
-        let path = format!("/repos/{}/{}", encode_uri_component(&slug.owner), encode_uri_component(&slug.repo));
+        let path = format!("/repos/{}/{}", encode_uri_component(slug.owner()), encode_uri_component(slug.repo()));
         let result = self.inner.client.get(&path, &TokenChoice::Stored, GetOptions { cancel: Some(cancel), ..Default::default() }).await;
         let mut g = self.st();
         let p = g.anon_probe.entry(sk).or_default();
