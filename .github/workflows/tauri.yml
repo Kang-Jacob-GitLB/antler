@@ -80,9 +80,11 @@ jobs:
       # net: GitHub·Jira 순수 로직(검증·URL 판정·응답 해석·Device Flow·ghEnv·토큰 가리기)이 tests/golden/net 골든과 같은지 + Rust 허용 ⇒ TS 허용 위반 0(네트워크·git 을 쓰지 않는다).
       # TS 테스트 대응표는 tests/golden/net/test-map.json(vitest 가 누락을 강제)
       # net 은 가짜 gh 도 띄운다(gh_cli_run): 테스트 바이너리를 gh.exe 로 하드링크해 gh CLI 토큰 가져오기(Job Object·제한 시간·cwd 의 gh.exe 무시)를 본다. 실제 gh 는 쓰지 않는다
+      # ssh_golden: SSH 순수 로직(설정 파서·known_hosts·원격 명령 인용, Phase 5 PR 1)이 tests/golden/ssh 와 exec/env.json 의 ssh 절과 같은지(소켓·ssh·git 을 쓰지 않는다).
+      # TS 테스트 대응표는 tests/golden/ssh/test-map.json(vitest 가 누락을 강제)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy

@@ -28,6 +28,9 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-window-state = "2.5.0"
 # fetch 가드의 위험 항목 지문(sha256) — Cargo.lock 에 전이 의존으로 이미 있는 판(0.10)
 sha2 = "0.10"
+# 해시된 known_hosts 항목(`|1|salt|hash`, HMAC-SHA1)의 검사(src/git/exec/ssh/known_hosts.rs). RustCrypto 0.10 계열이라 위 sha2 와 digest·crypto-common 이 같은 판이다
+hmac = "0.12"
+sha1 = "0.10"
 # GitHub·Jira 순수 판정(src/net, src/github, src/jira)의 URL 해석(WHATWG — Node 의 `new URL` 과 같은 규칙)과 base64(Authorization·토큰 가림).
 # 둘 다 Cargo.lock 에 전이 의존으로 이미 있는 판이다.
 url = "2"
@@ -51,7 +54,8 @@ native-tls = "0.2"
 # 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판
 # Job Object(프로세스 트리 종료, src/git/exec/job.rs)에 JobObjects 가, CreateJobObjectW 의 인자 타입에 Security 가 필요하다
 # Time: GitHub 한도 해제 시각을 로컬 시간대로 표시한다(src/github/local_time.rs — SystemTimeToTzSpecificLocalTime). 새 크레이트가 아니라 같은 크레이트의 기능이다
-windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Time"] }
+windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Time", "Win32_System_WindowsProgramming"] }
+# (위 windows) Win32_System_WindowsProgramming: SSH 설정 해석의 로컬 사용자 이름(src/git/exec/ssh/config.rs — GetUserNameW). 새 크레이트가 아니라 같은 크레이트의 기능이다
 # 확인 창을 플러그인 없이 직접 띄운다 — 플러그인은 Esc 를 "cancel 자리 버튼"으로 바꿔 돌려줘 취소를 기본 버튼으로 둘 수 없다
 # (src-tauri/src/dialogs.rs). tauri-plugin-dialog 2.8 이 쓰는 것과 같은 판·기능이라 따로 빌드되지 않는다
 rfd = { version = "0.17", default-features = false, features = ["common-controls-v6"] }

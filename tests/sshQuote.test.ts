@@ -1,26 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { GIT_ENV, buildGitArgs } from '../src/main/executors/GitExecutor'
 import { buildRemoteCommand, shQuote } from '../src/main/executors/ssh/quote'
+import { TRICKY } from './fixtures/sshCases'
 import { unquote } from './sshHarness'
 
-const TRICKY = [
-  '',
-  'plain',
-  'with space',
-  "it's",
-  "'",
-  "''",
-  'a"b',
-  '$HOME `id` $(id) ${x}',
-  '줄\n바꿈\r\n과 탭\t',
-  '한글 경로/파일 이름.txt',
-  '-leading-dash',
-  '--format=%H%x00%s',
-  'back\\slash\\',
-  '\\',
-  "mix \\' \\\\ '\" ; | & > < * ? ! ~ #",
-  ':(top)*.c'
-]
+// TRICKY 는 골든(tests/goldenSsh.test.ts)과 Rust 이식(src-tauri/tests/ssh_golden.rs)이 함께 쓰는 입력 표다
 
 describe('ssh 인용', () => {
   it.each(TRICKY)('왕복: %j', (s) => {

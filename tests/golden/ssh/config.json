@@ -1,0 +1,3189 @@
+{
+  "home": "C:\\golden\\home",
+  "localUser": "me",
+  "cases": [
+    {
+      "name": "Host 복수 패턴·와일드카드·부정",
+      "text": "\nHost web-* !web-old\n  User deploy\nHost a b\n  Port 2200\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "web-1",
+          "resolved": {
+            "alias": "web-1",
+            "hostName": "web-1",
+            "user": "deploy",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "web-old",
+          "resolved": {
+            "alias": "web-old",
+            "hostName": "web-old",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "b",
+          "resolved": {
+            "alias": "b",
+            "hostName": "b",
+            "user": "me",
+            "port": 2200,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "a",
+          "resolved": {
+            "alias": "a",
+            "hostName": "a",
+            "user": "me",
+            "port": 2200,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "c",
+          "resolved": {
+            "alias": "c",
+            "hostName": "c",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "WEB-2",
+          "resolved": {
+            "alias": "WEB-2",
+            "hostName": "WEB-2",
+            "user": "deploy",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "a",
+          "hostName": "a",
+          "user": "me",
+          "port": 2200
+        },
+        {
+          "alias": "b",
+          "hostName": "b",
+          "user": "me",
+          "port": 2200
+        }
+      ]
+    },
+    {
+      "name": "? 와일드카드와 대소문자 무시",
+      "text": "HOST node?\n  USER=u1\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "node7",
+          "resolved": {
+            "alias": "node7",
+            "hostName": "node7",
+            "user": "u1",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "node77",
+          "resolved": {
+            "alias": "node77",
+            "hostName": "node77",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "NODE7",
+          "resolved": {
+            "alias": "NODE7",
+            "hostName": "NODE7",
+            "user": "u1",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "node😀",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
+          "resolved": {
+            "alias": "node😀",
+            "hostName": "node😀",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "node ",
+          "resolved": {
+            "alias": "node",
+            "hostName": "node",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "nod",
+          "resolved": {
+            "alias": "nod",
+            "hostName": "nod",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": []
+    },
+    {
+      "name": "먼저 얻은 값이 이긴다(블록 순서 기준)",
+      "text": "\nHost dev\n  User first\n  HostName dev.example.com\nHost *\n  User second\n  Port 2222\n  HostName ignored\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "dev",
+          "resolved": {
+            "alias": "dev",
+            "hostName": "dev.example.com",
+            "user": "first",
+            "port": 2222,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "other",
+          "resolved": {
+            "alias": "other",
+            "hostName": "ignored",
+            "user": "second",
+            "port": 2222,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "dev",
+          "hostName": "dev.example.com",
+          "user": "first",
+          "port": 2222
+        }
+      ]
+    },
+    {
+      "name": "전역(Host 이전) 옵션도 적용된다",
+      "text": "User g\nHost x\n  Port 1\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "x",
+          "resolved": {
+            "alias": "x",
+            "hostName": "x",
+            "user": "g",
+            "port": 1,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "y",
+          "resolved": {
+            "alias": "y",
+            "hostName": "y",
+            "user": "g",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "x",
+          "hostName": "x",
+          "user": "g",
+          "port": 1
+        }
+      ]
+    },
+    {
+      "name": "IdentityFile 은 일치하는 모든 블록에서 누적되고 ~ 와 토큰이 확장된다",
+      "text": "\nHost srv\n  HostName 10.0.0.5\n  User bob\n  IdentityFile ~/.ssh/a\n  IdentityFile \"%d/keys/%h-%r-%u-%p\"\nHost *\n  IdentityFile ~/.ssh/z\n  IdentitiesOnly yes\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "srv",
+          "resolved": {
+            "alias": "srv",
+            "hostName": "10.0.0.5",
+            "user": "bob",
+            "port": 22,
+            "identityFiles": [
+              "C:\\golden\\home\\.ssh\\a",
+              "C:\\golden\\home\\keys\\10.0.0.5-bob-me-22",
+              "C:\\golden\\home\\.ssh\\z"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": true,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "srv:2200",
+          "resolved": {
+            "alias": "srv",
+            "hostName": "10.0.0.5",
+            "user": "bob",
+            "port": 2200,
+            "identityFiles": [
+              "C:\\golden\\home\\.ssh\\a",
+              "C:\\golden\\home\\keys\\10.0.0.5-bob-me-2200",
+              "C:\\golden\\home\\.ssh\\z"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": true,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "zed@other",
+          "resolved": {
+            "alias": "other",
+            "hostName": "other",
+            "user": "zed",
+            "port": 22,
+            "identityFiles": [
+              "C:\\golden\\home\\.ssh\\z"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": true,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "srv",
+          "hostName": "10.0.0.5",
+          "user": "bob",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "HostName 의 %h 토큰",
+      "text": "Host app\n  HostName %h.internal.example.com\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "app",
+          "resolved": {
+            "alias": "app",
+            "hostName": "app.internal.example.com",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "app",
+          "hostName": "app.internal.example.com",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "ProxyJump 체인과 user@host:port 형태, none",
+      "text": "\nHost target\n  ProxyJump j1, ops@j2:2201,[::1]:22\nHost direct\n  ProxyJump none\nHost *\n  ProxyJump ignored\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "target",
+          "resolved": {
+            "alias": "target",
+            "hostName": "target",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "j1",
+                "user": null,
+                "host": "j1",
+                "port": null
+              },
+              {
+                "spec": "ops@j2:2201",
+                "user": "ops",
+                "host": "j2",
+                "port": 2201
+              },
+              {
+                "spec": "[::1]:22",
+                "user": null,
+                "host": "::1",
+                "port": 22
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "direct",
+          "resolved": {
+            "alias": "direct",
+            "hostName": "direct",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "other",
+          "resolved": {
+            "alias": "other",
+            "hostName": "other",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "ignored",
+                "user": null,
+                "host": "ignored",
+                "port": null
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "target",
+          "hostName": "target",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "j1,ops@j2:2201,[::1]:22"
+        },
+        {
+          "alias": "direct",
+          "hostName": "direct",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "IdentityAgent none / SSH_AUTH_SOCK / 경로",
+      "text": "\nHost a\n  IdentityAgent none\nHost b\n  IdentityAgent SSH_AUTH_SOCK\nHost c\n  IdentityAgent ~/.agent.sock\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "a",
+          "resolved": {
+            "alias": "a",
+            "hostName": "a",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "none"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "b",
+          "resolved": {
+            "alias": "b",
+            "hostName": "b",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "c",
+          "resolved": {
+            "alias": "c",
+            "hostName": "c",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "C:\\golden\\home\\.agent.sock"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "a",
+          "hostName": "a",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "b",
+          "hostName": "b",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "c",
+          "hostName": "c",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "따옴표 값·주석·행 끝 주석",
+      "text": "\n# 주석\nHost \"my host\"   # 끝 주석\n  IdentityFile \"C:\\Users\\me\\my key\"\n  Port 2022 # 포트\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "my host",
+          "resolved": {
+            "alias": "my host",
+            "hostName": "my host",
+            "user": "me",
+            "port": 2022,
+            "identityFiles": [
+              "C:\\Users\\me\\my key"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "my host",
+          "hostName": "my host",
+          "user": "me",
+          "port": 2022
+        }
+      ]
+    },
+    {
+      "name": "Match 블록은 적용하지 않고 Match all 만 전역으로 취급한다",
+      "text": "\nMatch host foo\n  User matched\nHost foo\n  Port 1\nMatch all\n  User all\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "foo",
+          "resolved": {
+            "alias": "foo",
+            "hostName": "foo",
+            "user": "all",
+            "port": 1,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match host foo",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "foo",
+          "hostName": "foo",
+          "user": "all",
+          "port": 1
+        }
+      ]
+    },
+    {
+      "name": "user@host:port 직접 입력은 설정의 user/port 보다 우선하되 host 설정은 조회한다",
+      "text": "Host box\n  HostName 1.2.3.4\n  User cfg\n  Port 9\n  IdentityFile ~/k\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "root@box:2200",
+          "resolved": {
+            "alias": "box",
+            "hostName": "1.2.3.4",
+            "user": "root",
+            "port": 2200,
+            "identityFiles": [
+              "C:\\golden\\home\\k"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "ann@raw.example.com",
+          "resolved": {
+            "alias": "raw.example.com",
+            "hostName": "raw.example.com",
+            "user": "ann",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "box",
+          "resolved": {
+            "alias": "box",
+            "hostName": "1.2.3.4",
+            "user": "cfg",
+            "port": 9,
+            "identityFiles": [
+              "C:\\golden\\home\\k"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "ssh://root@box/",
+          "resolved": {
+            "alias": "box",
+            "hostName": "1.2.3.4",
+            "user": "root",
+            "port": 9,
+            "identityFiles": [
+              "C:\\golden\\home\\k"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "[box]:77",
+          "resolved": {
+            "alias": "box",
+            "hostName": "1.2.3.4",
+            "user": "cfg",
+            "port": 77,
+            "identityFiles": [
+              "C:\\golden\\home\\k"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "box",
+          "hostName": "1.2.3.4",
+          "user": "cfg",
+          "port": 9
+        }
+      ]
+    },
+    {
+      "name": "Include: ~/.ssh 기준 상대 경로와 글롭, 포함 파일의 Host 는 거기서 끝난다",
+      "text": "Include conf.d/*.conf extra\nHost after\n  Port 4444\nHost *\n  User tail\n",
+      "files": {
+        "C:\\golden\\home\\.ssh\\conf.d\\10-a.conf": "Host inc-a\n  Port 1111\nHost inc-b\n  Port 2222\n",
+        "C:\\golden\\home\\.ssh\\extra": "Host inc-c\n  Port 3333\n"
+      },
+      "env": {},
+      "queries": [
+        {
+          "spec": "inc-a",
+          "resolved": {
+            "alias": "inc-a",
+            "hostName": "inc-a",
+            "user": "tail",
+            "port": 1111,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "inc-b",
+          "resolved": {
+            "alias": "inc-b",
+            "hostName": "inc-b",
+            "user": "tail",
+            "port": 2222,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "inc-c",
+          "resolved": {
+            "alias": "inc-c",
+            "hostName": "inc-c",
+            "user": "tail",
+            "port": 3333,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "after",
+          "resolved": {
+            "alias": "after",
+            "hostName": "after",
+            "user": "tail",
+            "port": 4444,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "inc-a",
+          "hostName": "inc-a",
+          "user": "tail",
+          "port": 1111
+        },
+        {
+          "alias": "inc-b",
+          "hostName": "inc-b",
+          "user": "tail",
+          "port": 2222
+        },
+        {
+          "alias": "inc-c",
+          "hostName": "inc-c",
+          "user": "tail",
+          "port": 3333
+        },
+        {
+          "alias": "after",
+          "hostName": "after",
+          "user": "tail",
+          "port": 4444
+        }
+      ]
+    },
+    {
+      "name": "Include: 없는 Include 는 조용히 무시",
+      "text": "Include nope/*\nInclude missing.conf\nHost x\n  Port 5\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "x",
+          "resolved": {
+            "alias": "x",
+            "hostName": "x",
+            "user": "me",
+            "port": 5,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "x",
+          "hostName": "x",
+          "user": "me",
+          "port": 5
+        }
+      ]
+    },
+    {
+      "name": "listHosts: 와일드카드·부정 패턴 제외, 별칭 순서·중복 제거",
+      "text": "\nHost * !x\n  User all\nHost alpha beta\n  HostName 10.1.1.1\n  Port 2200\n  ProxyJump bastion\nHost alpha\n  User dup\nHost bastion\n  HostName b.example.com\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "alpha",
+          "resolved": {
+            "alias": "alpha",
+            "hostName": "10.1.1.1",
+            "user": "all",
+            "port": 2200,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "bastion",
+                "user": null,
+                "host": "bastion",
+                "port": null
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "beta",
+          "resolved": {
+            "alias": "beta",
+            "hostName": "10.1.1.1",
+            "user": "all",
+            "port": 2200,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "bastion",
+                "user": null,
+                "host": "bastion",
+                "port": null
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "bastion",
+          "resolved": {
+            "alias": "bastion",
+            "hostName": "b.example.com",
+            "user": "all",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "alpha",
+          "hostName": "10.1.1.1",
+          "user": "all",
+          "port": 2200,
+          "proxyJump": "bastion"
+        },
+        {
+          "alias": "beta",
+          "hostName": "10.1.1.1",
+          "user": "all",
+          "port": 2200,
+          "proxyJump": "bastion"
+        },
+        {
+          "alias": "bastion",
+          "hostName": "b.example.com",
+          "user": "all",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "지정한 known_hosts 파일들과 별칭을 돌려준다",
+      "text": "Host box\n  HostName 10.0.0.5\n  UserKnownHostsFile ~/.ssh/kh1 ~/.ssh/kh2\n  HostKeyAlias box-key\nHost x\n  UserKnownHostsFile none\nHost y\n  UserKnownHostsFile NONE ~/kh\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "box",
+          "resolved": {
+            "alias": "box",
+            "hostName": "10.0.0.5",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [
+              "C:\\golden\\home\\.ssh\\kh1",
+              "C:\\golden\\home\\.ssh\\kh2"
+            ],
+            "hostKeyAlias": "box-key"
+          }
+        },
+        {
+          "spec": "x",
+          "resolved": {
+            "alias": "x",
+            "hostName": "x",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "y",
+          "resolved": {
+            "alias": "y",
+            "hostName": "y",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [
+              "C:\\golden\\home\\kh"
+            ],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "box",
+          "hostName": "10.0.0.5",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "x",
+          "hostName": "x",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "y",
+          "hostName": "y",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "ProxyCommand 가 걸린 호스트는 unsupported",
+      "text": "Host inner\n  ProxyCommand ssh -W %h:%p bastion\nHost none\n  ProxyCommand none\nHost NONE2\n  ProxyCommand NONE\nHost empty\n  ProxyCommand \"\"\nHost *\n  ProxyCommand late\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "inner",
+          "resolved": {
+            "alias": "inner",
+            "hostName": "inner",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "ProxyCommand",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "none",
+          "resolved": {
+            "alias": "none",
+            "hostName": "none",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "NONE2",
+          "resolved": {
+            "alias": "NONE2",
+            "hostName": "NONE2",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "empty",
+          "resolved": {
+            "alias": "empty",
+            "hostName": "empty",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "other",
+          "resolved": {
+            "alias": "other",
+            "hostName": "other",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "ProxyCommand",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "inner",
+          "hostName": "inner",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "none",
+          "hostName": "none",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "NONE2",
+          "hostName": "NONE2",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "empty",
+          "hostName": "empty",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "이 호스트에 걸릴 수 있는 Match 블록만 unsupported",
+      "text": "Match host *.corp exec \"true\"\n  IdentitiesOnly yes\nMatch user root\n  User admin\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "box.home",
+          "resolved": {
+            "alias": "box.home",
+            "hostName": "box.home",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match user root",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "db.corp",
+          "resolved": {
+            "alias": "db.corp",
+            "hostName": "db.corp",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match host *.corp exec true, Match user root",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "DB.CORP",
+          "resolved": {
+            "alias": "DB.CORP",
+            "hostName": "DB.CORP",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match host *.corp exec true, Match user root",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": []
+    },
+    {
+      "name": "다른 호스트만 겨냥한 Match·옵션 없는 Match 는 영향 없음",
+      "text": "Match host other\n  User x\nMatch exec \"true\"\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "mine",
+          "resolved": {
+            "alias": "mine",
+            "hostName": "mine",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "other",
+          "resolved": {
+            "alias": "other",
+            "hostName": "other",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match host other",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": []
+    },
+    {
+      "name": "추가: Match 조건 모양(부정·originalhost·홀수 인자·HostName 대조)",
+      "text": "Host real\n  HostName real.corp\nMatch host !real.corp\n  User a\nMatch !host nothing\n  User b\nMatch originalhost real,other\n  User c\nMatch host x,!real.corp\n  User d\nMatch canonical\n  User e\nMatch host real.corp exec\n  User f\nMatch HOST REAL.CORP\n  User g\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "real",
+          "resolved": {
+            "alias": "real",
+            "hostName": "real.corp",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match !host nothing, Match originalhost real,other, Match canonical, Match host real.corp exec, Match HOST REAL.CORP",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "other",
+          "resolved": {
+            "alias": "other",
+            "hostName": "other",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match !host nothing, Match originalhost real,other, Match canonical",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "zzz",
+          "resolved": {
+            "alias": "zzz",
+            "hostName": "zzz",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match !host nothing, Match canonical",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "real",
+          "hostName": "real.corp",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: 경로 정규화(win32 규칙)",
+      "text": "Host p\n  IdentityFile ./a/../b\n  IdentityFile C:foo\n  IdentityFile //server/share/x\n  IdentityFile a:b/c\n  IdentityFile x:\n  IdentityFile conx\n  IdentityFile CON:file\n  IdentityFile ~\\k\n  IdentityFile ~user/k\n  IdentityFile ~\n  IdentityFile none\n  IdentityFile NONE\n  IdentityFile \"\"\n  IdentityFile dir/\n  IdentityFile ..\\..\\up\n  IdentityFile %%d/%x/%n/%\n  IdentityFile C:\\a\\..\\..\\..\\b\n  IdentityFile /abs/path//with///slashes\n  IdentityFile \\\\?\\C:\\x\n  IdentityFile ~/../../up\n  UserKnownHostsFile ~/.ssh/kh%n C:/x/./y\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "p",
+          "resolved": {
+            "alias": "p",
+            "hostName": "p",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [
+              "b",
+              "C:foo",
+              "\\\\server\\share\\x",
+              "a:b\\c",
+              "x:.",
+              ".\\conx",
+              ".\\CON:file",
+              "C:\\golden\\home\\k",
+              "~user\\k",
+              "C:\\golden\\home",
+              ".",
+              "dir\\",
+              "..\\..\\up",
+              "%d\\%x\\p\\%",
+              "C:\\b",
+              "\\abs\\path\\with\\slashes",
+              "\\\\?\\C:\\x",
+              "C:\\up"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [
+              "C:\\golden\\home\\.ssh\\khp",
+              "C:\\x\\y"
+            ],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "p",
+          "hostName": "p",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: 줄 모양(BOM·CRLF·탭·= 구분·알 수 없는 키·닫히지 않은 따옴표)",
+      "text": "﻿Host a\r\n\tPort=2201\r\nHost b\r\n  Port   =   2202\r\nHost c\n  Hostname=c.example\n  Unknown thing\n  User \"no close\nHost-x d\n  Port 1\nHost e\n  Port a\rb\n  User ok\n한글 f\n#Host g\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "a",
+          "resolved": {
+            "alias": "a",
+            "hostName": "a",
+            "user": "me",
+            "port": 2201,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "b",
+          "resolved": {
+            "alias": "b",
+            "hostName": "b",
+            "user": "me",
+            "port": 2202,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "c",
+          "resolved": {
+            "alias": "c",
+            "hostName": "c.example",
+            "user": "no close",
+            "port": 1,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "e",
+          "resolved": {
+            "alias": "e",
+            "hostName": "e",
+            "user": "ok",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "f",
+          "resolved": {
+            "alias": "f",
+            "hostName": "f",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "a",
+          "hostName": "a",
+          "user": "me",
+          "port": 2201
+        },
+        {
+          "alias": "b",
+          "hostName": "b",
+          "user": "me",
+          "port": 2202
+        },
+        {
+          "alias": "c",
+          "hostName": "c.example",
+          "user": "no close",
+          "port": 1
+        },
+        {
+          "alias": "e",
+          "hostName": "e",
+          "user": "ok",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: 포트 값(범위 밖·숫자 아님·앞의 0)",
+      "text": "Host p0\n  Port 0\nHost p1\n  Port 65536\nHost p2\n  Port abc\nHost p3\n  Port 22x\nHost p4\n  Port 0022\nHost p5\n  Port 65535\nHost p6\n  Port \"\"\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "p0",
+          "resolved": {
+            "alias": "p0",
+            "hostName": "p0",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p1",
+          "resolved": {
+            "alias": "p1",
+            "hostName": "p1",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p2",
+          "resolved": {
+            "alias": "p2",
+            "hostName": "p2",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p3",
+          "resolved": {
+            "alias": "p3",
+            "hostName": "p3",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p4",
+          "resolved": {
+            "alias": "p4",
+            "hostName": "p4",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p5",
+          "resolved": {
+            "alias": "p5",
+            "hostName": "p5",
+            "user": "me",
+            "port": 65535,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p6",
+          "resolved": {
+            "alias": "p6",
+            "hostName": "p6",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p0:70000",
+          "rust": {
+            "unsupported": "포트가 1~65535 범위 밖"
+          },
+          "resolved": {
+            "alias": "p0",
+            "hostName": "p0",
+            "user": "me",
+            "port": 70000,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "p4:0",
+          "rust": {
+            "unsupported": "포트가 1~65535 범위 밖"
+          },
+          "resolved": {
+            "alias": "p4",
+            "hostName": "p4",
+            "user": "me",
+            "port": 0,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "p0",
+          "hostName": "p0",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "p1",
+          "hostName": "p1",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "p2",
+          "hostName": "p2",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "p3",
+          "hostName": "p3",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "p4",
+          "hostName": "p4",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "p5",
+          "hostName": "p5",
+          "user": "me",
+          "port": 65535
+        },
+        {
+          "alias": "p6",
+          "hostName": "p6",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: ProxyJump 모양(대소문자·빈 항목·여러 인자·IPv6)",
+      "text": "Host a\n  ProxyJump NONE\nHost b\n  ProxyJump j1,,j2 ,\nHost c\n  ProxyJump j1 j2\nHost d\n  ProxyJump ssh://u@j:2201/,[::1]\nHost e\n  ProxyJump \"\"\nHost f\n  ProxyJump ,\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "a",
+          "resolved": {
+            "alias": "a",
+            "hostName": "a",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "b",
+          "resolved": {
+            "alias": "b",
+            "hostName": "b",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "j1",
+                "user": null,
+                "host": "j1",
+                "port": null
+              },
+              {
+                "spec": "j2",
+                "user": null,
+                "host": "j2",
+                "port": null
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "c",
+          "resolved": {
+            "alias": "c",
+            "hostName": "c",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "j1 j2",
+                "user": null,
+                "host": "j1 j2",
+                "port": null
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "d",
+          "resolved": {
+            "alias": "d",
+            "hostName": "d",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "ssh://u@j:2201/",
+                "user": "u",
+                "host": "j",
+                "port": 2201
+              },
+              {
+                "spec": "[::1]",
+                "user": null,
+                "host": "::1",
+                "port": null
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "e",
+          "resolved": {
+            "alias": "e",
+            "hostName": "e",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "f",
+          "resolved": {
+            "alias": "f",
+            "hostName": "f",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "a",
+          "hostName": "a",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "b",
+          "hostName": "b",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "j1,j2"
+        },
+        {
+          "alias": "c",
+          "hostName": "c",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "j1 j2"
+        },
+        {
+          "alias": "d",
+          "hostName": "d",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "ssh://u@j:2201/,[::1]"
+        },
+        {
+          "alias": "e",
+          "hostName": "e",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "f",
+          "hostName": "f",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: 토큰·HostName·User 가장자리",
+      "text": "Host t\n  HostName %h-%n-%%-%q-%\n  User \"\"\n  IdentityFile %d|%u|%h|%r|%p|%n\nHost u\n  HostName \"\"\n  IdentitiesOnly YES\nHost v\n  IdentitiesOnly yes please\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "t",
+          "resolved": {
+            "alias": "t",
+            "hostName": "t-%n-%-%q-%",
+            "user": "",
+            "port": 22,
+            "identityFiles": [
+              "C:\\golden\\home|me|t-%n-%-%q-%||22|t"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "u",
+          "resolved": {
+            "alias": "u",
+            "hostName": "u",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": true,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "v",
+          "resolved": {
+            "alias": "v",
+            "hostName": "v",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": true,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "@u",
+          "resolved": {
+            "alias": "@u",
+            "hostName": "@u",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "x@u",
+          "resolved": {
+            "alias": "u",
+            "hostName": "u",
+            "user": "x",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": true,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "ssh://SSH://u",
+          "resolved": {
+            "alias": "SSH://u",
+            "hostName": "SSH://u",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "t",
+          "hostName": "t-%n-%-%q-%",
+          "user": "",
+          "port": 22
+        },
+        {
+          "alias": "u",
+          "hostName": "u",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "v",
+          "hostName": "v",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: IdentityAgent 환경변수·토큰·경로",
+      "text": "Host a\n  IdentityAgent $AGENT_DIR/agent.sock\nHost b\n  IdentityAgent \"${AGENT_DIR}/x-%u-%h\"\nHost c\n  IdentityAgent $UNSET_VAR/s\nHost d\n  IdentityAgent ${AGENT_DIR\nHost e\n  IdentityAgent $\nHost f\n  IdentityAgent ssh_auth_sock\nHost g\n  IdentityAgent \"\"\nHost h\n  IdentityAgent ~\\pipe\\x\n",
+      "files": {},
+      "env": {
+        "AGENT_DIR": "/run/user/1000"
+      },
+      "queries": [
+        {
+          "spec": "a",
+          "resolved": {
+            "alias": "a",
+            "hostName": "a",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "/run/user/1000/agent.sock"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "b",
+          "resolved": {
+            "alias": "b",
+            "hostName": "b",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "/run/user/1000/x-me-b"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "c",
+          "resolved": {
+            "alias": "c",
+            "hostName": "c",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "/s"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "d",
+          "resolved": {
+            "alias": "d",
+            "hostName": "d",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "${AGENT_DIR"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "e",
+          "resolved": {
+            "alias": "e",
+            "hostName": "e",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "$"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "f",
+          "resolved": {
+            "alias": "f",
+            "hostName": "f",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "ssh_auth_sock"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "g",
+          "resolved": {
+            "alias": "g",
+            "hostName": "g",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": ""
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "h",
+          "resolved": {
+            "alias": "h",
+            "hostName": "h",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "path",
+              "path": "C:\\golden\\home\\pipe\\x"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "a",
+          "hostName": "a",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "b",
+          "hostName": "b",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "c",
+          "hostName": "c",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "d",
+          "hostName": "d",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "e",
+          "hostName": "e",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "f",
+          "hostName": "f",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "g",
+          "hostName": "g",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "h",
+          "hostName": "h",
+          "user": "me",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: 비 ASCII 와 줄 끝 문자 패턴",
+      "text": "Host Éxample ünï*\n  User u\nHost a*b\n  Port 9\nHost ?\n  Port 8\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "Éxample",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
+          "resolved": {
+            "alias": "Éxample",
+            "hostName": "Éxample",
+            "user": "u",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "éxample",
+          "rust": {
+            "user": "me",
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
+          "resolved": {
+            "alias": "éxample",
+            "hostName": "éxample",
+            "user": "u",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "ÜNÏcode",
+          "rust": {
+            "user": "me",
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
+          "resolved": {
+            "alias": "ÜNÏcode",
+            "hostName": "ÜNÏcode",
+            "user": "u",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "ünïcode",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
+          "resolved": {
+            "alias": "ünïcode",
+            "hostName": "ünïcode",
+            "user": "u",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "a b",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
+          "resolved": {
+            "alias": "a b",
+            "hostName": "a b",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "axb",
+          "resolved": {
+            "alias": "axb",
+            "hostName": "axb",
+            "user": "me",
+            "port": 9,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "😀",
+          "rust": {
+            "unsupported": "비 ASCII 호스트 이름(punycode 로 적으세요)"
+          },
+          "resolved": {
+            "alias": "😀",
+            "hostName": "😀",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "x",
+          "resolved": {
+            "alias": "x",
+            "hostName": "x",
+            "user": "me",
+            "port": 8,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "Éxample",
+          "hostName": "Éxample",
+          "user": "u",
+          "port": 22
+        }
+      ]
+    },
+    {
+      "name": "추가: RevokedHostKeys·범위 밖 ProxyJump 포트(TS 는 무시·통과 — Rust 는 unsupported)",
+      "text": "Host r\n  RevokedHostKeys C:\\revoked\nHost j\n  ProxyJump ok,b@bad:0\nHost k\n  ProxyJump j1:65535\n",
+      "files": {},
+      "env": {},
+      "queries": [
+        {
+          "spec": "r",
+          "rust": {
+            "unsupported": "RevokedHostKeys"
+          },
+          "resolved": {
+            "alias": "r",
+            "hostName": "r",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "j",
+          "rust": {
+            "unsupported": "포트가 1~65535 범위 밖"
+          },
+          "resolved": {
+            "alias": "j",
+            "hostName": "j",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "ok",
+                "user": null,
+                "host": "ok",
+                "port": null
+              },
+              {
+                "spec": "b@bad:0",
+                "user": "b",
+                "host": "bad",
+                "port": 0
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "k",
+          "resolved": {
+            "alias": "k",
+            "hostName": "k",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [
+              {
+                "spec": "j1:65535",
+                "user": null,
+                "host": "j1",
+                "port": 65535
+              }
+            ],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "r",
+          "hostName": "r",
+          "user": "me",
+          "port": 22
+        },
+        {
+          "alias": "j",
+          "hostName": "j",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "ok,b@bad:0"
+        },
+        {
+          "alias": "k",
+          "hostName": "k",
+          "user": "me",
+          "port": 22,
+          "proxyJump": "j1:65535"
+        }
+      ]
+    },
+    {
+      "name": "추가: Include 상태·순서·경로 모양",
+      "text": "Host top\n  Port 1\nInclude inc\\a.conf\n  Port 2\n",
+      "files": {
+        "C:\\golden\\home\\.ssh\\inc\\a.conf": "User from-inc\nHost in-a\n  Port 10\n",
+        "C:\\golden\\home\\.ssh\\inc\\b.CONF": "Host in-b\n  Port 11\n"
+      },
+      "env": {},
+      "queries": [
+        {
+          "spec": "top",
+          "resolved": {
+            "alias": "top",
+            "hostName": "top",
+            "user": "from-inc",
+            "port": 1,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "in-a",
+          "resolved": {
+            "alias": "in-a",
+            "hostName": "in-a",
+            "user": "me",
+            "port": 10,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "zzz",
+          "resolved": {
+            "alias": "zzz",
+            "hostName": "zzz",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "top",
+          "hostName": "top",
+          "user": "from-inc",
+          "port": 1
+        },
+        {
+          "alias": "in-a",
+          "hostName": "in-a",
+          "user": "me",
+          "port": 10
+        }
+      ]
+    },
+    {
+      "name": "추가: Include 글롭 정렬은 UTF-16 순서·대소문자 없는 파일 시스템",
+      "text": "Include sort/*.conf\nInclude C:\\golden\\other\\*.CONF\nInclude \"~/rel/x.conf\" ~/rel/*.cfg\nInclude [x].conf\nInclude dir*\\a.conf\nInclude ssh/sub\\*\n",
+      "files": {
+        "C:\\golden\\home\\.ssh\\sort\\b.conf": "IdentityFile b\n",
+        "C:\\golden\\home\\.ssh\\sort\\A.conf": "IdentityFile A\n",
+        "C:\\golden\\home\\.ssh\\sort\\10.conf": "IdentityFile 10\n",
+        "C:\\golden\\home\\.ssh\\sort\\é.conf": "IdentityFile e-acute\n",
+        "C:\\golden\\home\\.ssh\\sort\\z.txt": "IdentityFile no\n",
+        "C:\\golden\\other\\one.conf": "IdentityFile other-one\n",
+        "C:\\golden\\home\\rel\\x.conf": "IdentityFile rel-x\n",
+        "C:\\golden\\home\\rel\\y.cfg": "IdentityFile rel-y\n",
+        "C:\\golden\\home\\.ssh\\[x].conf": "IdentityFile bracket\n",
+        "C:\\golden\\home\\.ssh\\dir1\\a.conf": "IdentityFile dir-glob\n"
+      },
+      "env": {},
+      "queries": [
+        {
+          "spec": "h",
+          "resolved": {
+            "alias": "h",
+            "hostName": "h",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [
+              "10",
+              "A",
+              "b",
+              "e-acute",
+              "other-one",
+              "rel-x",
+              "rel-y",
+              "bracket"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": []
+    },
+    {
+      "name": "추가: Include 깊이 16",
+      "text": "Include loop\n",
+      "files": {
+        "C:\\golden\\home\\.ssh\\loop": "Host *\n  IdentityFile k\nInclude loop\n"
+      },
+      "env": {},
+      "queries": [
+        {
+          "spec": "x",
+          "resolved": {
+            "alias": "x",
+            "hostName": "x",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k",
+              "k"
+            ],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": []
+    },
+    {
+      "name": "추가: Include 안의 Include 와 Match",
+      "text": "Host a\nInclude one\n  Port 1\n",
+      "files": {
+        "C:\\golden\\home\\.ssh\\one": "Include two\nMatch host zz\n  User skipped\n",
+        "C:\\golden\\home\\.ssh\\two": "  User deep\nHost deep\n  Port 7\n"
+      },
+      "env": {},
+      "queries": [
+        {
+          "spec": "a",
+          "resolved": {
+            "alias": "a",
+            "hostName": "a",
+            "user": "deep",
+            "port": 1,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "deep",
+          "resolved": {
+            "alias": "deep",
+            "hostName": "deep",
+            "user": "me",
+            "port": 7,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": null,
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        },
+        {
+          "spec": "zz",
+          "resolved": {
+            "alias": "zz",
+            "hostName": "zz",
+            "user": "me",
+            "port": 22,
+            "identityFiles": [],
+            "proxyJump": [],
+            "identitiesOnly": false,
+            "identityAgent": {
+              "kind": "default"
+            },
+            "unsupported": "Match host zz",
+            "knownHostsFiles": [],
+            "hostKeyAlias": null
+          }
+        }
+      ],
+      "hosts": [
+        {
+          "alias": "a",
+          "hostName": "a",
+          "user": "deep",
+          "port": 1
+        },
+        {
+          "alias": "deep",
+          "hostName": "deep",
+          "user": "me",
+          "port": 7
+        }
+      ]
+    }
+  ],
+  "specs": [
+    {
+      "spec": "host",
+      "out": {
+        "user": null,
+        "host": "host",
+        "port": null
+      }
+    },
+    {
+      "spec": "user@host",
+      "out": {
+        "user": "user",
+        "host": "host",
+        "port": null
+      }
+    },
+    {
+      "spec": "user@host:2200",
+      "out": {
+        "user": "user",
+        "host": "host",
+        "port": 2200
+      }
+    },
+    {
+      "spec": "host:2200",
+      "out": {
+        "user": null,
+        "host": "host",
+        "port": 2200
+      }
+    },
+    {
+      "spec": "[::1]:22",
+      "out": {
+        "user": null,
+        "host": "::1",
+        "port": 22
+      }
+    },
+    {
+      "spec": "[::1]",
+      "out": {
+        "user": null,
+        "host": "::1",
+        "port": null
+      }
+    },
+    {
+      "spec": "[fe80::1]:2222",
+      "out": {
+        "user": null,
+        "host": "fe80::1",
+        "port": 2222
+      }
+    },
+    {
+      "spec": "fe80::1",
+      "out": {
+        "user": null,
+        "host": "fe80::1",
+        "port": null
+      }
+    },
+    {
+      "spec": "a:b:c",
+      "out": {
+        "user": null,
+        "host": "a:b:c",
+        "port": null
+      }
+    },
+    {
+      "spec": "ssh://u@h:22/",
+      "out": {
+        "user": "u",
+        "host": "h",
+        "port": 22
+      }
+    },
+    {
+      "spec": "SSH://H/",
+      "out": {
+        "user": null,
+        "host": "H",
+        "port": null
+      }
+    },
+    {
+      "spec": "sSh://h//",
+      "out": {
+        "user": null,
+        "host": "h",
+        "port": null
+      }
+    },
+    {
+      "spec": " padded ",
+      "out": {
+        "user": null,
+        "host": "padded",
+        "port": null
+      }
+    },
+    {
+      "spec": "@host",
+      "out": {
+        "user": null,
+        "host": "@host",
+        "port": null
+      }
+    },
+    {
+      "spec": "u@",
+      "out": {
+        "user": "u",
+        "host": "",
+        "port": null
+      }
+    },
+    {
+      "spec": "h:",
+      "out": {
+        "user": null,
+        "host": "h:",
+        "port": null
+      }
+    },
+    {
+      "spec": ":22",
+      "out": {
+        "user": null,
+        "host": ":22",
+        "port": null
+      }
+    },
+    {
+      "spec": "h:0022",
+      "out": {
+        "user": null,
+        "host": "h",
+        "port": 22
+      }
+    },
+    {
+      "spec": "h:70000",
+      "out": {
+        "user": null,
+        "host": "h",
+        "port": 70000
+      }
+    },
+    {
+      "spec": "x@y@z:3",
+      "out": {
+        "user": "x@y",
+        "host": "z",
+        "port": 3
+      }
+    },
+    {
+      "spec": "[a]b",
+      "out": {
+        "user": null,
+        "host": "[a]b",
+        "port": null
+      }
+    },
+    {
+      "spec": "[]:1",
+      "out": {
+        "user": null,
+        "host": "[]",
+        "port": 1
+      }
+    },
+    {
+      "spec": "[a]:",
+      "out": {
+        "user": null,
+        "host": "[a]:",
+        "port": null
+      }
+    },
+    {
+      "spec": "[a]:1x",
+      "out": {
+        "user": null,
+        "host": "[a]:1x",
+        "port": null
+      }
+    },
+    {
+      "spec": "",
+      "out": {
+        "user": null,
+        "host": "",
+        "port": null
+      }
+    },
+    {
+      "spec": "ssh://",
+      "out": {
+        "user": null,
+        "host": "",
+        "port": null
+      }
+    },
+    {
+      "spec": "h:١٢",
+      "out": {
+        "user": null,
+        "host": "h:١٢",
+        "port": null
+      }
+    },
+    {
+      "spec": "a b",
+      "out": {
+        "user": null,
+        "host": "a b",
+        "port": null
+      }
+    },
+    {
+      "spec": " h﻿",
+      "out": {
+        "user": null,
+        "host": "h",
+        "port": null
+      }
+    }
+  ]
+}

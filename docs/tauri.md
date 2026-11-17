@@ -24,7 +24,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
-| 5 | SSH(`russh` 또는 시스템 ssh) — Windows agent·ProxyJump 지원을 먼저 확인 | |
+| 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 사용자 결정 대기 | 진행 중 — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음) 완료. 계획·결정은 아래 "SSH(Phase 5)" |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
@@ -821,6 +821,69 @@ vitest `tests/sidecarGhToken.test.ts`(4)·`tests/sidecarRepoQuery.test.ts`(9)·`
 - `gh_remotes` 를 취소해도 사이드카의 git 호출이 즉시 끝나는지는 `RepoService` 의 신호 처리에 달렸다(서비스는 대기를 즉시 버린다).
 - `ghToken` 은 사이드카 stdin 파이프로 가는 평문이다(같은 사용자의 프로세스 사이). 사이드카 메모리의 사본은 JS 문자열이라 덮어쓸 수 없다.
 - 골든의 취소 시나리오는 목 서버의 지연 응답 스레드가 3초 동안 남는다(테스트 프로세스가 끝나면 사라진다).
+
+## SSH(Phase 5, `src-tauri/src/git/exec/ssh/`)
+
+Electron 판의 SSH 는 시스템 `ssh.exe` 가 아니라 **JS `ssh2` + 자체 `~/.ssh/config` 파서**다(`src/main/executors/ssh/{connection,config,knownHosts,quote}.ts`). 호스트 키는 known_hosts 로만 검증하고(TOFU 없음 —
+모르는 호스트는 거부하고 ssh CLI 로 수락하라고 안내), ProxyCommand·해당 Match 는 거부하며, 셸 확인(`echo 'an''tler'`)·연결당 채널 6·유휴 5분·keepalive 15초×3·접속 15초·ProxyJump 홉마다 호스트 키 검증·agent(`\\.\pipe\openssh-ssh-agent` → pageant → `SSH_AUTH_SOCK`,
+IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시스템 `ssh.exe` 는 ControlMaster 가 없고 ProxyCommand 를 거부할 수 없으며 SFTP 가 따로라 탈락했다.
+
+**결정 대기(사용자)**: 프로토콜 라이브러리로 `russh`(0.65, `default-features=false, features=["ring","rsa"]`, 크레이트 수십 개)를 들일지. PR 1 은 이 결정과 무관하다(소켓·`russh` 가 없다).
+저장소 추가 흐름(`env:*`·`repos:add` 의 SSH·SFTP 폴더 탐색, `remoteDir.ts`)은 사이드카에 남긴다(Phase 6b). 세션 정지(채널 윈도우가 읽는 쪽에 묶여 읽지 않는 채널이 연결 전체를 멈출 수 있음)는 스트림마다 펌프를 두고
+16MB 선읽기를 넘으면 프로세스를 죽이고 `--skip` 으로 다시 시작하는 방식을 PR 2 에서 시험한다 — Electron 판과의 동작 차이는 받아들이기로 했다.
+
+**PR 순서**: 1 순수 로직·골든(**완료**) → 2 `SshExecutor`(`russh`; 첫 단계 go/no-go 스파이크: ring 빌드·세션 정지·agent. `GitExecutor::stream` async 전환, 루프백 `russh::server` 하네스, clippy 로 password/keyboard-interactive/TOFU 쓰기/포트 포워딩 금지) →
+3 라우팅(`sshHost` 미러·`Target::Ssh`·`SshPool`·`ANTLER_RUST_SSH`, fetch 소유 판정을 kind 상수로 — 이중 fetch 방지) → 4 ssh fetch 를 Rust 로(`RUST_FETCH_KINDS`·`fetchOwns.ts`·SSH 전송 오류는 network 로 분류·fetch.scenarios ssh 시나리오) → 5 측정·사람 확인.
+이 단계 뒤 Phase 6 은 6a(나머지 git 채널·RepoWatcher) · 6b(설정·저장소 관리·env·external·github 원격 전용) · 6c(업데이터·패키징·Electron 제거)로 나눈다. 사이드카 전용으로 남은 채널은 37개다.
+
+### PR 1 — 설정·known_hosts·원격 명령 인용(앱에 연결하지 않는다)
+
+| 파일 | 내용 |
+|---|---|
+| `ssh/config.rs` | `~/.ssh/config` 파서·`resolve_host`·`list_hosts`·`parse_host_spec`(Include 깊이 16·`%` 토큰·`$VAR`·`ProxyCommand`/해당 `Match` 를 `unsupported` 로 표시). 파일은 `ConfigFs`(운영 `RealFs`·시험 `MemFs`), 환경변수·로컬 사용자 이름은 `Ctx` 로 주입 |
+| `ssh/known_hosts.rs` | `check_host_key`·`verify_host_key(_text)`·`known_host_key_algorithms`·지문·검증 문구. 해시 항목(HMAC-SHA1)·`@revoked` 거부·`@cert-authority` 무시. **known_hosts 를 쓰는 함수가 없다** |
+| `ssh/quote.rs` | `sh_quote`·`build_remote_command`. 환경은 `merged_env(Option<&FetchEnv>)` 의 닫힌 타입만 받는다(자유 env 를 넣을 수 없다 — 자유 env 를 받는 안쪽 구현은 모듈 밖으로 나가지 않는다) |
+| `ssh/win32_path.rs` | Node `path.win32` 의 `normalize`·`join`·`isAbsolute`·`dirname`·`basename`(Node 22.17.1 의 `lib/path.js`) |
+| `ssh/mod.rs` | JS 정규식 `globToRegExp` 의 의미를 옮긴 `glob_match`(UTF-16 단위·줄 끝 문자 제외·ASCII 대소문자 무시) |
+
+**골든**: `tests/fixtures/sshCases.ts`(입력 표 — 설정 사례 31개(질의 111)·호스트 스펙 29개·known_hosts 사례 14개(질의 49)·인용 28개·원격 명령 24개) → `tests/goldenSsh.test.ts` 가 TS 구현으로 `tests/golden/ssh/{config,knownHosts,quote}.json` 을 만들고
+(`UPDATE_GOLDEN=1 npx vitest run tests/goldenSsh.test.ts`), 원격 명령 원문 바이트는 `tests/goldenExec.test.ts` 가 `tests/golden/exec/env.json` 의 `ssh` 절로 만든다(`GIT_ENV` 단독·fetch 환경 둘 × 작은따옴표·백슬래시·`$`·백틱·개행·한글·`-c alias…`·NUL).
+`src-tauri/tests/ssh_golden.rs` 가 전부 읽어 비교한다(처리기 없는 골든이 있으면 실패). 입력 `TRICKY` 는 기존 `tests/sshQuote.test.ts` 와 공유한다.
+- **플랫폼과 무관한 골든**: 골든 생성기는 `node:path` 를 win32 판으로, `node:fs` 를 가상 파일 시스템(`C:\golden\…`, 대소문자 무시)으로 바꿔 돌린다 — 임시 경로·플랫폼(CI 의 vitest 는 ubuntu)에 기대지 않고 Rust 의 `MemFs`·`win32_path` 와 같은 규칙으로 맞춘다. 홈(`C:\golden\home`)·로컬 사용자·환경변수는 사례 입력이다.
+- **대응표**(`tests/golden/ssh/test-map.json`): 대상 테스트 5개(`sshConfig`·`sshKnownHosts`·`sshQuote`·`sshExecutor`·`sshRemoteDir`)의 모든 `it` 59개가 있어야 하고(vitest 가 강제) 값은 `<파일>.rs::<테스트 이름>`(그 이름의 `fn` 이 있어야 한다)·`N/A: PR n`·`N/A: 사유` 중 하나다.
+  `sshExecutor` 는 `N/A: PR 2`, `sshRemoteDir` 는 `N/A: 저장소 추가 흐름(사이드카 유지)`. 골든 사례 이름은 해당 `it` 제목과 같고, 한 골든 시험이 여러 `it` 을 덮는다.
+- **시험**: 라이브러리 단위 21개(`win32_path`·`glob`·줄 모양·토큰·`$VAR`·Include 깊이·실제 파일 시스템 Include·base64·키 종류·인용 모양·env 이름 거부), `ssh_golden.rs` 11개, vitest `goldenSsh`(2)·`goldenExec`(`ssh` 절 포함).
+
+**TS 와 다른 점**
+- **대소문자 무시는 ASCII 만이다 — 이름 쪽을 ASCII 로 막아 닫았다.** TS 의 `globToRegExp` 는 `i` 플래그(유니코드가 아닌 정규식)라 `toUpperCase` 로 정규화해 `é` 와 `É` 를 같게 본다.
+  Rust 는 Node 의 대문자 표가 없어 ASCII 만 접는다(`ſ`·켈빈 기호가 ASCII 와 다른 것은 TS 도 같다). JS 비유니코드 `i` 의 Canonicalize 는 비 ASCII 를 ASCII 로 접지 않으므로 **비교되는 이름이 ASCII 면 어떤 패턴이든 Rust 결과가 TS 와 정확히 같다.**
+  그래서 관문을 이름 쪽에 둔다(`to_lowercase` 로 바꾸지 않는다 — 켈빈 기호 등으로 새 차이가 생긴다): `resolve_host` 는 별칭·HostName·HostKeyAlias 에 비 ASCII 가 있으면 `unsupported`("비 ASCII 호스트 이름(punycode 로 적으세요)"),
+  `check_host_key` 는 비 ASCII 호스트를 판정하지 않고 `HostKeyCheck::Unsupported`(검증 거부, `known_host_key_algorithms` 는 빈 목록)를 낸다. 골든(`rust` 필드·`rustStatus`)이 이 차이를 고정하고 서로 **달라야** 통과한다.
+  비 ASCII 대문자 `@revoked`·`Host`/`Match host` 패턴이 호스트 이름과 맞지 않아 거부·ProxyCommand 판정이 새던 경로는 이 관문으로 닫혔다.
+- **Rust 가 TS 보다 엄격한 곳**(모두 `unsupported`): ① 최종 포트와 모든 ProxyJump 홉 포트가 1..=65535 가 아니면("포트가 1~65535 범위 밖"; TS 는 `Number()` 라 어떤 값이든 받고 `ssh2` 가 실패한다. 설정 파일의 `Port` 는 TS 처럼 범위 밖이면 무시한다).
+  ② 이 호스트에 적용되는 `RevokedHostKeys`("RevokedHostKeys" — 관리자 폐기 목록을 읽지 않는데 조용히 무시하면 폐기된 키를 수락한다. TS 는 무시한다).
+- **지원하지 않는 한계(TS 와 같다, 조용히 무시한다)**: `GlobalKnownHostsFile`(시스템 known_hosts 를 읽지 않는다)·`KnownHostsCommand`·`CanonicalizeHostname`. 이 설정에 기대는 환경에서는 호스트를 "알 수 없음"으로 거부하거나 다른 이름으로 접속할 수 있으니 사용자 안내에 적는다.
+- `~/.ssh/config` 의 경로는 **항상 win32 규칙**으로 정규화한다(`win32_path`). macOS·Linux 지원(Phase 6)에서 posix 규칙이 필요하면 호출부에서 고른다. Node 판이 올라 `path.win32` 가 바뀌면 골든이 실패하니 `lib/path.js` 와 다시 대조한다(예약 이름 `CON` 등의 처리는 `isWindowsReservedName(path, -1)` 의 끝 글자 하나 잘림까지 옮겼다).
+- 포트는 `u32` 로 포화시킨다(골든 모양 유지). 범위 검사는 위 "엄격한 곳" ① 이 `resolve_host` 한 곳에서 한다.
+- 로컬 사용자 이름은 Windows 에서 `GetUserNameW`(`windows` 크레이트의 `Win32_System_WindowsProgramming` 기능만 켰다 — 새 크레이트 아님), 실패하면 `USERNAME`·`USER`·`user`. 환경변수는 `process_env`(Windows 는 대소문자 무시, Node 와 같다).
+- 정규식 크레이트를 쓰지 않았다. 줄 형식 `^([A-Za-z0-9]+)(?:\s*=\s*|\s+)(.*)$` 는 손으로 풀었다(JS `\s`·`trim` 은 U+FEFF 를 공백으로 보고 U+0085 는 아니다, `.` 는 줄 끝 문자를 맞추지 않아 값 안에 있으면 그 줄을 버린다). `.sort()` 는 UTF-16 단위 순서다.
+- 해시된 known_hosts 의 salt·hash 는 Node `Buffer.from(x, 'base64')` 처럼 느슨하게 푼다(URL-safe 문자·공백·누락된 `=`). 키 종류는 Node `toString('ascii')` 처럼 바이트의 최상위 비트를 지운다.
+- `build_remote_command` 는 환경으로 `Option<&FetchEnv>` 만 받는다(TS 는 `Record<string,string>`). 키 이름 검사는 닫힌 타입이라 일어나지 않지만 안쪽 구현에 남겨 시험한다.
+
+**추가한 크레이트**: `hmac` 0.12.1·`sha1` 0.10.7(해시된 known_hosts 의 HMAC-SHA1). 이미 lock 에 있는 RustCrypto 0.10 계열(`digest` 0.10.7·`sha2` 0.10.9)과 같은 판이라 중복 판이 없다(`cargo tree -d` 로 확인).
+전이로 `subtle` 2.6.1 이 하나 더 들어왔다(`digest` 의 `mac` 기능). 그 밖의 새 크레이트는 없다.
+
+**PR 2 에서 반드시 옮길 방어**(TS `connection.ts` 가 하던 것 — 빠뜨리면 PR 1 의 순수 로직이 막은 것이 연결에서 새 나간다)
+- **원격 셸 확인 `SHELL_PROBE`**(`connection.ts:70-76,490-510`): 접속 직후 `echo 'an''tler'` 로 로그인 셸이 POSIX 인용을 해석하는지 확인한다. cmd.exe 로그인 셸에서는 `sh_quote` 의 인용이 무효라 주입 방어선이 사라진다.
+- **홉마다 `unsupported` 거부**(`connection.ts:285`): 대상뿐 아니라 ProxyJump 의 모든 홉을 `resolve_host` 로 다시 해석해 `unsupported` 가 있으면 거부한다.
+- **HostKeyAlias 가 있으면 포트 22 고정 조회**(`connection.ts:412-413`): known_hosts 조회 이름을 `[alias]:port` 가 아니라 alias·22 로 한다(TS 와 같다).
+- **비 ASCII 관문·포트 관문이 연결 경로에서도 걸리는지 시험**: 별칭·HostName·HostKeyAlias 비 ASCII, 대상·홉 포트 0·65536, `RevokedHostKeys` 가 `unsupported` 로 연결 전에 거부되는지, `check_host_key` 의 `Unsupported` 가 호스트 키 콜백을 거부로 이끄는지.
+
+**남은 위험(PR 1)**
+- 연결 쪽이 `ResolvedHost::unsupported`(비 ASCII·포트 범위·RevokedHostKeys 포함)를 거부해야 한다(TS 는 `connection.ts` 가 점프 호스트까지 모든 노드에서 한다). PR 1 에는 연결이 없어 이 거부는 시험되지 않는다 — PR 2 의 첫 시험으로 넣는다.
+- `MemFs` 가 feature 없이 운영 lib 에 들어 있다(통합 시험이 별도 크레이트라 `cfg(test)` 로 숨길 수 없다). 메모리 파일만 다루고 운영 경로에서 쓰이지 않는다.
+- 골든 생성기의 `node:path`·`node:fs` 모킹이 ubuntu CI(vitest)에서도 같은 골든을 내는지는 로컬(Windows)에서만 돌렸다.
+- `RealFs` 의 Include(실제 파일)는 Windows 임시 디렉터리로 한 시험뿐이다(심볼릭 링크·권한 오류·비 UTF-8 이름은 시험하지 않았다).
 
 ## Phase 0 에서 확인한 것
 

@@ -1,0 +1,134 @@
+{
+  "tricky": [
+    "",
+    "plain",
+    "with space",
+    "it's",
+    "'",
+    "''",
+    "a\"b",
+    "$HOME `id` $(id) ${x}",
+    "줄\n바꿈\r\n과 탭\t",
+    "한글 경로/파일 이름.txt",
+    "-leading-dash",
+    "--format=%H%x00%s",
+    "back\\slash\\",
+    "\\",
+    "mix \\' \\\\ '\" ; | & > < * ? ! ~ #",
+    ":(top)*.c"
+  ],
+  "quote": [
+    {
+      "input": "",
+      "ok": "''"
+    },
+    {
+      "input": "plain",
+      "ok": "'plain'"
+    },
+    {
+      "input": "with space",
+      "ok": "'with space'"
+    },
+    {
+      "input": "it's",
+      "ok": "'it'\\''s'"
+    },
+    {
+      "input": "'",
+      "ok": "\\'"
+    },
+    {
+      "input": "''",
+      "ok": "\\'\\'"
+    },
+    {
+      "input": "a\"b",
+      "ok": "'a\"b'"
+    },
+    {
+      "input": "$HOME `id` $(id) ${x}",
+      "ok": "'$HOME `id` $(id) ${x}'"
+    },
+    {
+      "input": "줄\n바꿈\r\n과 탭\t",
+      "ok": "'줄\n바꿈\r\n과 탭\t'"
+    },
+    {
+      "input": "한글 경로/파일 이름.txt",
+      "ok": "'한글 경로/파일 이름.txt'"
+    },
+    {
+      "input": "-leading-dash",
+      "ok": "'-leading-dash'"
+    },
+    {
+      "input": "--format=%H%x00%s",
+      "ok": "'--format=%H%x00%s'"
+    },
+    {
+      "input": "back\\slash\\",
+      "ok": "'back'\\\\'slash'\\\\"
+    },
+    {
+      "input": "\\",
+      "ok": "\\\\"
+    },
+    {
+      "input": "mix \\' \\\\ '\" ; | & > < * ? ! ~ #",
+      "ok": "'mix '\\\\\\'' '\\\\\\\\' '\\''\" ; | & > < * ? ! ~ #'"
+    },
+    {
+      "input": ":(top)*.c",
+      "ok": "':(top)*.c'"
+    },
+    {
+      "input": "😀 이모지",
+      "ok": "'😀 이모지'"
+    },
+    {
+      "input": "a bc",
+      "ok": "'a bc'"
+    },
+    {
+      "input": "''\\\\''",
+      "ok": "\\'\\'\\\\\\\\\\'\\'"
+    },
+    {
+      "input": "\\'\\",
+      "ok": "\\\\\\'\\\\"
+    },
+    {
+      "input": "a\u0000b",
+      "error": "원격 명령 인자에 NUL 문자는 쓸 수 없습니다"
+    },
+    {
+      "input": "\u0000",
+      "error": "원격 명령 인자에 NUL 문자는 쓸 수 없습니다"
+    },
+    {
+      "input": " ",
+      "ok": "' '"
+    },
+    {
+      "input": "\t",
+      "ok": "'\t'"
+    },
+    {
+      "input": "~",
+      "ok": "'~'"
+    },
+    {
+      "input": "*",
+      "ok": "'*'"
+    },
+    {
+      "input": "-c",
+      "ok": "'-c'"
+    },
+    {
+      "input": "x=y",
+      "ok": "'x=y'"
+    }
+  ]
+}
