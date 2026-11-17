@@ -551,6 +551,14 @@ async fn fake(shared: &Arc<Shared>, channel: &Channel<Msg>, argv: &[String], tok
 }
 
 /// `env K=V… git -C <repo> <전역 인자 8개> <args…>` 를 실행기로 돌린다
+/// 원격 명령의 `env K=V …`(`env` 뒤 `git` 앞)에서 fetch 환경을 읽는다. `GIT_SSH_COMMAND` 가 없으면 fetch 가 아니다
+fn fetch_env_of(env_args: &[String]) -> Option<antler_lib::git::exec::FetchEnv> {
+    let value = |name: &str| env_args.iter().skip(1).find_map(|a| a.strip_prefix(name).and_then(|r| r.strip_prefix('=')).map(str::to_string));
+    let ssh_command = value("GIT_SSH_COMMAND")?;
+    let allow_file = value("GIT_ALLOW_PROTOCOL").is_some_and(|p| p.split(':').any(|x| x == "file"));
+    Some(antler_lib::git::exec::FetchEnv { allow_file, ssh_command })
+}
+
 async fn git(shared: &Arc<Shared>, channel: &Channel<Msg>, argv: &[String], token: CancellationToken) {
     let mut i = 0;
     while i < argv.len() && argv[i] != "git" {
@@ -564,6 +572,25 @@ async fn git(shared: &Arc<Shared>, channel: &Channel<Msg>, argv: &[String], toke
         return;
     }
     let (repo, args) = (&rest[1], &rest[10..]);
+    // fetch(원격 명령의 `env` 에 GIT_SSH_COMMAND 가 실린 것): 실행기의 fetch 환경으로 돌린다 — `GIT_ALLOW_PROTOCOL`(file 허용 여부)·`GIT_SSH_COMMAND` 가 자식 git 에 닿는다.
+    // 일반 env 를 그대로 자식에 넣지 않는다(제품 코드와 같은 닫힌 `FetchEnv` 로만 — TS 하네스는 env 를 그대로 적용한다)
+    if let Some(fetch_env) = fetch_env_of(&argv[..i]) {
+        let _count = ChildCount::new(shared);
+        let opts = RunOpts { cancel: Some(token.clone()), fetch_env: Some(fetch_env), ..RunOpts::default() };
+        match LocalExecutor::default().run(repo, args, &opts).await {
+            Ok(out) => {
+                if !out.stdout.is_empty() {
+                    let _ = channel.data(&out.stdout[..]).await;
+                }
+                if !out.stderr.is_empty() {
+                    let _ = channel.extended_data(1, out.stderr.as_bytes()).await;
+                }
+                finish(channel, Some(u32::try_from(out.code).unwrap_or(255))).await;
+            }
+            Err(_) => finish(channel, None).await,
+        }
+        return;
+    }
     // 저장소 경로가 `antler-fake:<가짜 명령>[:인자…]` 면 git 대신 가짜 명령을 돌린다 — `run` 은 `build_remote_command` 의 결과만 보내므로
     // (임의 명령을 보낼 길이 없다) 오래 사는 원격 프로세스·큰 출력은 이 경로로 만든다
     if let Some(fake_cmd) = repo.strip_prefix("antler-fake:") {

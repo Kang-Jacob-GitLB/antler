@@ -125,10 +125,10 @@ impl SshStream {
             return Err(ExecError::Aborted);
         }
         if end.rejected {
-            return Err(ExecError::Other { message: "원격 명령을 시작하지 못했습니다: 서버가 exec 요청을 거부했습니다".into() });
+            return Err(ExecError::Ssh { message: "원격 명령을 시작하지 못했습니다: 서버가 exec 요청을 거부했습니다".into() });
         }
         match end.code {
-            None => Err(ExecError::Other { message: CONNECTION_LOST.into() }),
+            None => Err(ExecError::Ssh { message: CONNECTION_LOST.into() }),
             Some(0) => Ok(()),
             Some(code) => {
                 let stderr = String::from_utf8_lossy(&end.stderr).into_owned();

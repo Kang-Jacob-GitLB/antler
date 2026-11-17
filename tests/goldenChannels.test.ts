@@ -6,12 +6,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { AbortError, GitError } from '../src/main/executors/GitExecutor'
+import { ProcessQueue } from '../src/main/executors/ProcessQueue'
+import { SshExecutor } from '../src/main/executors/SshExecutor'
 import { ConfigStore } from '../src/main/services/ConfigStore'
 import { FetchService } from '../src/main/services/FetchService'
-import { logArgs } from '../src/main/git/commands'
+import { logArgs, refsSignature } from '../src/main/git/commands'
 import { RepoService, StaleLogError } from '../src/main/services/RepoService'
 import type { LogQuery } from '../src/shared/types'
 import { IPC_CHANNELS } from '../src/shared/ipc'
+import { knownHostsLine, makeHome, newKeyPair, startServer, type TestServer } from './sshHarness'
 
 // 채널 패리티 골든. TS(RepoService)가 기준이고, Rust 라우터(src-tauri/tests/channels.rs)가 같은 fixture·시나리오로 같은 결과를 내는지 본다.
 //  - tests/golden/exec/channels.json: IPC_CHANNELS 목록. Rust 의 RUST_CHANNELS 가 이것의 부분집합인지 Rust 테스트가 강제한다
@@ -20,6 +23,7 @@ import { IPC_CHANNELS } from '../src/shared/ipc'
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 //  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
+//    target:'ssh' 시나리오는 127.0.0.1 의 ssh2 하네스(tests/sshHarness.ts)와 SshExecutor 로 돌린다(실제 ~/.ssh·agent 는 쓰지 않는다 — 임시 홈).
 // 골든 갱신: `UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts`
 
 const FIXTURES = join(__dirname, 'fixtures', 'repos')
@@ -320,7 +324,43 @@ interface FetchStep {
 interface FetchScenario {
   name: string
   server?: 'auth401'
+  /** 'ssh' 면 repo 를 SSH 서버 너머의 원격 저장소로 둔다. ssh 는 그 서버의 이상(refused: 닫힌 포트, hostkey: known_hosts 와 다른 호스트 키) */
+  target?: 'ssh'
+  ssh?: 'refused' | 'hostkey'
   steps: FetchStep[]
+}
+
+/** target:'ssh' 시나리오의 환경: 임시 홈·SSH 서버·SshExecutor. RepoService 의 실행기 공장은 실제 ~/.ssh 를 읽으므로 fetch 가 쓰는 두 메서드만 이 실행기로 바꾼다 */
+async function sshRig(
+  config: ConfigStore,
+  repo: string,
+  anomaly: 'refused' | 'hostkey' | undefined
+): Promise<{ id: string; svc: RepoService; close: () => Promise<void> }> {
+  const clientKey = newKeyPair()
+  const server: TestServer = await startServer({ authorized: [clientKey] })
+  const port = server.port
+  if (anomaly === 'refused') await server.close()
+  const env = makeHome(clientKey)
+  writeFileSync(env.configPath, `Host test
+  HostName 127.0.0.1
+  Port ${port}
+  User tester
+  IdentityFile ${env.keyPath}
+  IdentitiesOnly yes
+`)
+  writeFileSync(env.knownHostsPath, knownHostsLine(port, anomaly === 'hostkey' ? newKeyPair() : server.hostKey))
+  const exec = new SshExecutor('test', { configPath: env.configPath, knownHostsPath: env.knownHostsPath, agent: null, homeDir: env.home })
+  const queue = new ProcessQueue(1)
+  class SshRepos extends RepoService {
+    override fetchContext(): { exec: SshExecutor; path: string; queue: ProcessQueue } {
+      return { exec, path: repo, queue }
+    }
+    override signature(_repoId: string, signal?: AbortSignal): Promise<string> {
+      return refsSignature(exec, repo, { signal })
+    }
+  }
+  const id = config.addRepo({ sourceId: 'ssh:test', path: repo, name: 'repo' }, { id: 'ssh:test', kind: 'ssh', label: 'SSH: test', sshHost: 'test' }).id
+  return { id, svc: new SshRepos(config), close: async () => { await exec.dispose(); if (anomaly !== 'refused') await server.close() } }
 }
 
 /** 상태에서 비교할 것만 남긴다: 시각(lastOkAt)은 유무만, 오류 문구는 유무와 file 전송 안내 여부만(문구 패리티는 하지 않는다) */
@@ -383,8 +423,17 @@ describe('git:fetch 채널 골든(channels/fetch.json)', () => {
       }
 
       const config = new ConfigStore(join(dir, 'config.json'))
-      const id = config.addRepo({ sourceId: 'local', path: repo, name: 'repo' }).id
-      const svc = new RepoService(config)
+      let id: string
+      let svc: RepoService
+      let closeRig = async (): Promise<void> => {}
+      if (sc.target === 'ssh') {
+        const rig = await sshRig(config, repo, sc.ssh)
+        ;({ id, svc } = rig)
+        closeRig = rig.close
+      } else {
+        id = config.addRepo({ sourceId: 'local', path: repo, name: 'repo' }).id
+        svc = new RepoService(config)
+      }
       let changed = 0
       let confirms = 0
       let reply: number | null = 2
@@ -421,6 +470,7 @@ describe('git:fetch 채널 골든(channels/fetch.json)', () => {
       }
       fetcher.dispose()
       await svc.dispose()
+      await closeRig()
       await new Promise<void>((r) => (server ? server.close(() => r()) : r()))
       results.push({ name: sc.name, steps })
     }

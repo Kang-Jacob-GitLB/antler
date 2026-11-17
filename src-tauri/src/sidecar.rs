@@ -42,7 +42,7 @@ impl Sidecar {
     /// `fetch_kinds` 가 있으면 env `ANTLER_RUST_FETCH_KINDS` 로 넘겨 사이드카가 그 환경의 저장소를 fetch 하지 않게 한다(Rust 가 맡는다). 없으면 사이드카가 전부 맡는다.
     /// **`FetchPrefsSink` 를 먼저 manage 한 뒤에 불러야 한다** — 첫 fetchPrefs 가 ready 전에 한 번만 온다
     /// `rust_api` 이면 env `ANTLER_RUST_API=1` 로 넘겨 사이드카가 `jira:*`·`gh:*`(`gh:repo` 제외)를 소유하지 않게 한다(Rust 가 처리한다. GitHub 토큰은 env 가 아니라 [`Sidecar::push_gh_token`] 으로만 간다). 아니면 부모 환경의 값도 지운다.
-    /// `rust_ssh` 이면 env `ANTLER_RUST_SSH=1` 로 넘겨 ssh 저장소의 git 채널(fetch 제외)을 Rust 가 처리함을 알린다(`Router::ssh_active` 와 같은 값 — 사이드카의 fetch 는 이 PR 에서 ssh 를 계속 맡는다). 아니면 부모 환경의 값도 지운다.
+    /// `rust_ssh` 이면 env `ANTLER_RUST_SSH=1` 로 넘겨 ssh 저장소의 git 채널(fetch 포함)을 Rust 가 처리함을 알린다(`Router::ssh_active` 와 같은 값 — `fetch_kinds` 의 ssh 포함 여부도 이 값이 정한다). 아니면 부모 환경의 값도 지운다.
     pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror, fetch_kinds: Option<&str>, rust_api: bool, rust_ssh: bool) -> Result<Self, String> {
         let node = std::env::var("ANTLER_NODE").unwrap_or_else(|_| "node".into());
         let script = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../out-tauri/sidecar/index.cjs"));

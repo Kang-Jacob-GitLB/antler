@@ -576,6 +576,253 @@
           }
         }
       ]
+    },
+    {
+      "name": "ssh: 수동 fetch 는 원격의 저장소에서 새 커밋을 받고 승인을 남긴다",
+      "steps": [
+        {
+          "approvals": [
+            "approval"
+          ],
+          "changed": 1,
+          "confirm": null,
+          "confirms": 0,
+          "manual": true,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": false,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": true,
+            "needsManual": false,
+            "noRemote": false
+          }
+        },
+        {
+          "approvals": [
+            "approval"
+          ],
+          "changed": 0,
+          "confirm": null,
+          "confirms": 0,
+          "manual": true,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": false,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": true,
+            "needsManual": false,
+            "noRemote": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "ssh: 원격 저장소의 위험 설정은 자동 fetch 가 차단하고 수동 확인이 있어야 받는다",
+      "steps": [
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": 0,
+          "confirms": 0,
+          "manual": false,
+          "state": {
+            "authPaused": false,
+            "blocked": {
+              "confirmable": true,
+              "keys": [
+                "core.sshcommand"
+              ]
+            },
+            "error": false,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": false,
+            "noRemote": false
+          }
+        },
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": 2,
+          "confirms": 1,
+          "manual": true,
+          "state": {
+            "authPaused": false,
+            "blocked": {
+              "confirmable": true,
+              "keys": [
+                "core.sshcommand"
+              ]
+            },
+            "error": false,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": false,
+            "noRemote": false
+          }
+        },
+        {
+          "approvals": [
+            "approval"
+          ],
+          "changed": 0,
+          "confirm": 0,
+          "confirms": 1,
+          "manual": true,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": false,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": true,
+            "needsManual": false,
+            "noRemote": false
+          }
+        },
+        {
+          "approvals": [
+            "approval"
+          ],
+          "changed": 0,
+          "confirm": 2,
+          "confirms": 0,
+          "manual": true,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": false,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": true,
+            "needsManual": false,
+            "noRemote": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "ssh: 원격 git 이 낸 http 인증 실패는 문구로 분류해 auth 다(전송 오류가 아니다)",
+      "steps": [
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": null,
+          "confirms": 0,
+          "manual": false,
+          "state": {
+            "authPaused": true,
+            "blocked": null,
+            "error": true,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": true,
+            "noRemote": false
+          }
+        },
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": null,
+          "confirms": 0,
+          "manual": true,
+          "state": {
+            "authPaused": true,
+            "blocked": null,
+            "error": true,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": false,
+            "noRemote": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "ssh: SSH 연결이 거부되면 인증 중단이 아니라 network(백오프)다",
+      "steps": [
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": null,
+          "confirms": 0,
+          "manual": true,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": true,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": false,
+            "noRemote": false
+          }
+        },
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": null,
+          "confirms": 0,
+          "manual": false,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": true,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": false,
+            "noRemote": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "ssh: 호스트 키가 known_hosts 와 다르면 인증 중단이 아니라 network(백오프)다",
+      "steps": [
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": null,
+          "confirms": 0,
+          "manual": true,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": true,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": false,
+            "noRemote": false
+          }
+        },
+        {
+          "approvals": [],
+          "changed": 0,
+          "confirm": null,
+          "confirms": 0,
+          "manual": false,
+          "state": {
+            "authPaused": false,
+            "blocked": null,
+            "error": true,
+            "fetching": false,
+            "fileHint": false,
+            "lastOk": false,
+            "needsManual": false,
+            "noRemote": false
+          }
+        }
+      ]
     }
   ]
 }

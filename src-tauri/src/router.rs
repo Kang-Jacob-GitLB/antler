@@ -4,13 +4,13 @@
 //! 환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아닐 때. 그 밖에는 전부 사이드카가 지금까지처럼 처리한다
 //! (미러에 없는 id 의 오류 문구도 사이드카가 만든다). `ANTLER_RUST_GIT=0` 은 즉시 되돌리는 스위치다.
 //!
-//! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
-//! `ANTLER_RUST_FETCH_KINDS=local,wsl` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
+//! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl(그리고 ssh 가 Rust 로 풀릴 때는 ssh) 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
+//! `ANTLER_RUST_FETCH_KINDS=local,wsl[,ssh]` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
 //! 스위치가 꺼져 있으면 env 도 서비스도 없다 — 사이드카가 전부 맡는다(이중 fetch 없음).
 //!
-//! ssh(Phase 5 PR 3): `ANTLER_RUST_SSH` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이면 함께 꺼진다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 `git:fetch` 를 뺀 6개 채널을 Rust 가 처리한다.
-//! 호스트마다 실행기(= 연결 하나)를 [`SshPool`] 에서 받고 큐는 호스트마다 하나(동시 4)다. **ssh 의 `git:fetch` 는 이 PR 에서 계속 사이드카다** —
-//! fetch 소유는 해석 결과가 아니라 소스 종류([`RUST_FETCH_KINDS`])로 정한다(`RepoMirror::resolve_fetch`). 아니면 ssh 가 Rust 로 풀리는 순간 Rust 도 ssh 를 자동 fetch 해 이중 fetch 가 된다.
+//! ssh(Phase 5 PR 3): `ANTLER_RUST_SSH` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이면 함께 꺼진다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 git 채널을 Rust 가 처리한다(Phase 5 PR 4: `git:fetch` 포함).
+//! 호스트마다 실행기(= 연결 하나)를 [`SshPool`] 에서 받고 큐는 호스트마다 하나(동시 4)다. fetch 서비스도 같은 풀의 연결을 쓴다.
+//! fetch 소유는 해석 결과가 아니라 소스 종류([`rust_fetch_kinds`])로 정한다(`RepoMirror::resolve_fetch`) — 사이드카 env 와 같은 술어 하나라 이중 fetch 도 미소유도 없다.
 //!
 //! `jira:*`·`gh:*`(`gh:repo` 제외, [`API_CHANNELS`])는 별개의 스위치다: `ANTLER_RUST_API` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이어도 꺼진다) 서비스가 주입돼 있으면 **미러와 무관하게**
 //! Rust 가 처리한다([`api_host`]). 꺼져 있으면 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
@@ -95,12 +95,21 @@ pub const API_CHANNELS: &[&str] = &[
 /// (Rust 서비스는 `repoq` 질의로 그 결과를 받는다). `src/sidecar/apiOwns.ts` 의 `SIDECAR_KEPT_CHANNELS` 와 같아야 한다
 pub const API_SIDECAR_CHANNELS: &[&str] = &["gh:repo"];
 
-/// Rust 가 fetch 를 맡는 소스 종류(사이드카 env `ANTLER_RUST_FETCH_KINDS` 의 값. `src/sidecar/fetchOwns.ts` 가 읽는다)
-pub const RUST_FETCH_KINDS: &str = "local,wsl";
+/// Rust 가 fetch 를 맡는 소스 종류(사이드카 env `ANTLER_RUST_FETCH_KINDS` 의 값. `src/sidecar/fetchOwns.ts` 가 읽는다).
+/// **계산 값이다**: local·wsl 은 항상, ssh 는 Rust 가 ssh 저장소를 푸는 때(`Router::ssh_active`)만 더한다. 미러의 fetch 소유 판정(`RepoMirror::resolve_fetch`)과
+/// 사이드카 env 가 모두 이 함수 하나를 부르므로, 둘이 어긋나 아무도 fetch 하지 않거나(미소유) 둘이 fetch 하는(이중) 일이 없다
+pub fn rust_fetch_kinds(ssh_active: bool) -> &'static str {
+    if ssh_active {
+        "local,wsl,ssh"
+    } else {
+        "local,wsl"
+    }
+}
 
-/// 사이드카를 띄울 때 넣을 `ANTLER_RUST_FETCH_KINDS` 값. 라우터가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 없다 — 사이드카가 fetch 를 전부 맡는다
-pub fn sidecar_fetch_kinds(router_enabled: bool) -> Option<&'static str> {
-    router_enabled.then_some(RUST_FETCH_KINDS)
+/// 사이드카를 띄울 때 넣을 `ANTLER_RUST_FETCH_KINDS` 값. 라우터가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 없다 — 사이드카가 fetch 를 전부 맡는다.
+/// `ssh_active` 는 [`Router::ssh_active`] 와 같은 값이어야 한다(`ANTLER_RUST_SSH` 도 같은 값으로 넘어간다)
+pub fn sidecar_fetch_kinds(router_enabled: bool, ssh_active: bool) -> Option<&'static str> {
+    router_enabled.then(|| rust_fetch_kinds(ssh_active))
 }
 
 /// `ANTLER_RUST_SSH`(`0` 이면 끔)와 `ANTLER_RUST_GIT`(`0` 이면 함께 끔)으로 ssh 저장소의 git 채널(fetch 제외)을 Rust 가 처리할지 정한다.
@@ -569,7 +578,7 @@ impl Router {
                 _ => None,
             };
             self.logs.close_others(active);
-            // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl — ssh 는 Rust 로 풀려도 사이드카가 fetch 한다)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
+            // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl, 그리고 Rust 가 ssh 를 풀 때는 ssh)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
             // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
             if self.enabled {
                 if let Some(service) = self.fetch_port() {
@@ -705,8 +714,8 @@ impl Router {
     }
 
     /// `git:fetch(repoId, manual)`. `manual` 은 정확히 `true` 일 때만 참이다(`handlers.ts` 의 `manual === true`) — renderer 가 주장하는 값이라 다른 모양은 모두 자동 fetch 다.
-    /// 저장소의 경로·kind 는 미러에서만 얻고(서비스가 다시 미러로 푼다), 미러에 없거나 ssh·github 면 사이드카가 처리한다 — **ssh 가 Rust 로 풀려도 마찬가지다**(`resolve_fetch` 는 소스 종류로 거른다).
-    /// local·wsl 이면 **절대 사이드카로 보내지 않는다** — 사이드카는 그 저장소를 맡지 않아(`ANTLER_RUST_FETCH_KINDS`) 보내면 오류가 나고, 보내서 둘이 fetch 하는 길도 없어야 한다
+    /// 저장소의 경로·kind 는 미러에서만 얻고(서비스가 다시 미러로 푼다), 미러에 없거나 github(또는 ssh 스위치가 꺼진 ssh)면 사이드카가 처리한다(`resolve_fetch` 는 소스 종류로 거른다).
+    /// local·wsl·(켜진) ssh 이면 **절대 사이드카로 보내지 않는다** — 사이드카는 그 저장소를 맡지 않아(`ANTLER_RUST_FETCH_KINDS`) 보내면 오류가 나고, 보내서 둘이 fetch 하는 길도 없어야 한다
     async fn git_fetch(&self, args: &[Option<&Value>]) -> Routed {
         let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
         match self.mirror.resolve_fetch(repo_id) {

@@ -12,7 +12,7 @@ use antler_lib::git::fetch::confirm_text::ConfirmBox;
 use antler_lib::git::fetch::service::{ApprovalKind, FetchControl, FetchFuture, FetchHost, FetchPrefs, FetchService, FetchStatus, HostEvent};
 use antler_lib::git::log_service::NoteOp;
 use antler_lib::mirror::{MirrorRepo, RepoMirror, Target};
-use antler_lib::router::{in_runtime_of, sidecar_fetch_kinds, Routed, Router, RUST_CHANNELS, RUST_FETCH_KINDS, UNDEFINED_ARG};
+use antler_lib::router::{in_runtime_of, rust_fetch_kinds, sidecar_fetch_kinds, Routed, Router, RUST_CHANNELS, UNDEFINED_ARG};
 use futures_util::FutureExt;
 use serde_json::{json, Value};
 
@@ -96,23 +96,27 @@ fn fetch_prefs_받는_곳은_사이드카를_띄우기_전에_등록한다() {
     let manage_router = lib.find("app.manage(router)").expect("라우터 등록");
     assert!(set_fetch < manage_router && manage_router < sink);
     // 사이드카 기동 인자는 라우터 스위치에서 정한 값이다
-    assert!(lib.contains("sidecar_fetch_kinds(router.enabled())"));
+    assert!(lib.contains("sidecar_fetch_kinds(router.enabled(), rust_ssh)"));
     // 포커스·sink 는 런타임 밖 스레드에서 불린다 — 라우터 호출은 앱 런타임 안에서
     assert_eq!(lib.matches("in_runtime_of(").count(), 2);
 }
 
 #[test]
-fn 사이드카_env_는_스위치가_켜졌을_때만_local_wsl_이다() {
-    assert_eq!(sidecar_fetch_kinds(true), Some("local,wsl"));
-    assert_eq!(RUST_FETCH_KINDS, "local,wsl");
-    assert_eq!(sidecar_fetch_kinds(false), None);
+fn 사이드카_env_는_스위치가_켜졌을_때만_있고_ssh_는_ssh_활성일_때만_더한다() {
+    assert_eq!(sidecar_fetch_kinds(true, false), Some("local,wsl"));
+    assert_eq!(sidecar_fetch_kinds(true, true), Some("local,wsl,ssh"));
+    assert_eq!(rust_fetch_kinds(false), "local,wsl");
+    assert_eq!(rust_fetch_kinds(true), "local,wsl,ssh");
+    // 라우터가 꺼져 있으면 ssh 가 활성이라는 값이 와도 env 는 없다(사이드카가 전부 맡는다)
+    assert_eq!(sidecar_fetch_kinds(false, false), None);
+    assert_eq!(sidecar_fetch_kinds(false, true), None);
     // 사이드카 기동은 값이 없을 때 부모의 env 를 지운다(되돌리기가 뒤집히지 않게)
     assert!(prod_code("src/sidecar.rs").contains("env_remove(\"ANTLER_RUST_FETCH_KINDS\")"));
     // 사이드카가 읽는 이름·토큰이 TS 와 같다
     let ts = read_src("../src/sidecar/index.ts");
     assert!(ts.contains("ANTLER_RUST_FETCH_KINDS"));
     let owns = read_src("../src/sidecar/fetchOwns.ts");
-    assert!(owns.contains("['local', 'wsl']"));
+    assert!(owns.contains("['local', 'wsl', 'ssh']"));
 }
 
 #[test]
@@ -244,7 +248,7 @@ async fn 스위치가_꺼지면_모든_fetch_가_사이드카로_가고_서비�
     router.shutdown();
     assert!(log(&calls).is_empty(), "{:?}", log(&calls));
     assert_eq!(router.rust_handled(), 0);
-    assert!(sidecar_fetch_kinds(router.enabled()).is_none());
+    assert!(sidecar_fetch_kinds(router.enabled(), router.ssh_active()).is_none());
 }
 
 #[tokio::test]
@@ -369,53 +373,87 @@ fn 활성_저장소가_있을_때_런타임_밖_스레드의_prefs_적용은_런
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// ssh 가 Rust 로 풀려도 fetch 는 사이드카가 맡는다(Phase 5 PR 3 — 이중 fetch 방지)
+// ssh 의 fetch(Phase 5 PR 4): ssh 가 Rust 로 풀리면(ssh_active) fetch 도 Rust 서비스가 맡는다 — 사이드카와 같은 술어(rust_fetch_kinds)로
 // ---------------------------------------------------------------------------------------------------------------------
 
 fn ssh_repo(id: &str, host: &str) -> MirrorRepo {
     MirrorRepo { id: id.into(), kind: "ssh".into(), path: "/srv/r".into(), distro: None, ssh_host: Some(host.into()) }
 }
 
-/// ssh 저장소가 Rust 로 풀리는(풀이 주입된) 라우터. 호스트가 잘못된 ssh 저장소(`sshbad`)도 있다
-fn ssh_rig() -> (Router, RepoMirror, Arc<Calls>) {
+fn ssh_mirror() -> RepoMirror {
     let m = mirror();
     m.apply(
         2,
-        vec![repo("loc", "local", "C:\nonexistent-antler\r", None), ssh_repo("ssh", "devbox"), ssh_repo("sshbad", "-oProxyCommand=x"), repo("gh", "github", "/cache/r", None)],
+        vec![repo("loc", "local", "C:\\nonexistent-antler\\r", None), ssh_repo("ssh", "devbox"), ssh_repo("sshbad", "-oProxyCommand=x"), repo("gh", "github", "/cache/r", None)],
     );
+    m
+}
+
+/// ssh 저장소가 Rust 로 풀리는(풀이 주입된) 라우터. 호스트가 잘못된 ssh 저장소(`sshbad`)도 있다
+fn ssh_rig() -> (Router, RepoMirror, Arc<Calls>) {
+    let m = ssh_mirror();
     let router = Router::new(true, false, m.clone());
     let calls = Arc::new(Calls::default());
     router.set_fetch(Arc::new(Fake(calls.clone())));
-    router.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\nonexistent-antler-home"));
+    router.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\\nonexistent-antler-home"));
     assert!(router.ssh_active());
     (router, m, calls)
 }
 
 #[tokio::test]
-async fn ssh_저장소의_git_fetch_는_rust_로_풀려도_사이드카로_간다() {
+async fn ssh_저장소의_git_fetch_는_ssh_활성이면_rust_로_가고_사이드카_env_에_ssh_가_들어간다() {
     let (router, m, calls) = ssh_rig();
-    // 이 시험의 전제: ssh 는 정말 Rust 로 풀린다(다른 채널은 Rust 가 처리한다)
     assert!(matches!(m.resolve("ssh"), antler_lib::mirror::Resolved::Rust(Target::Ssh { .. })));
     assert!(matches!(m.resolve("sshbad"), antler_lib::mirror::Resolved::Invalid(_)));
-    // 호스트가 잘못된 것도 오류가 아니라 사이드카다(사이드카가 자기 방식으로 오류를 만든다)
-    for id in ["ssh", "sshbad", "gh", "nope"] {
-        for manual in [true, false] {
-            assert!(is_sidecar(&router.route("git:fetch", &json!([id, manual])).await), "{id} {manual}");
-        }
+    for manual in [true, false] {
+        let env = envelope(router.route("git:fetch", &json!(["ssh", manual])).await);
+        assert_eq!((env["ok"].as_bool(), env["data"]["repoId"].as_str()), (Some(true), Some("ssh")), "{manual}");
     }
-    assert!(log(&calls).is_empty(), "Rust fetch 서비스에 닿지 않는다: {:?}", log(&calls));
-    assert_eq!(router.rust_handled(), 0);
-    // local 은 그대로 Rust 가 맡는다
-    assert_eq!(envelope(router.route("git:fetch", &json!(["loc", true])).await)["ok"], true);
-    assert_eq!(log(&calls), ["fetch loc true"]);
-    // 사이드카의 fetch 가 ssh 를 계속 맡도록 env 는 그대로 local,wsl 이다
-    assert_eq!(sidecar_fetch_kinds(router.enabled()), Some("local,wsl"));
+    assert_eq!(log(&calls), ["fetch ssh true", "fetch ssh false"]);
+    // 호스트가 잘못된 ssh 는 사이드카로 보내지 않고 오류다(사이드카는 그 저장소를 맡지 않는다 — local 의 검사에 걸린 저장소와 같다)
+    let env = envelope(router.route("git:fetch", &json!(["sshbad", true])).await);
+    assert_eq!((env["ok"].as_bool(), env["code"].as_str(), env["error"].as_str()), (Some(false), Some("ERROR"), Some("잘못된 SSH 호스트입니다")));
+    assert_eq!(log(&calls).len(), 2, "검사에 걸린 저장소는 서비스에 닿지 않는다");
+    // github·미러에 없는 id 는 여전히 사이드카다
+    for id in ["gh", "nope"] {
+        assert!(is_sidecar(&router.route("git:fetch", &json!([id, true])).await), "{id}");
+    }
+    assert_eq!(router.rust_handled(), 2);
+    // 사이드카 env 가 ssh 를 포함한다(같은 ssh_active 값) — 포함하지 않으면 사이드카도 fetch 해 이중 fetch 가 된다
+    assert_eq!(sidecar_fetch_kinds(router.enabled(), router.ssh_active()), Some("local,wsl,ssh"));
+    assert_eq!(rust_fetch_kinds(router.ssh_active()), "local,wsl,ssh");
 }
 
 #[tokio::test]
-async fn ssh_저장소는_자동_fetch_대상이_아니다() {
+async fn ssh_스위치가_꺼지면_ssh_fetch_는_사이드카이고_env_에_ssh_가_없다() {
+    let m = ssh_mirror();
+    // ANTLER_RUST_SSH=0: 풀이 주입되지 않아 ssh 는 풀리지 않는다
+    let off = Router::new(true, false, m.clone()).with_ssh(false);
+    let calls = Arc::new(Calls::default());
+    off.set_fetch(Arc::new(Fake(calls.clone())));
+    off.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\\nonexistent-antler-home"));
+    assert!(!off.ssh_active());
+    for id in ["ssh", "sshbad"] {
+        assert!(is_sidecar(&off.route("git:fetch", &json!([id, true])).await), "{id}");
+    }
+    assert!(log(&calls).is_empty());
+    assert_eq!(sidecar_fetch_kinds(off.enabled(), off.ssh_active()), Some("local,wsl"));
+    // ANTLER_RUST_GIT=0: env 도 서비스도 없다
+    let git_off = Router::new(false, false, ssh_mirror());
+    git_off.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\\nonexistent-antler-home"));
+    assert!(sidecar_fetch_kinds(git_off.enabled(), git_off.ssh_active()).is_none());
+    assert!(is_sidecar(&git_off.route("git:fetch", &json!(["ssh", true])).await));
+    // 풀이 없는 기본 라우터도 같다(미러의 ssh 해석이 꺼져 있으므로 fetch 소유도 사이드카다)
+    let bare = Router::new(true, false, ssh_mirror());
+    bare.set_fetch(Arc::new(Fake(Arc::new(Calls::default()))));
+    assert!(is_sidecar(&bare.route("git:fetch", &json!(["ssh", true])).await));
+    assert_eq!(sidecar_fetch_kinds(bare.enabled(), bare.ssh_active()), Some("local,wsl"));
+}
+
+#[tokio::test]
+async fn ssh_저장소는_자동_fetch_대상이다() {
     let (router, _m, calls) = ssh_rig();
-    for (arg, want) in [(json!(["ssh"]), "active None"), (json!(["sshbad"]), "active None"), (json!(["loc"]), "active Some(\"loc\")")] {
+    for (arg, want) in [(json!(["ssh"]), "active Some(\"ssh\")"), (json!(["sshbad"]), "active None"), (json!(["gh"]), "active None"), (json!(["loc"]), "active Some(\"loc\")")] {
         calls.log.lock().unwrap().clear();
         assert!(is_sidecar(&router.route("repos:watch", &arg).await), "{arg}");
         assert_eq!(log(&calls), [want], "{arg}");
@@ -425,10 +463,50 @@ async fn ssh_저장소는_자동_fetch_대상이_아니다() {
 #[derive(Default)]
 struct Built(Mutex<Vec<String>>);
 
-/// 진짜 fetch 서비스: ssh 가 Rust 로 풀려도 자기 것이 아니다 — 실행기를 만들지 않고 "unknown repo" 이며, 활성 저장소·자동 예약에도 들어가지 않는다
+/// 이미 닫은 ssh 실행기(풀이 정리한 것) — 어떤 설정 파일도 읽지 않고 모든 호출이 거부된다(연결하지 않는다)
+fn closed_ssh(host: &str) -> Arc<GitExecutor> {
+    let ex = antler_lib::git::exec::ssh::SshPool::for_home("").get(host);
+    ex.dispose();
+    Arc::new(GitExecutor::Ssh(ex))
+}
+
+/// 진짜 fetch 서비스: ssh 활성이면 ssh 저장소를 소유한다 — 실행기를 만들고, SSH 전송 오류는 network(백오프)다. 닫힌 실행기는 쥐지 않고 새로 받는다
 #[tokio::test]
-async fn fetch_서비스는_ssh_를_소유하지_않는다() {
+async fn fetch_서비스는_ssh_활성일_때_ssh_를_소유하고_전송_오류는_network_다() {
     let (_router, m, _calls) = ssh_rig();
+    let built = Arc::new(Built::default());
+    let b = built.clone();
+    let make_runner = move |t: &Target| {
+        b.0.lock().unwrap().push(t.source_key());
+        match t {
+            Target::Ssh { host, .. } => closed_ssh(host),
+            _ => Arc::new(GitExecutor::Local(LocalExecutor::default())),
+        }
+    };
+    let svc = FetchService::new(NullHost, m.clone(), make_runner, None);
+    let s = svc.fetch("ssh", true).await;
+    // 닫힌 실행기의 "이미 종료" 는 SSH 전송 오류 — 인증 중단(auth_paused)이 아니라 백오프다
+    assert!(s.error.as_deref().is_some_and(|e| e.contains("종료")), "{:?}", s.error);
+    assert!(!s.auth_paused && !s.needs_manual && s.blocked.is_none(), "{s:?}");
+    assert_eq!(built.0.lock().unwrap().clone(), ["ssh:devbox"]);
+    // 닫힌 실행기를 쥐고 있지 않다 — 다음 fetch 는 새로 받는다(풀이 닫았다가 같은 호스트가 다시 추가된 경우)
+    svc.fetch("ssh", false).await;
+    assert_eq!(built.0.lock().unwrap().clone(), ["ssh:devbox", "ssh:devbox"]);
+    // 호스트가 잘못된 ssh 는 실행기를 만들지 않고 오류다
+    let bad = svc.fetch("sshbad", true).await;
+    assert_eq!(bad.error.as_deref(), Some("잘못된 SSH 호스트입니다"));
+    assert_eq!(built.0.lock().unwrap().len(), 2);
+    // github·미러에 없는 id 는 서비스가 맡지 않는다
+    for id in ["gh", "nope"] {
+        assert_eq!(svc.fetch(id, true).await.error.as_deref(), Some(format!("unknown repo: {id}").as_str()), "{id}");
+    }
+    assert_eq!(built.0.lock().unwrap().len(), 2);
+}
+
+/// ssh 스위치가 꺼진 미러(`ANTLER_RUST_SSH=0`)에서는 서비스도 ssh 를 맡지 않는다 — 사이드카 env 에 ssh 가 없어 사이드카가 맡는다
+#[tokio::test]
+async fn fetch_서비스는_ssh_스위치가_꺼지면_ssh_를_소유하지_않는다() {
+    let m = ssh_mirror();
     let built = Arc::new(Built::default());
     let b = built.clone();
     let make_runner = move |t: &Target| {
@@ -437,20 +515,71 @@ async fn fetch_서비스는_ssh_를_소유하지_않는다() {
     };
     let svc = FetchService::new(NullHost, m.clone(), make_runner, None);
     for id in ["ssh", "sshbad"] {
-        let s = svc.fetch(id, true).await;
-        assert_eq!(s.error.as_deref(), Some(format!("unknown repo: {id}").as_str()), "{id}");
+        assert_eq!(svc.fetch(id, true).await.error.as_deref(), Some(format!("unknown repo: {id}").as_str()), "{id}");
     }
-    // 서비스가 만든 실행기는 하나도 없다(자동 fetch 도 같은 판정을 쓴다)
     assert!(built.0.lock().unwrap().is_empty(), "{:?}", built.0.lock().unwrap());
-    // 활성 저장소로 정해 두어도 미러 정리(sync_mirror)가 ssh 를 맡지 않는 것으로 비운다
+    // 활성 저장소로 정해 두어도 미러 정리(sync_mirror)가 맡지 않는 것으로 비운다
     svc.set_active(Some("ssh"));
     svc.sync_mirror();
     assert!(built.0.lock().unwrap().is_empty());
 }
 
+/// 호스트가 미러에서 빠지면 fetch 서비스가 쥔 실행기도 함께 정리되고, 같은 호스트를 다시 추가하면 새 연결(새 실행기)로 fetch 한다
+/// (루프백 거부 포트만 쓴다 — 실제 호스트·agent 에 닿지 않는다. 성공 경로는 `ssh_route.rs` 의 루프백 서버 시험이 본다)
+#[tokio::test]
+async fn ssh_호스트가_빠졌다_다시_추가되면_fetch_서비스도_새_실행기를_받는다() {
+    use antler_lib::git::exec::ssh::{AgentSetting, SshExecutor, SshOptions, SshPool};
+    let made = Arc::new(Mutex::new(Vec::<SshExecutor>::new()));
+    let sink = made.clone();
+    let pool = SshPool::new(move |host| {
+        let mut opts = SshOptions::for_home("C:\\nonexistent-antler-home");
+        opts.agent = AgentSetting::Disabled;
+        opts.env = Arc::new(|_| None);
+        let ex = SshExecutor::new(host, opts);
+        sink.lock().unwrap().push(ex.clone());
+        ex
+    });
+    let m = RepoMirror::default();
+    let host = "127.0.0.1:1";
+    m.apply(1, vec![ssh_repo("s", host)]);
+    let router = Router::new(true, false, m.clone());
+    router.set_ssh_pool(pool.clone());
+    let p = pool.clone();
+    let make_runner = move |t: &Target| match t {
+        Target::Ssh { host, .. } => Arc::new(GitExecutor::Ssh(p.get(host))),
+        _ => Arc::new(GitExecutor::Local(LocalExecutor::default())),
+    };
+    router.set_fetch(Arc::new(FetchService::new(NullHost, m.clone(), make_runner, None)));
+
+    let fetch = |manual: bool| {
+        let router = &router;
+        async move { envelope(router.route("git:fetch", &json!(["s", manual])).await) }
+    };
+    let env = fetch(true).await;
+    assert_eq!(env["ok"], true, "{env}");
+    assert!(env["data"]["error"].is_string() && env["data"]["authPaused"] == false, "{env}");
+    assert_eq!(pool.hosts(), [host]);
+    assert_eq!(made.lock().unwrap().len(), 1);
+
+    // 호스트가 빠지면 풀이 연결을 닫고 서비스도 그 실행기를 놓는다
+    assert!(m.apply(2, vec![]));
+    router.on_mirror_changed();
+    assert!(pool.hosts().is_empty());
+    assert!(made.lock().unwrap()[0].is_disposed());
+    // 같은 호스트가 다시 추가됐다 — 새 실행기로 fetch 한다(닫힌 실행기의 "이미 종료" 가 아니다)
+    assert!(m.apply(3, vec![ssh_repo("s", host)]));
+    router.on_mirror_changed();
+    let env = fetch(true).await;
+    assert!(!env["data"]["error"].as_str().unwrap_or_default().contains("종료"), "{env}");
+    assert_eq!(made.lock().unwrap().len(), 2, "새 실행기를 만들었다");
+    assert!(!made.lock().unwrap()[1].is_disposed());
+    assert_eq!(pool.hosts(), [host]);
+    router.shutdown();
+}
+
 #[test]
 fn fetch_소유_판정은_소스_종류만_쓴다() {
-    // 서비스·라우터의 fetch 쪽은 mirror.resolve 가 아니라 resolve_fetch 만 부른다 — 해석 결과로 소유를 정하면 ssh 가 Rust 로 풀리는 순간 이중 fetch 가 된다
+    // 서비스·라우터의 fetch 쪽은 mirror.resolve 가 아니라 resolve_fetch 만 부른다 — 해석 결과로 소유를 정하면 사이드카(ANTLER_RUST_FETCH_KINDS)와 어긋난다
     let service = prod_code("src/git/fetch/service.rs");
     assert!(!service.contains("mirror.resolve("), "fetch 서비스가 mirror.resolve 로 소유를 정한다");
     assert_eq!(service.matches("mirror.resolve_fetch(").count(), 2);
@@ -460,7 +589,11 @@ fn fetch_소유_판정은_소스_종류만_쓴다() {
     let body = &router[router.find("async fn git_fetch").expect("git_fetch")..];
     let body = &body[..body.find("async fn git_file_channel").expect("다음 함수")];
     assert!(body.contains("resolve_fetch(") && !body.contains("mirror.resolve("));
-    // 소스 종류 상수가 미러의 판정에 쓰인다
-    assert!(prod_code("src/mirror.rs").contains("RUST_FETCH_KINDS.split(',')"));
-    assert_eq!(RUST_FETCH_KINDS, "local,wsl");
+    // 소유 종류는 계산 값 하나(rust_fetch_kinds)다 — 미러의 판정과 사이드카 env 가 같은 함수를 부른다. 상수가 남아 있지 않다
+    let mirror = prod_code("src/mirror.rs");
+    assert!(mirror.contains("rust_fetch_kinds(self.ssh.load("));
+    assert!(router.contains("pub fn rust_fetch_kinds(") && !router.contains("RUST_FETCH_KINDS"));
+    assert!(router.contains("rust_fetch_kinds(ssh_active)"));
+    assert_eq!(rust_fetch_kinds(false), "local,wsl");
+    assert_eq!(rust_fetch_kinds(true), "local,wsl,ssh");
 }
