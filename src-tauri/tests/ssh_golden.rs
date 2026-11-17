@@ -345,7 +345,7 @@ fn 대응표가_가리키는_rust_테스트가_있다() {
     let map: Value = serde_json::from_str(&fs::read_to_string(root().join("tests/golden/ssh/test-map.json")).unwrap()).unwrap();
     let dir = root().join("src-tauri");
     let source = |file: &str| -> String {
-        let p = if file == "ssh_golden.rs" { dir.join("tests").join(file) } else { dir.join("src/git/exec/ssh").join(file) };
+        let p = if file == "ssh_golden.rs" || file == "ssh.rs" { dir.join("tests").join(file) } else { dir.join("src/git/exec/ssh").join(file) };
         fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
     };
     let (mut ported, mut later, mut na) = (0, 0, 0);

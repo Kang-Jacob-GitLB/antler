@@ -182,6 +182,7 @@ const TARGET_TESTS = ['sshConfig', 'sshKnownHosts', 'sshQuote', 'sshExecutor', '
 /** 대응표 값의 `<파일>::<이름>` 이 가리키는 Rust 소스 */
 const RUST_SOURCES: Record<string, string> = {
   'ssh_golden.rs': '../src-tauri/tests/ssh_golden.rs',
+  'ssh.rs': '../src-tauri/tests/ssh.rs',
   'config.rs': '../src-tauri/src/git/exec/ssh/config.rs',
   'known_hosts.rs': '../src-tauri/src/git/exec/ssh/known_hosts.rs',
   'quote.rs': '../src-tauri/src/git/exec/ssh/quote.rs',

@@ -1,4 +1,4 @@
-//! `src/main/executors` 의 Rust 이식(Local·WSL. SSH 는 Phase 5 — 순수 로직만 `ssh` 에 있다). 아직 앱에서 호출하지 않는다.
+//! `src/main/executors` 의 Rust 이식(Local·WSL. SSH 는 Phase 5 — `ssh` 에 순수 로직(PR 1)과 `run` 만 있는 russh 실행기(PR 2a)가 있고 `GitExecutor` 에는 아직 넣지 않았다). 아직 앱에서 호출하지 않는다.
 //!
 //! - [`GIT_GLOBAL_ARGS`]·[`GIT_ENV`] 는 `common.rs` 한 곳에만 있고 `RunOpts` 에는 일반 env 필드가 없다(fetch 가 덮어쓰는 값은 닫힌 [`FetchEnv`] 로만, `run` 에서만).
 //! - git 을 띄우는 `Command::new` 는 `process.rs` 한 곳뿐이다(`src-tauri/clippy.toml` 의 disallowed-methods 가 강제한다). gh CLI 를 띄우는 `github/gh_cli.rs` 만 예외다.
@@ -12,7 +12,7 @@ pub(crate) mod job;
 mod local;
 mod process;
 pub mod queue;
-// SSH 의 순수 로직(설정·known_hosts·원격 명령 인용, Phase 5 PR 1). 아직 앱에서 호출하지 않는다 — 통합 테스트(tests/ssh_golden.rs)가 별도 크레이트라 pub 이다
+// SSH(순수 로직 = Phase 5 PR 1, russh 실행기 = PR 2a). 아직 앱에서 호출하지 않는다 — 통합 테스트(tests/ssh_golden.rs)가 별도 크레이트라 pub 이다
 pub mod ssh;
 mod wsl;
 pub mod wsl_paths;

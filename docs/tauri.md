@@ -24,7 +24,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
-| 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 사용자 결정 대기 | 진행 중 — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음) 완료. 계획·결정은 아래 "SSH(Phase 5)" |
+| 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 진행 중 — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음) 완료, PR 2a(`russh` 스파이크 go·연결·`run`·시험) 완료 — 2b(stream async·펌프) 남음. 계획·결정은 아래 "SSH(Phase 5)" |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
@@ -828,11 +828,11 @@ Electron 판의 SSH 는 시스템 `ssh.exe` 가 아니라 **JS `ssh2` + 자체 `
 모르는 호스트는 거부하고 ssh CLI 로 수락하라고 안내), ProxyCommand·해당 Match 는 거부하며, 셸 확인(`echo 'an''tler'`)·연결당 채널 6·유휴 5분·keepalive 15초×3·접속 15초·ProxyJump 홉마다 호스트 키 검증·agent(`\\.\pipe\openssh-ssh-agent` → pageant → `SSH_AUTH_SOCK`,
 IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시스템 `ssh.exe` 는 ControlMaster 가 없고 ProxyCommand 를 거부할 수 없으며 SFTP 가 따로라 탈락했다.
 
-**결정 대기(사용자)**: 프로토콜 라이브러리로 `russh`(0.65, `default-features=false, features=["ring","rsa"]`, 크레이트 수십 개)를 들일지. PR 1 은 이 결정과 무관하다(소켓·`russh` 가 없다).
+**결정(사용자)**: 프로토콜 라이브러리로 `russh` 를 들인다(`default-features=false, features=["ring","rsa"]`, 새 크레이트 수는 PR 2 절). PR 1 은 이 결정과 무관했다(소켓·`russh` 가 없다).
 저장소 추가 흐름(`env:*`·`repos:add` 의 SSH·SFTP 폴더 탐색, `remoteDir.ts`)은 사이드카에 남긴다(Phase 6b). 세션 정지(채널 윈도우가 읽는 쪽에 묶여 읽지 않는 채널이 연결 전체를 멈출 수 있음)는 스트림마다 펌프를 두고
 16MB 선읽기를 넘으면 프로세스를 죽이고 `--skip` 으로 다시 시작하는 방식을 PR 2 에서 시험한다 — Electron 판과의 동작 차이는 받아들이기로 했다.
 
-**PR 순서**: 1 순수 로직·골든(**완료**) → 2 `SshExecutor`(`russh`; 첫 단계 go/no-go 스파이크: ring 빌드·세션 정지·agent. `GitExecutor::stream` async 전환, 루프백 `russh::server` 하네스, clippy 로 password/keyboard-interactive/TOFU 쓰기/포트 포워딩 금지) →
+**PR 순서**: 1 순수 로직·골든(**완료**) → 2 `SshExecutor`(`russh`, **2a 완료·2b 남음**; 첫 단계 go/no-go 스파이크: ring 빌드·세션 정지·agent. `GitExecutor::stream` async 전환, 루프백 `russh::server` 하네스, clippy 로 password/keyboard-interactive/TOFU 쓰기/포트 포워딩 금지) →
 3 라우팅(`sshHost` 미러·`Target::Ssh`·`SshPool`·`ANTLER_RUST_SSH`, fetch 소유 판정을 kind 상수로 — 이중 fetch 방지) → 4 ssh fetch 를 Rust 로(`RUST_FETCH_KINDS`·`fetchOwns.ts`·SSH 전송 오류는 network 로 분류·fetch.scenarios ssh 시나리오) → 5 측정·사람 확인.
 이 단계 뒤 Phase 6 은 6a(나머지 git 채널·RepoWatcher) · 6b(설정·저장소 관리·env·external·github 원격 전용) · 6c(업데이터·패키징·Electron 제거)로 나눈다. 사이드카 전용으로 남은 채널은 37개다.
 
@@ -884,6 +884,74 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - `MemFs` 가 feature 없이 운영 lib 에 들어 있다(통합 시험이 별도 크레이트라 `cfg(test)` 로 숨길 수 없다). 메모리 파일만 다루고 운영 경로에서 쓰이지 않는다.
 - 골든 생성기의 `node:path`·`node:fs` 모킹이 ubuntu CI(vitest)에서도 같은 골든을 내는지는 로컬(Windows)에서만 돌렸다.
 - `RealFs` 의 Include(실제 파일)는 Windows 임시 디렉터리로 한 시험뿐이다(심볼릭 링크·권한 오류·비 UTF-8 이름은 시험하지 않았다).
+
+### PR 2 — SSH 실행기(`russh`; 앱에 연결하지 않는다) — 2a: 스파이크 + 연결 + `run`
+
+**진행**: 2a(스파이크·연결·`run`·시험·clippy)까지. **2b 가 남았다** — `GitExecutor::Ssh` 변형, `stream` 의 async 전환(`GitStream` enum), 스트림 펌프(16MB 선읽기 상한), `log_service`·`file_channels` 갱신, `test-map.json` 의 stream `it` 5개.
+`SshExecutor` 는 `GitExecutor` 와 별개 타입이다(`run` 만 있다) — 동기 `stream` 에 가짜 변형을 두지 않으려고 2b 에서 enum 에 함께 넣는다.
+
+#### 1단계 go/no-go 스파이크 — **go**
+- **(a) 빌드**: `russh` **0.65.2**(2026-11-16, crates.io 최신 안정판, MSRV 1.89), `default-features = false, features = ["ring", "rsa"]`(`aws-lc-rs`·`flate2`(압축)는 끈다). Windows(MSVC, `-j 2`)에서 **NASM 없이** 빌드된다(`ring` 0.17.14).
+  `cargo build -j 2 -p russh` 57초(따뜻한 target — 110개 컴파일 단위), 전체 라이브러리 `cargo check` 3분 22초, 시험 포함 첫 빌드 4분 12초. 경고 없음.
+  **크레이트 수**: Windows 빌드 그래프에서 **새 `이름@판` 89개**(`cargo tree -e normal,build` 를 이전 `Cargo.lock` 과 대조), `Cargo.lock` 은 526 → 632(+106; `nix`·`windows-sys 0.52`·`windows_*` 등 다른 타깃용 항목 포함). `russh` 하위 트리 전체는 약 200개(기존 포함).
+  사용자가 허용한 `russh` 와 그 의존성 외에 **새로 넣은 크레이트는 없다** — `rand = "0.10"`(dev, 시험 서버 키 생성)은 russh 가 이미 끌어오는 판이다. 기존 `tokio` 에 `net` 기능만 켰다(russh 가 이미 켠다).
+  **중복 판**: RustCrypto 가 0.10 계열(PR 1 의 `sha2`·`sha1`·`hmac`·`digest`)과 0.11 계열(russh) 둘 다 들어왔다(`digest`·`sha1`·`sha2`·`hmac`·`crypto-common`·`block-buffer`·`cpufeatures`·`getrandom`·`rand_core`). PR 1 절의 "중복 판이 없다" 는 더 이상 사실이 아니다. 동작 문제는 없고 빌드 시간·바이너리 크기만 는다.
+  **CVE**: CVE-2025-54804(채널 윈도우 조정 오버플로)는 GitHub Advisory DB 에서 `< 0.54.1` 이 취약, 0.54.1 에서 고쳐졌다(판 번호 순서가 아니라 권고 DB 로 확인). 그 뒤 나온 권고들(키 교환 중 호스트 키 검증 전 콜백 CVE-2026-128087 등)의 **가장 높은 패치 판이 0.65.1** 이라 0.65.2 는 모두 지났다. `cargo audit` 은 돌리지 않았다.
+- **(b) 세션 정지(R1) — 재현됐고 펌프로 풀린다.** 소스(`client/encrypted.rs`): 데이터 패킷을 받으면 윈도우 조정은 **받은 바이트로** 하고(`adjust_window_size`), 채널 큐(`channel_buffer_size` = **메시지 100개**)에 `chan.send(..).await` 로 넣는다 — 소비자가 읽지 않아 큐가 차면 **세션 루프 전체**가 거기서 멈춘다.
+  실측(`tests/ssh.rs::세션_정지_스파이크_…`, 날 russh 클라이언트와 프로세스 안 서버): 채널 A 가 1KB 패킷으로 4MB 를 쏟는데 클라이언트가 읽지 않으면 서버는 약 309KB 에서 멈추고, **그 뒤에 연 채널 B(10바이트)는 4초 안에 끝나지 않는다.** 같은 상황에서 A 를 태스크가 즉시 비우면 B 가 끝나고 A 는 4MB 를 다 받는다.
+  (A 를 연 직후 곧바로 B 를 열면 B 가 먼저 끝나 버려 정지가 보이지 않는다 — 시험은 서버의 전송이 연속 5번 같고 전체보다 작은 것을 확인한 **뒤에** B 를 연다.) 패킷이 작을수록 정지가 빨리 온다(윈도우 2MB 보다 큐 100개가 먼저 찬다). 따라서 **읽는 쪽이 항상 비워야 한다** —
+  `run` 은 읽기 루프 자체가 펌프라 정지가 없다(`세션_정지_없음_…` 가 4MB·512바이트 패킷 8192개 옆에서 짧은 호출 5개가 끝나는지 본다). `stream`(2b)은 스트림마다 펌프 태스크를 두고 상한(16MB)을 넘으면 KILL 한다.
+  (이 시험의 "읽지 않으면 멈춘다" 단언이 깨지면 russh 가 고친 것이다 — 펌프 설계를 다시 본다.)
+- **(c) agent**: 코드 경로가 있다 — Windows OpenSSH 파이프 `AgentClient::connect_named_pipe(\\.\pipe\openssh-ssh-agent)`·pageant `AgentClient::connect_pageant()`(`pageant` 0.2.5, russh 의 필수 의존성). 유닉스 `connect_uds`·`connect_env`(`SSH_AUTH_SOCK`)는 **`cfg(unix)` 전용**이라 Windows 에서는 파이프 → pageant 다(TS 와 같다).
+  `connect_named_pipe` 는 `PIPE_BUSY` 에서 **무한 재시도**하므로 3초 제한 안에서 부른다. 서명은 `authenticate_publickey_with(.., &mut AgentClient)`(`Signer` 구현), `AgentClient::dynamic()` 로 종류를 하나로 합친다. **실제 agent 에는 접속하지 않았다**(API·소스 확인만) — 시험은 항상 `AgentSetting::Disabled`.
+
+#### 구현(`src-tauri/src/git/exec/ssh/`)
+| 파일 | 내용 |
+|---|---|
+| `connection.rs` | 연결 수명(지연 연결·단일 비행·끊김 감지 후 재연결·유휴 5분 종료·keepalive 15초×3·접속 15초), ProxyJump(direct-tcpip, 체인 전체 보관), 채널 세마포어 6, 원격 셸 확인, 홉마다 `unsupported` 거부·known_hosts 판정, exec 태스크 |
+| `auth.rs` | agent(파이프 → pageant, IdentitiesOnly 필터) → 키 파일(암호화된 키는 사유만), 비밀번호·KI 없음 |
+| `executor.rs` | `SshExecutor::run` — 원격 명령은 `build_remote_command`(PR 1) 결과만 보낸다 |
+| `tests/ssh.rs`·`tests/ssh/{server,common,spike}.rs` | 프로세스 안 `russh::server`(127.0.0.1, 전용 런타임) 하네스와 시험 47개(1개 `#[ignore]`), `connection.rs` 단위 시험 3개(호스트 키 콜백) |
+
+- **채널은 태스크가 소유한다.** Rust 는 future 를 버리는 것이 취소이고 `Drop` 은 동기라 원격에 KILL/close 를 보낼 수 없다. exec 채널을 연 뒤에는 스폰된 태스크가 채널과 슬롯(세마포어 허가)을 쥐고, 호출자가 취소하거나 future 를 버리면(`drop_guard`) 태스크가 **KILL → close → 서버가 닫을 때까지 비움(3초 상한)** 을 하고 그 뒤에 슬롯을 돌려준다.
+  호출자는 기다리지 않고 바로 `Aborted` 로 돌아온다. `Eof` 와 종료 코드를 둘 다 받거나 `Close`/`None` 이 올 때까지 읽는다(종료 코드 없이 끝나면 "SSH 연결이 끊겨…", 신호 종료는 -1).
+- **원격 셸 확인**: 접속 직후 `echo 'an''tler'` 를 보내 `antler` 가 아니면 거부한다. 서버가 받은 첫 명령이 항상 이것이고, 거부 시 그 밖의 명령이 없음을 시험이 확인한다.
+- **clippy `disallowed-methods`**(`clippy.toml`): `russh::client::connect`·`connect_stream`·`Handle::channel_open_direct_tcpip`(connection.rs 의 문장 하나씩만 `allow`), `authenticate_password`·`authenticate_keyboard_interactive_{start,respond}`·`authenticate_gssapi_with_mic`,
+  `russh::keys::known_hosts::{learn_known_hosts[_path], check_known_hosts[_path]}`(TOFU 쓰기·홈의 파일 읽기), `tcpip_forward`·`streamlocal_forward`(+cancel)·`channel_open_direct_streamlocal`·`channel_open_x11`·`Channel::{agent_forward, request_x11}`(+`ChannelWriteHalf`).
+  임시 파일로 8개가 실제로 걸리는 것을 확인하고 지웠다. clippy 를 `allow` 로 우회하는 경우를 위해 `tests/ssh.rs::russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다` 가 소스에서 같은 이름을 센다.
+- **시험**(`cargo test --test ssh`, 약 25초): TS `sshExecutor.test.ts` 24개 `it` 중 19개를 이식(나머지 5개는 stream — 2b, 대응표에 `N/A: PR 2` 로 남김)하고 추가했다 — 세션 정지 스파이크, `run` 큰 출력 옆 작은 호출, 취소 토큰·future 버림 뒤 원격 자식 0·슬롯 반환, 슬롯 수보다 많은 반복, 출력 상한 뒤 정리, 종료 코드 없는 끊김,
+  dispose 가 대기 호출을 깨움, 유휴 종료 뒤 재연결, 접속 제한 시간(배너 없는 서버), 2홉 ProxyJump(+둘째 홉 키 오류), 점프 홉의 `unsupported`, 비 ASCII 별칭·HostName·HostKeyAlias·포트 0/65536/홉 포트 70000·`ProxyCommand`·`RevokedHostKeys` 의 연결 전 거부, `@revoked`, `HostKeyAlias`(포트 22)·`UserKnownHostsFile`, 알고리즘을 등록 종류로 제한, 암호화된 키 사유, 원격 명령 바이트·환경 == `GIT_ENV`. **서버 쪽에서 연결이 실제로 닫히는지**(하네스의 열린 연결 수)를 유휴 종료·dispose·인증 실패·호스트 키 거부·셸 거부·점프 체인 실패 뒤에 확인한다 — 버려진 `Handle` 이 세션을 끝낸다는 것이 이것으로 확인됐다.
+  `HostKeyHandler::check_server_key` 는 단위 시험이 직접 부른다(비 ASCII 이름의 `Unsupported` → 거부, `@revoked`, 모르는 호스트, 다른 키).
+  시간 의존은 `wait_for`(조건 + 상한)이고 주입 가능한 `Timeouts`(접속·keepalive·유휴·셸 확인)를 쓴다 — 실제 소켓에 `start_paused` 를 쓰지 않았다. 무거운 시험은 `heavy()` 로 직렬화. 서버는 전용 런타임이라 시험 런타임이 끝나도 죽지 않는다.
+  실제 sshd 시험은 `#[ignore]` + `ANTLER_SSH_TEST_HOST`·`ANTLER_SSH_TEST_REPO`(사용자의 `~/.ssh`·agent 를 **읽는** 유일한 시험).
+
+**TS 와 다른 점**
+- **취소가 즉시 돌아온다**: TS 는 `killChannel` 뒤 `close` 를 기다리지 않고 슬롯을 돌려줬다. Rust 는 호출자가 즉시 `Aborted` 를 받지만 슬롯은 **서버가 채널을 닫은 뒤**(최대 3초)에 돌아온다(서버 `MaxSessions` 를 넘지 않게).
+- **연결 시도는 호출자별이다**: 처음 호출자가 취소하면 그 연결 시도도 버려진다(TS 는 진행 중인 연결 promise 를 다른 대기자와 공유해 계속 진행).
+- **종료 확정**: `Eof` 와 `exit-status` 를 둘 다 받으면 `Close` 를 기다리지 않고 끝낸다(TS 는 `close`). 서버가 `Close` 를 늦게 보내도 멈추지 않게 하려는 것이다.
+- **키 교환·암호**: russh 기본 목록(압축 없음 — `flate2` 를 껐다, `dsa` 없음). `ssh2` 가 받던 오래된 알고리즘만 되는 서버는 "SSH 연결에 실패했습니다" 로 보일 수 있다. 호스트 인증서(`*-cert-v01`)는 광고하지 않고 서버가 내밀면 거부한다.
+- **오류 문구**: 연결 거부·이름 못 찾음·시간 초과·호스트 키 거부·인증 실패 문구는 TS 와 같고, 그 밖의 핸드셰이크 실패는 russh 의 오류 문장이 들어간다.
+- **keepalive**: `keepalive_max = 3` 은 응답 없는 keepalive 가 3번을 **넘으면** 끊는다(ssh2 `keepaliveCountMax` 와 ±1 차이 가능). 시험하지 않았다(주입 가능한 간격만 있다).
+- **IdentitiesOnly 필터**: TS 는 agent 를 감싸 키 목록을 걸렀고 Rust 는 agent 에서 목록을 받아 같은 규칙으로 걸러 시도한다. 공개키는 `<IdentityFile>.pub` → `IdentityFile` 자체가 `.pub` 인 경우 그 파일 → 개인키 파일의 공개 부분(암호화된 OpenSSH 키도 공개 부분은 평문) 순으로 읽는다.
+- **서버가 여는 채널은 전부 거부한다**(session·direct-tcpip·direct-streamlocal·forwarded-tcpip·forwarded-streamlocal·auth-agent·x11 → `AdministrativelyProhibited`). russh 의 기본 핸들러는 accept 해서 채널 맵에 쌓이므로 7개 콜백을 모두 구현했다(ssh2 는 전부 거부). 루프백 서버가 인증 뒤 7종을 열어 거부 응답을 받는 시험이 있다. 클라이언트 쪽 채널 맵 크기는 공개 API 가 없어 직접 보지 못하고, 서버가 받은 거부 응답으로 갈음한다.
+- **연결 실패 공유**: 연결 잠금을 얻은 직후 최근 5초 안의 실패가 있으면 다시 맺지 않고 그 오류로 돌려준다(인증을 거부하는 서버에 대기 호출 수만큼 재접속·재인증하지 않는다). 설정을 고친 뒤 5초 안에 다시 호출하면 이전 실패 문구가 한 번 더 나올 수 있다.
+- **점프 호스트의 ProxyJump(중첩)는 거부한다**(`<별칭>: 점프 호스트의 ProxyJump(중첩)는 지원하지 않습니다`). TS 는 조용히 무시했지만 그러면 의도하지 않은 경로로 접속하므로 더 엄격하게 막았다. 대상의 `ProxyJump` 에 홉을 나열해야 한다.
+- **시작 실패 정리**: 채널 열기와 exec 요청을 두 단계로 나눠, exec 단계가 실패·시간 초과하면 KILL → close → 닫힘 확인 뒤에 슬롯을 돌려준다. exec 거부(`Failure`)도 닫힘을 확인한 뒤 슬롯을 돌려준다(하네스의 거부 모드로 시험). exec 요청 전송 자체의 실패·시간 초과는 로컬 큐가 막혀야 일어나 루프백 시험으로 재현하지 못했다.
+- **재키 시 호스트 키 재검사 없음**: 호스트 키는 접속 때 한 번만 known_hosts 로 판정한다. 재키(rekey)에서 서버가 다른 호스트 키를 내밀어도 다시 검사하지 않는다 — russh 가 재키마다 `check_server_key` 를 부르는지·부르면 같은 판정이 되는지 확인하지 않았고, OpenSSH 와 다른 점이다.
+- **협상 목록**: `kex`·`cipher`·`mac` 에 `none` 이 없음을 단위 시험이 고정한다(russh 를 올릴 때 깨지면 목록을 명시로 고정). clippy 금지 목록에 `Handle`·`client::Session` 의 포워딩·전역 요청과 `Channel`·`ChannelWriteHalf` 의 `exec`(프로브·`Job::run` 만 allow)·`request_shell`·`set_env` 를 더했다.
+- **Windows 에서 `SSH_AUTH_SOCK`**: TS 처럼 보지 않는다(`IdentityAgent` 에 파이프 경로를 줄 때만). 유닉스 소켓 경로는 Windows 에서 "지원하지 않는 agent 종류" 로 안내한다. `cfg(unix)` 분기는 이 환경에서 컴파일하지 못했다.
+
+**사람이 확인해야 할 것**
+- 실제 sshd(OpenSSH, 기본 셸이 cmd 인 Windows OpenSSH 서버 거부, bastion ProxyJump)에 접속해 `rev-parse`·큰 `log` 가 되는지(`ANTLER_SSH_TEST_HOST=<별칭> ANTLER_SSH_TEST_REPO=<경로> cargo test --test ssh -- --ignored`).
+- Windows OpenSSH agent 파이프·pageant 에 실제로 붙어 서명·IdentitiesOnly 필터가 되는지(이 환경에서는 연결해 보지 않았다), 암호화된 키 안내 문구, RSA 키(`rsa-sha2-*` 협상) 접속.
+- 해시된 known_hosts(`|1|…`)·`@cert-authority` 가 든 실제 파일, `UserKnownHostsFile` 여러 개.
+
+**남은 위험(PR 2)**
+- `ssh-key =0.7.0-rc.12` 가 russh 에 의해 **프리릴리스로 고정**돼 있다 — russh 를 올릴 때 같이 움직이며 따로 올릴 수 없다.
+- `rsa` 0.10(RSA 키 서명)에 타이밍 부채널 권고(RUSTSEC-2023-0071 계열)가 해당하는지 확인하지 않았다. 클라이언트 서명에만 쓰이고 원격 공격자가 타이밍을 잴 수 있는 경로는 좁지만 `cargo audit` 으로 확인한다.
+- 2a 의 `run` 은 읽기 루프가 펌프라 정지가 없지만, 2b 의 `stream` 이 소비자가 느릴 때 같은 정지를 일으키지 않는지는 2b 의 시험 몫이다(위 스파이크로 재현 조건은 확보).
+- 실제 원격(지연·패킷 손실)에서의 keepalive·재연결·유휴 종료 경계는 루프백 시험으로만 봤다. **keepalive 는 시험하지 않았고**, `cfg(unix)` 분기·실제 agent·`cargo audit` 도 확인하지 못했다.
+- CI(`tauri.yml` `timeout-minutes: 20`)는 새 크레이트 89개가 더해진 **콜드 빌드**(이 환경에서 시험 포함 첫 빌드 4분 12초, `-j 2`)를 감당하는지 첫 PR 실행에서 값을 확인한다.
 
 ## Phase 0 에서 확인한 것
 

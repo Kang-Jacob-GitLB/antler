@@ -1,9 +1,10 @@
-//! SSH 실행기(`src/main/executors/ssh`)의 **순수 로직** 이식 — Phase 5 PR 1. 소켓·russh 가 없고 앱에서 호출하지 않는다.
+//! SSH 실행기(`src/main/executors/ssh`)의 이식 — Phase 5. PR 1 은 순수 로직(소켓·russh 없음), PR 2 는 russh 실행기(`connection`·`auth`·`executor`). 아직 앱에서 호출하지 않는다.
 //!
 //! - [`config`]: `~/.ssh/config` 파서와 호스트 해석(`config.ts`). ProxyCommand·해당 Match 는 `unsupported` 로 표시해 연결 쪽이 거부하게 한다.
 //! - [`known_hosts`]: known_hosts 검증(`knownHosts.ts`). 키를 자동으로 등록하지 않는다(TOFU 없음) — **쓰기 기능이 없다.**
 //! - [`quote`]: 원격 명령 인용(`quote.ts`). 원격 로그인 셸에 문자열로 넘기므로 인용이 곧 주입 방어선이다 — 바이트 단위로 TS 와 같아야 한다.
 //!   환경변수는 닫힌 타입(`FetchEnv`)으로만 받는다.
+//! - [`SshExecutor`]: russh 로 원격 git 을 실행한다(`connection.rs` 의 모듈 문서에 방어 목록). 연결 수명·인증·원격 셸 확인.
 //! - [`win32_path`]: Node `path.win32` 의 작은 이식(설정 값의 경로 정규화).
 //!
 //! 골든: `tests/golden/ssh/{config,knownHosts,quote}.json`·`tests/golden/exec/env.json`(`ssh` 절)을 `src-tauri/tests/ssh_golden.rs` 가 비교한다.
@@ -17,10 +18,17 @@
 //!   이름이 ASCII 면 어떤 패턴이든 ASCII 접기 결과가 TS 와 같다. 관문은 `config::resolve_host`(별칭·HostName·HostKeyAlias 가 비 ASCII 면 `unsupported`)와
 //!   `known_hosts::check_host_key`(비 ASCII 호스트는 `Unsupported`)다 — `to_lowercase` 로 바꾸지 않는다(켈빈 기호 등으로 새 차이가 생긴다). docs/tauri.md "TS 와 다른 점".
 
+mod auth;
 pub mod config;
+mod connection;
+mod executor;
 pub mod known_hosts;
 pub mod quote;
 pub mod win32_path;
+
+pub use auth::AgentSetting;
+pub use connection::{EnvFn, SshOptions, Timeouts, DEFAULT_MAX_CHANNELS, SHELL_PROBE};
+pub use executor::SshExecutor;
 
 /// JS `.` 가 맞추는 코드 단위인가(줄 끝 문자 제외)
 fn dot_matches(unit: u16) -> bool {

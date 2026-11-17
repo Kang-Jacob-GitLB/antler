@@ -82,9 +82,11 @@ jobs:
       # net 은 가짜 gh 도 띄운다(gh_cli_run): 테스트 바이너리를 gh.exe 로 하드링크해 gh CLI 토큰 가져오기(Job Object·제한 시간·cwd 의 gh.exe 무시)를 본다. 실제 gh 는 쓰지 않는다
       # ssh_golden: SSH 순수 로직(설정 파서·known_hosts·원격 명령 인용, Phase 5 PR 1)이 tests/golden/ssh 와 exec/env.json 의 ssh 절과 같은지(소켓·ssh·git 을 쓰지 않는다).
       # TS 테스트 대응표는 tests/golden/ssh/test-map.json(vitest 가 누락을 강제)
+      # ssh: SSH 실행기(russh, Phase 5 PR 2)의 통합 테스트 — 127.0.0.1 의 프로세스 안 russh::server 만 쓴다(외부 접속·사용자의 ~/.ssh·agent 를 쓰지 않는다). 원격 git 은 LocalExecutor 로 돌린다.
+      # 실제 sshd 를 쓰는 시험은 #[ignore] 라 CI 에서 돌지 않는다
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden --test ssh
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy
