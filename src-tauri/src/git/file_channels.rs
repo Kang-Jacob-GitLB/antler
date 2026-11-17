@@ -232,7 +232,7 @@ pub async fn file_diff(exec: &GitExecutor, repo_path: &str, req: &DiffRequest) -
         DiffParseOpts { max_bytes: Some(DIFF_MAX_BYTES), ..DiffParseOpts::default() }
     };
     let mut parser = DiffParser::new(req.path.as_str(), req.old_path.as_ref().map(FilePath::as_str), &parse_opts);
-    let mut stream = exec.stream(repo_path, &args, &RunOpts::default())?;
+    let mut stream = exec.stream(repo_path, &args, &RunOpts::default()).await?;
     let mut chunk = vec![0u8; DIFF_CHUNK];
     loop {
         let n = stream.read(&mut chunk).await.map_err(|e| ExecError::Other { message: e.to_string() })?;

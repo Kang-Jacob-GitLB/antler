@@ -24,7 +24,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
-| 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 진행 중 — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음) 완료, PR 2a(`russh` 스파이크 go·연결·`run`·시험) 완료 — 2b(stream async·펌프) 남음. 계획·결정은 아래 "SSH(Phase 5)" |
+| 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 진행 중 — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음) 완료, PR 2a(`russh` 스파이크 go·연결·`run`·시험) 완료, PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한) 완료 — 3(라우팅) 남음. 계획·결정은 아래 "SSH(Phase 5)" |
 | 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
@@ -220,7 +220,7 @@ TS 의 `LogCursor`(`src/main/git/logCursor.ts`)와 `RepoService.log()` 의 커�
   확인 읽기와 본 읽기는 한 요청으로 묶어 그 사이에 다른 읽기가 끼지 못하게 했다(TS 는 둘을 따로 예약한다).
 - **유휴 정리**: 5초 안 쓰인 커서는 닫고(2.5초마다 훑는다) 읽는 중인 커서는 건드리지 않는다. 훑는 태스크는 첫 커서를 만들 때 띄우고(`setup` 은 tokio 런타임 밖이다) 커서가 없어지면 스스로 끝난다.
   앱 종료(`RunEvent::Exit`)·저장소 제거 때는 `Router::shutdown`·`on_mirror_changed` 가 닫는다. 종료 때 닫지 못한 git 은 앱이 어떻게 끝나든 Job 핸들이 닫히며(`KILL_ON_JOB_CLOSE`) 커널이 트리를 죽인다.
-  git 은 **읽기 태스크가 첫 요청 전에**(상태 락 밖, `spawn_blocking`) 띄운다 — 서비스가 락을 쥔 채 동기 CreateProcess 를 부르지 않게. PID 는 태스크가 meta 에 적는다.
+  git 은 **읽기 태스크가 첫 요청 전에**(상태 락 밖; `GitExecutor::stream` 이 async 이고 Local·WSL 은 그 안에서 `spawn_blocking`) 띄운다 — 서비스가 락을 쥔 채 동기 CreateProcess 를 부르지 않게. PID 는 태스크가 meta 에 적는다.
   한 레코드(NUL 사이)가 16MB 를 넘으면 스트림을 오류(`ERROR`)로 끝내 커서를 닫는다(`NulRecordSplitter::push_checked` — `run` 결과를 파싱하는 `split_nul` 에는 상한이 없다).
   한 페이지를 채우는 동안 읽은 바이트도 64MB(`DEFAULT_MAX_BUFFER`)를 넘으면 오류로 끝낸다 — 큰 메시지의 커밋 1000개(압축돼 저장소는 작다)가
   페이지 하나에 수 GB 를 쌓지 못하게. 분리기는 새 청크만 훑는다(긴 미완성 조각을 매번 다시 훑으면 시간이 길이의 제곱으로 는다).
@@ -832,7 +832,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 저장소 추가 흐름(`env:*`·`repos:add` 의 SSH·SFTP 폴더 탐색, `remoteDir.ts`)은 사이드카에 남긴다(Phase 6b). 세션 정지(채널 윈도우가 읽는 쪽에 묶여 읽지 않는 채널이 연결 전체를 멈출 수 있음)는 스트림마다 펌프를 두고
 16MB 선읽기를 넘으면 프로세스를 죽이고 `--skip` 으로 다시 시작하는 방식을 PR 2 에서 시험한다 — Electron 판과의 동작 차이는 받아들이기로 했다.
 
-**PR 순서**: 1 순수 로직·골든(**완료**) → 2 `SshExecutor`(`russh`, **2a 완료·2b 남음**; 첫 단계 go/no-go 스파이크: ring 빌드·세션 정지·agent. `GitExecutor::stream` async 전환, 루프백 `russh::server` 하네스, clippy 로 password/keyboard-interactive/TOFU 쓰기/포트 포워딩 금지) →
+**PR 순서**: 1 순수 로직·골든(**완료**) → 2 `SshExecutor`(`russh`, **2a·2b 완료**; 첫 단계 go/no-go 스파이크: ring 빌드·세션 정지·agent. `GitExecutor::stream` async 전환, 루프백 `russh::server` 하네스, clippy 로 password/keyboard-interactive/TOFU 쓰기/포트 포워딩 금지) →
 3 라우팅(`sshHost` 미러·`Target::Ssh`·`SshPool`·`ANTLER_RUST_SSH`, fetch 소유 판정을 kind 상수로 — 이중 fetch 방지) → 4 ssh fetch 를 Rust 로(`RUST_FETCH_KINDS`·`fetchOwns.ts`·SSH 전송 오류는 network 로 분류·fetch.scenarios ssh 시나리오) → 5 측정·사람 확인.
 이 단계 뒤 Phase 6 은 6a(나머지 git 채널·RepoWatcher) · 6b(설정·저장소 관리·env·external·github 원격 전용) · 6c(업데이터·패키징·Electron 제거)로 나눈다. 사이드카 전용으로 남은 채널은 37개다.
 
@@ -851,7 +851,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 `src-tauri/tests/ssh_golden.rs` 가 전부 읽어 비교한다(처리기 없는 골든이 있으면 실패). 입력 `TRICKY` 는 기존 `tests/sshQuote.test.ts` 와 공유한다.
 - **플랫폼과 무관한 골든**: 골든 생성기는 `node:path` 를 win32 판으로, `node:fs` 를 가상 파일 시스템(`C:\golden\…`, 대소문자 무시)으로 바꿔 돌린다 — 임시 경로·플랫폼(CI 의 vitest 는 ubuntu)에 기대지 않고 Rust 의 `MemFs`·`win32_path` 와 같은 규칙으로 맞춘다. 홈(`C:\golden\home`)·로컬 사용자·환경변수는 사례 입력이다.
 - **대응표**(`tests/golden/ssh/test-map.json`): 대상 테스트 5개(`sshConfig`·`sshKnownHosts`·`sshQuote`·`sshExecutor`·`sshRemoteDir`)의 모든 `it` 59개가 있어야 하고(vitest 가 강제) 값은 `<파일>.rs::<테스트 이름>`(그 이름의 `fn` 이 있어야 한다)·`N/A: PR n`·`N/A: 사유` 중 하나다.
-  `sshExecutor` 는 `N/A: PR 2`, `sshRemoteDir` 는 `N/A: 저장소 추가 흐름(사이드카 유지)`. 골든 사례 이름은 해당 `it` 제목과 같고, 한 골든 시험이 여러 `it` 을 덮는다.
+  `sshExecutor` 는 PR 2(a·b)에서 전부 `ssh.rs::…` 로 옮겼고(`N/A: PR n` 0개), `sshRemoteDir` 는 `N/A: 저장소 추가 흐름(사이드카 유지)`. 골든 사례 이름은 해당 `it` 제목과 같고, 한 골든 시험이 여러 `it` 을 덮는다.
 - **시험**: 라이브러리 단위 21개(`win32_path`·`glob`·줄 모양·토큰·`$VAR`·Include 깊이·실제 파일 시스템 Include·base64·키 종류·인용 모양·env 이름 거부), `ssh_golden.rs` 11개, vitest `goldenSsh`(2)·`goldenExec`(`ssh` 절 포함).
 
 **TS 와 다른 점**
@@ -887,8 +887,8 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 
 ### PR 2 — SSH 실행기(`russh`; 앱에 연결하지 않는다) — 2a: 스파이크 + 연결 + `run`
 
-**진행**: 2a(스파이크·연결·`run`·시험·clippy)까지. **2b 가 남았다** — `GitExecutor::Ssh` 변형, `stream` 의 async 전환(`GitStream` enum), 스트림 펌프(16MB 선읽기 상한), `log_service`·`file_channels` 갱신, `test-map.json` 의 stream `it` 5개.
-`SshExecutor` 는 `GitExecutor` 와 별개 타입이다(`run` 만 있다) — 동기 `stream` 에 가짜 변형을 두지 않으려고 2b 에서 enum 에 함께 넣는다.
+**진행**: 2a(스파이크·연결·`run`·시험·clippy)와 2b(`GitExecutor::Ssh`·`stream`·펌프·`log_service`/`file_channels` 갱신·stream `it` 5개 이식)까지 완료. 앱 연결(라우팅)은 PR 3.
+2a 에서는 `SshExecutor` 가 `GitExecutor` 와 별개 타입이었다(`run` 만) — 동기 `stream` 에 가짜 변형을 두지 않으려고 2b 에서 `stream` 을 async 로 바꾸며 enum 에 함께 넣었다.
 
 #### 1단계 go/no-go 스파이크 — **go**
 - **(a) 빌드**: `russh` **0.65.2**(2026-11-16, crates.io 최신 안정판, MSRV 1.89), `default-features = false, features = ["ring", "rsa"]`(`aws-lc-rs`·`flate2`(압축)는 끈다). Windows(MSVC, `-j 2`)에서 **NASM 없이** 빌드된다(`ring` 0.17.14).
@@ -919,7 +919,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - **clippy `disallowed-methods`**(`clippy.toml`): `russh::client::connect`·`connect_stream`·`Handle::channel_open_direct_tcpip`(connection.rs 의 문장 하나씩만 `allow`), `authenticate_password`·`authenticate_keyboard_interactive_{start,respond}`·`authenticate_gssapi_with_mic`,
   `russh::keys::known_hosts::{learn_known_hosts[_path], check_known_hosts[_path]}`(TOFU 쓰기·홈의 파일 읽기), `tcpip_forward`·`streamlocal_forward`(+cancel)·`channel_open_direct_streamlocal`·`channel_open_x11`·`Channel::{agent_forward, request_x11}`(+`ChannelWriteHalf`).
   임시 파일로 8개가 실제로 걸리는 것을 확인하고 지웠다. clippy 를 `allow` 로 우회하는 경우를 위해 `tests/ssh.rs::russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다` 가 소스에서 같은 이름을 센다.
-- **시험**(`cargo test --test ssh`, 약 25초): TS `sshExecutor.test.ts` 24개 `it` 중 19개를 이식(나머지 5개는 stream — 2b, 대응표에 `N/A: PR 2` 로 남김)하고 추가했다 — 세션 정지 스파이크, `run` 큰 출력 옆 작은 호출, 취소 토큰·future 버림 뒤 원격 자식 0·슬롯 반환, 슬롯 수보다 많은 반복, 출력 상한 뒤 정리, 종료 코드 없는 끊김,
+- **시험**(`cargo test --test ssh`, 약 25초): TS `sshExecutor.test.ts` 24개 `it` 중 19개를 이식(나머지 5개는 stream — 2b 에서 이식했다)하고 추가했다 — 세션 정지 스파이크, `run` 큰 출력 옆 작은 호출, 취소 토큰·future 버림 뒤 원격 자식 0·슬롯 반환, 슬롯 수보다 많은 반복, 출력 상한 뒤 정리, 종료 코드 없는 끊김,
   dispose 가 대기 호출을 깨움, 유휴 종료 뒤 재연결, 접속 제한 시간(배너 없는 서버), 2홉 ProxyJump(+둘째 홉 키 오류), 점프 홉의 `unsupported`, 비 ASCII 별칭·HostName·HostKeyAlias·포트 0/65536/홉 포트 70000·`ProxyCommand`·`RevokedHostKeys` 의 연결 전 거부, `@revoked`, `HostKeyAlias`(포트 22)·`UserKnownHostsFile`, 알고리즘을 등록 종류로 제한, 암호화된 키 사유, 원격 명령 바이트·환경 == `GIT_ENV`. **서버 쪽에서 연결이 실제로 닫히는지**(하네스의 열린 연결 수)를 유휴 종료·dispose·인증 실패·호스트 키 거부·셸 거부·점프 체인 실패 뒤에 확인한다 — 버려진 `Handle` 이 세션을 끝낸다는 것이 이것으로 확인됐다.
   `HostKeyHandler::check_server_key` 는 단위 시험이 직접 부른다(비 ASCII 이름의 `Unsupported` → 거부, `@revoked`, 모르는 호스트, 다른 키).
   시간 의존은 `wait_for`(조건 + 상한)이고 주입 가능한 `Timeouts`(접속·keepalive·유휴·셸 확인)를 쓴다 — 실제 소켓에 `start_paused` 를 쓰지 않았다. 무거운 시험은 `heavy()` 로 직렬화. 서버는 전용 런타임이라 시험 런타임이 끝나도 죽지 않는다.
@@ -941,7 +941,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - **협상 목록**: `kex`·`cipher`·`mac` 에 `none` 이 없음을 단위 시험이 고정한다(russh 를 올릴 때 깨지면 목록을 명시로 고정). clippy 금지 목록에 `Handle`·`client::Session` 의 포워딩·전역 요청과 `Channel`·`ChannelWriteHalf` 의 `exec`(프로브·`Job::run` 만 allow)·`request_shell`·`set_env` 를 더했다.
 - **Windows 에서 `SSH_AUTH_SOCK`**: TS 처럼 보지 않는다(`IdentityAgent` 에 파이프 경로를 줄 때만). 유닉스 소켓 경로는 Windows 에서 "지원하지 않는 agent 종류" 로 안내한다. `cfg(unix)` 분기는 이 환경에서 컴파일하지 못했다.
 
-**사람이 확인해야 할 것**
+**사람이 확인해야 할 것**(2a)
 - 실제 sshd(OpenSSH, 기본 셸이 cmd 인 Windows OpenSSH 서버 거부, bastion ProxyJump)에 접속해 `rev-parse`·큰 `log` 가 되는지(`ANTLER_SSH_TEST_HOST=<별칭> ANTLER_SSH_TEST_REPO=<경로> cargo test --test ssh -- --ignored`).
 - Windows OpenSSH agent 파이프·pageant 에 실제로 붙어 서명·IdentitiesOnly 필터가 되는지(이 환경에서는 연결해 보지 않았다), 암호화된 키 안내 문구, RSA 키(`rsa-sha2-*` 협상) 접속.
 - 해시된 known_hosts(`|1|…`)·`@cert-authority` 가 든 실제 파일, `UserKnownHostsFile` 여러 개.
@@ -949,9 +949,44 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 **남은 위험(PR 2)**
 - `ssh-key =0.7.0-rc.12` 가 russh 에 의해 **프리릴리스로 고정**돼 있다 — russh 를 올릴 때 같이 움직이며 따로 올릴 수 없다.
 - `rsa` 0.10(RSA 키 서명)에 타이밍 부채널 권고(RUSTSEC-2023-0071 계열)가 해당하는지 확인하지 않았다. 클라이언트 서명에만 쓰이고 원격 공격자가 타이밍을 잴 수 있는 경로는 좁지만 `cargo audit` 으로 확인한다.
-- 2a 의 `run` 은 읽기 루프가 펌프라 정지가 없지만, 2b 의 `stream` 이 소비자가 느릴 때 같은 정지를 일으키지 않는지는 2b 의 시험 몫이다(위 스파이크로 재현 조건은 확보).
+- 2a 의 `run` 은 읽기 루프가 펌프라 정지가 없고, 2b 의 `stream` 도 펌프라 소비자가 느려도 정지하지 않는다(아래 2b 시험이 읽지 않는 스트림 옆의 `run` 으로 확인).
 - 실제 원격(지연·패킷 손실)에서의 keepalive·재연결·유휴 종료 경계는 루프백 시험으로만 봤다. **keepalive 는 시험하지 않았고**, `cfg(unix)` 분기·실제 agent·`cargo audit` 도 확인하지 못했다.
 - CI(`tauri.yml` `timeout-minutes: 20`)는 새 크레이트 89개가 더해진 **콜드 빌드**(이 환경에서 시험 포함 첫 빌드 4분 12초, `-j 2`)를 감당하는지 첫 PR 실행에서 값을 확인한다.
+
+### PR 2b — `GitExecutor::Ssh`·`stream`·펌프(앱에 연결하지 않는다)
+
+| 파일 | 내용 |
+|---|---|
+| `exec/mod.rs` | `GitExecutor::Ssh`(`kind`="ssh", `cache_key`=`ssh:<host_spec>`), `run` 이 Ssh 로 디스패치, **`stream` 이 async**. Local·WSL 은 실행기 안에서 `spawn_blocking`(CreateProcess 가 느려 런타임 스레드를 막지 않게 — 예전 `log_service` 의 `spawn_blocking` 을 옮겼다), SSH 는 원격 명령이 시작될 때까지 기다린다 |
+| `exec/process.rs` | `GitStream` 이 **enum**(`Process(Box<ProcessStream>)`·`Ssh(SshStream)`). `AsyncRead`·`finish`·`pid`·`is_running`·Drop 의미는 그대로(Local·WSL 은 Job Object 종료). `Local/WslExecutor::stream` 은 여전히 동기 |
+| `exec/ssh/stream.rs` | `SshStream`(소비자 쪽 `AsyncRead`), `ReadAheadExceeded`·`is_read_ahead_exceeded`, `STREAM_AHEAD_LIMIT`(16MB) |
+| `exec/ssh/connection.rs` | `Connection::stream`, 펌프 태스크 `pump`, 채널 열기+exec 를 `open_exec` 한 곳으로 묶음(`run`·`stream` 공용 — clippy allow 는 늘지 않았다), 시험 훅 `set_stream_ahead_limit`(`test-hooks`) |
+| `git/log_service.rs`·`git/file_channels.rs` | `stream(..).await` 로 호출. `LogCursor` 가 선읽기 상한 초과를 처리(아래) |
+
+- **펌프(세션 정지 R1 방지)**: `stream` 은 채널·슬롯을 소유한 태스크를 띄워 **소비자와 무관하게 즉시 비운다**. 소비자는 무제한 큐(`mpsc`)에서 가져가고, 큐에 쌓인(아직 꺼내지 않은) 바이트가 16MB 를 넘으면 펌프가 `Overflow` 를 큐 끝에 넣고 원격에 KILL → close 를 보낸 뒤 **남은 출력은 버린다**(닫힘 확인 뒤 슬롯 반환).
+  소비자는 이미 쌓인 데이터를 모두 읽은 **뒤에** `io::Error`(원인 `ReadAheadExceeded`, `is_read_ahead_exceeded(&e)` 로 판별)를 받는다. 취소·연결 오류와 구별되고, 같은 오류가 반복되며, `finish()` 는 `Aborted` 다(정상 종료로 보이지 않는다).
+- **Drop·취소**: 스트림을 버리면(`DropGuard`) 펌프가 KILL → close → 닫힘 확인(3초 상한) 뒤 슬롯을 돌려준다. `RunOpts.cancel` 은 펌프도 보므로(읽는 중이 아니어도) 즉시 KILL 한다. 읽기는 `GitStream` 과 같이 취소를 먼저 보고 오류로 깨어난다. 시작(`stream` 호출) 중에 취소·future 버림도 같다.
+- **`LogCursor` 의 처리**: 상한 초과는 **오류가 아니다**. 읽기 태스크가 그 커서를 `overflowed`(재사용 불가, 실패 아님)로 표시하고 지금까지 읽은 만큼만 낸다(`has_more` 참 — 비어 있어도). 앵커(마지막으로 낸 커밋의 위치·해시)는 남기므로(`anchorable`) 다음 페이지는 기존 STALE 경로 그대로
+  새 커서가 `--skip=<위치-1>` + 앵커 확인(`verify_then_read`)으로 이어 읽는다. 확인 커밋을 받기 전에 끊기면 아무것도 내지 않고 앵커를 유지한다(불일치로 오판해 STALE 을 내지 않는다). STALE 알림(`logStale`)도 가지 않는다.
+  `file_channels::file_diff` 는 상한 초과를 오류(`ExecError::Other`)로 돌려준다.
+
+**TS 와 다른 점(2b)**
+- **원격은 backpressure 로 멈추지 않는다.** TS(`ssh2`)는 읽는 쪽이 느리면 윈도우가 차서 원격이 멈췄고, 소비자가 읽지 않으면 같은 연결의 다른 채널도 멈출 수 있었다(R1). Rust 는 펌프가 16MB 까지 먼저 읽고, **넘으면 원격을 죽이고 읽기를 상한 초과로 끝낸다**(사용자 결정 D3).
+  Local·WSL 은 그대로 파이프 backpressure(상한 없음)다. 소비가 느려 상한을 넘는 일은 `git log` 커서를 오래 쉬게 둔 경우(수 MB 의 출력이 이미 쌓인 상태)에 생기며, 로그는 위 앵커 경로로 투명하게 이어진다.
+- 상한은 **쌓인 바이트** 기준이라 느린 소비자가 천천히라도 계속 읽으면 넘지 않는다. 한 번 넘으면 그 스트림은 못 쓴다(재개 없음).
+- 시험 훅 `set_stream_ahead_limit`(`test-hooks`)만 상한을 바꾼다 — 운영 경로에 설정 수단이 없다.
+
+**시험**(`cargo test --features test-hooks --test ssh`, 약 50초) — `ssh.rs` 에 새 시험 16개(상한을 줄이는 3개는 `test-hooks` 가 있을 때만 컴파일된다)
+- TS `stream` `it` 5개 이식(`test-map.json` 의 `N/A: PR 2` 를 전부 전환): 큰 출력·느린 소비자(첫 청크만 읽고 같은 연결의 `run` 이 끝남)·비정상 종료의 git 오류·중간 취소(`Aborted`·원격 자식 0·슬롯 반환·연결 재사용)·소비자 이탈·슬롯 수보다 많은 반복.
+- 추가: 읽지 않는 스트림(512B 패킷 8192개) 옆에서 같은 연결의 `run` 5개가 끝남(세션 정지 없음), `hold` 스트림 drop·읽는 중 취소 뒤 서버 자식 0·슬롯 반환, 이미 취소된 토큰(연결도 안 맺음), 서버의 exec 거부, **상한 초과**(상한을 256KB 로 줄임 — 신호·원격 KILL·연결 계속 사용·`flooded < 4MB`),
+  상한 안에서 끝난 출력은 초과가 아님, `LogCursor`·`LogService` 의 SSH 대상 시나리오(페이지 이어 붙임 = 전체 log, 확인 읽기 불일치, 취소 뒤 커서·원격 자식·슬롯 정리, **상한(32KB)으로 끊긴 커서가 오류 없이 앵커로 다시 열려 중복·누락 없이 이어짐**).
+  16MB 를 실제로 보내지 않는다. 시간 의존은 `wait_for`·`timeout` 뿐이다.
+
+**남은 위험(2b)**
+- `file_diff`(전체 diff 보기 등)는 SSH 에서 상한 초과를 이어 읽지 못하고 **오류**로 끝낸다. 소비자(파서)가 네트워크보다 16MB 이상 느릴 때만 생기며 실제 sshd·큰 diff 로 확인하지 않았다.
+- 펌프는 데이터마다 `Vec` 를 한 번 복사한다(`CryptoVec` → `Vec<u8>`). 큐는 바이트로만 한도를 걸어 작은 패킷이 많으면 메시지 수는 많아질 수 있다(16MB / 작은 패킷 — 메모리는 데이터 크기 + 메시지 오버헤드).
+- `stream` 을 쓰는 호출부는 `log_service`·`file_diff` 둘뿐이다. 라우팅(PR 3)에서 SSH 로 연결할 때 `file_diff` 의 상한 초과 처리를 다시 본다.
+- 실제 sshd 지연·패킷 손실 아래의 상한 동작은 루프백으로만 봤다.
 
 ## Phase 0 에서 확인한 것
 

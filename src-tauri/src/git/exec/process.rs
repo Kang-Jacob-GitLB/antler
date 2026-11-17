@@ -19,6 +19,7 @@ use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use super::common::{RunOpts, RunResult, Spec, DEFAULT_MAX_BUFFER, MAX_STDERR};
 use super::error::ExecError;
+use super::ssh::SshStream;
 use super::wsl;
 
 /// Windows: 콘솔 창을 띄우지 않는다
@@ -353,10 +354,10 @@ pub(super) async fn run_process(spec: &Spec, opts: &RunOpts) -> Result<RunResult
     Ok(RunResult { stdout: out, stderr: String::from_utf8_lossy(&err).into_owned(), code: status.code().unwrap_or(-1) })
 }
 
-/// 실행 중인 git 의 stdout. [`AsyncRead`] 로 읽는다 — **읽을 때만** 파이프에서 가져오므로 소비자가 읽지 않으면
+/// 실행 중인 git 의 stdout(Local·WSL 자식 프로세스). [`AsyncRead`] 로 읽는다 — **읽을 때만** 파이프에서 가져오므로 소비자가 읽지 않으면
 /// git 이 파이프가 찬 곳에서 멈춘다(backpressure). 버리면(Drop) 프로세스 트리를 죽인다.
 /// EOF 까지 읽은 뒤 [`GitStream::finish`] 로 종료 코드를 확인한다.
-pub struct GitStream {
+pub struct ProcessStream {
     stdout: ChildStdout,
     guard: ChildGuard,
     stderr: Option<JoinHandle<Vec<u8>>>,
@@ -375,7 +376,7 @@ pub(super) fn stream_process(spec: &Spec, opts: &RunOpts) -> Result<GitStream, E
         return Err(ExecError::Aborted);
     }
     let Launched { guard, stdout, stderr } = launch(spec)?;
-    Ok(GitStream {
+    Ok(GitStream::Process(Box::new(ProcessStream {
         stdout,
         guard,
         stderr: Some(stderr),
@@ -386,14 +387,59 @@ pub(super) fn stream_process(spec: &Spec, opts: &RunOpts) -> Result<GitStream, E
         head: Vec::new(),
         eof: false,
         aborted: false,
-    })
+    })))
 }
 
 fn aborted_io() -> io::Error {
     io::Error::other("aborted")
 }
 
+/// 실행기가 돌려주는 git stdout 스트림. 자식 프로세스(Local·WSL, [`ProcessStream`])거나 원격 채널(SSH, [`SshStream`])이다.
+/// 의미는 같다: [`AsyncRead`] 로 읽고, EOF 뒤 [`GitStream::finish`] 로 종료 코드를 확인하고, 버리면(Drop) 프로세스 트리·원격 프로세스를 죽인다.
+/// 차이는 backpressure 하나다 — 자식 프로세스는 읽을 때만 파이프를 비우지만 SSH 는 채널을 소유 태스크가 즉시 비우고(세션 정지 방지)
+/// 선읽기 상한을 넘으면 원격을 죽이고 읽기가 [`super::ssh::is_read_ahead_exceeded`] 오류로 끝난다.
+pub enum GitStream {
+    Process(Box<ProcessStream>),
+    Ssh(SshStream),
+}
+
 impl GitStream {
+    /// 프로세스 PID(수동 테스트용 — 이미 수거됐으면 None, SSH 는 항상 None)
+    pub fn pid(&self) -> Option<u32> {
+        match self {
+            GitStream::Process(s) => s.pid(),
+            GitStream::Ssh(_) => None,
+        }
+    }
+
+    /// 프로세스가 아직 안 끝났으면 true(SSH 는 끝(EOF)을 받기 전까지)
+    pub fn is_running(&mut self) -> bool {
+        match self {
+            GitStream::Process(s) => s.is_running(),
+            GitStream::Ssh(s) => s.is_running(),
+        }
+    }
+
+    /// EOF 까지 읽은 뒤 호출한다: 종료를 기다려 코드를 검사한다. 취소됐으면 `Aborted`, 0 이 아니면 `Git`.
+    /// EOF 전에 부르면(소비자가 중도 포기) 프로세스를 죽이고 `Aborted` 를 돌려준다.
+    pub async fn finish(self) -> Result<(), ExecError> {
+        match self {
+            GitStream::Process(s) => s.finish().await,
+            GitStream::Ssh(s) => s.finish().await,
+        }
+    }
+}
+
+impl AsyncRead for GitStream {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        match &mut *self {
+            GitStream::Process(s) => Pin::new(s).poll_read(cx, buf),
+            GitStream::Ssh(s) => Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl ProcessStream {
     /// 프로세스 PID(수동 테스트용 — 이미 수거됐으면 None)
     pub fn pid(&self) -> Option<u32> {
         self.guard.id()
@@ -406,7 +452,7 @@ impl GitStream {
 
     /// EOF 까지 읽은 뒤 호출한다: 종료를 기다려 코드를 검사한다. 취소됐으면 `Aborted`, 0 이 아니면 `Git`.
     /// EOF 전에 부르면(소비자가 중도 포기) 프로세스를 죽이고 `Aborted` 를 돌려준다.
-    pub async fn finish(mut self) -> Result<(), ExecError> {
+    async fn finish(mut self) -> Result<(), ExecError> {
         if self.aborted || !self.eof {
             self.guard.kill_tree();
             return Err(ExecError::Aborted);
@@ -444,7 +490,7 @@ impl GitStream {
     }
 }
 
-impl AsyncRead for GitStream {
+impl AsyncRead for ProcessStream {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         let this = &mut *self;
         if this.aborted {

@@ -7,13 +7,25 @@
 //! 실제 sshd 를 쓰는 시험은 `#[ignore]` + `ANTLER_SSH_TEST_HOST`.
 
 use std::path::Path;
+use std::sync::Arc;
+#[cfg(feature = "test-hooks")]
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use antler_lib::git::exec::ssh::config::{list_hosts, load_ssh_config, Ctx, RealFs};
 use antler_lib::git::exec::ssh::quote::build_remote_command;
-use antler_lib::git::exec::ssh::{SshExecutor, SshOptions, SHELL_PROBE};
-use antler_lib::git::exec::{ExecError, RunOpts, RunResult, GIT_ENV};
+#[cfg(feature = "test-hooks")]
+use antler_lib::git::exec::ssh::is_read_ahead_exceeded;
+use antler_lib::git::exec::ssh::{SshExecutor, SshOptions, SshStream, SHELL_PROBE};
+use antler_lib::git::exec::{ExecError, GitExecutor, RunOpts, RunResult, GIT_ENV};
+#[cfg(feature = "test-hooks")]
+use antler_lib::git::log_service::NoteOp;
+use antler_lib::git::log_service::{CursorError, LogCursor, LogRequest, LogService};
+use antler_lib::git::parsers::log::{parse_log, Commit};
+use antler_lib::git::scope::log_args;
+use antler_lib::mirror::{RepoMirror, Target};
 use russh::keys::{Algorithm, EcdsaCurve, PrivateKey};
+use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
 #[path = "ssh/common.rs"]
@@ -23,7 +35,7 @@ mod server;
 #[path = "ssh/spike.rs"]
 mod spike;
 
-use common::{known_hosts_line, make_repo, openssh_no_comment, wait_for, Home, TempDir};
+use common::{known_hosts_line, make_linear_repo, make_repo, openssh_no_comment, wait_for, Home, TempDir};
 use server::{new_key, unquote, ExecMode, Opts, Shell, TestServer};
 
 /// 테스트 프로세스 환경 격리(`tests/exec.rs` 의 `isolate` 와 같다). 서버 쪽 git 과 저장소 준비용 git 이 사용자의 전역 설정을 읽지 않게 한다
@@ -930,6 +942,362 @@ async fn 서버가_exec_를_거부하면_채널을_닫고_닫힘을_확인한_�
         assert!(m.contains("거부"), "{m}");
     }
     wait_for("거부된 채널이 서버에서 닫힘", || e.server.lingering_channels() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+// ── stream(PR 2b): TS sshExecutor.test.ts 의 stream it 5개 이식 ──────────────────────
+
+/// 스트림 시작 도우미(기본 옵션)
+async fn open(ex: &SshExecutor, repo: &str, args: &[&str]) -> SshStream {
+    ex.stream(repo, args, &RunOpts::default()).await.expect("스트림 시작")
+}
+
+#[tokio::test]
+async fn stream_큰_출력을_느린_소비자에게도_온전히_전달하고_같은_연결의_호출은_멈추지_않는다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    let mut st = open(&ex, &e.repo, &["cat-file", "blob", "HEAD:big.bin"]).await;
+    let mut first = vec![0u8; 1024];
+    let mut total = st.read(&mut first).await.unwrap();
+    assert!(total > 0);
+    // 소비를 멈춘 동안에도 같은 연결의 다른 호출이 끝난다(TS 는 원격이 backpressure 로 멈췄다 — Rust 는 펌프가 채널을 비운다)
+    let r = tokio::time::timeout(Duration::from_secs(60), run(&ex, &e.repo, &["rev-parse", "HEAD"])).await.expect("읽지 않는 스트림 옆의 호출이 멈췄다").unwrap();
+    assert_eq!(r.code, 0);
+    let mut rest = Vec::new();
+    st.read_to_end(&mut rest).await.unwrap();
+    total += rest.len();
+    st.finish().await.unwrap();
+    assert_eq!(total, BIG);
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_비정상_종료는_마지막에_git_오류() {
+    let e = Env::new().await;
+    let ex = e.ex();
+    let mut st = open(&ex, &e.repo, &["log", "refs/heads/없는_브랜치"]).await;
+    let mut out = Vec::new();
+    st.read_to_end(&mut out).await.unwrap();
+    let err = st.finish().await.unwrap_err();
+    assert!(
+        matches!(&err, ExecError::Git { code, stderr, .. } if *code != 0 && (stderr.contains("없는_브랜치") || stderr.contains("unknown revision") || stderr.contains("ambiguous"))),
+        "{err:?}"
+    );
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_중간_취소는_aborted_이고_원격_프로세스도_정리된다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    let t = CancellationToken::new();
+    let mut st = ex.stream(&e.repo, &["cat-file", "blob", "HEAD:big.bin"], &RunOpts::with_cancel(t.clone())).await.unwrap();
+    let mut buf = vec![0u8; 1024];
+    assert!(st.read(&mut buf).await.unwrap() > 0);
+    t.cancel();
+    assert!(st.read(&mut buf).await.is_err(), "취소 뒤의 읽기는 오류");
+    assert!(matches!(st.finish().await, Err(ExecError::Aborted)));
+    wait_for("원격 자식 정리", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    assert_eq!(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0, "같은 연결로 계속 쓸 수 있다");
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_소비자가_그만두면_원격_프로세스를_남기지_않는다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    let mut st = open(&ex, &e.repo, &["cat-file", "blob", "HEAD:big.bin"]).await;
+    let mut buf = vec![0u8; 1024];
+    assert!(st.read(&mut buf).await.unwrap() > 0);
+    drop(st);
+    wait_for("원격 자식 정리", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_을_중간에_그만두거나_취소해도_채널_슬롯이_새지_않는다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    // 기본 동시 채널 상한(6)보다 많이 중간 종료·취소를 반복한다 — 새면 이후 호출이 영영 기다린다
+    for i in 0..10 {
+        let t = CancellationToken::new();
+        let mut st = ex.stream(&e.repo, &["cat-file", "blob", "HEAD:big.bin"], &RunOpts::with_cancel(t.clone())).await.unwrap();
+        let mut buf = vec![0u8; 1024];
+        assert!(st.read(&mut buf).await.unwrap() > 0);
+        if i % 2 == 1 {
+            t.cancel();
+        }
+        drop(st);
+    }
+    wait_for("원격 자식 정리", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    let r = tokio::time::timeout(Duration::from_secs(8), run(&ex, &e.repo, &["rev-parse", "HEAD"])).await.expect("슬롯이 새어 요청이 멈췄다");
+    assert_eq!(r.unwrap().code, 0);
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+// ── stream(PR 2b): 펌프·선읽기 상한 ─────────────────────────────────────────────
+
+#[tokio::test]
+async fn stream_읽지_않는_스트림이_있어도_같은_연결의_run_이_끝난다_세션_정지_없음() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    // 512B 패킷 8192개(채널 큐 100개보다 훨씬 많다)를 쏟는 스트림을 한 바이트도 읽지 않는다
+    let mut st = open(&ex, "antler-fake:flood:4194304:512", &["status"]).await;
+    wait_for("원격이 4MB 를 다 보냈다(펌프가 비웠다)", || e.server.flooded() == BIG).await;
+    let smalls = tokio::time::timeout(Duration::from_secs(60), futures_util::future::join_all((0..5).map(|_| run(&ex, &e.repo, &["rev-parse", "HEAD"]))))
+        .await
+        .expect("읽지 않는 스트림이 같은 연결의 호출을 막았다");
+    assert!(smalls.iter().all(|r| r.as_ref().is_ok_and(|o| o.code == 0)));
+    let mut all = Vec::new();
+    st.read_to_end(&mut all).await.unwrap();
+    st.finish().await.unwrap();
+    assert_eq!(all.len(), BIG);
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_을_버리면_멈춰_있는_원격_자식이_정리되고_슬롯이_돌아온다() {
+    let e = Env::new().await;
+    let ex = e.ex();
+    let st = open(&ex, "antler-fake:hold", &["status"]).await;
+    wait_for("원격 자식 시작", || e.server.active_children() == 1).await;
+    assert_eq!(ex.free_slots(), 5);
+    drop(st);
+    wait_for("원격 자식 정리", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_읽는_도중_취소하면_읽기가_깨어나고_원격_자식과_슬롯이_정리된다() {
+    let e = Env::new().await;
+    let ex = e.ex();
+    let t = CancellationToken::new();
+    let mut st = ex.stream("antler-fake:hold", &["status"], &RunOpts::with_cancel(t.clone())).await.unwrap();
+    wait_for("원격 자식 시작", || e.server.active_children() == 1).await;
+    let reader = tokio::spawn(async move {
+        let mut buf = [0u8; 16];
+        let r = st.read(&mut buf).await;
+        (r.is_err(), st.finish().await)
+    });
+    t.cancel();
+    let (read_failed, fin) = reader.await.unwrap();
+    assert!(read_failed);
+    assert!(matches!(fin, Err(ExecError::Aborted)));
+    wait_for("원격 자식 정리", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_이미_취소된_토큰이면_aborted_이고_연결도_맺지_않는다() {
+    let e = Env::new().await;
+    let ex = e.ex();
+    let t = CancellationToken::new();
+    t.cancel();
+    let r = ex.stream(&e.repo, &["rev-parse", "HEAD"], &RunOpts::with_cancel(t)).await;
+    assert!(matches!(r, Err(ExecError::Aborted)));
+    assert_eq!(e.server.connections(), 0);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn stream_서버가_exec_를_거부하면_시작_오류이고_슬롯을_돌려준다() {
+    let e = Env::with(|o| o.exec = ExecMode::Reject).await;
+    let ex = e.ex();
+    for _ in 0..8 {
+        // 거부 응답이 exec 요청의 응답보다 먼저 처리되면 시작 오류로, 아니면 첫 읽기·finish 에서 알려진다
+        let Ok(mut st) = ex.stream(&e.repo, &["rev-parse", "HEAD"], &RunOpts::default()).await else { continue };
+        let mut out = Vec::new();
+        let _ = st.read_to_end(&mut out).await;
+        let err = st.finish().await.unwrap_err();
+        assert!(err.to_string().contains("거부"), "{err}");
+    }
+    wait_for("거부된 채널이 서버에서 닫힘", || e.server.lingering_channels() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+async fn stream_선읽기_상한을_넘으면_상한_초과_신호를_주고_원격은_죽고_연결은_계속_쓸_수_있다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    let cap = 256 * 1024;
+    ex.set_stream_ahead_limit(cap);
+    // 소비하지 않는 동안 펌프가 상한까지만 쌓고 원격을 죽인다(16MB 를 실제로 보내지 않는다 — 상한을 줄여 시험한다)
+    let mut st = open(&ex, "antler-fake:flood:4194304:4096", &["status"]).await;
+    wait_for("원격 자식 정리(상한 초과로 KILL)", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    assert!(e.server.flooded() < BIG, "상한을 넘었는데 원격이 끝까지 보냈다: {}", e.server.flooded());
+    // 쌓인 데이터는 모두 읽히고, 그 뒤 읽기가 상한 초과 오류로 끝난다
+    let mut got = 0usize;
+    let mut buf = vec![0u8; 64 * 1024];
+    let err = loop {
+        match st.read(&mut buf).await {
+            Ok(0) => panic!("정상 EOF — 상한 초과가 알려지지 않았다(받은 {got})"),
+            Ok(n) => got += n,
+            Err(e) => break e,
+        }
+    };
+    assert!(is_read_ahead_exceeded(&err), "{err}");
+    assert!(got > 0 && got <= cap, "받은 바이트 {got} (상한 {cap})");
+    // 같은 오류가 반복되고, finish 는 정상 종료로 보이지 않는다
+    assert!(is_read_ahead_exceeded(&st.read(&mut buf).await.unwrap_err()));
+    assert!(matches!(st.finish().await, Err(ExecError::Aborted)));
+    // 연결은 그대로 쓸 수 있다
+    assert_eq!(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0);
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+#[cfg(feature = "test-hooks")]
+#[tokio::test]
+async fn stream_상한_안에서_끝난_출력은_상한_초과가_아니다() {
+    let e = Env::new().await;
+    let ex = e.ex();
+    ex.set_stream_ahead_limit(64 * 1024);
+    let mut st = open(&ex, "antler-fake:flood:60000:4096", &["status"]).await;
+    let mut all = Vec::new();
+    st.read_to_end(&mut all).await.unwrap();
+    st.finish().await.unwrap();
+    assert_eq!(all.len(), 60000);
+    ex.dispose();
+}
+
+// ── log(PR 2b): SSH 대상의 커서·서비스 ─────────────────────────────────────────────
+
+async fn linear_log(ex: &SshExecutor, repo: &str) -> Vec<Commit> {
+    parse_log(&ex.run(repo, &log_args(None, 0).unwrap(), &RunOpts::default()).await.unwrap().stdout)
+}
+
+fn hashes(commits: &[Commit]) -> Vec<&str> {
+    commits.iter().map(|c| c.hash.as_str()).collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn log_ssh_커서는_페이지를_이어_붙이면_전체_log_와_같다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    let lin = make_linear_repo(1200);
+    let repo = lin.path().to_string_lossy().into_owned();
+    let all = linear_log(&ex, &repo).await;
+    assert_eq!(all.len(), 1200);
+    let c = LogCursor::new(&GitExecutor::Ssh(ex.clone()), &repo, &log_args(None, 0).unwrap(), 0);
+    let mut got: Vec<Commit> = Vec::new();
+    loop {
+        let page = c.read(250).await.unwrap();
+        got.extend(page.commits);
+        if !page.has_more {
+            break;
+        }
+    }
+    assert_eq!(hashes(&got), hashes(&all));
+    assert_eq!(c.position(), 1200);
+    assert!(c.ended());
+    c.dispose();
+    assert!(!c.usable());
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn log_ssh_확인_읽기는_앵커와_다르면_불일치로_끝난다() {
+    let e = Env::new().await;
+    let ex = e.ex();
+    let lin = make_linear_repo(60);
+    let repo = lin.path().to_string_lossy().into_owned();
+    let all = linear_log(&ex, &repo).await;
+    let exec = GitExecutor::Ssh(ex.clone());
+    let ok = LogCursor::new(&exec, &repo, &log_args(None, 9).unwrap(), 9);
+    assert_eq!(hashes(&ok.verify_then_read(all[9].hash.clone(), 5).await.unwrap().commits), hashes(&all[10..15]));
+    let bad = LogCursor::new(&exec, &repo, &log_args(None, 9).unwrap(), 9);
+    assert_eq!(bad.verify_then_read(all[8].hash.clone(), 5).await.unwrap_err(), CursorError::Mismatch);
+    ex.dispose();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn log_ssh_서비스는_취소하면_커서를_버리고_슬롯을_돌려준다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    let lin = make_linear_repo(300);
+    let repo = lin.path().to_string_lossy().into_owned();
+    let svc = LogService::new(RepoMirror::default());
+    let (exec, t) = (GitExecutor::Ssh(ex.clone()), Target::Local { path: repo });
+    let tok = CancellationToken::new();
+    tok.cancel();
+    let r = svc.log("a", &exec, &t, &LogRequest { scope: None, count: 10, skip: 0 }, &tok).await;
+    assert_eq!(r.unwrap_err().envelope_code(), "ABORTED");
+    assert_eq!(svc.cursor_count(), 0);
+    // 읽기를 시작한 뒤 취소: 커서는 버려지고 원격 git·슬롯이 정리된다
+    let tok = CancellationToken::new();
+    let svc = Arc::new(svc);
+    let (svc2, exec2, t2, tok2) = (svc.clone(), exec.clone(), t.clone(), tok.clone());
+    let task = tokio::spawn(async move { svc2.log("a", &exec2, &t2, &LogRequest { scope: None, count: 10, skip: 0 }, &tok2).await });
+    wait_for("커서가 열림", || svc.cursor_count() == 1).await;
+    tok.cancel();
+    let _ = task.await.unwrap();
+    wait_for("커서 정리", || svc.cursor_count() == 0).await;
+    wait_for("원격 자식 정리", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[cfg(feature = "test-hooks")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn log_ssh_선읽기_상한으로_끊긴_커서는_오류가_아니라_앵커로_다시_열려_이어진다() {
+    let _h = heavy().await;
+    let e = Env::new().await;
+    let ex = e.ex();
+    let lin = make_linear_repo(3000);
+    let repo = lin.path().to_string_lossy().into_owned();
+    let all = linear_log(&ex, &repo).await;
+    assert_eq!(all.len(), 3000);
+    // 로그 전체(수백 KB)가 상한보다 크다. 소비를 멈춘 동안 펌프가 상한을 넘겨 원격 git 을 죽인다
+    ex.set_stream_ahead_limit(32 * 1024);
+    let svc = LogService::new(RepoMirror::default());
+    let notes: Arc<Mutex<Vec<NoteOp>>> = Arc::default();
+    let sink = notes.clone();
+    svc.set_sink(Arc::new(move |op, _| sink.lock().unwrap().push(op)));
+    let (exec, t, tok) = (GitExecutor::Ssh(ex.clone()), Target::Local { path: repo.clone() }, CancellationToken::new());
+    let req = |skip: u64| LogRequest { scope: None, count: 100, skip };
+    let first = svc.log("a", &exec, &t, &req(0), &tok).await.unwrap();
+    assert_eq!(first.commits.len(), 100);
+    assert!(first.has_more);
+    wait_for("원격 git 종료(상한 초과로 KILL)", || e.server.active_children() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    let mut got = first.commits;
+    loop {
+        let p = svc.log("a", &exec, &t, &req(got.len() as u64), &tok).await.unwrap();
+        got.extend(p.commits);
+        if !p.has_more {
+            break;
+        }
+        assert!(got.len() <= 3000, "끝나지 않는다");
+    }
+    assert_eq!(hashes(&got), hashes(&all), "끊긴 뒤에도 중복·누락 없이 이어진다");
+    // 끊긴 커서는 앵커로 새 커서를 열었다(`--skip` 으로 시작하는 log 가 있다) — STALE 이 아니다
+    let reopened = e.server.exec_log().iter().filter(|c| c.contains("--skip")).count();
+    assert!(reopened >= 1, "다시 열지 않았다: {:?}", e.server.exec_log());
+    assert!(!notes.lock().unwrap().contains(&NoteOp::Stale));
+    svc.close_all();
     wait_for("슬롯 반환", || ex.free_slots() == 6).await;
     assert_eq!(e.server.connections(), 1);
     ex.dispose();
