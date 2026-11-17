@@ -19,14 +19,17 @@ export class GhTokenMirror {
     return this.#token
   }
 
-  /** 메시지의 token 값(문자열 또는 null)을 적용한다. 모양이 틀리면 **기존 값을 건드리지 않는다** */
+  /** 메시지의 token 값(문자열 또는 null)을 적용한다. 모양이 틀리면 **기존 사본도 비운다**(Rust 는 이미 그 토큰을 버렸으니 낡은 토큰을 남기지 않는다) */
   apply(value: unknown): GhTokenResult {
     if (value === null) {
       if (this.#token === null) return 'unchanged'
       this.#token = null
       return 'cleared'
     }
-    if (typeof value !== 'string' || value.length === 0 || value.length > MAX_GH_TOKEN_LENGTH || !TOKEN_SHAPE.test(value)) return 'rejected'
+    if (typeof value !== 'string' || value.length === 0 || value.length > MAX_GH_TOKEN_LENGTH || !TOKEN_SHAPE.test(value)) {
+      this.#token = null
+      return 'rejected'
+    }
     if (value === this.#token) return 'unchanged'
     this.#token = value
     return 'set'
@@ -46,8 +49,12 @@ export class GhTokenMirror {
  * 거부한 값은 어디에도 적지 않는다(로그에는 고정 문구만)
  */
 export function handleGhToken(mirror: GhTokenMirror, msg: { token?: unknown }, onChanged: () => void): GhTokenResult {
+  const had = mirror.get() !== null
   const result = mirror.apply(msg.token)
-  if (result === 'rejected') console.error('ghToken 메시지를 적용하지 않았다(모양이 틀렸다)')
-  else if (result !== 'unchanged') onChanged()
+  if (result === 'rejected') {
+    console.error('ghToken 메시지를 적용하지 않았다(모양이 틀렸다)')
+    // 거부하면 사본을 비우므로 가지고 있던 토큰이 있었다면 바뀐 것이다
+    if (had) onChanged()
+  } else if (result !== 'unchanged') onChanged()
   return result
 }

@@ -754,6 +754,7 @@ Tauri 판에서 `gh:*` 23개 채널(`gh:repo` 제외)을 Rust 가 처리한다(`
   Rust 서비스는 같은 정보를 `repoq` 질의로 받는다(`gh:repo` 를 Rust 로 옮기면 git 호출·캐시를 두 곳에서 하게 된다).
 - **한 env, 두 서비스**: 사이드카의 `ANTLER_RUST_API=1` 하나가 `jira:*`·`gh:*` 를 함께 넘기므로 `lib.rs` 는 Jira·GitHub 서비스가 **둘 다** 만들어졌을 때만 둘 다 라우터에 주입한다. 하나라도 실패하면 둘 다 주입하지 않고 사이드카가 둘 다 처리한다(소스 검사가 이 분기를 고정한다).
   Vault(보관소)는 하나이고 생성은 스위치가 켜진 분기 안 한 곳이다.
+- **소유 판정은 하나**: `Router::api_active()`(스위치 && Jira·GitHub **둘 다** 주입)가 사이드카 env(`lib.rs` 의 `claim_api()`)와 채널 라우팅을 함께 정한다. 한쪽만 있으면 둘 다 사이드카가 처리한다. `claim_api()` 로 env=1 을 정한 뒤 서비스가 없는 채널은 사이드카로 넘기지 않고 `ERROR` 봉투다(방어 — 지금 경로로는 닿지 않는다).
 - **`api_host::gh_envelope`**: 서비스의 `GhError{code,status,message}` 를 봉투로 옮긴다(코드 순서 ABORTED → `GH_*` → ERROR 는 서비스가 정해서 준다). 취소는 jira 처럼 바깥에서 future 를 버리지 않는다 — 로그인·아바타(취소돼도 부분 결과를 돌려준다)가 도중에 끊기면 상태가 어정쩡해지므로
   서비스가 requestId 로 직접 취소한다(`req:cancel` → `GitHubService::cancel`, 라우터가 Jira 와 함께 부른다). requestId 자리는 서비스가 정한다(`devicePoll`·`launchpad`·`accessibleRepos` 0번, `avatars` 1번).
   `gh:openExternal` 은 서비스의 `external_url`(`https://github.com` 만) 뒤에 Jira 와 **같은 열기 함수**(`open_href` → 앱이 주입한 `open_https`)를 쓴다.
@@ -784,7 +785,7 @@ Tauri 판에서 `gh:*` 23개 채널(`gh:repo` 제외)을 Rust 가 처리한다(`
 앱이 사이드카를 띄운 **직후 한 번**(저장된 로그인 복원분)과 **토큰이 바뀔 때마다**(`GitHubService::set_on_auth_changed` — 로그인·로그아웃·토큰 폐기). "토큰 읽기 → 쓰기"는 `Sidecar` 의 전용 뮤텍스 하나 안에서 해서 로그인 직후 로그아웃이 겹쳐도 낡은 토큰이 나중에 써지지 않는다.
 
 - **새지 않게**: 줄은 `json!`·`to_string` 을 거치지 않고 `Zeroizing<String>` 에 직접 만든다(손으로 이스케이프). 4096바이트를 넘거나 비면 `null`. env·인자·로그에 싣지 않는다(`tests/api_route.rs` 가 사이드카 env 가 이름 셋뿐임을 소스로 강제). 사이드카는 `GhTokenMirror`(private 필드, `toJSON`·`util.inspect` 가 가린다)에만 두고,
-  모양(`[\x21-\x7e]+`, 4096자)이 틀린 값은 **기존 값을 건드리지 않고** 버리며 로그에는 고정 문구만 적는다. `rustApi` 가 아니면 이 메시지를 무시한다. 사이드카의 `GitHubService` 는 `rustApi` 일 때 `avatarCacheFile` 없이 돈다(로그인하지 않는 서비스다).
+  모양(`[\x21-\x7e]+`, 4096자)이 틀린 값은 버리고 **이전 사본도 비우며**(낡은 토큰을 남기지 않는다. Rust 도 Device Flow access_token 을 PAT 와 같은 `parse_pat_str` 로 검사해 통과한 것만 로그인한다) 로그에는 고정 문구만 적는다. `rustApi` 가 아니면 이 메시지를 무시한다. 사이드카의 `GitHubService` 는 `rustApi` 일 때 `avatarCacheFile` 없이 돈다(로그인하지 않는 서비스다).
 - 사이드카의 `githubToken`(`RepoService`)은 `rustApi ? 사본 : gh.gitToken()` 이다. 사본이 바뀌면 TS 의 `onAuthChanged` 와 같이 `fetcher.resumeGithubAuth()` 를 부른다(`IPC_EVENTS` 에 인증 이벤트는 없다 — 아래 "TS 와 다른 점").
 - `ANTLER_RUST_API=0`(또는 서비스를 못 만들었을 때)이면 이 메시지도 `repoq` 도 오가지 않고 사이드카가 GitHub 를 지금처럼 전부 처리한다.
 

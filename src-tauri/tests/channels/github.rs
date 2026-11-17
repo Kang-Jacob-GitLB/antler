@@ -135,6 +135,9 @@ fn router_with(base: &str, vault: Arc<Vault>, state: Arc<Mutex<FakeState>>, open
         Ok(())
     });
     let svc = service(base, vault, state);
+    // 앱은 Jira·GitHub 서비스가 둘 다 있을 때만 Rust 가 처리한다(`api_active`). Jira 쪽은 쓰지 않는 서비스(별도 메모리 보관소)다
+    let idle_jira = antler_lib::jira::service::JiraService::new(Arc::new(Vault::new(Arc::new(MemoryStore::new())))).expect("Jira 서비스");
+    router.set_jira(antler_lib::api_host::JiraHost { service: idle_jira, opener: Arc::new(|_| Ok(())) });
     router.set_github(GithubHost { service: svc.clone(), opener });
     (router, svc)
 }

@@ -7,7 +7,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use antler_lib::api_host::JiraHost;
+use antler_lib::api_host::{GithubHost, JiraHost};
+use antler_lib::github::ports::{GhRepoRef, RepoQuery};
+use antler_lib::github::service::{GitHubService, ServiceOptions};
+use futures_util::future::{BoxFuture, FutureExt};
+use tokio_util::sync::CancellationToken;
 use antler_lib::jira::client::JiraClient;
 use antler_lib::jira::service::{JiraService, SystemClock, TokioSleeper};
 use antler_lib::jira::validate::SiteOptions;
@@ -32,7 +36,32 @@ fn router_with(vault: Arc<Vault>, opened: Arc<Mutex<Vec<String>>>) -> Router {
         Ok(())
     });
     router.set_jira(JiraHost { service: service(vault), opener });
+    // 앱은 Jira·GitHub 서비스가 둘 다 있을 때만 Rust 가 처리한다(`api_active`). GitHub 쪽은 쓰지 않는 서비스다
+    let idle = GitHubService::new(Arc::new(Vault::new(Arc::new(MemoryStore::new()))), Arc::new(NoRepos), None, ServiceOptions::default()).expect("GitHub 서비스");
+    router.set_github(GithubHost { service: idle, opener: Arc::new(|_| Ok(())) });
     router
+}
+
+/// 저장소·클라이언트 ID 가 없는 저장소 정보(쓰지 않는 GitHub 서비스용)
+struct NoRepos;
+
+impl RepoQuery for NoRepos {
+    fn gh_repo<'a>(&'a self, _: &'a str) -> BoxFuture<'a, Result<Option<GhRepoRef>, String>> {
+        async { Ok(None) }.boxed()
+    }
+    fn gh_remotes<'a>(&'a self, _: &'a str, _: CancellationToken) -> BoxFuture<'a, Result<Vec<GhRepoRef>, String>> {
+        async { Ok(Vec::new()) }.boxed()
+    }
+    fn pushed_shas_by_author<'a>(&'a self, _: &'a str, _: &'a str, _: usize, _: CancellationToken) -> BoxFuture<'a, Result<Vec<String>, String>> {
+        async { Ok(Vec::new()) }.boxed()
+    }
+    fn invalidate_gh_remotes(&self) {}
+    fn github_client_id(&self) -> BoxFuture<'_, Option<String>> {
+        async { None }.boxed()
+    }
+    fn repo_ids(&self) -> BoxFuture<'_, Vec<String>> {
+        async { Vec::new() }.boxed()
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -22,7 +22,7 @@
 //! 이 모듈은 `Sidecar`·`AppHandle` 에 기대지 않는다 — 통합 테스트(`tests/channels.rs`)가 그대로 돌릴 수 있다.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -152,6 +152,8 @@ pub fn rust_git_enabled(var: Option<&str>) -> bool {
 fn ok_env(data: Value) -> Value {
     json!({ "ok": true, "data": data })
 }
+
+const API_UNAVAILABLE: &str = "연결 서비스를 사용할 수 없습니다";
 
 fn err_env(error: &str, code: &str) -> Value {
     json!({ "ok": false, "error": error, "code": code })
@@ -293,6 +295,8 @@ pub struct Router {
     jira: Mutex<Option<JiraHost>>,
     /// GitHub 서비스(Jira 와 같은 조건으로 주입한다). 없으면 `gh:*` 는 사이드카가 처리한다
     github: Mutex<Option<GithubHost>>,
+    /// 사이드카를 `ANTLER_RUST_API=1` 로 띄웠다([`Router::claim_api`]). 켜지면 사이드카는 `jira:*`·`gh:*` 를 받지 않는다
+    api_owned: AtomicBool,
 }
 
 impl Router {
@@ -302,6 +306,7 @@ impl Router {
             api_enabled: enabled,
             jira: Mutex::default(),
             github: Mutex::default(),
+            api_owned: AtomicBool::new(false),
             log,
             mirror: mirror.clone(),
             cancels: Arc::default(),
@@ -332,9 +337,18 @@ impl Router {
         self.api_enabled
     }
 
-    /// Rust 가 `jira:*` 를 처리하는가(앱은 `gh:*` 도 같이 주입한다): 스위치가 켜져 있고 서비스가 주입됐다. 사이드카를 `ANTLER_RUST_API=1` 로 띄울지는 이 값이 정한다
+    /// Rust 가 `jira:*`·`gh:*` 를 처리하는가: 스위치가 켜져 있고 **두 서비스가 모두** 주입됐다. 사이드카 env(`ANTLER_RUST_API`) 하나가 둘을 함께 넘기므로
+    /// 한쪽만 있으면 활성이 아니다(둘 다 사이드카). 사이드카를 `ANTLER_RUST_API=1` 로 띄울지, 채널을 Rust 가 받을지 모두 이 값 하나로 정한다
     pub fn api_active(&self) -> bool {
-        self.api_enabled && self.jira_port().is_some()
+        self.api_enabled && self.jira_port().is_some() && self.github_port().is_some()
+    }
+
+    /// 사이드카를 띄우기 직전에 부른다: [`Router::api_active`] 를 돌려주고, 켜졌으면 "사이드카에 jira·gh 를 맡기지 않았다(소유는 Rust)"를 기록한다.
+    /// 이후 이 상태에서 서비스가 없는 채널은 사이드카로 가지 않고 오류다(사이드카는 이미 그 채널을 처리하지 않는다)
+    pub fn claim_api(&self) -> bool {
+        let active = self.api_active();
+        self.api_owned.store(active, Ordering::SeqCst);
+        active
     }
 
     fn jira_port(&self) -> Option<JiraHost> {
@@ -516,11 +530,21 @@ impl Router {
         }
     }
 
+    /// 서비스가 없는 `jira:*`·`gh:*` 채널의 행선지. Rust 가 소유(사이드카를 env=1 로 띄움)했는데 서비스가 없으면 사이드카는 받지 않으므로 오류다.
+    /// 아니면(스위치 꺼짐·서비스 없음·한쪽만 있음) 사이드카가 처리한다
+    fn api_unserved(&self, channel: &str) -> Routed {
+        if self.api_owned.load(Ordering::SeqCst) {
+            self.note(channel, "error(서비스 없음)");
+            return Routed::Done(err_env(API_UNAVAILABLE, "ERROR"));
+        }
+        self.note(channel, "sidecar(ANTLER_RUST_API=0)");
+        Routed::Sidecar
+    }
+
     /// `jira:*` 한 채널. 서비스가 없으면(스위치 꺼짐·만들지 못함) 사이드카다
     async fn jira_channel(&self, channel: &str, raw: &[Value]) -> Routed {
-        let Some(host) = self.jira_port().filter(|_| self.api_enabled) else {
-            self.note(channel, "sidecar(ANTLER_RUST_API=0)");
-            return Routed::Sidecar;
+        let Some(host) = self.jira_port().filter(|_| self.api_active()) else {
+            return self.api_unserved(channel);
         };
         self.note(channel, "rust");
         self.rust_handled.fetch_add(1, Ordering::Relaxed);
@@ -530,9 +554,8 @@ impl Router {
 
     /// `gh:*` 한 채널(`gh:repo` 는 오지 않는다). 서비스가 없으면(스위치 꺼짐·만들지 못함) 사이드카다
     async fn gh_channel(&self, channel: &str, raw: &[Value]) -> Routed {
-        let Some(host) = self.github_port().filter(|_| self.api_enabled) else {
-            self.note(channel, "sidecar(ANTLER_RUST_API=0)");
-            return Routed::Sidecar;
+        let Some(host) = self.github_port().filter(|_| self.api_active()) else {
+            return self.api_unserved(channel);
         };
         self.note(channel, "rust");
         self.rust_handled.fetch_add(1, Ordering::Relaxed);

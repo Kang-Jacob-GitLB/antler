@@ -23,15 +23,22 @@ describe('사이드카 ghToken(Rust 가 보낸 GitHub 토큰의 메모리 사본
     expect(changed).toHaveBeenCalledTimes(3)
   })
 
-  it('모양이 틀린 값은 거부하고 기존 값을 건드리지 않는다', () => {
+  it('모양이 틀린 값은 거부하고 이전 토큰 사본도 비운다', () => {
     const m = new GhTokenMirror()
-    handleGhToken(m, { token: TOKEN }, () => undefined)
     const changed = vi.fn()
     const bad: unknown[] = [undefined, '', 5, {}, [], true, 'a b', 'a\nb', 'a\u0000b', '토큰', ' x', 'x'.repeat(MAX_GH_TOKEN_LENGTH + 1)]
     for (const token of bad) {
-      expect(handleGhToken(m, { token }, changed), String(token)).toBe('rejected')
+      handleGhToken(m, { token: TOKEN }, () => undefined)
       expect(m.get()).toBe(TOKEN)
+      changed.mockClear()
+      expect(handleGhToken(m, { token }, changed), String(token)).toBe('rejected')
+      expect(m.get(), String(token)).toBeNull()
+      // 가지고 있던 토큰이 사라졌으니 바뀐 것이다
+      expect(changed).toHaveBeenCalledTimes(1)
     }
+    // 가진 것이 없을 때의 거부는 알리지 않는다
+    changed.mockClear()
+    expect(handleGhToken(m, { token: 'a b' }, changed)).toBe('rejected')
     expect(changed).not.toHaveBeenCalled()
     expect(handleGhToken(m, { token: 'x'.repeat(MAX_GH_TOKEN_LENGTH) }, changed)).toBe('set')
   })

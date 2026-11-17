@@ -531,6 +531,8 @@ impl GitHubService {
                 }
             };
             self.finish_device(seq);
+            // 서버가 준 access_token 도 PAT 와 같은 모양 검사를 통과한 것만 쓴다(공백·제어 문자가 든 값이 보관소·사이드카 사본으로 가지 않게). 오류에는 토큰이 섞이지 않는 고정 문구뿐이다
+            let token = validate::parse_pat_str(token.expose()).map_err(GhError::plain)?;
             let token_secrets = github_secrets(&token);
             let user = self.verify(&token, &cancel).await.map_err(|e| e.sealed(&token_secrets))?;
             self.sign_in(token, GithubMethod::Device, user, logout_gen, &cancel).await

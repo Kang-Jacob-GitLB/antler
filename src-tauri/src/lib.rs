@@ -159,7 +159,7 @@ pub fn run() {
             }
             let fetch_kinds = router::sidecar_fetch_kinds(router.enabled());
             // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
-            let rust_api = router.api_active();
+            let rust_api = router.claim_api();
             app.manage(router);
             // fetchPrefs 를 받는 곳은 **사이드카를 띄우기 전에** 등록한다 — 첫 fetchPrefs 는 ready 전에 한 번만 오고 같은 내용이면 다시 오지 않는다.
             // 사이드카 읽기 스레드에서 불리므로 앱 런타임에 들어가서 라우터를 부른다(예약이 태스크를 만든다)

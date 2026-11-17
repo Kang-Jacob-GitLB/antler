@@ -130,7 +130,7 @@ fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든�
     // 서비스가 실제로 만들어졌을 때만 사이드카에 알린다. 서비스는 사이드카 기동·라우터 등록보다 먼저다
     let jira = lib.find("router.set_jira(").expect("서비스 주입");
     let github = lib.find("router.set_github(").expect("GitHub 서비스 주입");
-    let api = lib.find("router.api_active()").expect("사이드카 env 값");
+    let api = lib.find("router.claim_api()").expect("사이드카 env 값(라우팅과 같은 api_active 판정)");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
     assert!(jira < api && github < api && api < manage && manage < spawn);
@@ -313,8 +313,7 @@ async fn 스위치가_켜지면_jira_채널은_미러와_무관하게_rust_가_�
 
 #[tokio::test]
 async fn 연결하지_않으면_조회는_jira_auth_이고_검증_실패는_error_다() {
-    let router = Router::new(true, false, RepoMirror::default());
-    router.set_jira(host());
+    let router = router_with_both();
     let call = |ch: &'static str, args: Value| {
         let router = &router;
         async move {
@@ -367,16 +366,48 @@ async fn 서비스를_만들지_못했으면_사이드카가_처리한다() {
 }
 
 #[tokio::test]
-async fn 한쪽_서비스만_있으면_그_계열만_rust_가_처리한다() {
-    // 앱은 둘 다 만들어졌을 때만 주입한다(lib.rs 의 소스 검사). 라우터 자체는 계열별로 판단한다
+async fn 한쪽_서비스만_있으면_활성이_아니고_둘_다_사이드카가_처리한다() {
+    // 사이드카 env 하나가 jira·gh 를 함께 넘기므로 한쪽만 있으면 api_active=false 이고(env 를 주지 않는다) 두 계열 모두 사이드카다
     let only_jira = Router::new(true, false, RepoMirror::default());
     only_jira.set_jira(host());
-    assert!(matches!(only_jira.route("gh:auth", &json!([])).await, Routed::Sidecar));
-    assert!(matches!(only_jira.route("jira:auth", &json!([])).await, Routed::Done(_)));
     let only_gh = Router::new(true, false, RepoMirror::default());
     only_gh.set_github(gh_host());
-    assert!(matches!(only_gh.route("jira:auth", &json!([])).await, Routed::Sidecar));
-    assert!(matches!(only_gh.route("gh:auth", &json!([])).await, Routed::Done(_)));
+    for r in [&only_jira, &only_gh] {
+        assert!(!r.api_active());
+        assert!(!r.claim_api());
+        for (ch, args) in offline_calls() {
+            assert!(matches!(r.route(ch, &args).await, Routed::Sidecar), "{ch}");
+        }
+        assert_eq!(r.rust_handled(), 0);
+    }
+}
+
+#[tokio::test]
+async fn 둘_다_있으면_claim_api_가_참이고_채널을_rust_가_처리한다() {
+    let r = router_with_both();
+    assert!(r.api_active() && r.claim_api());
+    assert!(matches!(r.route("gh:auth", &json!([])).await, Routed::Done(_)));
+    assert!(matches!(r.route("jira:auth", &json!([])).await, Routed::Done(_)));
+}
+
+#[tokio::test]
+async fn 배열이_아닌_인자와_login_pat_의_토큰은_사이드카로_가지_않는다() {
+    // 서비스가 있는 소유 상태(둘 다 사이드카 아님)와 한쪽만 있는 상태 모두에서: 배열이 아닌 인자는 Done(검증 거부)이어야 하고, 사이드카로는 토큰이 가지 않는다
+    let r = router_with_both();
+    assert!(r.claim_api());
+    for args in [json!("ghp_secret"), json!({"token": "ghp_secret"}), json!(null), json!(5)] {
+        for ch in ["gh:loginPat", "jira:connect"] {
+            let Routed::Done(env) = r.route(ch, &args).await else { panic!("{ch} {args} 가 사이드카로 갔다") };
+            assert_eq!(env["ok"], false, "{ch}: {env}");
+            assert!(!env.to_string().contains("ghp_secret"), "{env}");
+        }
+    }
+    // 배열 인자의 loginPat 토큰도 Rust 서비스가 받는다(사이드카 stdin 으로 가지 않는다)
+    for token in ["has space", "ghp_secret bad"] {
+        let Routed::Done(env) = r.route("gh:loginPat", &json!([token])).await else { panic!("gh:loginPat 이 사이드카로 갔다") };
+        assert_eq!(env["code"], "ERROR");
+        assert!(!env.to_string().contains("secret"), "{env}");
+    }
 }
 
 #[tokio::test]
@@ -450,8 +481,7 @@ async fn req_cancel_은_jira_가_켜져_있어도_사이드카에_전달한다()
 #[tokio::test]
 async fn 배열이_아닌_인자의_jira_호출도_사이드카로_보내지_않는다() {
     // 토큰을 담은 객체 인자가 사이드카 stdin 으로 가지 않게 — 서비스 검증이 거부한다(보안 리뷰)
-    let r = Router::new(true, false, RepoMirror::default());
-    r.set_jira(host());
+    let r = router_with_both();
     let bad = json!({"kind": "cloud", "siteUrl": "https://x.atlassian.net", "email": "a@b.c", "token": "SECRET"});
     for ch in ["jira:connect", "jira:issue", "jira:auth"] {
         let Routed::Done(env) = r.route(ch, &bad).await else { panic!("{ch} 가 사이드카로 갔다") };
@@ -461,8 +491,7 @@ async fn 배열이_아닌_인자의_jira_호출도_사이드카로_보내지_않
 
 #[tokio::test]
 async fn 등록_전에_온_cancel_은_조회를_취소하지만_전환은_취소하지_않는다() {
-    let r = Router::new(true, false, RepoMirror::default());
-    r.set_jira(host());
+    let r = router_with_both();
     assert!(matches!(r.route("req:cancel", &json!(["early"])).await, Routed::Sidecar));
     let Routed::Done(env) = r.route("jira:issue", &json!(["ABC-1", "early"])).await else { panic!() };
     assert_eq!(env["code"], "ABORTED");
@@ -479,8 +508,7 @@ async fn 등록_전에_온_cancel_은_조회를_취소하지만_전환은_취소
 
 #[tokio::test]
 async fn 다른_채널은_영향을_받지_않는다() {
-    let r = Router::new(true, false, RepoMirror::default());
-    r.set_jira(host());
+    let r = router_with_both();
     for ch in ["gh:repo", "git:refs", "repos:list", "app:version"] {
         assert!(matches!(r.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
     }
