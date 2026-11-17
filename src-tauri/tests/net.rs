@@ -2037,7 +2037,11 @@ mod live {
     // unsafe: main 이전 코드다 — 소켓 하나를 열고 환경 변수만 넣는다(다른 스레드는 아직 없다)
     #[ctor::ctor(unsafe)]
     fn install_proxy_trap() {
-        let l = TcpListener::bind("127.0.0.1:0").expect("프록시 덫");
+        // 가짜 gh(아래 fake_gh)로 시작된 프로세스는 덫을 만들지 않는다 — 환경을 건드리면 gh 가 받은 환경을 시험할 수 없다
+        if std::env::current_exe().is_ok_and(|e| e.file_stem().and_then(|s| s.to_str()) == Some("gh")) {
+            return;
+        }
+        let l =TcpListener::bind("127.0.0.1:0").expect("프록시 덫");
         l.set_nonblocking(true).expect("프록시 덫");
         let url = format!("http://{}", l.local_addr().expect("프록시 덫"));
         for k in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
@@ -5364,6 +5368,36 @@ mod live {
             assert!(!e.svc.auth().await.signed_in);
         }
 
+        #[cfg(windows)]
+        #[tokio::test]
+        async fn gh_서비스는_gh_가_없으면_cli_available_이_false_이고_가져오기는_설치_안내로_실패하며_저장하지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, _| user_ok());
+            // 실제 구현체(GhCli)에 gh 가 없는 PATH 를 준다
+            let none = crate::fake_gh::Dir::new("none");
+            let e = env_full(&m.base(), new_vault(), FakeRepos::new(), 0, ServiceOptions::default(), Some(Arc::new(none.cli()) as Arc<dyn ExternalTokenProvider>));
+            assert_eq!(state_json(&e.svc.auth().await), json!({"signedIn": false, "cliAvailable": false}));
+            assert!(failure(e.svc.import_cli_token().await).message.contains("설치되어 있지 않습니다"));
+            assert!(e.vault.load_github().is_none());
+            assert_eq!(m.requests().len(), 0);
+        }
+
+        #[cfg(windows)]
+        #[tokio::test]
+        async fn gh_서비스는_실제_구현체가_띄운_가짜_gh_의_토큰으로_gh_cli_방식_로그인을_한다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| if r.header("authorization") == Some("Bearer ghp_fromfake") { user_ok() } else { bad_credentials() });
+            let fake = crate::fake_gh::Dir::new("token ghp_fromfake");
+            let e = env_full(&m.base(), new_vault(), FakeRepos::new(), 0, ServiceOptions::default(), Some(Arc::new(fake.cli()) as Arc<dyn ExternalTokenProvider>));
+            assert_eq!(state_json(&e.svc.auth().await), json!({"signedIn": false, "cliAvailable": true}));
+            let text = serde_json::to_string(&e.svc.import_cli_token().await.unwrap()).unwrap();
+            assert!(!text.contains("ghp_fromfake"));
+            let stored = e.vault.load_github().unwrap();
+            assert_eq!((stored.token.expose(), stored.method), ("ghp_fromfake", GithubMethod::GhCli));
+            // available(--version) 한 번 + token 한 번. 인자는 고정이다
+            assert_eq!(fake.runs(), ["--version", "auth\ttoken\t--hostname\tgithub.com"]);
+        }
+
         #[tokio::test]
         async fn gh_낡은_세대의_저장된_토큰_검증이_거부돼도_새_로그인은_유지된다() {
             let _g = Guard;
@@ -5447,11 +5481,17 @@ mod live {
             gate.open();
             let err = failure(within(list).await.unwrap());
             assert_eq!(err.code, "ABORTED");
-            // 목록이 끝난 뒤에는 이어 도는 작업이 없으므로 요청 수가 더 늘지 않는다. 로그아웃 시점에 이미 나간 동시 요청(최대 6 PR × 3)뿐이다
-            let after = enrich.load(Ordering::SeqCst);
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            assert_eq!(enrich.load(Ordering::SeqCst), after);
-            assert!(after <= 18, "{after}");
+            // 목록이 끝난 뒤에는 이어 도는 작업이 없다. 로그아웃 시점에 이미 나간 동시 요청(최대 6 PR × 3)은 목 서버에 늦게 닿을 수 있으므로
+            // "더 늘지 않는다"를 순간 비교하지 않고, 잦아들 때까지 기다린 뒤 총수가 동시 상한 안인지 본다(이어 도는 작업이 있으면 12 PR × 3 = 36 까지 간다)
+            let mut last = usize::MAX;
+            for _ in 0..40 {
+                let now = enrich.load(Ordering::SeqCst);
+                if now == last { break }
+                last = now;
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let total = enrich.load(Ordering::SeqCst);
+            assert!(total <= 18, "{total}");
         }
 
         // ── 경합·세대(리뷰가 짚은 것) ───────────────────────────────────────
@@ -6513,6 +6553,109 @@ mod live {
             assert_eq!(m.requests().len(), 0);
         }
 
+        // ── 아바타 차단 사유(ghCliImport 의 AvatarResolver 절) ─────────────
+
+        #[tokio::test]
+        async fn gh_아바타는_비로그인_404_만_쌓이고_저장소도_404_면_needs_login_이고_더_묻지_않으며_부정_결과를_디스크에_남기지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                let p = path_of(r);
+                if p == "/repos/octo/hello/commits" || p == "/repos/octo/hello" {
+                    rate_headers(status(404, json!({"message": "Not Found"})), 50, 1_900_000_000)
+                } else {
+                    status(500, json!({}))
+                }
+            });
+            let dir = TempDir::new("avatar-block");
+            let file = dir.0.join("avatar.json");
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), Some(file.clone()));
+            let cancel = CancellationToken::new();
+            // 한 묶음에 10명: 비공개가 확정된 뒤에는 대기 중이던 나머지를 호출하지 않는다(동시성 슬롯 몫만 더 나간다)
+            let batch: Vec<AvatarQuery> = "abcdefghij".chars().map(|c| query_of(&format!("{c}@x.io"), &sha_of(c))).collect();
+            assert_eq!(r.lookup_authors(Some(&slug()), &batch, &cancel, None).await, vec![]);
+            assert!((1..=9).contains(&m.requests().len()), "전부(10명 + 저장소 확인 1번)를 묻지 않는다: {}", m.requests().len());
+            let block = r.blocked_for(Some(&slug())).unwrap();
+            assert_eq!((block.reason, block.reset_at, block.signed_in), ("needs-login", None, false));
+            let n = m.requests().len();
+            let more: Vec<AvatarQuery> = "klmn".chars().map(|c| query_of(&format!("{c}@x.io"), &sha_of(c))).collect();
+            r.lookup_authors(Some(&slug()), &more, &cancel, None).await;
+            assert_eq!(m.requests().len(), n, "더 묻지 않는다");
+            r.flush();
+            assert!(!file.exists(), "404 는 디스크에 저장하지 않는다");
+            // 로그인(세션 초기화 + 토큰) 뒤에는 다시 묻는다
+            r.reset_session();
+            assert_eq!(r.blocked_for(Some(&slug())), None);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_공개_저장소의_미푸시_커밋_404_를_needs_login_으로_보지_않는다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| {
+                if path_of(r) == "/repos/octo/hello" {
+                    rate_headers(ok(json!({"full_name": "octo/hello"})), 50, 1_900_000_000)
+                } else {
+                    rate_headers(status(404, json!({"message": "Not Found"})), 50, 1_900_000_000)
+                }
+            });
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            let qs: Vec<AvatarQuery> = "abc".chars().map(|c| query_of(&format!("{c}@x.io"), &sha_of(c))).collect();
+            r.lookup_authors(Some(&slug()), &qs, &CancellationToken::new(), None).await;
+            assert_eq!(r.blocked_for(Some(&slug())), None);
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_한도_소진이면_rate_limited_와_풀리는_시각을_알린다() {
+            let _g = Guard;
+            let reset: u64 = 1_900_000_000;
+            let m = Mock::start(move |_, _| rate_headers(status(403, json!({"message": "API rate limit exceeded"})), 0, reset));
+            let r = resolver(&m.base(), None, FakeClock::at(reset * 1000 - 1_800_000), None);
+            r.lookup_authors(Some(&slug()), &[query_of("a@x.io", &sha_of('a'))], &CancellationToken::new(), None).await;
+            let block = r.blocked_for(Some(&slug())).unwrap();
+            assert_eq!((block.reason, block.reset_at, block.signed_in), ("rate-limited", Some(reset), false));
+        }
+
+        #[tokio::test]
+        async fn gh_아바타는_세션_상한이면_session_cap_이고_reset_session_이_풀어_준다() {
+            let _g = Guard;
+            let m = Mock::start(|_, r| rate_headers(ok(json!([{"sha": sha_query(r), "author": null}])), 50, 1_900_000_000));
+            let r = resolver(&m.base(), None, FakeClock::at(CLOCK0), None);
+            // 비로그인 상한은 40번이다. 서로 다른 작성자 40명을 풀면 채워진다
+            let qs: Vec<AvatarQuery> = (0..40).map(|i| query_of(&format!("u{i}@x.io"), &format!("{i:040x}"))).collect();
+            r.lookup_authors(Some(&slug()), &qs, &CancellationToken::new(), None).await;
+            assert_eq!((r.calls(), m.requests().len()), (40, 40));
+            let block = r.blocked_for(Some(&slug())).unwrap();
+            assert_eq!((block.reason, block.reset_at, block.signed_in), ("session-cap", None, false));
+            r.reset_session();
+            assert_eq!(r.blocked_for(Some(&slug())), None);
+            assert_eq!(r.calls(), 0);
+        }
+
+        #[tokio::test]
+        async fn gh_서비스_아바타는_로그인하면_차단_표시와_한도_정보가_초기화된다() {
+            let _g = Guard;
+            let reset: u64 = 1_900_000_000;
+            let m = Mock::start(move |_, r| {
+                let authed = r.header("authorization").is_some();
+                if path_of(r) == "/user" {
+                    if authed { rate_headers(user_ok(), 4999, reset) } else { bad_credentials() }
+                } else if !authed {
+                    rate_headers(status(403, json!({"message": "API rate limit exceeded"})), 0, reset)
+                } else {
+                    rate_headers(ok(json!([{"sha": sha_query(r), "author": {"login": "octocat", "id": 5, "avatar_url": ""}}])), 4990, reset)
+                }
+            });
+            let cli = FakeCli { available: true, token: Ok("ghp_ok".into()) };
+            let e = cli_env(&m, Some(cli));
+            let authors = json!([{"email": "a@x.io", "sha": sha_of('a')}]);
+            let blocked = jv(&e.svc.avatars(&json!("r1"), &json!("req1"), &authors).await.unwrap());
+            assert_eq!(blocked["avatars"], json!({}));
+            assert_eq!((blocked["blocked"]["reason"].clone(), blocked["blocked"]["resetAt"].clone(), blocked["blocked"]["signedIn"].clone()), (json!("rate-limited"), json!(reset), json!(false)));
+            e.svc.import_cli_token().await.unwrap();
+            let after = jv(&e.svc.avatars(&json!("r1"), &json!("req2"), &authors).await.unwrap());
+            assert_eq!(after["avatars"]["a@x.io"]["login"], json!("octocat"));
+            assert!(after.get("blocked").is_none(), "{after}");
+        }
+
         // ── 접근 가능한 저장소(ghAccessibleRepos) ───────────────────────────
 
         fn repo_raw(owner: &str, name: &str, pushed: &str, extra: Value) -> Value {
@@ -7509,5 +7652,442 @@ mod secret_store {
         let code: String = code_lines(&text).iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
         assert!(!code.contains("Display for SecretString") && !code.contains("Serialize for SecretString") && !code.contains("derive(Serialize"));
         assert!(code.contains("impl Drop for SecretString"));
+    }
+}
+
+// ── 가짜 gh(PR 8) ─────────────────────────────────────────────────────────
+// 진짜 gh 는 실행하지 않는다. 이 테스트 바이너리 자신을 `gh.exe` 라는 이름으로 하드링크(안 되면 복사)해 두고 `GhCli` 가 그것을 띄운다.
+// 그 이름으로 시작된 프로세스는 ctor 에서(테스트 하네스보다 먼저) 가짜 gh 로 동작하고 끝난다. 동작은 환경 변수가 아니라 exe 옆의 `gh.mode` 파일로 정한다
+// (GhCli 는 환경을 비우고 허용 목록만 넘기므로 임의의 환경 변수는 가짜에 닿지 않는다). 기록은 모두 exe 옆의 파일이다:
+//   gh.runs(실행마다 인자 한 줄, 탭으로 이음)·gh.env(받은 환경 변수)·gh.pid·gh.child.pid(손자)·executed.marker(`mark` 모드)
+// 모드: `token <값>`(값과 CRLF 출력) · `empty` · `big <n>`(x 를 n 바이트) · `flood`(끝없이 출력) · `hang` · `hang_tree`(손자 하나를 띄우고 멈춤)
+//       · `fail <코드>`(stdout·stderr 에 토큰 모양 문자열을 쓰고 그 코드로 종료) · `mark`(실행됐다는 표시 파일을 만든다) · `cwd`(자기 작업 디렉터리를 gh.cwd 에 적는다)
+#[cfg(windows)]
+mod fake_gh {
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use antler_lib::github::gh_cli::GhCli;
+
+    /// 가짜가 쓰는 폴더 이름의 일부(공백이 든 경로에서도 띄워지는지 본다)
+    const TAG: &str = "antler gh";
+
+    // unsafe: main 이전 코드다 — 이 이름으로 시작된 프로세스는 파일만 읽고 쓰고 곧바로 끝난다
+    #[ctor::ctor(unsafe)]
+    fn act_as_fake_gh() {
+        let Ok(exe) = std::env::current_exe() else { return };
+        if exe.file_stem().and_then(|s| s.to_str()) == Some("gh") {
+            behave(&exe);
+        }
+    }
+
+    #[allow(clippy::disallowed_methods)]
+    fn spawn_grandchild(exe: &Path) {
+        let _ = std::process::Command::new(exe)
+            .arg("--gh-grandchild")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    }
+
+    fn sleep_forever() -> ! {
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+
+    fn append(path: &Path, line: &str) {
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).expect("기록 파일");
+        writeln!(f, "{line}").expect("기록");
+    }
+
+    /// 가짜 gh 의 본체. 돌아오지 않고 프로세스를 마친다
+    fn behave(exe: &Path) -> ! {
+        let dir = exe.parent().expect("exe 폴더");
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.first().map(String::as_str) == Some("--gh-grandchild") {
+            std::fs::write(dir.join("gh.child.pid"), std::process::id().to_string()).expect("pid");
+            sleep_forever();
+        }
+        append(&dir.join("gh.runs"), &args.join("\t"));
+        let env: Vec<String> = std::env::vars().map(|(k, v)| format!("{k}={v}")).collect();
+        std::fs::write(dir.join("gh.env"), env.join("\n")).expect("env");
+        let mode = std::fs::read_to_string(dir.join("gh.mode")).unwrap_or_default();
+        let (kind, rest) = mode.trim_end().split_once(' ').unwrap_or((mode.trim_end(), ""));
+        let mut out = std::io::stdout();
+        match kind {
+            "token" => {
+                let _ = write!(out, "  {rest}\r\n");
+                let _ = out.flush();
+                std::process::exit(0);
+            }
+            "empty" => {
+                let _ = writeln!(out);
+                std::process::exit(0);
+            }
+            "big" => {
+                let n: usize = rest.parse().expect("바이트 수");
+                let _ = out.write_all(&vec![b'x'; n]);
+                let _ = out.flush();
+                std::process::exit(0);
+            }
+            "flood" => {
+                std::fs::write(dir.join("gh.pid"), std::process::id().to_string()).expect("pid");
+                let chunk = [b'x'; 1024];
+                // 읽는 쪽이 끊으면(또는 우리를 죽이면) 쓰기가 실패해 끝난다
+                while out.write_all(&chunk).is_ok() && out.flush().is_ok() {}
+                std::process::exit(0);
+            }
+            "hang" | "hang_tree" => {
+                std::fs::write(dir.join("gh.pid"), std::process::id().to_string()).expect("pid");
+                if kind == "hang_tree" {
+                    // 손자의 pid 는 손자가 직접 적는다(시험이 기다린다)
+                    spawn_grandchild(exe);
+                }
+                sleep_forever();
+            }
+            "fail" => {
+                let _ = write!(out, "gho_STDOUT_LEAK");
+                let _ = out.flush();
+                eprint!("gho_STDERR_LEAK C:\\Users\\secret\\path");
+                std::process::exit(rest.parse().unwrap_or(1));
+            }
+            "cwd" => {
+                // 자기 작업 디렉터리를 적고 토큰을 낸다
+                std::fs::write(dir.join("gh.cwd"), std::env::current_dir().expect("cwd").to_string_lossy().as_bytes()).expect("cwd");
+                let _ = write!(out, "gho_cwd");
+                let _ = out.flush();
+                std::process::exit(0);
+            }
+            "mark" => {
+                std::fs::write(dir.join("executed.marker"), "x").expect("marker");
+                let _ = write!(out, "marked");
+                let _ = out.flush();
+                std::process::exit(0);
+            }
+            other => {
+                eprint!("알 수 없는 모드 {other}");
+                std::process::exit(99);
+            }
+        }
+    }
+
+    /// 가짜 gh 가 든 임시 폴더(끝나면 지운다). 모드 `none` 은 gh 가 없는 폴더다
+    pub struct Dir {
+        pub path: PathBuf,
+    }
+
+    impl Dir {
+        pub fn new(mode: &str) -> Dir {
+            static N: AtomicUsize = AtomicUsize::new(0);
+            let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{TAG} {}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+            std::fs::create_dir_all(&path).expect("임시 폴더");
+            if mode != "none" {
+                let me = std::env::current_exe().expect("현재 exe");
+                let fake = path.join("gh.exe");
+                if std::fs::hard_link(&me, &fake).is_err() {
+                    std::fs::copy(&me, &fake).expect("가짜 gh 복사");
+                }
+                std::fs::write(path.join("gh.mode"), mode).expect("모드");
+            }
+            Dir { path }
+        }
+
+        /// `GhCli` 에 주입할 환경 원본: 이 폴더만 PATH 에 있고, gh 에 가면 안 되는 변수도 일부러 섞는다
+        pub fn source_env(&self) -> Vec<(String, String)> {
+            let kv = |k: &str, v: &str| (k.to_string(), v.to_string());
+            vec![
+                kv("PATH", &self.path.to_string_lossy()),
+                kv("SystemRoot", &std::env::var("SystemRoot").unwrap_or_default()),
+                kv("GH_CONFIG_DIR", &self.path.to_string_lossy()),
+                kv("GITHUB_TOKEN", "gho_ENV_LEAK_1"),
+                kv("GH_TOKEN", "gho_ENV_LEAK_2"),
+                kv("HTTPS_PROXY", "http://127.0.0.1:9"),
+                kv("AWS_SECRET_ACCESS_KEY", "leak"),
+            ]
+        }
+
+        /// 시간 초과를 보는 시험이 아니면 제한을 넉넉히 둔다 — 새로 하드링크한 gh.exe 의 첫 실행은 백신 검사·부하로 수 초씩 늦어
+        /// 운영 값(10초)으로는 간헐 실패했다. 운영 값 자체는 상수(TIMEOUT)와 시간 초과 시험(cli_with)이 본다
+        pub fn cli(&self) -> GhCli {
+            GhCli::new().with_env_for_test(self.source_env()).with_limits_for_test(Duration::from_secs(60), antler_lib::github::gh_cli::MAX_STDOUT)
+        }
+
+        /// 제한 시간·stdout 상한을 줄인 `GhCli`
+        pub fn cli_with(&self, timeout: Duration, max_stdout: usize) -> GhCli {
+            self.cli().with_limits_for_test(timeout, max_stdout)
+        }
+
+        pub fn read(&self, name: &str) -> Option<String> {
+            std::fs::read_to_string(self.path.join(name)).ok()
+        }
+
+        /// 실행마다 한 줄(인자를 탭으로 이은 것)
+        pub fn runs(&self) -> Vec<String> {
+            self.read("gh.runs").map(|t| t.lines().map(str::to_string).collect()).unwrap_or_default()
+        }
+
+        /// 파일에 적힌 pid(프로세스가 pid 를 적을 때까지 잠깐 기다린다)
+        pub fn pid(&self, name: &str) -> u32 {
+            for _ in 0..3000 {
+                if let Some(t) = self.read(name) {
+                    if let Ok(p) = t.trim().parse() {
+                        return p;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("{name} 가 생기지 않았다");
+        }
+    }
+
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// 그 pid 의 프로세스가 아직 살아 있는가
+    pub fn alive(pid: u32) -> bool {
+        use windows::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+        use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+        // 이미 끝나 열 수 없으면 죽은 것이다. 열렸어도 신호 상태(종료)면 죽은 것이다
+        let Ok(h) = (unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }) else { return false };
+        let alive = unsafe { WaitForSingleObject(h, 0) } == WAIT_TIMEOUT;
+        unsafe {
+            let _ = CloseHandle(h);
+        }
+        alive
+    }
+
+    /// 죽을 때까지 최대 5초 기다린다(종료는 비동기로 끝난다). 끝내 살아 있으면 false
+    pub fn dies(pid: u32) -> bool {
+        for _ in 0..500 {
+            if !alive(pid) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        false
+    }
+}
+
+#[cfg(windows)]
+mod gh_cli_run {
+    use std::time::{Duration, Instant};
+
+    use antler_lib::github::gh_cli::{find_gh, GhCli, MSG_MISSING, MSG_NOT_LOGGED_IN, MSG_TIMEOUT, MSG_TOO_LARGE};
+    use antler_lib::github::ports::ExternalTokenProvider;
+
+    use super::fake_gh::{dies, Dir};
+
+    const SECS: Duration = Duration::from_secs(10);
+    const MAX: usize = 64 * 1024;
+
+    /// 환경 변수 이름(소문자) 중 gh 에 가도 되는 것: 허용 목록 + 고정 두 개
+    const ALLOWED: [&str; 17] = [
+        "path", "pathext", "systemroot", "comspec", "temp", "tmp", "home", "userprofile", "appdata", "localappdata", "xdg_config_home", "xdg_data_home", "xdg_state_home", "gh_config_dir", "gh_host",
+        "gh_prompt_disabled", "no_color",
+    ];
+
+    #[allow(clippy::disallowed_methods)]
+    fn raw(program: &std::path::Path) -> std::process::Command {
+        std::process::Command::new(program)
+    }
+
+    #[tokio::test]
+    async fn gh_cli_가_없으면_available_은_false_이고_토큰은_설치_안내() {
+        let none = Dir::new("none");
+        let cli = none.cli();
+        assert!(!cli.available().await);
+        assert_eq!(cli.token().await.unwrap_err().message, MSG_MISSING);
+        assert!(MSG_MISSING.contains("설치되어 있지 않습니다"));
+    }
+
+    #[tokio::test]
+    async fn gh_cli_토큰을_trim_하고_인자는_auth_token_hostname_github_com_으로_고정한다() {
+        let fake = Dir::new("token gho_abc123");
+        let token = fake.cli().token().await.unwrap();
+        assert_eq!(token.expose(), "gho_abc123");
+        assert_eq!(format!("{token:?}"), "***");
+        assert_eq!(fake.runs(), ["auth\ttoken\t--hostname\tgithub.com"]);
+    }
+
+    #[tokio::test]
+    async fn gh_cli_는_환경을_비우고_허용_목록과_고정_변수만_넘긴다() {
+        let fake = Dir::new("token gho_abc123");
+        fake.cli().token().await.unwrap();
+        let env = fake.read("gh.env").expect("가짜가 받은 환경");
+        let names: Vec<String> = env.lines().filter_map(|l| l.split_once('=')).map(|(k, _)| k.to_lowercase()).collect();
+        for n in &names {
+            assert!(ALLOWED.contains(&n.as_str()), "gh 에 넘기면 안 되는 변수: {n}");
+        }
+        for must in ["path", "gh_prompt_disabled", "no_color", "systemroot"] {
+            assert!(names.iter().any(|n| n == must), "{must} 가 없다: {names:?}");
+        }
+        assert!(env.lines().any(|l| l == "GH_PROMPT_DISABLED=1") && env.lines().any(|l| l == "NO_COLOR=1"));
+        assert!(!env.contains("LEAK") && !env.contains("127.0.0.1:9"), "{env}");
+    }
+
+    #[tokio::test]
+    async fn gh_cli_available_은_동시_호출에도_한_번만_실행하고_캐시한다() {
+        let fake = Dir::new("token gho_x");
+        let cli = fake.cli();
+        let (a, b) = tokio::join!(cli.available(), cli.available());
+        assert_eq!((a, b), (true, true));
+        assert!(cli.available().await);
+        assert_eq!(fake.runs(), ["--version"]);
+    }
+
+    #[tokio::test]
+    async fn gh_cli_비정상_종료와_빈_출력은_로그인_안_됨이고_stdout_stderr_를_메시지에_싣지_않는다() {
+        let failing = Dir::new("fail 3");
+        let err = failing.cli().token().await.unwrap_err();
+        assert_eq!(err.message, MSG_NOT_LOGGED_IN);
+        for leak in ["gho_", "secret", "LEAK"] {
+            assert!(!err.message.contains(leak) && !format!("{err:?}").contains(leak), "{err:?}");
+        }
+        // 종료 코드가 0 이 아니면 available 도 false
+        assert!(!failing.cli().available().await);
+        let empty = Dir::new("empty");
+        assert_eq!(empty.cli().token().await.unwrap_err().message, MSG_NOT_LOGGED_IN);
+    }
+
+    #[tokio::test]
+    async fn gh_cli_실행은_셸_없이_공백_경로에서_뜨고_출력의_셸_문자를_해석하지_않는다() {
+        let fake = Dir::new("token $(echo hi) && x");
+        assert!(fake.path.to_string_lossy().contains(' '), "공백이 든 경로여야 한다");
+        let token = fake.cli().token().await.unwrap();
+        assert_eq!(token.expose(), "$(echo hi) && x");
+    }
+
+    #[tokio::test]
+    async fn gh_cli_는_시간이_초과되면_중단하고_시간_초과_문구를_돌려준다() {
+        let fake = Dir::new("hang");
+        let started = Instant::now();
+        let err = fake.cli_with(Duration::from_millis(300), MAX).token().await.unwrap_err();
+        assert_eq!(err.message, MSG_TIMEOUT);
+        assert!(started.elapsed() < Duration::from_secs(8), "제한 시간 뒤에도 오래 걸렸다: {:?}", started.elapsed());
+        // available 도 시간을 넘기면 false 다
+        assert!(!fake.cli_with(Duration::from_millis(300), MAX).available().await);
+    }
+
+    /// 제한 시간이 끝나면 `tokio::time::timeout` 이 호출 future 를 버린다 — 이 시험은 같은 버림을 가짜 gh(손자 포함)가 **뜬 것을 확인한 뒤** 일으킨다.
+    /// (제한 시간으로 직접 끊으면 부하가 큰 러너에서 가짜가 pid 를 적기 전에 끊겨 확인할 것이 없다)
+    // multi_thread: 시험 스레드가 pid 파일을 기다리며 멈춰 있어도 호출 task 가 돌아야 한다
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn gh_cli_는_호출이_버려지면_손자까지_프로세스_트리를_죽인다() {
+        let fake = Dir::new("hang_tree");
+        let cli = std::sync::Arc::new(fake.cli_with(Duration::from_secs(120), MAX));
+        let call = tokio::spawn({
+            let cli = cli.clone();
+            async move { cli.token().await }
+        });
+        // 가짜가 떠서 손자까지 띄울 때까지 기다린다(첫 실행은 백신 검사로 느릴 수 있다)
+        let (root, child) = (fake.pid("gh.pid"), fake.pid("gh.child.pid"));
+        assert!(super::fake_gh::alive(root) && super::fake_gh::alive(child), "시험 준비: 가짜와 손자가 떠 있어야 한다");
+        call.abort();
+        let _ = call.await;
+        assert!(dies(root), "gh 가 남았다");
+        assert!(dies(child), "gh 의 손자가 고아로 남았다");
+    }
+
+    #[tokio::test]
+    async fn gh_cli_는_stdout_이_상한을_넘으면_읽는_중에_끊고_프로세스를_죽인다() {
+        let fake = Dir::new("flood");
+        let started = Instant::now();
+        let err = fake.cli_with(SECS, 4096).token().await.unwrap_err();
+        assert_eq!(err.message, MSG_TOO_LARGE);
+        assert!(started.elapsed() < Duration::from_secs(8), "끝없는 출력을 제한 시간까지 기다렸다");
+        assert!(dies(fake.pid("gh.pid")), "넘친 뒤에도 gh 가 남았다");
+    }
+
+    #[tokio::test]
+    async fn gh_cli_의_stdout_상한은_64kb_까지_받고_넘으면_거절한다() {
+        let exact = Dir::new(&format!("big {MAX}"));
+        let ok = exact.cli_with(SECS, MAX).token().await.unwrap();
+        assert_eq!(ok.expose().len(), MAX);
+        let over = Dir::new(&format!("big {}", MAX + 1));
+        let err = over.cli_with(SECS, MAX).token().await.unwrap_err();
+        assert_eq!(err.message, MSG_TOO_LARGE);
+        // 운영 상수는 TS 와 같다
+        assert_eq!((antler_lib::github::gh_cli::MAX_STDOUT, antler_lib::github::gh_cli::TIMEOUT), (64 * 1024, Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn find_gh_는_절대_경로의_gh_exe_만_앞_항목부터_찾고_빈_항목_상대_경로_cwd_항목을_건너뛴다() {
+        let found = Dir::new("mark");
+        let other = Dir::new("none");
+        // gh.cmd 같은 것은 셸 없이 못 띄우므로 찾지 않는다
+        std::fs::write(other.path.join("gh.cmd"), "@echo off").unwrap();
+        let join = |parts: &[&std::path::Path]| std::env::join_paths(parts.iter().copied()).unwrap().to_string_lossy().into_owned();
+        let want = found.path.join("gh.exe");
+        assert_eq!(find_gh(&join(&[&other.path, &found.path]), None), Some(want.clone()));
+        assert_eq!(find_gh(&join(&[&other.path]), None), None);
+        // 절대 경로가 아닌 항목(현재 디렉터리 기준으로 풀린다)은 건너뛴다 — 뒤의 절대 경로가 이긴다
+        let path = format!(";.;bin;C:foo;\\foo;..;{}", join(&[&found.path]));
+        assert_eq!(find_gh(&path, None), Some(want.clone()));
+        assert_eq!(find_gh(";.;bin;C:foo;\\foo", None), None);
+        // 현재 디렉터리와 같은 항목은 절대 경로여도 건너뛴다(대소문자 무시)
+        assert_eq!(find_gh(&join(&[&found.path]), Some(&found.path)), None);
+        let upper = found.path.to_string_lossy().to_uppercase();
+        assert_eq!(find_gh(&upper, Some(&found.path)), None);
+        assert_eq!(find_gh(&join(&[&found.path]), Some(&other.path)), Some(want));
+    }
+
+    /// 자식 프로세스 몫: 부모가 현재 작업 디렉터리를 `gh.exe` 가 든 폴더로 해 두고 이 시험만 다시 돌린다(환경 변수가 있을 때만 일을 한다).
+    /// 프로세스 전역인 cwd 를 이 바이너리의 다른 시험과 섞지 않으려고 별도 프로세스로 돌린다
+    #[tokio::test]
+    async fn gh_cli_cwd_탐침_자식() {
+        let Some(empty) = std::env::var_os("ANTLER_GH_CWD_PROBE_EMPTY") else { return };
+        let cwd = std::env::current_dir().unwrap();
+        assert!(cwd.join("gh.exe").is_file(), "cwd 에 가짜 gh.exe 가 있어야 한다");
+        let sys = std::env::var("SystemRoot").unwrap_or_default();
+        let empty = empty.to_string_lossy().into_owned();
+        // PATH 에 현재 디렉터리를 뜻하는 항목들만 있거나(상대 경로·빈 항목), cwd 의 절대 경로가 있어도 실행하지 않는다
+        for path in [format!(";.;bin;C:foo;\\foo;{empty}"), format!("{};{empty}", cwd.display())] {
+            let cli = GhCli::new().with_env_for_test(vec![("PATH".into(), path.clone()), ("SystemRoot".into(), sys.clone())]);
+            assert!(!cli.available().await, "{path}");
+            assert_eq!(cli.token().await.unwrap_err().message, MSG_MISSING, "{path}");
+        }
+    }
+
+    #[test]
+    fn gh_cli_는_현재_작업_디렉터리의_gh_exe_를_실행하지_않는다() {
+        let trap = Dir::new("mark");
+        let empty = Dir::new("none");
+        let out = raw(&std::env::current_exe().unwrap())
+            .args(["--exact", "gh_cli_run::gh_cli_cwd_탐침_자식", "--test-threads=1", "--nocapture"])
+            .env("ANTLER_GH_CWD_PROBE_EMPTY", &empty.path)
+            .current_dir(&trap.path)
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "자식 시험이 실패했다:\n{text}");
+        assert!(text.contains("1 passed"), "자식이 시험을 돌리지 않았다:\n{text}");
+        assert!(!trap.path.join("executed.marker").exists(), "cwd 의 gh.exe 가 실행됐다");
+        assert!(trap.runs().is_empty());
+    }
+
+    #[tokio::test]
+    async fn gh_cli_는_자식의_작업_디렉터리를_gh_exe_폴더로_고정한다() {
+        let fake = Dir::new("cwd");
+        // 호출하는 쪽의 cwd 는 가짜가 든 폴더가 아니다(cwd 를 바꾸지 않고, 물려받았다면 다른 값이 보인다)
+        let mine = std::env::current_dir().unwrap();
+        assert_ne!(std::fs::canonicalize(&mine).unwrap(), std::fs::canonicalize(&fake.path).unwrap());
+        fake.cli().token().await.unwrap();
+        let seen = fake.read("gh.cwd").expect("가짜가 적은 cwd");
+        assert_eq!(std::fs::canonicalize(&seen).unwrap(), std::fs::canonicalize(&fake.path).unwrap(), "gh 의 cwd: {seen}");
+    }
+
+    #[tokio::test]
+    async fn gh_cli_의_대조군_절대_경로의_gh_exe_는_실제로_실행된다() {
+        // 위 시험의 표시 파일 방식이 눈먼 것이 아님을 보인다: PATH 의 절대 경로에 있으면 표시가 생긴다
+        let fake = Dir::new("mark");
+        assert_eq!(fake.cli().token().await.unwrap().expose(), "marked");
+        assert!(fake.path.join("executed.marker").exists());
     }
 }

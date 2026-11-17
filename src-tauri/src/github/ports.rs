@@ -1,6 +1,6 @@
-//! GitHub 서비스가 밖에 묻는 것들의 포트(트레이트). 이 PR 은 트레이트만 두고 실제 구현은 뒤 PR 이 맞춘다:
+//! GitHub 서비스가 밖에 묻는 것들의 포트(트레이트). 구현은 따로 있다:
 //! - [`RepoQuery`]: 사이드카가 쥔 저장소 정보(저장소 → owner/repo, remote 목록, push 된 sha, `githubClientId`) — PR 9 가 `repoq` 질의로 구현한다. 이 PR 의 시험은 가짜로 채운다.
-//! - [`ExternalTokenProvider`]: GitHub CLI(gh) 같은 밖의 토큰 출처 — PR 8 이 구현한다.
+//! - [`ExternalTokenProvider`]: GitHub CLI(gh) 같은 밖의 토큰 출처 — `gh_cli::GhCli` 가 구현한다.
 use futures_util::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
