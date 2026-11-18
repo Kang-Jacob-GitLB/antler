@@ -421,6 +421,56 @@ fn 운영_realpath_는_확장_길이_접두를_벗긴다() {
     fs::remove_dir_all(&dir).unwrap();
 }
 
+/// 디렉터리 링크를 만든다. Windows 는 권한이 없으면 실패한다 — 그때는 false 로 시험을 건너뛴다
+fn dir_link(target: &Path, link: &Path) -> bool {
+    #[cfg(windows)]
+    let r = std::os::windows::fs::symlink_dir(target, link);
+    #[cfg(unix)]
+    let r = std::os::unix::fs::symlink(target, link);
+    r.is_ok()
+}
+
+#[test]
+fn 링크_사슬은_원격_대상과_깊이_상한에서_거부하고_로컬_대상은_통과한다() {
+    use antler_lib::external::launch::links_stay_local;
+    let dir = std::env::temp_dir().join(format!("antler-links-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("real").join("deep")).unwrap();
+    // 링크가 없는 경로·없는 경로는 통과(없는 경로는 뒤따르는 canonicalize 가 처리한다)
+    assert!(links_stay_local(&dir.join("real").join("deep"), |_| true));
+    assert!(links_stay_local(&dir.join("real").join("없음").join("x"), |_| true));
+    // a -> real(상대) , b -> a(상대) : 로컬 사슬
+    let ok = dir_link(Path::new("real"), &dir.join("a")) && dir_link(Path::new("a"), &dir.join("b"));
+    if ok {
+        let via = dir.join("b").join("deep");
+        assert!(links_stay_local(&via, |_| false), "로컬 대상 사슬은 통과해야 한다");
+        // 판정 함수가 원격이라 하면 첫 링크에서 멈춘다
+        assert!(!links_stay_local(&via, |_| true));
+        // 링크 대상 문자열을 그대로 판정 함수에 넘긴다
+        let seen = std::cell::RefCell::new(Vec::new());
+        assert!(links_stay_local(&via, |t| {
+            seen.borrow_mut().push(t.to_string());
+            false
+        }));
+        assert_eq!(*seen.borrow(), vec!["a".to_string(), "real".to_string()]);
+    }
+    // 순환 링크 x -> y, y -> x 는 깊이 상한(16)에서 거부한다
+    if dir_link(Path::new("y"), &dir.join("x")) && dir_link(Path::new("x"), &dir.join("y")) {
+        assert!(!links_stay_local(&dir.join("x").join("f"), |_| false));
+    }
+    // 길이 16 의 사슬은 통과, 17 은 거부
+    let mut made = true;
+    for i in 0..17 {
+        let target = if i == 0 { "real".to_string() } else { format!("c{}", i - 1) };
+        made &= dir_link(Path::new(&target), &dir.join(format!("c{i}")));
+    }
+    if made {
+        assert!(links_stay_local(&dir.join("c15"), |_| false));
+        assert!(!links_stay_local(&dir.join("c16"), |_| false));
+    }
+    fs::remove_dir_all(&dir).unwrap();
+}
+
 /// 앱 실행 별칭(`%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe`)은 `stat` 이 접근 거부로 실패하고 `lstat` 만 된다 — 있는 PC 에서 직접 확인하는 시험이다
 /// (`cargo test --test external -- --ignored`). 파일을 **열거나 실행하지 않고** 메타데이터만 읽는다
 #[cfg(windows)]

@@ -36,7 +36,8 @@ pub trait OpenerDeps {
     fn platform(&self) -> Platform;
     /// 환경변수 하나(Windows 는 이름의 대소문자를 가리지 않는다)
     fn env(&self, name: &str) -> Option<String>;
-    /// 심볼릭 링크를 모두 푼 경로(Windows 의 `\\?\` 접두는 벗긴 형태 — [`normalize_canonical`]). 없으면 None
+    /// 심볼릭 링크를 모두 푼 경로(Windows 의 `\\?\` 접두는 벗긴 형태 — [`normalize_canonical`]). 없으면 None.
+    /// Windows 는 푸는 **중간**에 링크가 원격 UNC 를 가리키면 따라가지 않고 None 이다([`is_remote_link_target`])
     fn realpath(&self, p: &str) -> Option<String>;
     /// 링크를 따라간 상태. 없거나 읽을 수 없으면 None
     fn stat(&self, p: &str) -> Option<Stat>;
@@ -54,7 +55,11 @@ pub trait OpenerDeps {
 /// 확장 길이 접두를 붙이는데, 비교(저장소 루트 안인가)가 접두 유무에 흔들리면 안 된다.
 /// - `\\?\UNC\server\share\…` → `\\server\share\…`, `\\?\C:\…` → `C:\…`
 /// - 그 밖의 `\\?\`·`\\.\`(볼륨 GUID·장치 경로)는 거부(None)
-/// - 벗긴 결과가 UNC 인데 WSL 공유(`\\wsl.localhost\`·`\\wsl$\`)가 아니면 거부한다 — 임의의 SMB 공유(NTLM 유출)를 열 대상으로 삼지 않는다
+/// - 벗긴 결과가 UNC 인데 WSL 공유(`\\wsl.localhost\`·`\\wsl$\`)가 아니면 거부한다 — 임의의 SMB 공유를 열 대상으로 삼지 않는다
+///
+/// **이것은 결과를 거르는 것뿐이다.** `canonicalize` 가 링크를 따라가는 순간 이미 SMB/WebDAV 인증(NTLM)이 나가므로, 유출을 막는 것은 그 **앞**에서
+/// 링크 대상을 미리 읽어 판정하는 `launch.rs::links_stay_local`([`is_remote_link_target`])이다. 매핑된 네트워크 드라이브(`Z:\`)는 `canonicalize` 가
+/// UNC 로 풀어 여기서 거부된다(docs/tauri.md PR 3).
 pub fn normalize_canonical(p: &str) -> Option<String> {
     let out = if let Some(rest) = p.strip_prefix("\\\\?\\") {
         if rest.get(..4).is_some_and(|h| h.eq_ignore_ascii_case("UNC\\")) {
@@ -76,6 +81,23 @@ pub fn normalize_canonical(p: &str) -> Option<String> {
         return None;
     }
     Some(out)
+}
+
+/// 링크(심볼릭 링크·정션)가 가리키는 대상 문자열이 따라가면 안 되는 **원격·장치 경로**인가(순수). 따라가는 것 자체가 네트워크 접속이므로
+/// `canonicalize` 전에 쓴다. `\\host\share`·`//host/share`·`\\?\UNC\host\…`·정션의 `\??\UNC\…` 는 WSL 공유(`\\wsl.localhost\`·`\\wsl$\`)가 아니면 원격이고,
+/// `\\.\`·볼륨 GUID 같은 그 밖의 `\\?\`·`\??\` 모양도 거부한다(`normalize_canonical` 과 같은 기준). 드라이브 경로·상대 경로는 로컬이다
+pub fn is_remote_link_target(target: &str) -> bool {
+    if target.starts_with("\\\\.\\") {
+        return true;
+    }
+    if let Some(rest) = target.strip_prefix("\\\\?\\").or_else(|| target.strip_prefix("\\??\\")) {
+        if rest.get(..4).is_some_and(|h| h.eq_ignore_ascii_case("UNC\\")) {
+            return !is_wsl_unc(&format!("\\\\{}", &rest[4..]));
+        }
+        let b = rest.as_bytes();
+        return !(b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b.len() == 2 || b[2] == b'\\' || b[2] == b'/'));
+    }
+    is_double_sep(target) && !is_wsl_unc(target)
 }
 
 fn is_file(deps: &dyn OpenerDeps, p: &str) -> bool {
@@ -408,6 +430,43 @@ mod tests {
         // 접두 없는 일반 경로는 그대로
         assert_eq!(normalize_canonical("C:\\a").as_deref(), Some("C:\\a"));
         assert_eq!(normalize_canonical("/home/u").as_deref(), Some("/home/u"));
+    }
+
+    #[test]
+    fn 링크_대상이_원격_unc_나_장치_경로면_원격으로_판정한다() {
+        for t in [
+            "\\\\attacker\\share\\x",
+            "//attacker/share/x",
+            "\\/attacker/share",
+            "\\\\host@SSL\\DavWWWRoot\\x",
+            "\\\\?\\UNC\\attacker\\share\\x",
+            "\\\\?\\unc\\attacker\\share",
+            "\\??\\UNC\\attacker\\share\\x",
+            "\\\\.\\pipe\\x",
+            "\\\\?\\Volume{01234567-89ab-cdef-0123-456789abcdef}\\x",
+            "\\??\\GLOBALROOT\\Device\\x",
+            "\\\\wsl.localhostx\\Ubuntu",
+        ] {
+            assert!(is_remote_link_target(t), "{t}");
+        }
+        // WSL 공유·드라이브·상대·리눅스 경로는 로컬(따라가도 된다)
+        for t in [
+            "\\\\wsl.localhost\\Ubuntu\\home",
+            "//wsl$/Ubuntu/home",
+            "\\\\?\\UNC\\wsl.localhost\\Ubuntu\\home",
+            "\\??\\UNC\\wsl$\\Ubuntu",
+            "C:\\work\\repo",
+            "c:/work",
+            "\\\\?\\C:\\work",
+            "\\??\\C:\\work",
+            "..\\other",
+            "sub\\x",
+            "\\work",
+            "/home/u",
+            "",
+        ] {
+            assert!(!is_remote_link_target(t), "{t}");
+        }
     }
 
     #[test]
