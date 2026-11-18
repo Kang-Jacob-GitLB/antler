@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { Branch, FileDiff, RemoteGroup } from '../src/shared/types'
+import type { Branch, FileDiff, RemoteDirListing, RemoteGroup, SourceKind } from '../src/shared/types'
+import { parseLxssQuery, parseWslList } from '../src/main/executors/WslExecutor'
+import { remoteRelative, resolveEnv } from '../src/main/services/RepoService'
+import { scanFromListing } from '../src/main/services/repoScan'
 import { bucketize, TimeStreamParser } from '../src/main/git/activity'
 import { assertCommitId, imageMime, isResolvableRef, normalizeDir, normalizeFilePath, parseTree } from '../src/main/git/codeBrowse'
 import { isSafeSubmodulePath, parsePushedShas, parseRemoteConfig } from '../src/main/git/commands'
@@ -139,12 +142,28 @@ const PARSERS: Record<string, Parser> = {
   pickRemote: (b) =>
     cases(b, (c) => ({ one: pickGithubRemote(c as { name: string; url: string }[]), all: pickGithubRemotes(c as { name: string; url: string }[]) })),
   remoteConfig: (b) => cases(b, (c) => parseRemoteConfig(c as string)),
-  pushedShas: (b) => cases(b, (c) => parsePushedShas(c as string))
+  pushedShas: (b) => cases(b, (c) => parsePushedShas(c as string)),
+
+  // ---- Phase 6b PR 4a ----
+  // 케이스는 `wsl.exe -l -q` stdout: 문자열(UTF-8) · `{utf16, bom?}`(UTF-16LE, bom 이면 FF FE 가 앞에 붙는다) · `{parts}`(위 caseBytes)
+  wslList: (b) => cases(b, (c) => parseWslList(caseBytes(c))),
+  // 케이스는 `reg query …\Lxss /s /v DistributionName` stdout 문자열
+  lxssQuery: (b) => cases(b, (c) => parseLxssQuery(c as string)),
+  // 케이스는 SFTP 폴더 목록(RemoteDirListing)
+  scanFromListing: (b) => cases(b, (c) => scanFromListing(c as RemoteDirListing)),
+  // 케이스는 {kind, path, distro?, sshHost?}. GitHub 는 던진다(오류 문구가 골든에 남는다)
+  resolveEnv: (b) => cases(b, (c) => resolveEnv(c as Parameters<typeof resolveEnv>[0])),
+  // 케이스는 {kind, path}
+  remoteRelative: (b) => cases(b, (c) => remoteRelative((c as { kind: SourceKind }).kind, (c as { path: string }).path))
 }
 
 /** filterOverrides 케이스를 바이트로 푼다. 문자열은 UTF-8, `{parts}` 는 조각을 이어 붙인다(잘못된 UTF-8 은 `{hex}` 로 쓴다) */
 function caseBytes(c: unknown): Buffer {
   if (typeof c === 'string') return Buffer.from(c, 'utf8')
+  if (typeof c === 'object' && c !== null && 'utf16' in c) {
+    const u = c as { utf16: string; bom?: boolean }
+    return Buffer.concat([u.bom ? Buffer.from([0xff, 0xfe]) : Buffer.alloc(0), Buffer.from(u.utf16, 'utf16le')])
+  }
   const parts = (c as { parts: (string | { hex: string } | { repeat: [string, number] })[] }).parts
   return Buffer.concat(
     parts.map((p) => {
@@ -288,6 +307,15 @@ for (const [parser, f] of [
   ['pickRemote', 'pick-remote'],
   ['remoteConfig', 'remote-config'],
   ['pushedShas', 'pushed-shas']
+] as const) {
+  add(parser, E(`${f}-cases.json`))
+}
+for (const [parser, f] of [
+  ['wslList', 'wsl-list'],
+  ['lxssQuery', 'lxss-query'],
+  ['scanFromListing', 'scan-listing'],
+  ['resolveEnv', 'resolve-env'],
+  ['remoteRelative', 'remote-relative']
 ] as const) {
   add(parser, E(`${f}-cases.json`))
 }

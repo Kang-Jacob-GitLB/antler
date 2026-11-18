@@ -1,0 +1,121 @@
+[
+  {
+    "in": "",
+    "out": []
+  },
+  {
+    "in": "Ubuntu\nDebian\n",
+    "out": [
+      "Ubuntu",
+      "Debian"
+    ]
+  },
+  {
+    "in": "Ubuntu\r\nDebian\r\n",
+    "out": [
+      "Ubuntu",
+      "Debian"
+    ]
+  },
+  {
+    "in": "docker-desktop\nUbuntu\ndocker-desktop-data\n",
+    "out": [
+      "Ubuntu"
+    ]
+  },
+  {
+    "in": "  My Distro  \n\n   \nUbuntu-24.04\n",
+    "out": [
+      "My Distro",
+      "Ubuntu-24.04"
+    ]
+  },
+  {
+    "in": "Ubuntu\n",
+    "out": [
+      "Ubuntu"
+    ]
+  },
+  {
+    "in": "﻿Ubuntu\n",
+    "out": [
+      "Ubuntu"
+    ]
+  },
+  {
+    "in": {
+      "bom": true,
+      "utf16": "Ubuntu-24.04\r\nDebian\r\n"
+    },
+    "out": [
+      "Ubuntu-24.04",
+      "Debian"
+    ]
+  },
+  {
+    "in": {
+      "utf16": "Ubuntu\r\n"
+    },
+    "out": [
+      "Ubuntu"
+    ]
+  },
+  {
+    "in": {
+      "bom": true,
+      "utf16": "docker-desktop\r\n\r\nUbuntu\r\ndocker-desktop-data\r\n  \r\n"
+    },
+    "out": [
+      "Ubuntu"
+    ]
+  },
+  {
+    "in": {
+      "bom": true,
+      "utf16": "My Distro\r\n"
+    },
+    "out": [
+      "My Distro"
+    ]
+  },
+  {
+    "in": {
+      "bom": true,
+      "utf16": "배포판\r\n한글 이름\r\n"
+    },
+    "out": [
+      "��0���\u0010�",
+      "\\�� tǄ�"
+    ]
+  },
+  {
+    "in": {
+      "parts": [
+        {
+          "hex": "fffe"
+        },
+        {
+          "hex": "55006200750000"
+        }
+      ]
+    },
+    "out": [
+      "Ubu"
+    ]
+  },
+  {
+    "in": {
+      "parts": [
+        "Ubuntu\n",
+        {
+          "hex": "0000"
+        },
+        "Debian\n"
+      ]
+    },
+    "out": [
+      "Ubuntu",
+      "Debian"
+    ]
+  }
+]

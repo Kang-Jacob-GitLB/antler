@@ -810,6 +810,31 @@
     "golden": "pushedShas__edge_pushed-shas-cases.json.json"
   },
   {
+    "parser": "wslList",
+    "fixture": "edge/wsl-list-cases.json",
+    "golden": "wslList__edge_wsl-list-cases.json.json"
+  },
+  {
+    "parser": "lxssQuery",
+    "fixture": "edge/lxss-query-cases.json",
+    "golden": "lxssQuery__edge_lxss-query-cases.json.json"
+  },
+  {
+    "parser": "scanFromListing",
+    "fixture": "edge/scan-listing-cases.json",
+    "golden": "scanFromListing__edge_scan-listing-cases.json.json"
+  },
+  {
+    "parser": "resolveEnv",
+    "fixture": "edge/resolve-env-cases.json",
+    "golden": "resolveEnv__edge_resolve-env-cases.json.json"
+  },
+  {
+    "parser": "remoteRelative",
+    "fixture": "edge/remote-relative-cases.json",
+    "golden": "remoteRelative__edge_remote-relative-cases.json.json"
+  },
+  {
     "parser": "normalizeDir",
     "fixture": "edge/normalize-dir-cases.json",
     "golden": "normalizeDir__edge_normalize-dir-cases.json.json"

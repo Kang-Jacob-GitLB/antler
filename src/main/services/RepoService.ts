@@ -1176,7 +1176,7 @@ export class RepoService {
  * 입력의 환경과 경로를 정한다. 로컬·WSL 로 고른 경로가 \\wsl.localhost\… 같은 WSL 공유 경로면 WSL 저장소로 바꾼다(WSL 안에서
  * git 을 돌려야 9P 파일 공유를 거치지 않아 빠르고 줄바꿈·권한이 정확하다).
  */
-function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; target?: string; path: string } {
+export function resolveEnv(input: Omit<AddRepoInput, 'group'>): { kind: SourceKind; target?: string; path: string } {
   // GitHub 원격 전용 저장소는 addGithubRepos 로만 만든다(임의 경로를 github 소스에 올리지 못하게)
   if (input.kind === 'github') throw new Error('GitHub 원격 저장소는 여기서 추가할 수 없습니다')
   const path = input.path.trim()
@@ -1241,7 +1241,7 @@ function createExecutor(source: Source, github?: GithubDeps): GitExecutor {
  * WSL·SSH 에서 '~/' 로 시작하는 경로는 셸 없이 실행하므로 펼쳐지지 않는다.
  * 두 실행기 모두 홈 디렉터리에서 git 을 실행하므로(WSL --cd ~, SSH exec 기본 위치) 홈 기준 상대 경로로 바꾼다.
  */
-function remoteRelative(kind: SourceKind, path: string): string {
+export function remoteRelative(kind: SourceKind, path: string): string {
   if (kind === 'local') return path
   if (path === '~') return '.'
   return path.startsWith('~/') ? path.slice(2) || '.' : path

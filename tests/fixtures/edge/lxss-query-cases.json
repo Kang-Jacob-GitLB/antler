@@ -1,0 +1,17 @@
+[
+ "",
+ "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{0d1e7a1c-0000-0000-0000-000000000001}\r\n    DistributionName    REG_SZ    Ubuntu-22.04\r\n\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{0d1e7a1c-0000-0000-0000-000000000002}\r\n    DistributionName    REG_SZ    docker-desktop\r\n\r\n검색 종료: 2 일치하는 항목이 있습니다.",
+ "    DistributionName    REG_SZ    Ubuntu\n    DistributionName    REG_SZ    Debian\n",
+ "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\r\n    DefaultDistribution    REG_SZ    {x}",
+ "DistributionName REG_SZX Ubuntu",
+ "DistributionNameX REG_SZ Ubuntu",
+ "DistributionName\tREG_SZ\tTab Distro",
+ "DistributionName REG_SZ    ",
+ "DistributionName REG_SZ",
+ "DistributionName REG_DWORD 0x1",
+ "  DistributionName    REG_SZ    My Distro  \r\n",
+ "DistributionName REG_SZ Mid\rdle",
+ "DistributionName REG_SZ Trail\r\r\n",
+ "DistributionName REG_SZ 한글 배포판",
+ "distributionname REG_SZ lower"
+]

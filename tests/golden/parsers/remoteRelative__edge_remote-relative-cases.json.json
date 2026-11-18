@@ -1,0 +1,93 @@
+[
+  {
+    "in": {
+      "kind": "local",
+      "path": "~/x"
+    },
+    "out": "~/x"
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "~"
+    },
+    "out": "~"
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "~"
+    },
+    "out": "."
+  },
+  {
+    "in": {
+      "kind": "wsl",
+      "path": "~"
+    },
+    "out": "."
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "~/"
+    },
+    "out": "."
+  },
+  {
+    "in": {
+      "kind": "wsl",
+      "path": "~/proj"
+    },
+    "out": "proj"
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "~/a/b"
+    },
+    "out": "a/b"
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "~//a"
+    },
+    "out": "/a"
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "/abs/path"
+    },
+    "out": "/abs/path"
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "~user/x"
+    },
+    "out": "~user/x"
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "rel/path"
+    },
+    "out": "rel/path"
+  },
+  {
+    "in": {
+      "kind": "wsl",
+      "path": ""
+    },
+    "out": ""
+  },
+  {
+    "in": {
+      "kind": "github",
+      "path": "~/x"
+    },
+    "out": "x"
+  }
+]

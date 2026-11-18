@@ -1,0 +1,393 @@
+//! 저장소 추가 창의 "폴더 안 저장소 찾기"(`src/main/services/repoScan.ts`): 고른 폴더 바로 아래 하위 폴더 중 `.git` 이 있는 것을 고른다(읽기 전용).
+//! 로컬과 WSL(`\\wsl.localhost\…` 공유 경로)은 같은 파일 시스템 API 로 읽는다. 진짜 저장소인지는 추가할 때 git 이 확인한다.
+//!
+//! TS 와 다른 점:
+//! - 이름순 정렬은 `localeCompare` 의 **근사**다(ICU 전체를 옮기지 않았다 — 글자는 대소문자 무시·같으면 소문자 먼저, ASCII 기호는 CLDR root 순서, ASCII 밖은 코드 포인트순).
+//!   TS 의 `localeCompare` 는 numeric 이 아니라 숫자도 글자처럼 한 자리씩 비교한다(`a10` < `a2`).
+//! - 읽기 실패 문구는 Node 의 오류 메시지가 아니라 Rust 의 `io::Error` 문구다.
+//! - 동기 함수다(호출자가 `spawn_blocking` 으로 부른다). `.git` 확인은 TS 처럼 동시에 8개씩 한다(WSL 공유(9P)가 느릴 때 스레드를 다 차지하지 않게).
+
+use std::cmp::Ordering;
+use std::fs;
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+use serde::{Deserialize, Serialize};
+
+use crate::git::exec::ssh::win32_path;
+use crate::git::parsers::refs::SYMBOL_ORDER;
+
+/// 하위 폴더 상한 — 아주 큰 폴더(예: node_modules)에서 창이 굳지 않게
+pub const MAX_DIRS: usize = 2000;
+/// 동시에 띄우는 stat 수
+pub const PROBE_CONCURRENCY: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ScanRepo {
+    pub name: String,
+    pub path: String,
+}
+
+/// TS `RepoScanResult`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoScanResult {
+    pub path: String,
+    pub is_repo: bool,
+    pub repos: Vec<ScanRepo>,
+    pub truncated: bool,
+}
+
+/// TS `RemoteDirListing` 의 하위 폴더 항목. `is_repo` 가 `None` 이면 확인하지 않은 것이다
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDirEntry {
+    pub name: String,
+    #[serde(default)]
+    pub is_repo: Option<bool>,
+}
+
+/// TS `RemoteDirListing`(SFTP 폴더 목록 — PR 4b 가 만든다)
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDirListing {
+    pub path: String,
+    #[serde(default)]
+    pub parent: Option<String>,
+    pub is_repo: bool,
+    pub dirs: Vec<RemoteDirEntry>,
+    pub truncated: bool,
+}
+
+/// 로컬·WSL 공유 경로: 고른 폴더 바로 아래에서 `.git` 이 있는 폴더를 찾는다(고른 폴더가 저장소가 아님은 호출자가 확인했다).
+/// 숨김(`.` 시작) 폴더는 뺀다. 링크(정션)는 대상이 **원격(UNC·`\??\UNC`)이 아닐 때만** 따라가 폴더인지 본다(원격 대상은 SMB 접속·NTLM 해시 유출 위험).
+/// `.git` 은 `symlink_metadata` 로 존재만 본다(링크를 따라가지 않는다). 폴더가 2000개를 넘으면 앞쪽만 보고 `truncated`.
+///
+/// **호출자는 먼저 `mirror::check_path("local", root)` 를 통과시킨다.** 여기서도 root 가 WSL 이 아닌 UNC·NT 네임스페이스면 거부하지만(방어), 길이·NUL 같은 검사는 호출자 몫이다
+pub fn scan_local_repos(root: &str) -> Result<RepoScanResult, String> {
+    crate::mirror::check_path("local", root)?;
+    let entries = fs::read_dir(root).map_err(|e| e.to_string())?;
+    let mut dirs: Vec<String> = Vec::new();
+    let mut truncated = false;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let Ok(kind) = entry.file_type() else { continue };
+        // 심볼릭 링크(정션)는 대상이 원격이 아닐 때만 따라가 폴더인지 본다
+        let is_dir = kind.is_dir() || (kind.is_symlink() && !link_leads_remote(&entry.path()) && fs::metadata(entry.path()).is_ok_and(|m| m.is_dir()));
+        if !is_dir {
+            continue;
+        }
+        if dirs.len() >= MAX_DIRS {
+            truncated = true;
+            break;
+        }
+        dirs.push(name);
+    }
+    let flags = probe_git(root, &dirs);
+    let mut repos: Vec<ScanRepo> = dirs
+        .iter()
+        .zip(flags)
+        .filter(|(_, has_git)| *has_git)
+        .map(|(name, _)| ScanRepo { name: name.clone(), path: win32_path::join(&[root, name]) })
+        .collect();
+    repos.sort_by(|a, b| locale_compare(&a.name, &b.name));
+    Ok(RepoScanResult { path: root.to_string(), is_repo: false, repos, truncated })
+}
+
+/// 링크 대상 문자열이 원격(SMB)을 가리키는가 — 순수 판정이다. `\\host\share`·`//host/share`·`\\?\UNC\…`·`\??\UNC\…`·장치 경로(`\\.\`)는 원격,
+/// `\\wsl.localhost\…`·`\\wsl$\…`·`\\?\C:\…`·`\??\C:\…`(정션의 일반 대상)·드라이브·상대 경로는 로컬이다
+fn is_remote_link_target(target: &str) -> bool {
+    let t = target.trim();
+    let is_sep = |c: char| c == '\\' || c == '/';
+    let starts_ci = |s: &str, p: &str| s.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
+    // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): `UNC\` 가 이어지면 원격, 아니면 그 뒤가 로컬 경로(드라이브)다
+    for prefix in ["\\??\\", "\\\\?\\", "//?/"] {
+        if starts_ci(t, prefix) {
+            return starts_ci(&t[prefix.len()..], "UNC\\") || starts_ci(&t[prefix.len()..], "UNC/");
+        }
+    }
+    let mut chars = t.chars();
+    if !matches!((chars.next(), chars.next()), (Some(a), Some(b)) if is_sep(a) && is_sep(b)) {
+        return false;
+    }
+    !crate::git::exec::wsl_paths::is_wsl_unc(t)
+}
+
+/// 링크(정션)를 따라가면 원격에 닿는가. 링크 사슬을 최대 8단계까지 `read_link` 로만 따라가 본다(대상 파일 시스템에 접속하지 않는다).
+/// 읽을 수 없으면 따라가지 않는다(`true`)
+fn link_leads_remote(link: &Path) -> bool {
+    let mut cur = link.to_path_buf();
+    for _ in 0..8 {
+        let Ok(target) = fs::read_link(&cur) else { return true };
+        if is_remote_link_target(&target.to_string_lossy()) {
+            return true;
+        }
+        let next = if target.is_absolute() { target } else { cur.parent().map_or(target.clone(), |p| p.join(&target)) };
+        match next.symlink_metadata() {
+            Ok(m) if m.file_type().is_symlink() => cur = next,
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// 각 하위 폴더의 `.git` 존재(파일이어도 된다 — 워크트리·서브모듈). `PROBE_CONCURRENCY` 개씩 동시에, 결과는 입력 순서대로
+fn probe_git(root: &str, dirs: &[String]) -> Vec<bool> {
+    let next = AtomicUsize::new(0);
+    let mut out = vec![false; dirs.len()];
+    let results: Vec<Vec<(usize, bool)>> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..PROBE_CONCURRENCY.min(dirs.len()))
+            .map(|_| {
+                s.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, AtomicOrdering::SeqCst);
+                        let Some(dir) = dirs.get(i) else { break };
+                        // 링크를 따라가지 않고 존재만 본다
+                        done.push((i, Path::new(root).join(dir).join(".git").symlink_metadata().is_ok()));
+                    }
+                    done
+                })
+            })
+            .collect();
+        workers.into_iter().map(|w| w.join().unwrap_or_default()).collect()
+    });
+    for (i, found) in results.into_iter().flatten() {
+        out[i] = found;
+    }
+    out
+}
+
+/// SSH: 원격 폴더 목록(SFTP)에서 저장소 표시가 된 하위 폴더를 고른다(TS `scanFromListing`)
+pub fn scan_from_listing(listing: &RemoteDirListing) -> RepoScanResult {
+    RepoScanResult {
+        path: listing.path.clone(),
+        is_repo: listing.is_repo,
+        repos: if listing.is_repo {
+            Vec::new()
+        } else {
+            listing.dirs.iter().filter(|d| d.is_repo == Some(true)).map(|d| ScanRepo { name: d.name.clone(), path: posix_join(&listing.path, &d.name) }).collect()
+        },
+        // 목록이 잘렸거나, 앞쪽 일부만 저장소 여부를 확인했다(SFTP 목록의 확인 상한)
+        truncated: listing.truncated || listing.dirs.iter().any(|d| d.is_repo.is_none()),
+    }
+}
+
+/// `path.posix.join(a, b)` — 빈 조각은 건너뛰고 `.`·`..`·중복 `/` 를 정리한다
+fn posix_join(a: &str, b: &str) -> String {
+    let joined = [a, b].iter().filter(|p| !p.is_empty()).copied().collect::<Vec<_>>().join("/");
+    if joined.is_empty() {
+        return ".".to_string();
+    }
+    let absolute = joined.starts_with('/');
+    let trailing = joined.ends_with('/');
+    let mut stack: Vec<&str> = Vec::new();
+    for seg in joined.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => match stack.last() {
+                Some(&last) if last != ".." => {
+                    stack.pop();
+                }
+                _ if !absolute => stack.push(".."),
+                _ => {}
+            },
+            s => stack.push(s),
+        }
+    }
+    let mut path = stack.join("/");
+    if path.is_empty() && !absolute {
+        path.push('.');
+    }
+    if trailing && !path.is_empty() && path != "/" {
+        path.push('/');
+    }
+    if absolute {
+        format!("/{path}")
+    } else {
+        path
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum SortKey {
+    Symbol(usize),
+    Digit(char),
+    Letter(u32),
+}
+
+fn sort_keys(s: &str) -> Vec<SortKey> {
+    s.chars()
+        .filter(|c| !c.is_ascii_control())
+        .map(|c| {
+            if let Some(i) = SYMBOL_ORDER.find(c) {
+                SortKey::Symbol(i)
+            } else if c.is_ascii_digit() {
+                SortKey::Digit(c)
+            } else {
+                SortKey::Letter(c.to_lowercase().next().map_or(0, u32::from))
+            }
+        })
+        .collect()
+}
+
+/// `a.localeCompare(b)` 의 근사(모듈 문서)
+fn locale_compare(a: &str, b: &str) -> Ordering {
+    sort_keys(a).cmp(&sort_keys(b)).then_with(|| {
+        // 1차가 같을 때만: 처음 다른 대소문자는 소문자가 앞
+        for (x, y) in a.chars().zip(b.chars()) {
+            if x != y && x.to_lowercase().eq(y.to_lowercase()) {
+                return if x.is_lowercase() { Ordering::Less } else { Ordering::Greater };
+            }
+        }
+        Ordering::Equal
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 시험마다 따로 쓰는 임시 폴더(끝나면 지운다)
+    struct Tmp(std::path::PathBuf);
+
+    impl Tmp {
+        fn new(name: &str) -> Tmp {
+            let p = std::env::temp_dir().join(format!("antler-scan-{}-{name}", std::process::id()));
+            let _ = fs::remove_dir_all(&p);
+            fs::create_dir_all(&p).unwrap();
+            Tmp(p)
+        }
+
+        fn root(&self) -> String {
+            self.0.to_string_lossy().into_owned()
+        }
+
+        fn dir(&self, rel: &str) {
+            fs::create_dir_all(self.0.join(rel)).unwrap();
+        }
+    }
+
+    impl Drop for Tmp {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn names(r: &RepoScanResult) -> Vec<&str> {
+        r.repos.iter().map(|x| x.name.as_str()).collect()
+    }
+
+    #[test]
+    fn git_이_있는_하위_폴더만_이름순으로_고르고_숨김과_파일은_뺀다() {
+        let t = Tmp::new("basic");
+        for d in ["beta/.git", "Alpha/.git", "gamma", ".hidden/.git", "delta/.git"] {
+            t.dir(d);
+        }
+        fs::write(t.0.join("file.txt"), "x").unwrap();
+        // `.git` 이 파일인 폴더(워크트리·서브모듈)도 저장소 후보다
+        t.dir("wt");
+        fs::write(t.0.join("wt").join(".git"), "gitdir: ../x").unwrap();
+        let r = scan_local_repos(&t.root()).unwrap();
+        assert_eq!(names(&r), ["Alpha", "beta", "delta", "wt"]);
+        assert!(!r.is_repo && !r.truncated);
+        assert_eq!(r.path, t.root());
+        assert_eq!(r.repos[1].path, win32_path::join(&[&t.root(), "beta"]));
+    }
+
+    #[test]
+    fn 폴더가_상한을_넘으면_앞쪽만_보고_truncated() {
+        let t = Tmp::new("cap");
+        for i in 0..MAX_DIRS + 5 {
+            t.dir(&format!("d{i:04}"));
+        }
+        let r = scan_local_repos(&t.root()).unwrap();
+        assert!(r.truncated);
+        assert!(r.repos.is_empty(), "상한 안의 폴더에 .git 이 없다");
+        // 정확히 상한이면 잘리지 않는다
+        let t2 = Tmp::new("cap-exact");
+        for i in 0..MAX_DIRS {
+            t2.dir(&format!("d{i:04}"));
+        }
+        assert!(!scan_local_repos(&t2.root()).unwrap().truncated);
+    }
+
+    #[test]
+    fn 없는_폴더는_오류() {
+        let t = Tmp::new("missing");
+        assert!(scan_local_repos(&format!("{}\\nope", t.root())).is_err());
+    }
+
+    #[test]
+    fn 링크_대상이_원격이면_따라가지_않는다() {
+        for remote in [r"\\host\share\x", "//host/share", r"\??\UNC\host\share", r"\\?\UNC\host\share", r"\??\unc\h\s", "//?/UNC/h/s", r"\\.\pipe\x", r"  \\host\s"] {
+            assert!(is_remote_link_target(remote), "{remote}");
+        }
+        for local in [r"C:\work\repo", r"\??\C:\work\repo", r"\\?\C:\work", r"\\wsl.localhost\Ubuntu\home", r"\\wsl$\Ubuntu\x", "../sibling", "repo", "/usr/x", ""] {
+            assert!(!is_remote_link_target(local), "{local}");
+        }
+    }
+
+    #[test]
+    fn 읽을_수_없는_링크는_따라가지_않는다() {
+        let t = Tmp::new("notlink");
+        t.dir("plain");
+        // read_link 가 실패하면(링크가 아니다) 보수적으로 따라가지 않는다
+        assert!(link_leads_remote(&t.0.join("plain")));
+    }
+
+    #[test]
+    fn root_가_원격_공유면_읽지_않고_거부한다() {
+        for root in [r"\\host\share", "//host/share", r"\??\UNC\host\share"] {
+            assert!(scan_local_repos(root).is_err(), "{root}");
+        }
+    }
+
+    #[test]
+    fn 이름순은_대소문자를_무시하고_같으면_소문자가_앞이며_기호가_숫자와_글자보다_앞이다() {
+        let mut v = vec!["b", "A", "a", "_x", "1x", "-y", "B", "a10", "a2"];
+        v.sort_by(|a, b| locale_compare(a, b));
+        assert_eq!(v, ["_x", "-y", "1x", "a", "A", "a10", "a2", "b", "B"]);
+    }
+
+    fn listing(path: &str, is_repo: bool, dirs: &[(&str, Option<bool>)], truncated: bool) -> RemoteDirListing {
+        RemoteDirListing {
+            path: path.into(),
+            parent: Some("/".into()),
+            is_repo,
+            dirs: dirs.iter().map(|(n, r)| RemoteDirEntry { name: (*n).into(), is_repo: *r }).collect(),
+            truncated,
+        }
+    }
+
+    #[test]
+    fn 원격_목록에서_저장소_표시가_된_하위_폴더를_고른다() {
+        let r = scan_from_listing(&listing("/home/me/work", false, &[("a", Some(true)), ("b", Some(false)), ("c", Some(true))], false));
+        assert_eq!(r.repos, [ScanRepo { name: "a".into(), path: "/home/me/work/a".into() }, ScanRepo { name: "c".into(), path: "/home/me/work/c".into() }]);
+        assert!(!r.truncated && !r.is_repo);
+        // 확인하지 않은 항목이 있거나 목록이 잘렸으면 truncated
+        assert!(scan_from_listing(&listing("/w", false, &[("a", None)], false)).truncated);
+        assert!(scan_from_listing(&listing("/w", false, &[("a", Some(false))], true)).truncated);
+        // 폴더 자체가 저장소면 하위는 찾지 않는다
+        let own = scan_from_listing(&listing("/w", true, &[("a", Some(true))], false));
+        assert!(own.is_repo && own.repos.is_empty());
+        assert_eq!(scan_from_listing(&listing("/", false, &[("a", Some(true))], false)).repos[0].path, "/a");
+    }
+
+    #[test]
+    fn posix_join_은_node_와_같이_정리한다() {
+        assert_eq!(posix_join("/a/b", "c"), "/a/b/c");
+        assert_eq!(posix_join("/a/b/", "c"), "/a/b/c");
+        assert_eq!(posix_join("/", "c"), "/c");
+        assert_eq!(posix_join("/a//b/.", "c"), "/a/b/c");
+        assert_eq!(posix_join("/a/b", ".."), "/a");
+        assert_eq!(posix_join("/a", "../.."), "/");
+        assert_eq!(posix_join("", "c"), "c");
+        assert_eq!(posix_join("", ""), ".");
+        assert_eq!(posix_join("a", ".."), ".");
+    }
+}

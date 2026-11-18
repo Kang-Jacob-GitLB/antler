@@ -9,14 +9,98 @@ use super::{SshExecutor, SshOptions};
 
 type Make = Box<dyn Fn(&str) -> SshExecutor + Send + Sync>;
 
+/// 풀 잠금 하나로 지키는 상태. 실행기 표와 "저장 전 잡기"(`hold`) 장부를 한 잠금에 둔다 — `retain` 과 `HoldGuard` 의 해제가 서로 엇갈려 보지 않게
+#[derive(Default)]
+struct State {
+    hosts: HashMap<String, SshExecutor>,
+    /// 호스트별 잡기 횟수. 잡힌 호스트는 `retain` 이 닫지 않는다
+    held: HashMap<String, usize>,
+    /// `hold` 가 새로 만든 호스트(아직 아무도 `get`·`get_if` 로 채택하지 않았고 `retain` 의 보존 목록에도 들지 않았다). 마지막 잡기가 풀릴 때 닫는다
+    transient: HashSet<String>,
+    /// 잡혀 있어서 `retain` 이 닫기를 미룬 호스트(보존 목록에 없었다). `get`·`get_if` 로 채택되거나 이후 `retain` 의 보존 목록에 들면 빠진다.
+    /// 마지막 잡기가 풀릴 때 남아 있으면 닫는다
+    deferred: HashSet<String>,
+    /// `dispose_all` 마다 올라가는 세대. 그 이전에 잡은 `HoldGuard` 는 이후의 상태를 건드리지 않는다
+    generation: u64,
+}
+
 pub struct SshPool {
     make: Make,
-    hosts: Mutex<HashMap<String, SshExecutor>>,
+    state: Mutex<State>,
+}
+
+/// [`SshPool::hold`] 가 돌려주는 잡기. 버려질 때(마지막 잡기이고 미러에 없는 호스트면) 연결을 닫고 풀에서 뺀다
+pub struct HoldGuard {
+    pool: Arc<SshPool>,
+    host: String,
+    exec: SshExecutor,
+    generation: u64,
+}
+
+impl HoldGuard {
+    pub fn executor(&self) -> &SshExecutor {
+        &self.exec
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+}
+
+impl Drop for HoldGuard {
+    fn drop(&mut self) {
+        let closed = {
+            let mut st = self.pool.state.lock().unwrap_or_else(PoisonError::into_inner);
+            // `dispose_all` 이전에 잡은 가드는 그 뒤에 새로 잡은 같은 호스트의 장부를 건드리지 않는다
+            if st.generation != self.generation {
+                return;
+            }
+            let Some(n) = st.held.get_mut(&self.host) else { return };
+            *n -= 1;
+            if *n > 0 {
+                return;
+            }
+            st.held.remove(&self.host);
+            // 채택되지 않은 임시 호스트이거나 `retain` 이 잡혀 있어 건너뛴 호스트일 때만 닫는다. 그 사이 `get`·`get_if`(라우터)가 채택했거나
+            // `retain` 의 보존 목록에 든 호스트는 두 표에서 이미 빠졌으므로 낡은 정보로 닫지 않는다
+            let transient = st.transient.remove(&self.host);
+            let deferred = st.deferred.remove(&self.host);
+            if transient || deferred {
+                st.hosts.remove(&self.host)
+            } else {
+                None
+            }
+        };
+        if let Some(e) = closed {
+            e.dispose();
+        }
+    }
 }
 
 impl SshPool {
     pub fn new(make: impl Fn(&str) -> SshExecutor + Send + Sync + 'static) -> Arc<Self> {
-        Arc::new(SshPool { make: Box::new(make), hosts: Mutex::default() })
+        Arc::new(SshPool { make: Box::new(make), state: Mutex::default() })
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// 아직 저장하지 않은 호스트(연결 테스트·폴더 탐색·추가 중)의 실행기를 잡아 둔다(TS `holdRuntime`). 같은 새 호스트를 여러 요청이 동시에 쓰면
+    /// 먼저 끝난 쪽이 연결을 닫아 다른 쪽을 끊지 않도록 참조 횟수로 센다. 잡힌 호스트는 `retain`(다른 저장소의 미러 변경)이 닫지 않는다.
+    /// 마지막 잡기가 풀릴 때 미러에 없는 호스트면 닫는다(`HoldGuard` 의 Drop). 이미 저장된 호스트는 건드리지 않고 그 실행기를 쓴다
+    pub fn hold(self: &Arc<Self>, host: &str) -> HoldGuard {
+        let (exec, generation) = {
+            let mut st = self.lock();
+            let existed = st.hosts.contains_key(host);
+            let exec = st.hosts.entry(host.to_string()).or_insert_with(|| (self.make)(host)).clone();
+            if !existed {
+                st.transient.insert(host.to_string());
+            }
+            *st.held.entry(host.to_string()).or_default() += 1;
+            (exec, st.generation)
+        };
+        HoldGuard { pool: self.clone(), host: host.to_string(), exec, generation }
     }
 
     /// 운영 풀: 사용자 홈의 `~/.ssh/{config,known_hosts}`·기본 키·agent·프로세스 환경변수
@@ -27,26 +111,40 @@ impl SshPool {
 
     /// 호스트의 실행기. 없으면 만들고 이후 같은 값을 돌려준다. 이미 정리한(`dispose`) 호스트는 새로 만든다
     pub fn get(&self, host: &str) -> SshExecutor {
-        self.hosts.lock().unwrap_or_else(PoisonError::into_inner).entry(host.to_string()).or_insert_with(|| (self.make)(host)).clone()
+        let mut st = self.lock();
+        // 저장된 호스트로 쓰이기 시작했다 — 잡기가 풀려도 더는 "임시"가 아니다(닫는 쪽은 `retain` 이다)
+        st.transient.remove(host);
+        st.deferred.remove(host);
+        st.hosts.entry(host.to_string()).or_insert_with(|| (self.make)(host)).clone()
     }
 
     /// `get` 과 같되, 풀 잠금을 쥔 채 `alive` 가 참일 때만 만든다(거짓이면 `None`).
     /// 호스트 확인과 등록을 `retain` 과 같은 잠금 하나로 묶는다 — 미러 적용 뒤의 호출은 거부되고, 그 전의 호출이 넣은 실행기는 뒤이은 `retain` 이 닫는다.
     /// 라우터와 다른 잠금으로 확인하는 쪽(fetch 서비스)이 지운 호스트를 닫히지 않은 채 다시 등록하지 않게 한다
     pub fn get_if(&self, host: &str, alive: impl FnOnce() -> bool) -> Option<SshExecutor> {
-        let mut hosts = self.hosts.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut st = self.lock();
         if !alive() {
             return None;
         }
-        Some(hosts.entry(host.to_string()).or_insert_with(|| (self.make)(host)).clone())
+        st.transient.remove(host);
+        st.deferred.remove(host);
+        Some(st.hosts.entry(host.to_string()).or_insert_with(|| (self.make)(host)).clone())
     }
 
-    /// `keep` 에 없는 호스트의 연결을 닫고 풀에서 뺀다(닫은 실행기는 영구히 거부하므로 **풀에서도 빼야** 같은 호스트를 다시 쓸 때 새로 맺는다). 닫은 호스트 이름을 돌려준다
+    /// `keep` 에 없는 호스트의 연결을 닫고 풀에서 뺀다(닫은 실행기는 영구히 거부하므로 **풀에서도 빼야** 같은 호스트를 다시 쓸 때 새로 맺는다). 닫은 호스트 이름을 돌려준다.
+    /// **`hold` 로 잡힌 호스트는 닫지 않는다**(저장 전 연결 테스트가 다른 미러 변경에 끊기지 않게). 마지막 잡기가 풀릴 때 이 `keep` 에 없으면 그때 닫는다
     pub fn retain(&self, keep: &HashSet<String>) -> Vec<String> {
         let gone: Vec<(String, SshExecutor)> = {
-            let mut hosts = self.hosts.lock().unwrap_or_else(PoisonError::into_inner);
-            let names: Vec<String> = hosts.keys().filter(|h| !keep.contains(*h)).cloned().collect();
-            names.into_iter().filter_map(|h| hosts.remove(&h).map(|e| (h, e))).collect()
+            let mut st = self.lock();
+            // 미러에 든 호스트는 저장된 것이다 — 임시·미룸 표시를 지운다. 잡혀서 건너뛰는 호스트는 미룸으로 적어 마지막 잡기가 풀릴 때 닫는다
+            for h in keep {
+                st.transient.remove(h);
+                st.deferred.remove(h);
+            }
+            let skipped: Vec<String> = st.hosts.keys().filter(|h| !keep.contains(*h) && st.held.contains_key(*h)).cloned().collect();
+            st.deferred.extend(skipped);
+            let names: Vec<String> = st.hosts.keys().filter(|h| !keep.contains(*h) && !st.held.contains_key(*h)).cloned().collect();
+            names.into_iter().filter_map(|h| st.hosts.remove(&h).map(|e| (h, e))).collect()
         };
         let mut names: Vec<String> = gone.iter().map(|(h, _)| h.clone()).collect();
         for (_, e) in &gone {
@@ -56,14 +154,24 @@ impl SshPool {
         names
     }
 
-    /// 모든 연결을 닫고 비운다(앱 종료)
+    /// 잡기를 포함해 모든 연결을 닫고 비운다(앱 종료). 남아 있는 `HoldGuard` 는 해제될 때 아무것도 하지 않는다
     pub fn dispose_all(&self) {
-        self.retain(&HashSet::new());
+        let all: Vec<SshExecutor> = {
+            let mut st = self.lock();
+            st.held.clear();
+            st.transient.clear();
+            st.deferred.clear();
+            st.generation += 1;
+            st.hosts.drain().map(|(_, e)| e).collect()
+        };
+        for e in &all {
+            e.dispose();
+        }
     }
 
     /// 풀에 있는 호스트(정렬)
     pub fn hosts(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.hosts.lock().unwrap_or_else(PoisonError::into_inner).keys().cloned().collect();
+        let mut v: Vec<String> = self.lock().hosts.keys().cloned().collect();
         v.sort();
         v
     }
@@ -108,6 +216,116 @@ mod tests {
         assert_eq!(*made.lock().unwrap(), 3, "닫은 호스트는 풀에서 빠져 있어 새로 만든다");
         counting.dispose_all();
         assert!(counting.hosts().is_empty());
+    }
+
+    fn keep(hosts: &[&str]) -> HashSet<String> {
+        hosts.iter().map(|h| (*h).to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn 잡은_호스트는_retain_이_닫지_않고_마지막_잡기가_풀리면_닫는다() {
+        let p = pool();
+        let a = p.hold("new");
+        let b = p.hold("new");
+        assert_eq!(p.hosts(), ["new"]);
+        // 다른 저장소의 미러 변경(retain)이 와도 잡힌 호스트는 남는다
+        assert!(p.retain(&keep(&["saved"])).is_empty());
+        assert_eq!(p.hosts(), ["new"]);
+        assert!(!a.executor().is_disposed());
+        drop(a);
+        assert_eq!(p.hosts(), ["new"], "아직 잡기가 남았다");
+        assert!(!b.executor().is_disposed());
+        let exec = b.executor().clone();
+        drop(b);
+        assert!(p.hosts().is_empty(), "마지막 잡기가 풀리면 미러에 없는 호스트는 풀에서 빠진다");
+        assert!(exec.is_disposed());
+    }
+
+    #[tokio::test]
+    async fn 저장된_호스트는_잡기가_풀려도_닫지_않는다() {
+        let p = pool();
+        // retain 이 아직 없었고 hold 가 만든 것도 아니면(다른 곳에서 get 으로 이미 쓰는 호스트) 건드리지 않는다
+        let used = p.get("used");
+        drop(p.hold("used"));
+        assert!(!used.is_disposed());
+        assert_eq!(p.hosts(), ["used"]);
+        // 잡혀 있는 동안 저장돼 미러 목록에 들어왔다
+        let g = p.hold("new");
+        p.retain(&keep(&["new", "used"]));
+        let exec = g.executor().clone();
+        drop(g);
+        assert!(!exec.is_disposed());
+        assert_eq!(p.hosts(), ["new", "used"]);
+        // 이미 저장된 호스트를 잡았다 놓아도 그대로다
+        drop(p.hold("new"));
+        assert_eq!(p.hosts(), ["new", "used"]);
+    }
+
+    #[tokio::test]
+    async fn 잡힌_사이_retain_이_건너뛴_호스트는_풀릴_때_닫는다() {
+        let p = pool();
+        p.get("old");
+        let g = p.hold("old");
+        // 미러에서 빠졌지만 잡혀 있어 남는다
+        assert!(p.retain(&keep(&[])).is_empty());
+        assert_eq!(p.hosts(), ["old"]);
+        drop(g);
+        assert!(p.hosts().is_empty());
+    }
+
+    #[tokio::test]
+    async fn 잡은_호스트를_get_으로_채택하면_풀려도_임시로_닫지_않는다() {
+        let p = pool();
+        let g = p.hold("x");
+        p.get("x");
+        drop(g);
+        assert_eq!(p.hosts(), ["x"], "저장된 호스트로 쓰이기 시작했으면 닫는 쪽은 retain 이다");
+        assert_eq!(p.retain(&keep(&[])), ["x"]);
+    }
+
+    #[tokio::test]
+    async fn dispose_all_은_잡힌_호스트도_닫고_남은_가드는_아무것도_하지_않는다() {
+        let p = pool();
+        let g = p.hold("x");
+        p.dispose_all();
+        assert!(g.executor().is_disposed());
+        assert!(p.hosts().is_empty());
+        let again = p.get("x");
+        drop(g);
+        assert!(!again.is_disposed(), "앱 종료 뒤 새로 만든 실행기를 낡은 가드가 닫지 않는다");
+    }
+
+    #[tokio::test]
+    async fn retain_이_이미_있어도_잡은_뒤_get_으로_채택한_실행기는_가드가_풀려도_닫지_않는다() {
+        let p = pool();
+        // keep 이 Some 인 상태(낡은 보존 목록에 호스트가 없다)
+        p.retain(&keep(&["other"]));
+        let g = p.hold("x");
+        let adopted = p.get("x");
+        drop(g);
+        assert!(!adopted.is_disposed(), "라우터가 채택한 실행기를 낡은 keep 으로 닫지 않는다");
+        assert_eq!(p.hosts(), ["x"]);
+        // retain 이 건너뛰어 미룬 뒤 get_if 로 채택해도 같다
+        let g = p.hold("y");
+        p.retain(&keep(&["other", "x"]));
+        let y = p.get_if("y", || true).unwrap();
+        drop(g);
+        assert!(!y.is_disposed());
+        assert_eq!(p.hosts(), ["x", "y"]);
+    }
+
+    #[tokio::test]
+    async fn dispose_all_이전의_가드는_이후의_새_잡기를_건드리지_않는다() {
+        let p = pool();
+        let old = p.hold("x");
+        p.dispose_all();
+        let new = p.hold("x");
+        drop(old);
+        assert!(!new.executor().is_disposed());
+        assert_eq!(p.hosts(), ["x"], "낡은 가드가 새 잡기의 횟수를 줄이거나 닫지 않는다");
+        let exec = new.executor().clone();
+        drop(new);
+        assert!(exec.is_disposed() && p.hosts().is_empty(), "새 가드는 정상으로 닫는다");
     }
 
     #[test]
