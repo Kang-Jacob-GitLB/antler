@@ -33,6 +33,10 @@ pub fn raw(program: &str) -> std::process::Command {
     let mut c = std::process::Command::new(program);
     // 깨끗한 전역 설정(프로세스 전역이 적대적이어도 준비 단계는 영향을 받지 않는다)
     c.env("GIT_CONFIG_GLOBAL", manifest().join("tests").join("gitconfig")).env("GIT_CONFIG_NOSYSTEM", "1").env_remove("GIT_DEFAULT_REF_FORMAT");
+    // 시험 바이너리가 부모 환경을 적대적으로 만들 수 있다(`github_cache_env.rs`) — 준비 단계는 받지 않는다
+    for k in ["GIT_COMMON_DIR", "GIT_TRACE", "GIT_TRACE_CURL", "GIT_TRACE2_EVENT", "GIT_TRACE_REDACT", "GIT_CURL_VERBOSE", "GIT_SSL_NO_VERIFY", "GIT_NAMESPACE", "GIT_ALTERNATE_OBJECT_DIRECTORIES"] {
+        c.env_remove(k);
+    }
     c
 }
 

@@ -186,7 +186,7 @@ async fn 골든_github_fetch_인자가_ts_와_같다() {
     for c in golden("fetch.json")["cases"].as_array().unwrap() {
         let replies: Vec<ghcache::Reply> = c["replies"].as_array().unwrap().iter().map(|r| (r[0].as_i64().unwrap() as i32, r.get(1).map_or(String::new(), s), r.get(2).map_or(String::new(), s))).collect();
         let fake = Fake::sequenced("github", replies);
-        let got = run_github_fetch(&fake, GOLDEN_DIR, &GithubFetchOpts { cancel: None, no_hooks_dir: &hooks.str() }).await;
+        let got = run_github_fetch(&fake, &golden_path(), &GithubFetchOpts { cancel: None, no_hooks_dir: &hooks.str() }).await;
         let name = c["name"].as_str().unwrap();
         match (got, c.get("error")) {
             (Ok(()), None) => {}
@@ -239,7 +239,7 @@ impl Env {
     }
 
     async fn fetch(&self) {
-        run_github_fetch(&self.exec, self.dir.as_str(), &GithubFetchOpts { cancel: None, no_hooks_dir: &self.cache.hooks }).await.expect("fetch");
+        run_github_fetch(&self.exec, &self.dir, &GithubFetchOpts { cancel: None, no_hooks_dir: &self.cache.hooks }).await.expect("fetch");
     }
 
     fn git(&self, args: &[&str]) -> String {
@@ -412,6 +412,27 @@ async fn 오류_문구에서_토큰과_base64_를_가린다() {
 }
 
 #[tokio::test]
+async fn stream_의_실패_문구와_run_의_stdout_에서도_토큰을_가린다() {
+    let e = env_with("file", Some("ghp_golden_fake_token"));
+    e.init(None).await;
+    let b64 = "Z2hwX2dvbGRlbl9mYWtlX3Rva2Vu";
+    // stream: stdout 은 그대로 읽고, 실패하면 `finish` 의 오류 문구(message·stderr)가 가려진다
+    let alias = "alias.e=!echo \"$GIT_CONFIG_VALUE_6\" >&2; exit 3";
+    let mut st = e.exec.stream(e.dir.as_str(), &["-c", alias, "e"], &RunOpts::default()).await.unwrap();
+    let mut buf = Vec::new();
+    tokio::io::AsyncReadExt::read_to_end(&mut st, &mut buf).await.unwrap();
+    let err = st.finish().await.unwrap_err();
+    let shown = format!("{err:?} {err}");
+    assert!(shown.contains("Authorization: Basic ***"), "{shown}");
+    assert!(!shown.contains("ghp_golden_fake_token") && !shown.contains(b64), "{shown}");
+    // run: 환경의 헤더를 보여 주는 `config --list`(command scope)의 stdout 에도 토큰이 없다
+    let list = e.exec.run(e.dir.as_str(), &["config", "--list", "--show-scope"], &RunOpts::default()).await.unwrap();
+    let out = String::from_utf8_lossy(&list.stdout).into_owned();
+    assert!(out.contains("extraheader=Authorization: Basic ***"), "대조: 환경의 헤더가 config 목록에 보여야 한다: {out}");
+    assert!(!out.contains("ghp_golden_fake_token") && !out.contains(b64), "{out}");
+}
+
+#[tokio::test]
 async fn fetch_환경을_줘도_github_환경이_그대로다() {
     let e = env_with("http", None);
     e.init(None).await;
@@ -430,7 +451,7 @@ async fn 일반_fetch_와_github_fetch_는_서로의_실행기로_부르면_실�
     let err = run_fetch(&e.exec, e.dir.as_str(), &ins, &normal).await.unwrap_err();
     assert!(err.to_string().contains("run_github_fetch"), "{err}");
     let local = GitExecutor::Local(LocalExecutor::default());
-    let err = run_github_fetch(&local, e.dir.as_str(), &GithubFetchOpts { cancel: None, no_hooks_dir: &e.cache.hooks }).await.unwrap_err();
+    let err = run_github_fetch(&local, &e.dir, &GithubFetchOpts { cancel: None, no_hooks_dir: &e.cache.hooks }).await.unwrap_err();
     assert!(err.to_string().contains("GitHub 캐시 실행기"), "{err}");
     // 아무것도 받지 않았다
     assert!(raw("git").arg("-C").arg(path_of(&e.dir)).args(["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"]).output().unwrap().status.code() != Some(0));
@@ -440,11 +461,11 @@ async fn 일반_fetch_와_github_fetch_는_서로의_실행기로_부르면_실�
 async fn github_fetch_는_훅_디렉터리가_쓸_수_없으면_실행하지_않는다() {
     let e = env_with("file", None);
     e.init(None).await;
-    let err = run_github_fetch(&e.exec, e.dir.as_str(), &GithubFetchOpts { cancel: None, no_hooks_dir: "C:/없는/디렉터리" }).await.unwrap_err();
+    let err = run_github_fetch(&e.exec, &e.dir, &GithubFetchOpts { cancel: None, no_hooks_dir: "C:/없는/디렉터리" }).await.unwrap_err();
     assert!(err.to_string().contains("훅 차단"), "{err}");
     // 비어 있지 않은 디렉터리도 마찬가지다
     fs::write(Path::new(&e.cache.hooks).join("post-merge"), "x").unwrap();
-    let err = run_github_fetch(&e.exec, e.dir.as_str(), &GithubFetchOpts { cancel: None, no_hooks_dir: &e.cache.hooks }).await.unwrap_err();
+    let err = run_github_fetch(&e.exec, &e.dir, &GithubFetchOpts { cancel: None, no_hooks_dir: &e.cache.hooks }).await.unwrap_err();
     assert!(err.to_string().contains("훅 차단"), "{err}");
     // 캐시 경로의 일반 조회도 같은 이유로 실패한다(보호 없이 실행하지 않는다)
     assert!(e.exec.run(e.dir.as_str(), &["rev-parse", "--git-dir"], &RunOpts::default()).await.is_err());
@@ -596,7 +617,7 @@ async fn 리다이렉트를_따라가지_않고_토큰이_다른_호스트로_�
     // github 경로: fetch 도 ls-remote 도 리다이렉트 너머로 가지 않는다
     let r = exec.run(dir.as_str(), &["ls-remote", "origin"], &o).await.unwrap();
     assert_ne!(r.code, 0);
-    let err = run_github_fetch(&exec, dir.as_str(), &GithubFetchOpts { cancel: None, no_hooks_dir: &cache.hooks }).await.unwrap_err();
+    let err = run_github_fetch(&exec, &dir, &GithubFetchOpts { cancel: None, no_hooks_dir: &cache.hooks }).await.unwrap_err();
     assert!(!err.to_string().contains("ghp_golden_fake_token"));
     assert_eq!(target.requests().len(), seen, "github 경로가 리다이렉트를 따라갔다");
     // 토큰 헤더(`http.https://github.com/.extraheader`)는 github.com 이 아닌 호스트에는 가지 않는다

@@ -1748,9 +1748,9 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 | 파일 | 내용 |
 |---|---|
 | `src/git/github_cache.rs` | `GithubCachePath`(캐시 모양 `github_cache_slug` 를 통과한 경로만 담는 newtype — 환경·init·HEAD 쓰기는 이 타입만 받는다)·`github_env`(값과 **순서**가 TS `githubEnv` 와 같다. 별도의 `GithubEnv` 타입은 없다 — 환경을 만드는 곳이 이 파일 한 곳뿐임을 소스 검사가 강제하고, `Spec` 은 `exec` 밖에서 만들 수 없다. `GithubEnvOpts.allow_protocol` 은 게이트 없는 `Option` 이고 시험만 실행기의 `test-hooks` 진입점으로 채운다)·`expected_github_config`·`check_github_config`(허용 목록이 아니라 **기대값 정확 일치**)·`inspect_github_repo`(설정 + `remote` 가 origin 하나)·`init_github_repo`(`--template=`, 네트워크 없음)·`ensure_github_head`(레코드 → `origin/HEAD` → `ls-remote --symref`, `is_safe_branch` 통과한 이름만 HEAD 에 쓴다)·`pick_network_config`·`read_network_config` |
-| `src/git/exec/github.rs` | `GithubExecutor`(`GitExecutor::Github`, `kind()`=`"github"`). 로컬 git 을 띄우되 대상 경로가 캐시 모양일 때만 `github_env`, 아니면 `GIT_ENV` 그대로(전송 금지). `run`·`stream` **둘 다**(lazy fetch 는 log·diff 스트림에서도 필요하다). `RunOpts.fetch_env` 는 무시한다. 토큰은 호출마다 `TokenSource` 에서 읽고 `run` 결과의 stderr·오류 message 에서 가린다(`stream` 은 가리지 않는다 — `GitStream::finish` 의 오류를 envelope 로 내기 전에 가리는 것은 연결 PR 의 몫이다). 훅 디렉터리를 쓸 수 없으면 실행하지 않는다 |
-| `src/git/exec/{common,process,local}.rs` | `Spec` 에 `env_remove`·`cwd`(사용자 설정 읽기 전용 변형), `Debug` 는 환경 값을 찍지 않고 `Drop` 이 값을 0 으로 덮는다. `local.rs` 의 `read_user_config_list`(`git config --list --show-scope -z`, 임시 폴더, 10초·1MB, `GIT_CONFIG_*`·`GIT_DIR` 류 제거 — 이름은 대소문자 무시) |
-| `src/git/fetch/run.rs` | `run_github_fetch`·`GithubFetchOpts`·`FetchFilter::BlobNone`·`fetch_args_for`. `run_fetch`(일반)와 서로의 실행기로 부르면 Err 다 |
+| `src/git/exec/github.rs` | `GithubExecutor`(`GitExecutor::Github`, `kind()`=`"github"`). 로컬 git 을 띄우되 대상 경로가 캐시 모양일 때만 `github_env`, 아니면 `GIT_ENV` 그대로(전송 금지). `run`·`stream` **둘 다**(lazy fetch 는 log·diff 스트림에서도 필요하다). `RunOpts.fetch_env` 는 무시한다. 토큰은 호출마다 `TokenSource` 에서 읽고 `run` 결과의 stdout·stderr·오류 message 와 `stream` 의 `finish` 오류(message·stderr)에서 가린다(`GitStream::redacting`; `stream` 의 stdout 은 blob 내용이라 가리지 않는다). 캐시 경로에서는 부모 환경의 `GIT_*`(예외 `GIT_SSL_CAINFO`·`GIT_SSL_CAPATH`)·`SSLKEYLOGFILE` 를 `Spec.env_remove` 로 지운다(`inherited_env_to_remove`; docs/security.md). 훅 디렉터리를 쓸 수 없으면 실행하지 않는다 |
+| `src/git/exec/{common,process,local}.rs` | `Spec` 에 `env_remove`·`cwd`(사용자 설정 읽기 전용 변형), `Debug` 는 환경 값을 찍지 않고 `Drop` 이 값을 0 으로 덮는다. `process.rs` 의 `launch` 는 `env_remove` 를 `envs` 보다 **먼저** 적용한다(부모 것만 지우고 `spec.env` 가 넣는 같은 이름은 살린다 — 기존 사용처 `read_user_config_list` 는 `env` 가 비어 있어 의미가 같다). `local.rs` 의 `read_user_config_list`(`git config --list --show-scope -z`, 임시 폴더, 10초·1MB, `GIT_CONFIG_*`·`GIT_DIR` 류 제거 — 이름은 대소문자 무시) |
+| `src/git/fetch/run.rs` | `run_github_fetch`(경로는 `&GithubCachePath` — init·HEAD 와 같다)·`GithubFetchOpts`·`FetchFilter::BlobNone`·`fetch_args_for`. `run_fetch`(일반)와 서로의 실행기로 부르면 Err 다 |
 | `Cargo.toml`·`tests/gitconfig_github`·`tests/ghcache/` | 시험 바이너리 둘(`required-features = ["test-hooks"]`), 적대적 전역 설정 픽스처, 공용 도구(임시 폴더·`raw`·`make_source`·가짜 실행기) |
 
 **설계 결정**
@@ -1766,13 +1766,15 @@ env 는 `[키, 값]` 순서 목록이고(토큰은 가짜 값), 판정 함수는
 
 **시험**: `tests/github_cache_exec.rs`(24개) — 골든 6개, 실제 git(`file:///` 소스만: init→검사→fetch→재검사·설정 변조 차단·HEAD 맞추기·이름 바뀜·lazy fetch(run·stream)·reftable·상위 저장소로 올라가지 않음), 환경이 캐시 경로에만 열림·`fetch_env` 무시·두 fetch 진입점 교차 거부·훅 디렉터리 불량 거부·토큰 가리기, 127.0.0.1 가짜 서버(리다이렉트를 따라가지 않음 — `-c http.followRedirects=initial` 대조군이 따라가는 것을 먼저 보인다 — 와 Authorization 이 다른 호스트로 가지 않음), 읽기 전용 pack 폴더 삭제, 소스 검사(`extraheader`·`GIT_NO_LAZY_FETCH=0`·`github_env(` 가 정해진 파일에만).
 `tests/github_cache_isolation.rs`(3개)는 **프로세스 전역 git 설정이 적대적인** 별도 바이너리다(`insteadOf` ssh·`safe.bareRepository=explicit`·`init.defaultRefFormat=reftable`·프록시·`sslVerify=false`·`GIT_DEFAULT_REF_FORMAT`·`GIT_CONFIG_COUNT`). 런타임 `set_var` 를 못 쓰므로 TS 의 `withEnv` 는 이렇게 옮겼다.
+`tests/github_cache_env.rs`(2개)는 **부모 환경이 적대적인** 별도 바이너리다(`GIT_SSL_NO_VERIFY=`(빈 값)·`GIT_TRACE*`·`GIT_TRACE_REDACT=0`·`GIT_CURL_VERBOSE`·`GIT_COMMON_DIR`·`GIT_NAMESPACE`·`GIT_ALTERNATE_OBJECT_DIRECTORIES`). 같은 환경의 로컬 실행기 git 은 받고(대조군) 캐시 경로의 git 은 `alias !env` 에서 하나도 못 본다 — 실행기가 넣은 `GIT_DIR`·`GIT_CONFIG_COUNT` 는 남는다.
+`GIT_COMMON_DIR` 를 물려받으면 `init_github_repo` 가 다른 저장소의 `.git/config` 를 덮어쓰는 경로(날 git 대조군이 덮어쓰는 것을 먼저 보인다)가 막힌 것도 같은 파일이 본다.
 대응표(`tests/golden/repos/test-map.json`)의 `N/A: PR 2` 36개 가운데 34개를 옮겼고 `commitDetail`·`compareCommits` 의 lenient 둘(`githubRemote > 실제 git … 커밋 상세…`)은 조회 경로를 연결하는 `N/A: PR 6` 으로 옮겼다.
 
 **TS 와 다른 점**
 - 사용자 설정을 읽을 때 지우는 환경 변수 이름을 **대소문자 무시**로 맞춘다(TS 의 정규식은 `Git_Config_Count` 를 놓친다 — 더 엄격한 쪽).
 - `init_github_repo` 는 기본 브랜치가 `is_safe_branch` 를 통과하지 않으면 거부한다(TS 는 호출자가 검증된 링크를 준다고 믿는다 — `GithubLink` 를 직접 만들 수 있는 Rust 쪽 방어).
 - 읽은 사용자 설정의 출력은 1MB 상한이다(TS `execFile` 의 기본 `maxBuffer` 와 같다). 읽지 못하면 빈 목록이다.
-- 환경 변수 `GIT_DEFAULT_REF_FORMAT=reftable` 을 init 에 주는 TS 시험은 **적대적 전역 설정 바이너리 전체의 환경**으로 옮겼고, 실행기 시험은 `--ref-format=reftable` 로 같은 단계를 직접 밟는다(`init_github_repo` 는 `git init` 을 고정 인자로 부른다).
+- 부모의 `GIT_DEFAULT_REF_FORMAT` 은 캐시 경로의 git 에 물려주지 않는다(`GIT_*` 전부 제거 — TS 는 물려줘서 사용자 환경에 따라 reftable 캐시가 만들어졌다). 이 시험은 "init 에 닿지 않는다" 로 뒤집었다. reftable 저장소 자체의 처리는 **적대적 전역 설정 바이너리**가 아니라 실행기 시험이 맡고, 그 시험은 `--ref-format=reftable` 로 같은 단계를 직접 밟는다(`init_github_repo` 는 `git init` 을 고정 인자로 부른다).
 - 읽기 전용 pack(`git` 이 pack 을 읽기 전용으로 만든다)이 든 폴더는 `std::fs::remove_dir_all` 이 그대로 지운다(Windows, 시험으로 확인) — PR 9 의 삭제 구현이 속성을 풀 필요가 없다. 링크(정션) 폴더를 따라가지 않는지는 PR 9 가 시험한다.
 
 **연결 PR 에 넘기는 것**: `exec.kind() == "local"` 로 갈리는 곳(`refs_service.rs`·`wip.rs` — worktrees·WIP 의 local 판정)은 `"github"` 를 local 취급해야 하는지 PR 6 이 정한다(계획 §3.2: github 는 worktrees 를 비우고 WIP 는 빈 결과). `read_network_config` 의 결과를 앱 시작 때 한 번 읽어 `NetConfigSource` 에 주는 것과 `TokenSource`(= `GitHubService::git_token`)를 잇는 것도 PR 6·7 이다.

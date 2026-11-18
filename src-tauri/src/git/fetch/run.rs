@@ -25,6 +25,7 @@ use super::guard::{
 };
 use super::js_trim;
 use crate::git::exec::{ExecError, FetchEnv, GitExecutor, RunOpts, RunResult};
+use crate::git::github_cache::GithubCachePath;
 
 /// 이 모듈이 git 을 부르는 유일한 길
 pub trait GitRunner: Sync {
@@ -292,7 +293,8 @@ pub struct GithubFetchOpts<'a> {
 /// remote 는 `origin` 하나, `--filter=blob:none`, `http.followRedirects=false`(Authorization 헤더가 리다이렉트 너머로 가지 않게), 자격 증명 도우미 없음.
 /// 환경은 **실행기**가 붙인다(`GitExecutor::Github` — 이 함수는 `fetch_env` 를 주지 않는다). 다른 종류의 실행기로 부르면 Err 다.
 /// 설정이 기대값과 일치하는지의 검사(`inspect_github_repo`)는 호출자가 먼저 한다
-pub async fn run_github_fetch<R: GitRunner>(r: &R, repo_path: &str, o: &GithubFetchOpts<'_>) -> Result<(), ExecError> {
+pub async fn run_github_fetch<R: GitRunner>(r: &R, repo_path: &GithubCachePath, o: &GithubFetchOpts<'_>) -> Result<(), ExecError> {
+    let repo_path = repo_path.as_str();
     if r.kind() != "github" {
         return Err(ExecError::Other { message: "run_github_fetch 는 GitHub 캐시 실행기로만 부른다".to_string() });
     }

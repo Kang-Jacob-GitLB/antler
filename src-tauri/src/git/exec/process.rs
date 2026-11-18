@@ -21,6 +21,7 @@ use super::common::{RunOpts, RunResult, Spec, DEFAULT_MAX_BUFFER, MAX_STDERR};
 use super::error::ExecError;
 use super::ssh::SshStream;
 use super::wsl;
+use crate::net::redact::{redact_token, SecretString};
 
 /// Windows: 콘솔 창을 띄우지 않는다
 #[cfg(windows)]
@@ -263,16 +264,17 @@ fn launch(spec: &Spec) -> Result<Launched, ExecError> {
     // 이 프로젝트에서 git 을 띄우는 유일한 지점(실행기 자신)
     #[allow(clippy::disallowed_methods)]
     let mut cmd = tokio::process::Command::new(&spec.program);
-    // 부모 환경을 상속하고 그 위에 덧씌운다(호출자가 정하는 값은 없다 — spec.env 는 실행기 상수에서만 온다)
+    // 부모 환경을 상속하고 그 위에 덧씌운다(호출자가 정하는 값은 없다 — spec.env 는 실행기 상수에서만 온다).
+    // 지우기를 **먼저** 한다: 부모에서 물려받는 것만 지우고, spec.env 가 넣는 같은 이름(예: GitHub 실행기의 GIT_DIR)은 살린다
+    for name in &spec.env_remove {
+        cmd.env_remove(name);
+    }
     cmd.args(&spec.argv)
         .envs(spec.env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(false);
-    for name in &spec.env_remove {
-        cmd.env_remove(name);
-    }
     if let Some(dir) = &spec.cwd {
         cmd.current_dir(dir);
     }
@@ -375,6 +377,8 @@ pub struct ProcessStream {
     head: Vec<u8>,
     eof: bool,
     aborted: bool,
+    /// 있으면 `finish` 의 오류 문구(message·stderr)에서 이 토큰을 가린다(GitHub 캐시 실행기)
+    redact: Option<SecretString>,
 }
 
 pub(super) fn stream_process(spec: &Spec, opts: &RunOpts) -> Result<GitStream, ExecError> {
@@ -393,6 +397,7 @@ pub(super) fn stream_process(spec: &Spec, opts: &RunOpts) -> Result<GitStream, E
         head: Vec::new(),
         eof: false,
         aborted: false,
+        redact: None,
     })))
 }
 
@@ -410,6 +415,14 @@ pub enum GitStream {
 }
 
 impl GitStream {
+    /// `finish` 의 오류 문구에서 토큰(과 그 base64)을 가리게 한다. 자식 프로세스 스트림에만 뜻이 있다(SSH 는 토큰을 쓰지 않는다)
+    pub(super) fn redacting(mut self, token: Option<SecretString>) -> Self {
+        if let GitStream::Process(s) = &mut self {
+            s.redact = token;
+        }
+        self
+    }
+
     /// 프로세스 PID(수동 테스트용 — 이미 수거됐으면 None, SSH 는 항상 None)
     pub fn pid(&self) -> Option<u32> {
         match self {
@@ -492,7 +505,8 @@ impl ProcessStream {
             "" => format!("git exited with {code}"),
             t => t.to_string(),
         };
-        Err(ExecError::Git { message, code, stderr, args: self.git_args.clone() })
+        let token = self.redact.as_ref().map(SecretString::expose);
+        Err(ExecError::Git { message: redact_token(&message, token), code, stderr: redact_token(&stderr, token), args: self.git_args.clone() })
     }
 }
 

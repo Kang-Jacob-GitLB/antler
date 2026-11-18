@@ -2,7 +2,7 @@
 //! TS `githubRemote.test.ts` 의 "실제 git: 사용자 git 설정과 격리"·`readNetworkConfig` 를 옮겼다. 런타임 `set_var` 는 다른 스레드가 환경을 읽는 중이면 위험해
 //! (TS 의 `withEnv` 를 옮길 수 없다) 적대적 값은 시작 때(`isolate`, ctor) 한 번 넣는다. 준비용 git(`ghcache::raw`)은 깨끗한 전역 설정을 따로 받는다.
 //! 적대적 전역 설정(`tests/gitconfig_github`): `url.insteadOf`(ssh)·`safe.bareRepository=explicit`·`init.defaultRefFormat=reftable`·프록시·`sslVerify=false`·`credential.helper`.
-//! 환경 변수로도 같은 것을 넣는다: `GIT_DEFAULT_REF_FORMAT=reftable`, `GIT_CONFIG_COUNT`(command scope 의 프록시).
+//! 환경 변수로도 같은 것을 넣는다(캐시 경로의 git 은 물려받지 않아야 한다): `GIT_DEFAULT_REF_FORMAT=reftable`, `GIT_CONFIG_COUNT`(command scope 의 프록시).
 
 mod ghcache;
 
@@ -33,7 +33,7 @@ async fn whole_flow(cache: &Cache, exec: &GitExecutor, src: &ghcache::Source) {
     let l = link("octocat", "iso", None);
     init_github_repo_for_test(exec, &dir, &l, &src.origin(), None).await.expect("init");
     assert_eq!(inspect_github_repo_for_test(exec, &dir, &l, &src.origin(), None).await.expect("inspect"), Vec::<String>::new());
-    run_github_fetch(exec, dir.as_str(), &GithubFetchOpts { cancel: None, no_hooks_dir: &cache.hooks }).await.expect("fetch");
+    run_github_fetch(exec, &dir, &GithubFetchOpts { cancel: None, no_hooks_dir: &cache.hooks }).await.expect("fetch");
     assert_eq!(ensure_github_head(exec, &dir, &l, None, &[]).await.unwrap().as_deref(), Some("main"));
     let o = RunOpts::default();
     let log = exec.run(dir.as_str(), &["log", "--format=%s", "HEAD"], &o).await.unwrap();
@@ -63,17 +63,16 @@ async fn 전역_설정이_insteadof_safe_bare_repository_reftable_이어도_끝�
 }
 
 #[tokio::test]
-async fn init_이_reftable_저장소를_만들어도_검사를_통과하고_fetch_log_가_된다() {
-    let v = git_version(&GitExecutor::Local(LocalExecutor::default())).await;
-    if !version_at_least(v, [2.0, 45.0, 0.0]) {
-        return eprintln!("[건너뜀] GIT_DEFAULT_REF_FORMAT 은 git 2.45+");
-    }
+async fn 부모의_default_ref_format_은_init_에_닿지_않고_흐름은_끝까지_된다() {
+    // 부모의 `GIT_*` 는 캐시 경로의 git 에 물려주지 않는다(보안 수정) — 저장소 형식이 사용자 환경에 따라 달라지지 않는다.
+    // reftable 저장소를 검사·fetch·log 하는 길은 `github_cache_exec.rs` 의 `--ref-format=reftable` 시험이 맡는다
+    assert_eq!(std::env::var("GIT_DEFAULT_REF_FORMAT").as_deref(), Ok("reftable"), "부모 환경에 값이 없다 — 이 시험이 공허하다");
     let (src, cache) = (make_source("octocat", "iso"), Cache::new());
     let exec = cache.executor("file", None);
     whole_flow(&cache, &exec, &src).await;
     let dir = cache.repo("octocat", "iso");
     let fmt = exec.run(dir.as_str(), &["config", "--local", "extensions.refstorage"], &RunOpts::default()).await.unwrap();
-    assert_eq!(text(&fmt.stdout), "reftable", "환경의 GIT_DEFAULT_REF_FORMAT 이 init 에 닿지 않았다");
+    assert_eq!(text(&fmt.stdout), "", "환경의 GIT_DEFAULT_REF_FORMAT 이 init 에 닿았다");
 }
 
 #[tokio::test]

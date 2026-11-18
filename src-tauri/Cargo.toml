@@ -102,3 +102,7 @@ required-features = ["test-hooks"]
 [[test]]
 name = "github_cache_isolation"
 required-features = ["test-hooks"]
+
+[[test]]
+name = "github_cache_env"
+required-features = ["test-hooks"]
