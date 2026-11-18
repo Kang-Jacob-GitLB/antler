@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 7a(감시 상태 기계)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -993,7 +993,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 
 **남은 위험(3)**
 - **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널·감시가 넘어오면 줄어든다. 사이드카의 `gh:repo`·repoq 의 git 조회(`remotes`·`pushedShas`)는 **6a PR 8 이 Rust 로 옮겼다**(아래 "PR 8"). 사라지는 것은 6a 가 끝났을 때다 — 이 PR 8 만으로는 아니다:
-  `wipStatus`·`wipDiff`(PR 6)·RepoWatcher(PR 7b)와 저장소 **추가 흐름**의 사이드카 git(`repos:add`·`scan`·`env:test`·`env:listDir` — 6b)가 남아 있는 동안은 Rust 가 맡은 저장소에도 사이드카가 연결을 연다.
+  RepoWatcher(PR 7b)와 저장소 **추가 흐름**의 사이드카 git(`repos:add`·`scan`·`env:test`·`env:listDir` — 6b)가 남아 있는 동안은 Rust 가 맡은 저장소에도 사이드카가 연결을 연다.
 - **정리 경합.** 미러 변경 직전에 해석을 마친 요청이 정리(`sync_ssh_hosts`) 뒤에 `runtime()` 으로 들어오면 지운 호스트가 풀에 다시 생긴다. 다음 미러 변경이나 유휴 5분(연결 해제) 뒤에 정리되며 기능 영향은 없다.
 - `file_diff` 상한 초과(위)·실제 sshd 에서의 라우팅은 확인하지 않았다(루프백 서버만).
 - 검증 중 `cargo test` 가 한 번 `fetch_service` 의 `git clone file://…`(시험 준비용 git)에서 15분 넘게 멈춘 적이 있다 — 1회 관측, 원인은 확인하지 못했고 그 바이너리를 단독으로 다시 돌리면 통과했다(PR 3 의 코드는 그 바이너리에서 `MirrorRepo` 리터럴 한 줄만 바뀌었다).
@@ -1104,7 +1104,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 | 3a / 3b | 3a: 공유 상태(첫 페이지 문·ref 시그니처 저장소, `signature.rs` 추출, note 팬아웃). 3b: `refs`·`refsDetails`(서브모듈 확인 포함) | 3a 없음 / 3b 있음 | 3a·3b **완료** |
 | 4 | `search`·`activity` | 있음 | **완료** |
 | 5 | `repoExtras`·`lfsPaths` | 있음 | **완료(코드)** — 작업 트리 `--no-index` 읽기는 #121 의 `FilterGuard` 로 필터를 무력화한다(아래 "필터 실행 차단") |
-| 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | |
+| 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | **완료(코드)** — 사람 확인 항목은 아래 "PR 6" 절 |
 | 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | 7a **완료** |
 | 8 | `gh:repo`·repoq 의 git 조회 | 있음 | **완료(코드)** — 저장소 추가 흐름의 사이드카 git 은 6b 몫이다 |
 
@@ -1151,11 +1151,11 @@ Phase 2 가 이미 옮긴 파서의 골든(`parseRefs`·`parseWorktrees`·`parse
 | 방어(TS) | Rust | 상태 |
 |---|---|---|
 | `assertRelPath`(NUL·4096·`/`·`\`·드라이브·`..`·`.git`) | `wip::assert_rel_path` | 이번 PR(골든) |
-| untracked 허용 목록(정확히 일치, 목록 없으면 거부) | `wip::validate_wip_diff_request` 가 `Option<&HashSet<String>>` 을 받는다 | 판정은 이번 PR, **목록의 보관(저장소별 마지막 `wipStatus` 가 보고한 경로, 저장소 제거 시 정리)은 PR 6** |
+| untracked 허용 목록(정확히 일치, 목록 없으면 거부) | `wip::validate_wip_diff_request` 가 `Option<&HashSet<String>>` 을 받는다 | 판정은 이번 PR, 목록의 보관(저장소별 마지막 `wipStatus` 가 보고한 경로, 저장소 제거 시 정리)은 **PR 6 에서 `Router::untracked_allow` 로 완료** |
 | unstaged `~숫자` 구성 요소 거부 | `wip::has_short_name_segment`(골든) | 이번 PR |
 | `isSafeSubmodulePath`(절대·드라이브·빈/`.`/`..`) | `refs_service::is_safe_submodule_path`(골든) | 이번 PR, 호출은 PR 3b(서브모듈 확인 — 완료) |
-| 정션·symlink 거부(`assertNoLinkEscape`)·`assertInsideRoot`(realpath, 8.3 이름, `.git`) | `link_guard::assert_no_link_escape`·`assert_inside_root` | 이번 PR 에 구현·시험(실제 정션·`GIT~1`). **호출은 로컬 저장소 한정 — untracked·unstaged 는 PR 6, 서브모듈 경로는 PR 3b** |
-| FilterGuard(`filter.<d>.*` 덮어쓰기, 이름의 `=` 거부) | `wip::FilterGuard` | 이번 PR(골든), `-c` 인자 소스 검사 시험은 PR 6 |
+| 정션·symlink 거부(`assertNoLinkEscape`)·`assertInsideRoot`(realpath, 8.3 이름, `.git`) | `link_guard::assert_no_link_escape`·`assert_inside_root` | 이번 PR 에 구현·시험(실제 정션·`GIT~1`). 호출은 로컬 저장소 한정 — untracked·unstaged 는 **PR 6 에서 완료**(`wip_file_diff`), 서브모듈 경로는 PR 3b |
+| FilterGuard(`filter.<d>.*` 덮어쓰기, 이름의 `=` 거부) | `wip::FilterGuard` | 이번 PR(골든), `-c` 인자 소스 검사 시험은 **PR 6 에서 완료** |
 
 - `link_guard` 는 TS 가 쓰는 두 사실을 실제로 확인하고 지었다(`link_guard.rs` 시험, 이 PC 의 NTFS): Rust `symlink_metadata` 가 정션(`mklink /J`)을 symlink 로 보고하고, `canonicalize` 가 8.3 `GIT~1` 을 긴 이름 `.git` 으로 편다(이 볼륨이 짧은 이름을 만들지 않으면 그 시험은 건너뛴다 — TS 의 `skipIf` 와 같다).
 - TS 보다 엄격한 곳: `assert_no_link_escape` 는 `.`·`..` 구성 요소를 어휘적으로 걷어 내지 않고 거부한다(TS 는 `path.join` 이 걷어 낸다), Windows 에서 `:` 가 든 구성 요소(드라이브 상대·대체 데이터 스트림)도 거부한다.
@@ -1576,6 +1576,89 @@ TS: `RepoService.ghRepo`·`ghRemotes`·`pushedShasByAuthor`·`invalidateGhRemote
 - 앱 시작 직후 미러가 채워지기 전의 질의는 사이드카가 답한다(미러는 사이드카가 ready 전에 보내 거의 닿지 않는 틈이다).
 - 이 PR 만으로 이중 연결이 사라지지는 않는다: `wipStatus`·`wipDiff`(PR 6)·RepoWatcher(PR 7b)·저장소 추가 흐름(6b)이 남아 있다.
 - URL 해석은 두 WHATWG 구현의 일치에 기댄다. 골든 137개가 같았지만 `url` 크레이트가 올라 규칙이 바뀌면 골든이 알려 준다(`UPDATE_GOLDEN` 으로 덮지 않고 원인을 본다).
+
+### PR 6 — `git:wipStatus`·`git:wipDiff`(앱에 연결한다 — 보안 리뷰 집중)
+
+`git:wipStatus(repoId, requestId?)`·`git:wipDiff(repoId, req, requestId?)` 를 Rust 가 처리한다(local·WSL·SSH 세 실행기 — 라우팅·미러·취소·envelope 는 앞 채널들과 같다). TS: `RepoService.wipStatus`·`wipDiff` + `src/main/git/wip.ts`·`linkGuard.ts`.
+소유 판정은 새로 만든 것이 없다 — 한 술어 `RepoMirror::resolve` 와 스위치 `ANTLER_RUST_GIT`·`ANTLER_RUST_SSH` 뿐이다(github 소스는 미러가 사이드카로 보낸다 — TS 의 빈 결과 분기는 옮기지 않았다).
+계획 문서의 PR 6 절은 #113·#114·#121·#122 이전 기준이라 틀린 곳이 있다(untracked 는 가드 없이 / `SAFE_FILTER_CMDS` 예외 / rc 1 은 항상 정상 / `-c` 는 fetch `run.rs` 뿐) — 이 PR 은 최신 `wip.ts` 를 따른다.
+
+| 파일 | 내용 |
+|---|---|
+| `git/wip.rs` | PR 1 의 `FilterGuard`·`assert_rel_path`·`validate_wip_diff_request` 아래에 git 호출을 더했다: `wip_status`·`wip_file_diff`·`WipDiffRequest::parse`·argv 빌더 `wip_status_args`·`wip_diff_args`·`pump`(스트림 읽기), `FilterGuardError` → `ExecError` 변환(`Config` 가 stderr 를 싣는다). 모듈 주석·`FilterGuard::none()` 주석이 #121 이전 기준("untracked 는 필터를 돌지 않는다")이라 고쳤다 |
+| `router.rs` | `RUST_CHANNELS` 에 두 채널, `git_wip_channel`·`wip_job`·`WipJob`, **untracked 허용 목록**(`Router::untracked_allow` — 저장소별 마지막 `wipStatus` 가 보고한 경로 + 그 상태를 읽은 대상) |
+| `git/file_channels.rs` | `DIFF_CHUNK` 가 `pub(crate)` 로 바뀌었다(스트림 읽기 청크 크기 공유) |
+
+| 채널 | git(상수 + 검증된 값) | 큐·합치기 | 취소 |
+|---|---|---|---|
+| `git:wipStatus` | `config -z --get-regexp ^filter\.`(종료 코드 1 = 빈 가드) → `<가드 -c…> status --porcelain=v2 -z --untracked-files=all --renames --ignore-submodules=all --`(스트림 → `WipStatusParser`, 추적 안 됨 5000 상한) | 같은 저장소의 진행 중 요청에 합류(키 `wip\0<id>`, 슬롯과 무관) → **첫 페이지 문** → 큐 슬롯 안에서 가드 조회 + status | 합친 요청은 기다리는 쪽이 모두 떠났을 때만 프로세스에 닿는다(`activity` 와 같다) |
+| `git:wipDiff` | 가드 조회 → 영역별(#124 의 plumbing): staged `<가드 -c…> diff-index -p --no-color --no-ext-diff --no-textconv --ignore-submodules=all --submodule=short -U3 --cached -M <HEAD|빈 트리> -- [old] path`(기준은 `rev-parse --verify --quiet HEAD^{commit}` 가 0 이면 `HEAD`, 아니면 SHA-1·SHA-256 빈 트리 중 `<해시>^{tree}` 가 풀리는 쪽) · unstaged `diff-files <같은 공통 인자> --no-renames -- path` · untracked `diff --no-color --no-ext-diff --no-textconv -U3 --no-index -- /dev/null path`(porcelain 그대로 — index 를 읽지 않는다) | 슬롯 하나(합치지 않는다·캐시 없다) | requestId 가 가드 조회와 diff 스트림 양쪽에 걸린다(`RunOpts::with_cancel`) |
+
+**순서(TS `wipFileDiff` 와 같다 — 바꾸면 오류 code 가 달라진다)**: 요청이 객체가 아니거나 area 가 허용 목록 밖 → `invalid area` → `path`(문자열이 아니면)·`oldPath`(있으면 — `null` 도)의 `assert_rel_path` → untracked 면 허용 목록과 정확히 일치 → unstaged 면 `~숫자` 구성 요소 거부
+(여기까지 `Error`, code ERROR, 큐·레지스트리·git 을 건드리지 않고 `rust_handled` 에도 세지 않는다) → 추적 안 되는 폴더(`dir/`)는 git 없이 빈 diff → **로컬 실행기만** `link_guard::assert_no_link_escape`(untracked 는 마지막 구성 요소가 링크여도 거부, unstaged 는 추적 중인 링크 파일만 허용 —
+실패는 `invalid path`, code ERROR) → `filter_overrides`(실패는 GIT) → diff 스트림.
+
+**보안 방어(TS 와 동등 이상 — 하나라도 빠지면 안 된다)와 그 증명** — 각 방어를 하나씩 빼고(임시 수정 → 해당 시험만 실행 → 원복. 제품 코드에 끄는 스위치를 넣지 않았다) 시험이 실패함을 확인했다:
+
+| 방어 | 구현 | 빼면 실패하는 시험 |
+|---|---|---|
+| ① 모든 작업 트리 읽기에 `filter_overrides` 가드를 전역 옵션 자리에. git-lfs 포함 전부 무력화, 무력화 불가면 UNSAFE_FILTER_MSG(GIT)로 작업 트리를 읽지 않는다 | `wip_status`·`wip_file_diff` 가 가드를 조회하고, argv 빌더(`wip_status_args`·`wip_diff_args`)가 `&FilterGuard` 를 필수 인자로 받아 **가드 없이는 만들 수 없다**(`--no-index` 는 `wip_diff_args` 한 곳) | status 만 빼면 `악성_저장소의_filter_는_…`(local·SSH)와 소스 검사. unstaged 만 빼도 · untracked 만 빼도 같은 시험이 표지 파일 생성으로 실패. 가드 조회 실패를 삼켜도(`unwrap_or_default`) 실패. `=` 거부를 빼도, git-lfs 예외를 넣어도 실패 |
+| ② untracked diff 는 마지막 `wipStatus` 가 보고한 경로와 **정확히** 일치. 없으면(wipStatus 전) 거부, 저장소가 미러에서 빠지거나 대상이 바뀌면 지운다 | `validate_wip_diff_request`(PR 1) + `Router::untracked_allow`(성공한 `wipStatus` 만 교체, 그 사이 저장소가 빠졌거나 바뀌었으면 기록하지 않는다) + `on_mirror_changed`·`shutdown` 의 정리 + 조회 때 대상 일치 | 접두 일치로 바꾸면 골든 시험(`dir` 이 열린다), 검사를 빼면 골든·`untracked_허용_목록은_…`, `on_mirror_changed` 의 정리를 빼도 · 대상 일치 검사를 빼도 `untracked_허용_목록은_…` 가 실패 |
+| ③ unstaged: `has_short_name_segment`(끝 점·공백을 벗긴 뒤 `~숫자`) 거부. **요청 경로(저장소 상대)에만** 건다 — 저장소 경로 자체의 `RUNNER~1` 은 보지 않는다 | `validate_wip_diff_request` | 빼면 골든 시험이 실패(`GIT~1/config`·`a/GIT~1./config`·`x\GIT~12\config` 가 거부 대신 열린다) |
+| ④ local 이면 열기 직전 `assert_no_link_escape`(untracked 는 링크 leaf 도 거부, unstaged 는 추적 중인 링크 파일만). git 의 `-C` 와 같은 비 verbatim 문자열을 넘긴다 | `wip_file_diff`(`spawn_blocking`) | 빼면 `정션_아래_경로는_…` 가 실패 — **`gitj/config` 의 untracked diff 가 실제 `.git/config` 내용(`[core]…`)을 돌려준다**(대조군: Git for Windows 의 `status -uall` 이 정션을 따라 들어가 그 경로를 보고한다) |
+| ⑤ rc 1 + 빈 출력은 오류, rc 1 + 출력은 untracked 에서만 정상 | `wip_file_diff` 의 `produced` | 항상 삼키면 골든(`gone.txt` — 허용 목록에는 있지만 지워진 파일)이 실패 |
+| ⑥ `-c` 인자는 `wip.rs` 밖에서 만들지 않는다 | 소스 검사 `c_인자는_wip_밖에서_만들지_않고_작업_트리_읽기는_가드를_필수로_받는다`: `src/` 의 비 시험 코드에서 `"-c` 접두 리터럴이 든 파일은 `git/exec/common.rs`(`GIT_GLOBAL_ARGS`)·`git/fetch/guard.rs`(`fetch_config_args`)·`git/wip.rs` 셋뿐(`jira/`·`github/` 는 git 과 무관해 제외), `FilterGuard::none()` 의 제품 코드 사용은 `wip.rs` 뿐, 가드를 읽는 곳은 `wip.rs::guarded`·`lfs.rs::no_index_args` 뿐, wip 의 git 호출 두 곳이 모두 `filter_overrides` 로 만든 가드의 argv 만 쓰고 링크 확인이 가드 조회보다 앞선다 | `router.rs` 에 `"-c"` 한 줄을 넣으면 실패 |
+
+PR 1 의 방어(이름의 `=`·잘못된 UTF-8·U+FFFD·256개/24000자 상한·git-lfs 예외 없음)는 `FilterGuard` 단위 시험이 맡고, 이 PR 은 실제 저장소로 확인한다(아래 시험).
+
+**#124 반영(WIP diff plumbing)**: 이 PR 을 main 의 #124 위로 rebase 하면서 `wip_diff_args` 를 TS `wipFileDiff` 와 바이트까지 같게 맞췄다. staged·unstaged 는 porcelain `git diff` 가 아니라 `diff-index --cached`·`diff-files` 다 — porcelain 은 stat 만 바뀐 파일이 있으면 index 를 **쓰고** `post-index-change` 훅을 실행하고, `diff.submodule=diff` + 인덱스엔 파일·작업 트리엔 중첩 저장소인 경로면 서브모듈 안에서 그 저장소의 `diff.external` 을 실행한다(docs/security.md). `wip_diff_args(guard, req, staged_base)` 가 기준을 인자로 받고(staged 만 쓴다), `staged_base` 가 TS `stagedBase` 와 같은 순서로 `HEAD`→빈 트리 해시를 고른다(둘 다 없으면 code 1 `빈 트리를 찾을 수 없습니다`). 가드 조회 뒤·diff 스트림 앞이다. 빈 이름 filter 거부(A)와 전역 인자 `-c diff.submodule=short -c submodule.recurse=false`(`exec/common.rs`)는 이미 들어 있었다. 출력 파서는 그대로다 — stat 만 바뀐 파일은 hunk 없이 나와 `hunks: []`·`binary: false` 다. 채널 골든(`wip.json`)은 TS 로 재생성해도 바뀌지 않았다(출력 동일). `channels.rs` 의 `작업_트리_diff_는_plumbing_이라_…`·`…_ssh_에서도_plumbing_이다` 가 A(빈 이름 filter)·B(서브모듈 `diff.external`)·C(`post-index-change` 훅·index 바이트 불변, 훅 파일은 유닉스에서 0o755)와 출력(unborn SHA-1·SHA-256·이름 변경)을 실제 저장소로 시험한다 — 표지는 임시 디렉터리 안에만 쓰고 시험마다 porcelain 대조군이 먼저 표지를 만드는지 확인한다. `tests/wipPlumbing.test.ts` 13개를 대응표에 넣었다(`golden6a` `TARGET_TESTS` 에 `wipPlumbing`, `RUST_SOURCES` 에 `common.rs`). 소스 검사 시험의 `wip_diff_args` 시그니처 단언도 새 인자로 갱신했다.
+**음성 대조**: `wip_diff_args` 를 임시로 porcelain 으로 되돌리면 C 시험이 실패한다(`wipDiff 가 post-index-change 훅을 실행했다`). B 는 이때 **실패하지 않는다** — 전역 인자 `-c diff.submodule=short` 가 저장소의 `diff.submodule=diff` 를 이미 덮기 때문이다(방어 심층). 전역 인자까지 임시로 `diff.submodule=diff` 로 바꾸면 B 도 실패한다(`wipDiff(unstaged) 가 중첩 저장소의 diff.external 을 실행했다`). 둘 다 원복했다.
+
+**골든**: `tests/fixtures/repos/wip.scenarios.json`(시나리오 8개·123단계, 결과 비교 83회 — `empty`·`basic` 저장소에 단계를 더한다)를 TS(`goldenChannels.test.ts` → `RepoService.wipStatus·wipDiff`)와 Rust(`channels.rs` → `Router::route`, local 과 루프백 SSH)가 같이 돌아 `tests/golden/channels/wip.json` 과 비교한다(SSH 는 끝에 `connections()==1`).
+단계 `{rm: 경로}`·`{bulk: [접두사, 개수]}` 를 새로 더했다(`{write}`·`{git}` 는 PR 5 가 만들었다). 경우: 상태와 영역별 diff(staged·unstaged·full·이름 변경·한글 경로·untracked·바이너리·MM)·**잘못된 요청 30개**(비객체·`null`·잘못된 area·경로 규칙·`oldPath: null`·허용 목록 밖·8.3 모양·옵션처럼 보이는 경로)·깨끗한 작업 트리·커밋 없는 저장소·
+허용 목록의 교체(지워진 파일은 GIT, 새 파일은 wipStatus 전까지 거부)·중첩 저장소(`nested/` 는 빈 diff)·추적 안 되는 파일 5001개(5000 상한 — git 정렬 순서상 마지막 하나가 목록에서 빠진다)·삭제·이름 변경. 오류는 code 만 비교하고 `msg: true` 인 검증 문구는 문구까지 비교한다.
+**넣지 않은 것**: 경로에 `:` 가 든 unstaged(`:(glob)*` 등) — Rust 의 링크 확인이 Windows local 에서 `:` 구성 요소를 거부해 결과가 TS·SSH 와 다르다(아래). 정션·8.3·저장소가 심은 filter 는 링크 확인이 local 전용이거나 결과가 아니라 "표지 명령이 실행되지 않았는가"가 관심사라 전용 시험이 맡는다.
+
+**그 밖의 시험**: `channels.rs` — `악성_저장소의_filter_는_작업_트리_채널이_실행하지_않는다`·`…_ssh_에서도_…`(경우 5개, 아래), `git_lfs_기본_filter_도_작업_트리_채널과_repo_extras_가_실행하지_않는다`·`lfs_저장소의_작업_중_변경은_포인터가_아닌_원본과_비교된다`(git-lfs 가 없으면 건너뛴다 — `lfsFilterExemption.test.ts` 대응),
+`필터_드라이버가_없으면_가드는_비어_있다`, `정션_아래_경로는_untracked_unstaged_diff_가_모두_거부하고_정상_파일은_열린다`·`짧은_이름으로_git_config_를_untracked_로_읽을_수_없다`(Windows 전용, 8.3 은 볼륨이 짧은 이름을 만들지 않으면 건너뛴다),
+`작업_트리_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카`, `적대적_wip_diff_요청은_git_을_띄우지_않는다`, `untracked_허용_목록은_저장소가_미러에서_빠지거나_대상이_바뀌면_지워진다`, `실패한_wip_status_는_허용_목록을_바꾸지_않는다`, `wip_status_는_첫_페이지_문이_열릴_때까지_기다리고_wip_diff_는_기다리지_않는다`,
+`같은_저장소의_wip_status_는_합쳐지고_한쪽_취소가_다른_쪽을_죽이지_않는다`, `등록_전에_온_cancel_은_작업_트리_요청을_git_없이_취소한다`, `진행_중_작업_트리_요청을_취소해도_멈추지_않는다`, 위 소스 검사. `wip.rs` 단위 — argv 가 TS 와 바이트까지 같음(status·diff 세 영역·가드 위치)·요청 파싱 순서와 문구·가드 오류의 모양·git-lfs 처럼 보이게 뒤에 명령을 붙인 값.
+`router.rs` 단위 `작업_트리_채널의_소유는_…`, `ssh_route.rs` 의 두 표에 두 채널이 더해졌다.
+**악성 저장소 시험의 경우 5개**(실제 저장소에 표지 명령 `sh -c "echo x > <임시>/MARK-…; cat"` 을 심은 `filter.<이름>.clean`; 시험마다 **대조군**으로 날 git 이 표지를 만듦을 먼저 확인한다 — 대조군이 실패하면 시험이 의미 없다): ① `required=true` 일반 드라이버 — status·staged·unstaged·untracked 모두 표지 없음·실패하지 않음·내용은 그대로,
+② git-lfs 이름의 드라이버에 뒤에 명령을 붙인 값(`git-lfs clean -- %f; echo x > …`), ③ 이름에 `=`(status·staged·unstaged 와 **untracked**(허용 목록을 먼저 받아 둔 뒤 심는다) 모두 GIT·UNSAFE 문구·표지 없음), ④ 이름이 잘못된 UTF-8(`\xff`)인 `.git/config` 의 드라이버,
+⑤ 이름에 셸 메타 문자·따옴표(`x;sh -c "echo y > '…'";$(echo z)` 따위)가 든 드라이버 — `-c` 값이 한 인자로 도착함(SSH 는 원격 셸을 한 번 거치므로 인용이 어긋나면 주입 표지가 생긴다)과 매칭되는 `evil` 드라이버도 막힘.
+
+**시험 실행**: `cargo test --features test-hooks` 를 바이너리마다 하나씩 — `--lib` 304개(새 것 6개: `wip` 5·`router` 1), `channels` 90개(새 것 19개), `golden` 2개, `ssh_route` 10개, `api_route` 23개 통과. clippy `--all-targets -D warnings` 는 feature 있음·없음 둘 다 통과. vitest 는 `golden6a`·`goldenChannels`·`wip`·`wipFilter`·`wipFilterNonUtf8`·`noIndexFilter`·`lfsFilterExemption` 7개 파일 64개 통과, `pnpm typecheck` 통과. 새 바이너리는 없다(CI 목록 그대로).
+
+**대응표**(`test-map.json`): `N/A: PR 6` 33개를 전부 Rust 대응으로 바꿨다 — `wip` 의 상태·diff·허용 목록 `it` 은 `channels.rs::작업_트리_시나리오가_ts_골든과_같다`(local·SSH), 충돌 항목 파서는 `golden.rs::rust_parsers_match_ts_golden`, 8.3·정션은 위 Windows 전용 시험, `RepoService` 의 허용 목록 `it` 은 `untracked_허용_목록은_…`,
+`wipFilter`·`wipFilterNonUtf8`(실제 저장소)·`noIndexFilter`(untracked 2개)는 `악성_저장소의_filter_는_작업_트리_채널이_실행하지_않는다`, git-lfs 값 두 `it` 와 `filterOverrides` 의 키 없음은 `wip.rs`·`필터_드라이버가_없으면_가드는_비어_있다`. 이 PR 뒤 `N/A: PR n` 은 7b(`repoWatcher`)·8 분만 남는다.
+`tests/lfsFilterExemption.test.ts` 는 대응표 대상이 **아니다**(`tests/golden6a.test.ts` `TARGET_TESTS` 에 없고, `describe.skipIf(...)` 라 `itKeys` 가 `describe` 제목을 읽지 못한다) — 그 `it` 5개의 Rust 대응(`git_lfs_기본_filter_도_…`·`lfs_저장소의_작업_중_변경은_…`)은 시험으로만 있고 표에는 없다.
+
+**TS 와 다른 점**
+- 요청이 객체가 아닐 때(`null`·문자열·배열·인자 없음) 문구는 TS 와 같은 `invalid area` 다(TS 는 `!req || !AREAS.has(req.area)`). 골든이 문구까지 고정한다.
+- 허용 목록이 **대상(경로·종류)과 함께** 저장된다 — 같은 id 의 대상이 바뀌면(미러가 바뀜) 낡은 목록을 쓰지 않고, 저장소가 미러에서 빠지면(TS `forgetWip` 은 저장소를 지울 때) 지운다. 성공한 `wipStatus` 가 끝났을 때 저장소가 이미 빠졌거나 바뀌었으면 기록하지 않는다(TS 는 이 경쟁에서 지운 저장소의 목록을 남긴다).
+- 링크 확인(`link_guard`)이 `.`·`..` 구성 요소와 Windows 의 `:` 가 든 구성 요소를 **거부한다**(TS `assertNoLinkEscape` 는 `path.join` 이 걷어 내고 `:` 는 보지 않는다 — PR 1 에서 이미 알린 차이). `assert_rel_path` 는 `.`·`:` 를 통과시키므로 닿을 수 있는 입력이다:
+  unstaged 의 `:(glob)*` 는 TS·SSH 에서 빈 diff(ok), Windows local Rust 에서는 `invalid path`(ERROR)다. 정상 파일 이름에는 `:` 가 없다(Windows 불가) — 실영향은 없다고 본다.
+- 큐 슬롯 **앞**에서 검증한다(TS 는 슬롯 안에서 던진다). 결과·code 는 같고, 거부된 요청이 슬롯을 기다리지 않는다.
+- 상한은 `file_diff` 와 같다(일반 8MB·full 64MB + Rust 의 줄 수 상한 — 위 "알려진 차이"). SSH 는 stream 이 16MB 선읽기를 넘으면 오류로 끝난다(`wipStatus` 의 `WipStatusParser`·`wipDiff` 의 `DiffParser`, 소비가 빨라 현실에서는 어렵다).
+
+**TS 에도 있는 구멍(보고만 한다 — 이번 PR 에서 고치지 않았다)**
+- `assert_rel_path` 의 `.git` 비교는 `.git.`·`.git `(끝 점·공백)을 막지 못한다. untracked 는 허용 목록과 `link_guard`(실제 경로로 편 뒤 `.git` 구성 요소를 비교)가 막는다고 보지만, **WSL·SSH 의 unstaged** 는 링크 확인이 없고 원격 git 이 그 경로를 어떻게 해석하는지 실측하지 않았다(Linux git 은 NTFS 이름 규칙을 따르지 않으므로 막을 대상이 아닐 수 있다).
+- PR 1 이 남긴 질문("링크 확인의 마지막 구성 요소 면제가 디렉터리 정션 자체에도 적용되는데, 조작된 index 로 그 경로의 unstaged diff 가 링크 안을 읽는가"): 임시 저장소에서 추적 중인 파일 `j` 를 지우고 `j` 를 밖을 가리키는 정션으로 바꾼 뒤 `git diff -- j` 를 돌려 봤다(git 2.49 windows) — `deleted file` 만 나오고 링크 안 파일은 읽지 않는다. 막혀 있다고 본다(실측 1회, 시험으로 고정하지 않았다).
+
+**사람 확인(자동화 불가·실환경)**
+- `pnpm tauri:build:cdp` 뒤 `ANTLER_ROUTE_LOG=1 ANTLER_DRIVE_DEBUG=1 node scripts/drive.mjs <저장소> --tauri …` 로 두 채널이 `-> rust` 인지 보고(WIP 패널 = 변경 파일 목록·스테이지·변경·추적 안 됨 diff), `ANTLER_RUST_GIT=0`(사이드카)·Electron 과 같은지 비교: 파일 저장 직후 목록 갱신, 추적 안 되는 파일·한글·공백 이름·이름 변경·바이너리 diff, 큰 untracked 파일의 "전체 보기".
+- 필터 차단을 앱 경로에서 한 번 더: 최소 재현 저장소(`.gitattributes` 에 `*.txt filter=evil` + `filter.evil.clean` 이 표식 파일을 만드는 명령, 같은 크기로 파일을 바꾸고 mtime 을 옮겨 clean 이 돌게 함)를 앱으로 열어 WIP 패널을 눌러도 표식이 생기지 않는지(Rust·사이드카). git-lfs 가 설치된 저장소에서 LFS 추적 파일이 "수정됨"으로 보이는 화면 영향(`docs/security.md`)이 사이드카·Electron 과 같은지.
+- Windows 에서 정션이 든 저장소(`mklink /J j .git`)를 열어 WIP 패널의 `j/config` 항목을 눌러도 `.git/config` 가 보이지 않는지(untracked·unstaged).
+- WSL 저장소·실제 sshd 의 SSH 저장소: 같은 WIP 패널, 호스트당 연결 하나(원격 `ss`/`who`). 이 PC 에는 WSL 이 없어 **WSL 은 실행해 보지 않았다**(필터 가드의 `-c` 값은 `wsl.exe` argv 에 한 인자로 실린다 — SSH 는 위 ⑤ 로 확인했고 WSL 은 `tests/exec.rs` 의 `wsl_통합` 이 배포판이 있을 때만 덮는다).
+- CI(windows-latest)의 TEMP 는 8.3 짧은 이름(`RUNNER~1`)이다: 이 PC 에서 TMP·TEMP 를 짧은 이름 경로(`…\1686F2~1\…`)로 바꿔 wip 관련 `channels` 시험 19개와 `link_guard`·`wip`·`refs_service` 단위 37개를 돌려 통과를 확인했다(저장소 경로 자체에 `~1` 이 있어도 `has_short_name_segment` 는 요청 경로에만 걸리고 `link_guard` 는 저장소 루트도 canonicalize 한다). 실제 CI 는 푸시 뒤 확인한다.
+
+**남은 위험**
+- WSL 미검증: 가드 `-c` 값(공백·따옴표·비 ASCII)이 한 인자로 도착하는지는 SSH 로 대신 봤을 뿐이다. WSL·SSH 에는 링크 확인이 없다(TS 와 같다 — Rust 가 그 파일 시스템을 볼 수 없고, Linux git 의 status 는 디렉터리 symlink 를 따라 들어가지 않는다는 가정은 **여전히 실측하지 않았다**).
+- 요청 취소 토큰이 `RunOpts` 로 프로세스에 직접 닿는 것은 시험으로 구별하지 못한다: 토큰을 `RunOpts` 에서 빼도(`RunOpts::default()`) 취소 시험이 통과한다 — 큐 슬롯이 이미 토큰으로 future 를 버려 프로세스가 정리되기 때문이다(이중 방어).
+- staged diff 는 필터를 돌지 않는다(`--cached` 는 인덱스 대 HEAD) — 가드를 staged 에서만 빼는 변이는 시험이 구별하지 못한다. TS 와 같게 모든 영역에 붙이되(소스 검사가 `guarded` 한 곳을 강제), 효과는 status·unstaged·untracked 에서만 증명했다.
+- 확인과 git 의 읽기 사이 경쟁(TOCTOU)은 막지 못한다(TS 와 같다). 정션이 순환하면(`mklink /J a .`) status 의 재귀가 길어지는 로컬 DoS 는 이 가드의 범위 밖이다.
+- `link_guard` 를 `spawn_blocking` 으로 부른다(실패·패닉은 모두 `invalid path` 로 기운다). 허용 목록은 저장소마다 집합 하나(5000 상한)를 메모리에 두고 저장소를 지우거나 종료하면 비운다.
 
 ## 설정·저장소 관리·env·external·github 원격 전용(Phase 6b)
 

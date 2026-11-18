@@ -21,6 +21,7 @@ const TARGET_TESTS = [
   'wip',
   'wipFilter',
   'wipFilterNonUtf8',
+  'wipPlumbing',
   'noIndexFilter',
   'hostileRepo',
   'submodule',
@@ -48,7 +49,8 @@ const RUST_SOURCES: Record<string, string> = {
   'refs_service.rs': '../src-tauri/src/git/refs_service.rs',
   'repo_state.rs': '../src-tauri/src/git/repo_state.rs',
   'search.rs': '../src-tauri/src/git/search.rs',
-  'wip.rs': '../src-tauri/src/git/wip.rs'
+  'wip.rs': '../src-tauri/src/git/wip.rs',
+  'common.rs': '../src-tauri/src/git/exec/common.rs'
 }
 
 describe('Phase 6a 이식 대응표', () => {

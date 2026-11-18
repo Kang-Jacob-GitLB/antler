@@ -1,0 +1,168 @@
+{
+  "_": "git:wipStatus·git:wipDiff 채널 패리티 시나리오. TS(tests/goldenChannels.test.ts → RepoService.wipStatus·wipDiff)와 Rust(src-tauri/tests/channels.rs → Router::route)가 시나리오마다 <repo>.fi 를 새 디렉터리에 import 해 steps 를 순서대로 돈다(Rust 는 같은 시나리오를 루프백 SSH 서버 너머에서 한 번 더). 단계: { git: [인자…] }(그 저장소에서 날 git 실행 — 작성자·시각은 고정 환경), { write: [저장소 기준 경로, 내용] }(디렉터리를 만들고 파일을 쓴다), { rm: 경로 }(파일을 지운다), { bulk: [접두사, 개수] }(`<접두사><i>` 파일을 개수만큼 만든다 — 내용은 i), { wipStatus: true }, { wipDiff: 요청 }(요청은 git:wipDiff 의 인자 그대로 — null 이면 null, requestId 는 하네스가 붙인다). msg: true 면 ERROR 의 문구도 비교한다(검증이 만든 문구만). 수정한 파일은 크기가 바뀌게 쓴다(같은 크기·같은 시각이면 git 이 stat 캐시로 변경을 놓친다 — racy-git). 결과는 tests/golden/channels/wip.json. wipStatus 결과의 untracked 가 20개를 넘으면 {count, first, last} 로, wipDiff 의 hunk 줄이 40개를 넘으면 {count, first, last} 로 줄여 비교한다. 정션·8.3 짧은 이름·저장소가 심은 filter 는 골든이 아니라 channels.rs 의 전용 시험이 맡는다(링크 확인은 local 만이라 SSH 에서 같은 결과가 아니다). 경로에 ':' 가 든 unstaged(`:(glob)*` 등)는 넣지 않는다 — Rust 의 링크 확인(Windows local)이 `:` 구성 요소를 TS 보다 엄격히 거부해 local 결과가 TS·SSH 와 다르다(docs/tauri.md PR 6 \"TS 와 다른 점\").",
+  "scenarios": [
+    {
+      "name": "작업 트리 상태와 영역별 diff",
+      "repo": "empty",
+      "steps": [
+        { "write": ["a.txt", "one\ntwo\nthree\n"] },
+        { "write": ["staged me.txt", "x\n"] },
+        { "write": ["old name.ts", "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9\nline 10\nline 11\nline 12\nline 13\nline 14\nline 15\nline 16\nline 17\nline 18\nline 19\n"] },
+        { "write": ["docs/한글 문서.md", "안녕\n"] },
+        { "write": ["both.txt", "b1\n"] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "init"] },
+        { "write": ["a.txt", "one\nTWO\nthree\nfour\n"] },
+        { "write": ["staged me.txt", "x\ny\n"] },
+        { "git": ["add", "staged me.txt"] },
+        { "git": ["mv", "old name.ts", "new name.ts"] },
+        { "write": ["docs/한글 문서.md", "안녕\n하세요\n"] },
+        { "write": ["both.txt", "b1\nb2\n"] },
+        { "git": ["add", "both.txt"] },
+        { "write": ["both.txt", "b1\nb2\nb3\n"] },
+        { "write": ["untracked 파일.txt", "u1\nu2\n"] },
+        { "write": ["dir/nested/deep.txt", "deep\n"] },
+        { "write": ["bin.dat", "\u0000\u0001\u0002\u0003\u0000"] },
+        { "wipDiff": { "area": "untracked", "path": "untracked 파일.txt" }, "msg": true },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "unstaged", "path": "a.txt" } },
+        { "wipDiff": { "area": "unstaged", "path": "a.txt", "full": true } },
+        { "wipDiff": { "area": "staged", "path": "both.txt" } },
+        { "wipDiff": { "area": "unstaged", "path": "both.txt" } },
+        { "wipDiff": { "area": "staged", "path": "new name.ts", "oldPath": "old name.ts" } },
+        { "wipDiff": { "area": "staged", "path": "staged me.txt", "oldPath": "staged me.txt" } },
+        { "wipDiff": { "area": "unstaged", "path": "docs/한글 문서.md" } },
+        { "wipDiff": { "area": "untracked", "path": "untracked 파일.txt" } },
+        { "wipDiff": { "area": "untracked", "path": "dir/nested/deep.txt" } },
+        { "wipDiff": { "area": "untracked", "path": "bin.dat" } },
+        { "wipDiff": { "area": "untracked", "path": "a.txt" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "UNTRACKED 파일.txt" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "dir" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "dir/nested/../nested/deep.txt" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "GIT~1/config" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "git~1\\config" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "GIT~1/config" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "a/GIT~1./config" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "x\\GIT~12\\config" }, "msg": true }
+      ]
+    },
+    {
+      "name": "잘못된 요청은 거부한다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "wipStatus": true },
+        { "wipDiff": null, "msg": true },
+        { "wipDiff": "x", "msg": true },
+        { "wipDiff": 5, "msg": true },
+        { "wipDiff": [], "msg": true },
+        { "wipDiff": {}, "msg": true },
+        { "wipDiff": { "area": 5, "path": "a.txt" }, "msg": true },
+        { "wipDiff": { "area": "nope", "path": "a.txt" }, "msg": true },
+        { "wipDiff": { "area": "nope", "path": "../x" }, "msg": true },
+        { "wipDiff": { "area": "Staged", "path": "a.txt" }, "msg": true },
+        { "wipDiff": { "area": "staged" }, "msg": true },
+        { "wipDiff": { "area": "staged", "path": null }, "msg": true },
+        { "wipDiff": { "area": "staged", "path": 5 }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "a\u0000b" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "../outside.txt" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "a/../../outside.txt" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "../outside.txt" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "C:\\Windows\\win.ini" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "/etc/passwd" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "\\\\host\\share\\x" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": ".git/config" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": ".GIT/config" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "a/.git/config" }, "msg": true },
+        { "wipDiff": { "area": "staged", "path": "a.txt", "oldPath": null }, "msg": true },
+        { "wipDiff": { "area": "staged", "path": "a.txt", "oldPath": 5 }, "msg": true },
+        { "wipDiff": { "area": "staged", "path": "a.txt", "oldPath": "../x" }, "msg": true },
+        { "wipDiff": { "area": "staged", "path": "a.txt", "oldPath": ".git/config" }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": { "$": 1 } }, "msg": true },
+        { "wipDiff": { "area": "unstaged", "path": "-c" } },
+        { "wipDiff": { "area": "unstaged", "path": "--output=pwned.txt" } }
+      ]
+    },
+    {
+      "name": "깨끗한 작업 트리",
+      "repo": "basic",
+      "steps": [{ "git": ["checkout", "-q", "-f", "main"] }, { "wipStatus": true }]
+    },
+    {
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "repo": "empty",
+      "steps": [
+        { "wipStatus": true },
+        { "write": ["a.txt", "first\n"] },
+        { "write": ["b.txt", "second\n"] },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "untracked", "path": "a.txt" } },
+        { "git": ["add", "a.txt"] },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "staged", "path": "a.txt" } },
+        { "wipDiff": { "area": "untracked", "path": "b.txt" } },
+        { "wipDiff": { "area": "untracked", "path": "a.txt" }, "msg": true }
+      ]
+    },
+    {
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "repo": "empty",
+      "steps": [
+        { "write": ["gone.txt", "bye\n"] },
+        { "write": ["stay.txt", "stay\n"] },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "untracked", "path": "gone.txt" } },
+        { "rm": "gone.txt" },
+        { "wipDiff": { "area": "untracked", "path": "gone.txt" } },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "untracked", "path": "gone.txt" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "stay.txt" } },
+        { "write": ["late.txt", "late\n"] },
+        { "wipDiff": { "area": "untracked", "path": "late.txt" }, "msg": true },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "untracked", "path": "late.txt" } }
+      ]
+    },
+    {
+      "name": "중첩 저장소(폴더 항목)는 빈 diff 다",
+      "repo": "empty",
+      "steps": [
+        { "git": ["init", "-q", "nested"] },
+        { "write": ["nested/x.txt", "inner\n"] },
+        { "write": ["top.txt", "top\n"] },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "untracked", "path": "nested/" } },
+        { "wipDiff": { "area": "untracked", "path": "nested" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "nested/x.txt" }, "msg": true },
+        { "wipDiff": { "area": "untracked", "path": "top.txt" } }
+      ]
+    },
+    {
+      "name": "추적 안 되는 파일은 5000개까지만 담고 나머지는 개수로 알린다(git 의 정렬 순서상 마지막 하나가 목록에서 빠진다)",
+      "repo": "empty",
+      "steps": [{ "bulk": ["bulk/f", 5001] }, { "wipStatus": true }, { "wipDiff": { "area": "untracked", "path": "bulk/f0" } }, { "wipDiff": { "area": "untracked", "path": "bulk/f999" }, "msg": true }]
+    },
+    {
+      "name": "이름 변경·삭제·타입이 다른 변경과 공백·한글 경로",
+      "repo": "empty",
+      "steps": [
+        { "write": ["gone.txt", "to delete\n"] },
+        { "write": ["폴더 이름/파일 이름.txt", "가\n나\n"] },
+        { "write": ["keep.txt", "k\n"] },
+        { "git": ["add", "-A"] },
+        { "git": ["commit", "-q", "-m", "init"] },
+        { "rm": "gone.txt" },
+        { "write": ["폴더 이름/파일 이름.txt", "가\n나\n다\n"] },
+        { "git": ["mv", "keep.txt", "kept.txt"] },
+        { "write": ["kept.txt", "k\nk2\n"] },
+        { "wipStatus": true },
+        { "wipDiff": { "area": "unstaged", "path": "gone.txt" } },
+        { "wipDiff": { "area": "unstaged", "path": "폴더 이름/파일 이름.txt" } },
+        { "wipDiff": { "area": "staged", "path": "kept.txt", "oldPath": "keep.txt" } },
+        { "wipDiff": { "area": "unstaged", "path": "kept.txt" } },
+        { "wipDiff": { "area": "unstaged", "path": "nothing/here.txt" } }
+      ]
+    }
+  ]
+}

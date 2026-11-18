@@ -21,8 +21,10 @@
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
-//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote)·`git::refs_service`(refs·refsDetails — 인자가 저장소 id 뿐)·`git::search`·`git::activity`(search·activity — 질의는 `--grep=`·`--author=` 접두가 붙은 한 인자) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
+//! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote)·`git::refs_service`(refs·refsDetails — 인자가 저장소 id 뿐)·`git::search`·`git::activity`(search·activity — 질의는 `--grep=`·`--author=` 접두가 붙은 한 인자)·
+//!   `git::lfs`(repoExtras·lfsPaths)·`git::wip`(wipStatus·wipDiff — 작업 트리를 읽으므로 저장소의 filter 드라이버를 무력화하는 `-c` 가드가 전역 옵션 자리에 붙는다) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
 //!   파일 경로는 항상 `--` 뒤(blame 의 크기 조회·코드 탐색기의 `cat-file`·`ls-tree` 만 `<해시>:<경로>` 한 인자)다. 이 파일은 인자를 만들지 않는다.
+//! - untracked `wipDiff` 는 저장소별 마지막 `wipStatus` 가 보고한 경로와 **정확히 일치**할 때만 연다([`Router`] 의 허용 목록 — 저장소가 미러에서 빠지면 지운다).
 //! - 취소: `requestId → CancellationToken` 레지스트리. cancel 이 등록보다 먼저 도착해도(별개 호출이라 순서가 보장되지 않는다)
 //!   tombstone 이 기억했다가 등록 때 이미 취소된 토큰을 준다.
 //!
@@ -58,7 +60,9 @@ use crate::git::repo_state::{RepoState, SigError};
 use crate::github::ports::GhRepoRef;
 use crate::github::remote_url::{pick_github_remote, pick_github_remotes, Remote};
 use crate::git::search::{search, SearchRequest};
+use crate::git::parsers::wip_status::WIP_UNTRACKED_LIMIT;
 use crate::git::signature::{refs_signature_digest, Signature};
+use crate::git::wip::{wip_file_diff, wip_status, WipDiffRequest};
 use crate::mirror::{RepoMirror, Resolved, Target};
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
@@ -83,6 +87,8 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:lfsPaths",
     // `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 다른 git 채널과 같은 소유 술어를 쓴다(Phase 6a PR 8). github kind·미러에 없는 id 는 사이드카가 답한다
     "gh:repo",
+    "git:wipStatus",
+    "git:wipDiff",
 ];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
@@ -219,6 +225,17 @@ enum HistoryJob {
 enum ExtrasJob {
     Extras,
     LfsPaths(LfsPathsRequest),
+}
+/// 검증을 마친 `git:wipStatus`·`git:wipDiff` 요청
+enum WipJob {
+    Status,
+    Diff(WipDiffRequest),
+}
+
+/// 저장소 하나의 untracked diff 허용 목록: 마지막 `wipStatus` 가 보고한 경로와, 그 상태를 읽은 대상(경로·종류). 대상이 바뀐 저장소의 낡은 목록은 쓰지 않는다
+struct AllowEntry {
+    target: Target,
+    paths: Arc<HashSet<String>>,
 }
 
 fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ExecError> {
@@ -420,8 +437,10 @@ pub struct Router {
     /// 슬롯과 무관하게 같은 키의 진행 중 요청을 합치는 큐(TS `RepoService.shared`). 슬롯을 쥔 채 시그니처의 슬롯을 기다리지 않도록 소스의 큐와 분리한다
     joins: ProcessQueue<Arc<Value>>,
     logs: LogService,
-    /// 첫 페이지 문·ref 시그니처 저장소(Phase 6a PR 3a). 소비자: refsDetails(문)·activity(문·시그니처). wipStatus·감시는 뒤 PR 에서 온다
+    /// 첫 페이지 문·ref 시그니처 저장소(Phase 6a PR 3a). 소비자: refsDetails(문)·activity(문·시그니처)·wipStatus(문). 감시는 뒤 PR 에서 온다
     repo_state: RepoState,
+    /// 저장소별 untracked diff 허용 목록(TS `untrackedAllow`). `wipStatus` 가 끝나면 교체하고, 미러에서 빠졌거나 대상이 바뀐 저장소는 `on_mirror_changed` 가 지운다. 없으면 untracked diff 는 거부다
+    untracked_allow: Arc<Mutex<HashMap<String, AllowEntry>>>,
     /// 앱이 단 사이드카 알림 싱크. 상태에 먼저 반영한 뒤 부른다(`note_sink`)
     user_sink: Arc<Mutex<Option<NoteSink>>>,
     rust_handled: AtomicU64,
@@ -473,6 +492,7 @@ impl Router {
             joins: ProcessQueue::new(JOIN_SLOTS),
             logs,
             repo_state,
+            untracked_allow: Arc::default(),
             user_sink,
             rust_handled: AtomicU64::new(0),
             fetch: Mutex::default(),
@@ -647,6 +667,8 @@ impl Router {
         // Launchpad 의 remote 목록은 통째로 비운다 — `repos:update` 무효화(route 시점)와 미러 반영(비동기) 사이에 옛 경로로 채운 항목이
         // 소유만 보는 retain 으로는 남는다(10분 캐시라 다시 채우는 비용이 작다)
         self.invalidate_gh_remotes(None);
+        // 미러에서 빠졌거나 Rust 가 맡지 않게 됐거나 대상이 바뀐 저장소의 untracked diff 허용 목록을 버린다(TS `forgetWip` — 저장소를 지울 때)
+        self.untracked_allow.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, entry| matches!(self.mirror.resolve(id), Resolved::Rust(t) if t == entry.target));
         // 사라졌거나 Rust 가 맡지 않게 된 저장소의 fetch 상태를 비운다
         if let Some(service) = self.fetch_port() {
             service.sync_mirror();
@@ -671,6 +693,7 @@ impl Router {
         self.activity_cache.lock().unwrap_or_else(PoisonError::into_inner).clear();
         self.invalidate_gh_remotes(None);
         self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        self.untracked_allow.lock().unwrap_or_else(PoisonError::into_inner).clear();
         // SSH 연결을 닫는다(런타임 밖 스레드면 정중한 해제 메시지는 보내지 못하고 연결만 버린다 — 프로세스가 끝나며 소켓이 닫힌다)
         if let Some(pool) = self.ssh_pool() {
             pool.dispose_all();
@@ -776,6 +799,7 @@ impl Router {
             "git:search" | "git:activity" => self.git_history_channel(channel, &args).await,
             "git:repoExtras" | "git:lfsPaths" => self.git_extras_channel(channel, &args).await,
             "gh:repo" => self.gh_repo_channel(&args).await,
+            "git:wipStatus" | "git:wipDiff" => self.git_wip_channel(channel, &args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -1349,6 +1373,82 @@ impl Router {
         }
     }
 
+    /// 작업 트리 채널: `git:wipStatus(repoId, requestId?)`·`git:wipDiff(repoId, req, requestId?)`. 소유는 다른 git 채널과 같은 한 술어(`mirror.resolve`)다(github 소스는 미러가 사이드카로 보낸다 —
+    /// TS 의 빈 결과 분기는 옮기지 않는다). `wipDiff` 의 요청 검증은 untracked 허용 목록을 보므로 이 라우터가 목록을 쥔 채로 하고(실패하면 git·레지스트리를 건드리지 않는다),
+    /// 통과한 값만 `git::wip` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다
+    async fn git_wip_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note(channel, "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        let (job, request_id) = if channel == "git:wipStatus" {
+            (WipJob::Status, 1)
+        } else {
+            let allow = self.untracked_allow.lock().unwrap_or_else(PoisonError::into_inner).get(repo_id.as_str()).filter(|e| e.target == target).map(|e| e.paths.clone());
+            match WipDiffRequest::parse(args.get(1).copied().flatten(), allow.as_deref()) {
+                Ok(req) => (WipJob::Diff(req), 2),
+                Err(message) => return Routed::Done(err_env(message, "ERROR")),
+            }
+        };
+        // 등록은 첫 await 전에 한다. 빈 문자열은 requestId 없음이다
+        let reg = match args.get(request_id) {
+            Some(Some(Value::String(id))) if is_request_id(id) => Some(self.cancels.register(id)),
+            _ => None,
+        };
+        let token = reg.as_ref().map_or_else(CancellationToken::new, |r| r.token.clone());
+        self.note(channel, "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        let result = self.wip_job(repo_id, &target, job, &token).await;
+        drop(reg);
+        Routed::Done(match result {
+            Ok(data) => ok_env(Arc::try_unwrap(data).unwrap_or_else(|a| (*a).clone())),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    /// 작업 트리 한 요청. 캐시는 없다(파일 저장만으로 바뀐다).
+    /// - 상태(TS `RepoService.wipStatus`): 같은 저장소의 진행 중 요청에 합류(키 `wip\0<id>`, 슬롯과 무관) → 첫 페이지 문 → 큐 슬롯 안에서 가드 조회 + `git status`. 합친 요청의 취소는 기다리는 쪽이 모두 떠났을 때만 프로세스에 닿는다.
+    ///   **성공했을 때만** untracked 허용 목록을 이 저장소의 보고 결과로 바꾼다(실패·취소는 이전 목록을 그대로 둔다 — TS 와 같다). 그 사이 저장소가 미러에서 빠졌거나 대상이 바뀌었으면 기록하지 않는다
+    /// - diff(TS `RepoService.wipDiff`): 합치지 않고 큐 슬롯 하나, 취소는 이 요청의 프로세스(가드 조회와 diff 모두)에 바로 닿는다
+    async fn wip_job(&self, repo_id: &str, target: &Target, job: WipJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+        let rt = self.runtime(target)?;
+        let (exec, path) = (rt.exec.clone(), target.path().to_string());
+        match job {
+            WipJob::Diff(req) => {
+                let t = token.clone();
+                rt.queue.run(None, Some(token.clone()), move || async move { Ok(Arc::new(to_value(&wip_file_diff(&exec, &path, &req, &RunOpts::with_cancel(t)).await?)?)) }).await
+            }
+            WipJob::Status => {
+                let (state, queue, allow, mirror) = (self.repo_state.clone(), rt.queue.clone(), self.untracked_allow.clone(), self.mirror.clone());
+                let (repo, target) = (repo_id.to_string(), target.clone());
+                let join_key = format!("wip\0{repo_id}");
+                let run = self.joins.run(Some(&join_key), None, move || async move {
+                    state.after_first_page(&repo).await;
+                    queue
+                        .run(None, None, move || async move {
+                            let status = wip_status(&exec, &path, &RunOpts::default(), WIP_UNTRACKED_LIMIT).await?;
+                            if matches!(mirror.resolve(&repo), Resolved::Rust(t) if t == target) {
+                                let paths = Arc::new(status.untracked.iter().cloned().collect::<HashSet<String>>());
+                                allow.lock().unwrap_or_else(PoisonError::into_inner).insert(repo, AllowEntry { target, paths });
+                            }
+                            Ok(Arc::new(to_value(&status)?))
+                        })
+                        .await
+                });
+                tokio::select! {
+                    biased;
+                    () = token.cancelled() => Err(ExecError::Aborted),
+                    r = run => r,
+                }
+            }
+        }
+    }
+
     async fn history_job(&self, repo_id: &str, target: &Target, job: HistoryJob, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
         let rt = self.runtime(target)?;
         let (exec, path) = (rt.exec.clone(), target.path().to_string());
@@ -1672,6 +1772,25 @@ mod tests {
         let r = Router::new(true, false, m.clone());
         let off = Router::new(false, false, m);
         for (ch, tail) in [("git:repoExtras", json!([])), ("git:lfsPaths", json!([{ "paths": ["a"] }]))] {
+            assert!(RUST_CHANNELS.contains(&ch), "{ch}");
+            let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
+            for id in ["nope", "s", "g"] {
+                assert!(is_sidecar(&r.route(ch, &call(id)).await), "{id} {ch}");
+            }
+            assert!(is_sidecar(&off.route(ch, &call("a")).await), "{ch}");
+            let env = envelope(r.route(ch, &call("unc")).await);
+            assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+        }
+        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+    }
+
+    /// 작업 트리 채널의 소유도 같은 한 술어다 — 사이드카에는 이 채널의 소유 env 가 없다
+    #[tokio::test]
+    async fn 작업_트리_채널의_소유는_다른_git_채널과_같은_한_술어다() {
+        let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
+        let r = Router::new(true, false, m.clone());
+        let off = Router::new(false, false, m);
+        for (ch, tail) in [("git:wipStatus", json!([])), ("git:wipDiff", json!([{ "area": "unstaged", "path": "a.txt" }]))] {
             assert!(RUST_CHANNELS.contains(&ch), "{ch}");
             let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
             for id in ["nope", "s", "g"] {

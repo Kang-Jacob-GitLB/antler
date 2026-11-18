@@ -25,6 +25,7 @@ import { knownHostsLine, makeHome, newKeyPair, startServer, type TestServer } fr
 //  - tests/golden/channels/{search,activity}.json: 검색·활동 채널 시나리오(tests/fixtures/repos/search.scenarios.json — 다단계: 저장소 조작 뒤 조회. 악성 질의·범위·해시 갈래·스태시 같은 닿지 않는 커밋을 포함한다)
 //  - tests/golden/channels/{repoExtras,lfsPaths}.json: LFS·gitflow 채널 시나리오(tests/fixtures/repos/extras.scenarios.json — 다단계: 저장소·작업 트리·info/attributes·설정 조작 뒤 조회. 요청 검증·묶음·1000개 상한을 포함한다)
 //  - tests/golden/channels/{ghRepo,ghRemotes,pushedShas}.json: remote 추론(gh:repo)·모든 GitHub remote(Launchpad)·push 된 커밋(아바타) 시나리오(tests/fixtures/repos/remotes.scenarios.json — 다단계: remote·커밋 조작 뒤 조회. 캐시 동작을 포함한다)
+//  - tests/golden/channels/wip.json: 작업 트리 채널 시나리오(tests/fixtures/repos/wip.scenarios.json — 다단계: 파일 쓰기·git 뒤 wipStatus·wipDiff. untracked diff 허용 목록·검증 문구를 포함한다. 정션·8.3·저장소가 심은 filter 는 Rust 전용 시험이 맡는다)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 //  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
@@ -677,6 +678,82 @@ describe('remote 조회 채널 골든(channels/{ghRepo,ghRemotes,pushedShas}.jso
       await svc.dispose()
     }
     for (const channel of ['ghRepo', 'ghRemotes', 'pushedShas'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
+  }, 180_000)
+})
+
+// ── 작업 트리: git:wipStatus · git:wipDiff ────────────────
+
+type WipStep = { git: string[] } | { write: [string, string] } | { rm: string } | { bulk: [string, number] } | { wipStatus: true } | { wipDiff: unknown; msg?: boolean }
+interface WipScenario {
+  name: string
+  repo: string
+  steps: WipStep[]
+}
+
+/** wipStatus 결과의 untracked 가 20개를 넘으면 {count, first, last} 로 줄인다. Rust 테스트(channels.rs 의 `summarize_wip_status`)도 같은 규칙이다 */
+function summarizeWipStatus(data: Record<string, unknown>): Record<string, unknown> {
+  const u = data['untracked'] as string[]
+  return u.length > 20 ? { ...data, untracked: { count: u.length, first: u[0], last: u[u.length - 1] } } : data
+}
+
+describe('작업 트리 채널 골든(channels/wip.json)', () => {
+  const scenarios = (JSON.parse(readFileSync(join(FIXTURES, 'wip.scenarios.json'), 'utf8')) as { scenarios: WipScenario[] }).scenarios
+  let root: string
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, ...REFS_STEP_ENV, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chanwip-'))
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const out: unknown[] = []
+    for (const [si, sc] of scenarios.entries()) {
+      const dir = join(root, `s${si}`)
+      mkdirSync(dir)
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${sc.repo}.fi`)))
+      const config = new ConfigStore(join(root, `s${si}.config.json`))
+      const id = config.addRepo({ sourceId: 'local', path: dir, name: sc.repo }).id
+      const svc = new RepoService(config)
+      for (const [i, step] of sc.steps.entries()) {
+        if ('git' in step) {
+          git(dir, step.git)
+          continue
+        }
+        if ('write' in step) {
+          mkdirSync(dirname(join(dir, step.write[0])), { recursive: true })
+          writeFileSync(join(dir, step.write[0]), step.write[1])
+          continue
+        }
+        if ('rm' in step) {
+          rmSync(join(dir, step.rm))
+          continue
+        }
+        if ('bulk' in step) {
+          const [prefix, n] = step.bulk
+          mkdirSync(dirname(join(dir, prefix)), { recursive: true })
+          for (let k = 0; k < n; k++) writeFileSync(join(dir, `${prefix}${k}`), `${k}\n`)
+          continue
+        }
+        let result: Record<string, unknown>
+        let args: unknown = null
+        try {
+          if ('wipStatus' in step) {
+            result = { ok: true, data: summarizeWipStatus(JSON.parse(JSON.stringify(await svc.wipStatus(id, `req-${si}-${i}`))) as Record<string, unknown>) }
+          } else {
+            args = step.wipDiff
+            result = { ok: true, data: summarizeDiff(JSON.parse(JSON.stringify(await svc.wipDiff(id, step.wipDiff as never, `req-${si}-${i}`))) as Record<string, unknown>) }
+          }
+        } catch (err) {
+          result = { ok: false, code: codeOf(err), ...('msg' in step && step.msg ? { error: (err as Error).message } : {}) }
+        }
+        out.push({ name: sc.name, step: i, ...('wipDiff' in step ? { args } : {}), result })
+      }
+      await svc.dispose()
+    }
+    check(join(GOLDEN_DIR, 'channels', 'wip.json'), stable({ scenarios: out }))
   }, 180_000)
 })
 

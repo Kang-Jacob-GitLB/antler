@@ -38,8 +38,8 @@ pub const FILE_HISTORY_MAX_SKIP: f64 = 100_000.0;
 /// 이보다 큰 파일은 blame 하지 않는다
 pub const BLAME_MAX_BYTES: f64 = 512.0 * 1024.0;
 const BLAME_MAX_BUFFER: usize = 128 * 1024 * 1024;
-/// diff 스트림을 읽는 청크 크기(파서 결과는 청크 경계와 무관하다 — 골든이 1·3·7·4096 바이트 분할로 확인한다)
-const DIFF_CHUNK: usize = 64 * 1024;
+/// diff 스트림을 읽는 청크 크기(파서 결과는 청크 경계와 무관하다 — 골든이 1·3·7·4096 바이트 분할로 확인한다). `wip` 의 스트림 읽기도 같은 값이다
+pub(crate) const DIFF_CHUNK: usize = 64 * 1024;
 
 fn other(message: &str) -> ExecError {
     ExecError::Other { message: message.to_string() }
