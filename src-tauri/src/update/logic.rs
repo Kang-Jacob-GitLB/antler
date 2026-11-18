@@ -174,7 +174,8 @@ fn clean_version(raw: &str) -> Option<&str> {
         return None;
     }
     let v = strip_v(raw);
-    parse_semver(v).map(|_| v)
+    // `vv1.0.0` 처럼 v 가 둘이면 거부한다(`parse_semver` 가 한 번 더 떼므로 그대로 두면 `v1.0.0` 이 버전으로 새어 나간다)
+    (!v.starts_with('v') && parse_semver(v).is_some()).then_some(v)
 }
 
 // ── URL 허용 목록 ────────────────────────────────────────────────────
@@ -234,7 +235,7 @@ pub struct ManifestOffer {
 /// - `Err`: 본문이 너무 크거나 JSON·필드가 올바르지 않다. 새 버전일 때만 플랫폼 항목을 검사한다
 ///
 /// 플랫폼 항목은 `windows-x86_64-nsis` 를 먼저 보고, **키 자체가 없을 때만** `windows-x86_64` 로 내려간다(있는데 틀린 항목은 오류다).
-/// `url` 은 [`is_release_asset_url`] 을 통과하고, **버전의 태그 아래**(`…/releases/download/v<버전>/<파일>`)여야 한다 — 새 버전 번호에 다른 릴리스의 설치본을 붙이는 매니페스트를 거부한다.
+/// `url` 은 [`is_release_asset_url`] 을 통과하고, **버전의 태그 아래**(`…/releases/download/v<버전>/<파일>`)여야 한다 — 매니페스트 생성 실수를 거른다(롤백 방어가 아니다: 옛 서명 설치본을 새 태그에 다시 올리는 경우는 PR 4 의 서명 버전 결속만 막는다).
 /// 서명은 형식만 본다(실제 검증은 설치 직전 minisign). 매니페스트의 `notes` 등 다른 필드는 쓰지 않는다
 pub fn check_manifest(text: &str, current: &str) -> Result<Option<ManifestOffer>, String> {
     if text.len() > MAX_MANIFEST_BYTES {

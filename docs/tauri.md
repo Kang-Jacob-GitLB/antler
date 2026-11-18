@@ -1986,7 +1986,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 - `UpdatePolicy` 의 건너뛴 값 전달 방식(위). `check_manifest`·`prerelease_manifest_url`·`is_safe_file_name` 의 태그 결속은 TS 에 없다.
 
 **남은 위험**(PR 4 로 넘긴다)
-- `net::json` 은 중복 키를 JS 처럼 마지막 값으로 합치는데, PR 4 가 원문을 플러그인(`Updater::restore_update`)에 넘기면 플러그인의 `serde` 파서는 다르게 읽을 수 있다(중복 `url`·`signature`). 검사한 값(`ManifestOffer`)에서 **원문을 다시 만들어** 넘기거나 중복 키를 거부해야 한다.
+- **PR 4 연결 계약(보안 리뷰)**: 플러그인(`tauri-plugin-updater` 2.14.1)은 `bundle_type()` 이 NSIS 일 때만 `-nsis` 키를 보고, 표식이 없는 빌드는 `windows-x86_64` 만 본다 — 원문 매니페스트를 그대로 넘기면 `check_manifest` 가 검사한 항목과 플러그인이 설치할 항목이 다를 수 있다. 그래서 **검사를 통과한 `ManifestOffer` 로 고른 키 하나만 담은 JSON 을 다시 만들고** `target(offer.platform)` 으로 고정해 `restore_update` 에 넘긴다(그 경로는 `require_signed_version` 을 강제로 켠다; `check()` 경로를 쓰면 `requireSignedVersion = true` 필수). 중복 필드는 플러그인의 serde 가 오류로 막는다(fail-closed). 태그 결속은 매니페스트 생성 실수만 거르며, 옛 서명 설치본을 새 태그에 다시 올리는 롤백은 서명 안의 버전 결속(`require_signed_version`)만 막는다 — CI 는 버전을 기록하는 Tauri CLI 로 서명해야 한다.
 - 서명은 형식만 본다. 서명이 실제로 맞는지·**서명된 버전이 매니페스트 버전과 같은지**(옛 서명 바이트에 새 버전 번호를 붙이는 공격)는 PR 4 가 `Update::verify`(`requireSignedVersion`)로 막는다.
 - 리다이렉트 허용 판정(`is_allowed_download_url`)은 순수 함수만 있고, 5단·매 홉 확인은 PR 4 의 `net::http::Redirects::ReleaseAssets` 가 이 함수를 쓰게 만든다.
 

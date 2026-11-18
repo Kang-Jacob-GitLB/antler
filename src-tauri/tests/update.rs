@@ -367,6 +367,14 @@ fn 정식_사용자에게_프리릴리스는_숨긴다() {
 }
 
 #[test]
+fn v_가_둘인_버전은_매니페스트와_태그에서_받지_않는다() {
+    // `parse_semver` 가 v 를 한 번 더 떼므로 검사하지 않으면 `v1.1.0` 이 버전으로 새어 나간다
+    assert!(!matches!(check_manifest(&manifest("vv1.1.0", &nsis("1.1.0")), "1.0.0"), Ok(Some(_))));
+    let list = json!([{ "tag_name": "vv1.2.0-rc.2", "prerelease": true }]).to_string();
+    assert!(!matches!(prerelease_manifest_url(&list, "1.2.0-rc.1"), Ok(Some(_))));
+}
+
+#[test]
 fn 프리릴리스_사용자는_릴리스_목록에서_매니페스트를_찾는다() {
     let list = json!([
         { "tag_name": "v1.2.0-rc.3", "draft": true },
