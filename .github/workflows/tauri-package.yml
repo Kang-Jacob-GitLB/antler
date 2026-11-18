@@ -177,7 +177,7 @@ jobs:
           node-version: "22"
           # cache 를 쓰지 않는다: 빌드 잡(스크립트가 도는 unix 갈래)이 저장한 pnpm 스토어를 복원하면 오염된 @tauri-apps/cli 바이너리가 서명 단계에서 키를 읽을 수 있다
 
-      # 설치 스크립트를 돌리지 않는다(--ignore-scripts). 서명 키는 아직 이 잡의 어느 단계에도 없다
+      # 설치 스크립트를 돌리지 않고(--ignore-scripts) 스토어는 이 러너의 빈 임시 폴더에 둔다(캐시 복원 없음). 서명 키는 아직 이 잡의 어느 단계에도 없다
       - name: Tauri CLI 설치
         run: pnpm install --frozen-lockfile --ignore-scripts --store-dir "$RUNNER_TEMP/pnpm-store"
 

@@ -4,10 +4,18 @@
 //   2) 업데이트 공개 키(src-tauri/src/update/host.rs 의 UPDATE_PUBKEY)가 들어 있다. `None` 인 채로 발행하면 그 릴리스의 앱은 업데이트를 설치하지 못한다
 //      (fail-closed — 이미 설치된 사용자는 앱 안에서 영영 고칠 수 없다). 그래서 키 없는 빌드의 발행을 여기서 막는다
 // 사용: node scripts/check-release-preflight.mjs --version <버전> [--host <host.rs 경로>]
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { parsePublicKey } from './lib/minisign.mjs'
 
 export const HOST_RS = 'src-tauri/src/update/host.rs'
+/** 시험용 키(`*.pub`)가 있는 폴더 — 운영 키로 쓰면 안 된다 */
+export const TEST_KEYS_DIR = 'src-tauri/tests/fixtures/update_keys'
+
+/** 시험용 공개 키 파일들의 `UPDATE_PUBKEY` 형식 값(.pub 내용 그대로 = base64 한 줄) */
+export function readTestKeys(dir = TEST_KEYS_DIR) {
+  return readdirSync(resolve(dir)).filter((f) => f.endsWith('.pub')).map((f) => readFileSync(resolve(dir, f), 'utf8').trim())
+}
 
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/
 
@@ -19,7 +27,7 @@ export function readPubkey(rustSource) {
 }
 
 /** 공개 키 문자열이 `tauri signer generate` 의 `.pub` 내용(minisign 공개 키 텍스트의 base64)인지 본다. 시험용 키(TEST-ONLY)는 거부한다 */
-export function checkPubkey(rustSource) {
+export function checkPubkey(rustSource, testKeys = []) {
   const key = readPubkey(rustSource)
   if (key === undefined) return { ok: false, reason: 'UPDATE_PUBKEY 상수를 host.rs 에서 찾지 못했습니다' }
   if (key === null) return { ok: false, reason: 'UPDATE_PUBKEY 가 None 입니다 — 공개 키를 넣기 전에는 발행할 수 없습니다(docs/updates.md "업데이트 공개 키")' }
@@ -28,6 +36,12 @@ export function checkPubkey(rustSource) {
   const [comment, body, ...rest] = text.split('\n')
   if (!comment?.startsWith('untrusted comment: minisign public key')) return { ok: false, reason: 'UPDATE_PUBKEY 가 minisign 공개 키 파일(.pub)의 내용이 아닙니다' }
   if (/TEST-ONLY/i.test(comment)) return { ok: false, reason: 'UPDATE_PUBKEY 가 시험용 키입니다' }
+  // 시험용 키 본체(키 ID·공개 키)와도 비교한다 — 실제 시험 키 파일의 주석에는 키 ID 만 있어 주석 검사로는 못 거른다(src-tauri/tests/fixtures/update_keys)
+  const mine = parsePublicKey(key)
+  for (const t of testKeys) {
+    const other = parsePublicKey(t)
+    if (mine && other && (mine.keyId.equals(other.keyId) || mine.publicKey.equals(other.publicKey))) return { ok: false, reason: 'UPDATE_PUBKEY 가 저장소의 시험용 키(src-tauri/tests/fixtures/update_keys)와 같습니다' }
+  }
   if (!body || !/^RW[A-Za-z0-9+/]{54}$/.test(body) || rest.some((l) => l.trim() !== '')) return { ok: false, reason: 'UPDATE_PUBKEY 의 키 줄 형식이 올바르지 않습니다' }
   return { ok: true }
 }
@@ -48,7 +62,7 @@ function parseArgs(argv) {
 function main() {
   try {
     const args = parseArgs(process.argv.slice(2))
-    const results = [checkVersion(args.version), checkPubkey(readFileSync(resolve(args.host ?? HOST_RS), 'utf8'))]
+    const results = [checkVersion(args.version), checkPubkey(readFileSync(resolve(args.host ?? HOST_RS), 'utf8'), readTestKeys())]
     const failed = results.filter((r) => !r.ok)
     for (const f of failed) console.error(`::error::${f.reason}`)
     if (failed.length) process.exit(1)

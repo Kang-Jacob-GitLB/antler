@@ -62,7 +62,15 @@ semver 태그(`v2.0.0`, 프리릴리스는 `v2.0.0-rc.1`)를 annotated 태그로
 | 버전·공개 키 | `release.yml` preflight → `scripts/check-release-preflight.mjs` | semver 아님 · `UPDATE_PUBKEY` 가 `None`·형식 오류·시험용 키(발행하는 실행만) |
 | 배포 빌드 feature | `tauri-package.yml` → `scripts/check-release-features.mjs` | 바이너리에 `cdp`·`test-hooks` 표식 |
 | 자산 점검 | `release.yml` release 잡 → `scripts/check-release-assets.mjs` | 설치본 4·`.sig` 4·`latest.json`(다섯 플랫폼 키)·`latest.yml` 중 누락 · 예상 밖 파일 · 해시·크기·서명 불일치 |
+| 서명 검증 | 같은 점검(`--pubkey-from host.rs`) | 각 `.sig` 가 `UPDATE_PUBKEY` 의 키가 아니거나(키 ID) 내용·trusted comment 와 안 맞거나 서명된 버전이 다름(node:crypto Ed25519, `scripts/lib/minisign.mjs`) |
+| 시험 키 거부 | preflight | `UPDATE_PUBKEY` 가 `src-tauri/tests/fixtures/update_keys/*.pub` 의 키 ID·공개 키와 같음(주석이 아니라 키 본체 비교) |
+| 초안 강제 | `release.yml` preflight → `scripts/release-draft-policy.mjs` | (실패가 아니라 강제) 직전 정식 태그와 메이저가 다르거나 `docs/release-notes/v<버전>.md` 가 있으면 호출자의 `draft` 와 무관하게 초안 |
 | 공개 대기 동결 | `nightly-release.yml` plan 잡 → `scripts/release-freeze.mjs` | 직전 정식 릴리스가 초안·없음·조회 오류 |
+
+**신뢰 모델과 운영 메모**
+- **리허설 rc 태그는 main 밖 커밋을 운영 키로 서명한다 — 의도된 절차다.** 그래서 신뢰 근거는 파일 안의 `if:` 가드가 아니라 **Environment `release` 의 배포 브랜치·태그 정책(`main` 과 `v*`)과 `v*` 태그 생성을 소유자로 제한하는 tag ruleset** 이다. 이 둘이 없으면 누구나 임의 커밋에서 시크릿을 받는 태그를 만들 수 있다.
+- 서명 잡은 빌드 잡이 저장한 캐시를 복원하지 않는다(`setup-node` 에 `cache` 없음, 스토어는 `$RUNNER_TEMP`) — 오염된 `@tauri-apps/cli` 가 서명 키를 읽는 길을 막는다. 시크릿·쓰기 권한 잡에는 캐시가 없고 시험이 확인한다. 모든 외부 액션은 40자 SHA 로 고정하며 시험이 확인한다.
+- **이관 기간이 지나면 `ELECTRON_MIGRATION=off`** 로 `latest.yml` 생성을 끈다(Electron 사용자의 마지막 이관 시점은 사용자가 정한다). 이미 공개된 릴리스의 `latest.yml` 자산은 사람이 지운다.
 
 릴리스 가드와 워크플로 구조는 `tests/releaseScripts.test.ts`·`tests/releaseWorkflow.test.ts` 가 시험한다(워크플로 자체는 머지 전에는 실행할 수 없다 — [tauri.md](tauri.md) "PR 7" 의 리허설).
 

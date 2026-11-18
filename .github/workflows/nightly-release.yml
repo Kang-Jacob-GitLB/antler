@@ -62,8 +62,10 @@ jobs:
       # 계산한 그 커밋(sha)을 그대로 빌드·태그하므로, 계산 뒤 main 에 새 커밋이 들어와도 섞이지 않는다.
       - name: 다음 버전 계산
         id: next
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
         run: |
-          node scripts/next-version.mjs --bump "${{ inputs.bump || 'auto' }}" --json > next.json
+          node scripts/next-version.mjs --bump "$BUMP" --json > next.json
           cat next.json
           node -e '
             const r = require("./next.json")

@@ -3,9 +3,12 @@
 // tauri-package.yml 은 점검용 수동 실행에서도 쓰이므로 서명 키가 없거나 macOS·Linux 갈래가 실패해도 경고만 하고 끝난다 — 그 느슨함이 발행으로 새지 않게 여기서 막는다:
 //   필수 자산(설치본 + .sig) 전부 · latest.json(다섯 플랫폼 키가 전부, 키마다 url 이 그 자산을 가리킨다) · latest.yml(저장소 변수 ELECTRON_MIGRATION 이 꺼지지 않았다면)
 //   · 자산 목록 밖의 파일이 없다(예상 밖 파일이 릴리스에 딸려 가지 않게).
-// 사용: node scripts/check-release-assets.mjs --version <버전> --dir <자산 폴더> [--electron-migration <값>]
+//   각 `.sig` 는 host.rs 의 UPDATE_PUBKEY 로 실제 검증한다(키 ID·Ed25519·trusted comment 전역 서명·서명된 버전) — 다른 키로 서명했거나 변조된 산출물은 발행하지 못한다.
+// 사용: node scripts/check-release-assets.mjs --version <버전> --dir <자산 폴더> --pubkey-from src-tauri/src/update/host.rs [--electron-migration <값>]
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { verifyMinisign } from './lib/minisign.mjs'
+import { readPubkey } from './check-release-preflight.mjs'
 import { DOWNLOAD_PREFIX, installerName, isSafeFileName, MANUAL_ASSETS, migrationEnabled, sha512Base64 } from './make-update-manifests.mjs'
 
 /** latest.json 이 담아야 하는 플랫폼 키(Windows 는 같은 항목 둘 + 수동 경로 셋) */
@@ -23,7 +26,7 @@ export function expectedAssets(version, migration) {
  * 폴더의 파일 목록과 내용을 점검한다. `readText(name)` 은 텍스트 파일 읽기, `sizeOf(name)` 은 바이트 수, `sha512Of(name)` 은 실물의 sha512(base64).
  * 문제 목록(문자열)을 돌려준다 — 비어 있으면 통과.
  */
-export function checkAssets({ version, migration, names, readText, sizeOf, sha512Of }) {
+export function checkAssets({ version, migration, names, readText, sizeOf, sha512Of, pubkeyB64, bytesOf }) {
   const problems = []
   const want = expectedAssets(version, migration)
   for (const n of want) if (!names.includes(n)) problems.push(`첨부할 자산이 없습니다: ${n}`)
@@ -32,7 +35,18 @@ export function checkAssets({ version, migration, names, readText, sizeOf, sha51
     if (names.includes(n) && !(sizeOf(n) > 0)) problems.push(`크기가 0 입니다: ${n}`)
   }
   for (const n of want.filter((w) => w.endsWith('.sig') && names.includes(w))) {
-    if (!/^[A-Za-z0-9+/=]+$/.test(readText(n).trim())) problems.push(`서명 형식이 올바르지 않습니다: ${n}`)
+    if (!/^[A-Za-z0-9+/=]+$/.test(readText(n).trim())) {
+      problems.push(`서명 형식이 올바르지 않습니다: ${n}`)
+      continue
+    }
+    // UPDATE_PUBKEY 의 키로 만든 서명인가(키 ID 일치 + 실제 Ed25519 검증 + 서명된 버전). 다른 키·변조·옛 서명은 여기서 막힌다
+    if (pubkeyB64) {
+      const target = n.slice(0, -'.sig'.length)
+      if (names.includes(target)) {
+        const why = verifyMinisign({ pubkeyB64, sigText: readText(n), data: bytesOf(target), version })
+        if (why) problems.push(`${n}: ${why}`)
+      }
+    }
   }
 
   if (names.includes('latest.json')) {
@@ -82,7 +96,9 @@ function parseArgs(argv) {
 function main() {
   try {
     const args = parseArgs(process.argv.slice(2))
-    if (!args.version || !args.dir) throw new Error('--version 과 --dir 이 필요합니다')
+    if (!args.version || !args.dir || !args['pubkey-from']) throw new Error('--version 과 --dir, --pubkey-from(UPDATE_PUBKEY 가 있는 host.rs)이 필요합니다')
+    const pubkeyB64 = readPubkey(readFileSync(args['pubkey-from'], 'utf8'))
+    if (!pubkeyB64) throw new Error('UPDATE_PUBKEY 가 없어 서명을 검증할 수 없습니다')
     const entries = readdirSync(args.dir, { withFileTypes: true })
     const names = entries.filter((e) => e.isFile()).map((e) => e.name)
     const problems = entries.filter((e) => !e.isFile()).map((e) => `파일이 아닌 항목입니다: ${e.name}`)
@@ -94,7 +110,9 @@ function main() {
         names,
         readText: (n) => readFileSync(join(args.dir, n), 'utf8'),
         sizeOf: (n) => statSync(join(args.dir, n)).size,
-        sha512Of: (n) => sha512Base64(readFileSync(join(args.dir, n)))
+        sha512Of: (n) => sha512Base64(readFileSync(join(args.dir, n))),
+        pubkeyB64,
+        bytesOf: (n) => readFileSync(join(args.dir, n))
       })
     )
     for (const p of problems) console.error(`::error::${p}`)

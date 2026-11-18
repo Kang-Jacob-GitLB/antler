@@ -94,7 +94,7 @@ describe('release.yml — 태그에서 Tauri 설치본을 초안으로 발행한
   it('발행 가드: 자산 점검(누락 시 실패)이 태그 만들기·push 와 릴리스 생성보다 앞이다', () => {
     const rel = job(f, 'release')
     const check = rel.steps[stepIndex(rel, '자산 점검 (누락 시 실패)')]
-    expect(check?.run).toContain('scripts/check-release-assets.mjs --version "$VERSION" --dir installers --electron-migration "$ELECTRON_MIGRATION"')
+    expect(check?.run).toContain('scripts/check-release-assets.mjs --version "$VERSION" --dir installers --pubkey-from src-tauri/src/update/host.rs --electron-migration "$ELECTRON_MIGRATION"')
     // 중단 장치: 저장소 변수 ELECTRON_MIGRATION 은 점검에도 전달된다(꺼진 동안 latest.yml 이 없어도 통과해야 이후 릴리스가 막히지 않는다)
     expect(check?.env).toEqual({ ELECTRON_MIGRATION: '${{ vars.ELECTRON_MIGRATION }}' })
     expect(stepIndex(rel, '자산 점검 (누락 시 실패)')).toBeLessThan(stepIndex(rel, '태그 만들기·push (재사용 호출)'))
@@ -112,6 +112,40 @@ describe('release.yml — 태그에서 Tauri 설치본을 초안으로 발행한
     const tag = rel.steps[stepIndex(rel, '태그 만들기·push (재사용 호출)')]
     expect(tag?.run).toContain('docs/release-notes/$TAG.md')
     expect(tag?.if).toBe('inputs.version')
+  })
+})
+
+describe('공급망·캐시', () => {
+  it('모든 워크플로의 외부 액션이 40자 SHA 로 고정돼 있다(로컬 재사용 호출 ./ 는 제외)', () => {
+    for (const file of readdirSync(WORKFLOWS)) {
+      const uses = [...code(file).matchAll(/^\s*(?:- )?uses:\s*(\S+)/gm)].map((m) => m[1]!)
+      expect(uses.length, file).toBeGreaterThan(0)
+      for (const u of uses) if (!u.startsWith('./')) expect(u, `${file}: ${u}`).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/)
+    }
+  })
+
+  it('시크릿·쓰기 권한 잡은 캐시를 복원하지 않는다: release.yml 전체·nightly 에 cache 가 없고, tauri-package 에서는 서명 잡(environment)에 없다', () => {
+    for (const f of ['release.yml', 'nightly-release.yml']) expect(code(f), f).not.toMatch(/actions\/cache|\bcache:/)
+    const pkg = wf('tauri-package.yml')
+    for (const [id, j] of Object.entries(pkg.jobs)) {
+      if (j.environment || j.permissions) expect(JSON.stringify(j), id).not.toMatch(/actions\/cache|"cache"/)
+    }
+    expect(pkg.jobs['sign']?.environment).toBe('release')
+  })
+
+  it('초안 강제 이중화: preflight 가 정책 스크립트를 부르고 draft 출력이 호출자 값 또는 강제값이다(태그 전체를 받는다)', () => {
+    const pre = job('release.yml', 'preflight')
+    expect(pre.steps[0]?.with?.['fetch-depth']).toBe(0)
+    const step = pre.steps.find((s) => s.id === 'policy')
+    expect(step?.run).toContain('scripts/release-draft-policy.mjs --version "$VERSION" --tags "$TAGS" --notes "$NOTES"')
+    expect(pre.outputs?.['draft']).toBe("${{ steps.v.outputs.draft == 'true' || steps.policy.outputs.force == 'true' }}")
+  })
+
+  it('야간 수동 입력(inputs.bump)은 셸에 끼워 넣지 않고 env 로 받는다', () => {
+    const next = job('nightly-release.yml', 'plan').steps.find((s) => s.id === 'next')
+    expect(next?.env).toEqual({ BUMP: "${{ inputs.bump || 'auto' }}" })
+    expect(next?.run).toContain('--bump "$BUMP"')
+    expect(code('nightly-release.yml')).not.toMatch(/run:[^\n]*\$\{\{\s*inputs\./)
   })
 })
 
