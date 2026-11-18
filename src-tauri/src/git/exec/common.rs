@@ -11,7 +11,9 @@ use crate::git::fetch::guard::fetch_env;
 /// `core.fsmonitor=false`: 저장소 설정의 fsmonitor 명령은 index 를 읽는 명령에서 실행된다(악성 저장소 RCE 경로).
 /// `core.protectNTFS=true`: 저장소 로컬 설정이 false 로 꺼 NTFS 위험 경로(`.git.`·`::$INDEX_ALLOCATION`·8.3) 보호를 풀지 못하게 고정한다.
 /// 모든 플랫폼의 git 이 인식하고 모르는 core 키는 무시하므로 WSL·SSH 의 Linux git 에도 무해하다.
-pub const GIT_GLOBAL_ARGS: [&str; 10] = [
+/// `diff.submodule=short`: 저장소 설정이 `diff` 로 두면 porcelain diff 가 서브모듈 안에서 자식 git diff 를 띄워 그 저장소의 diff.external 이 실행될 수 있다.
+/// `submodule.recurse=false`: 저장소 설정이 서브모듈 재귀를 켜 읽기 명령이 서브모듈 안으로 들어가지 못하게 한다.
+pub const GIT_GLOBAL_ARGS: [&str; 14] = [
     "-c",
     "core.quotepath=false",
     "-c",
@@ -22,6 +24,10 @@ pub const GIT_GLOBAL_ARGS: [&str; 10] = [
     "core.fsmonitor=false",
     "-c",
     "core.protectNTFS=true",
+    "-c",
+    "diff.submodule=short",
+    "-c",
+    "submodule.recurse=false",
 ];
 
 /// 모든 git 호출에 넣는 환경변수(순서가 WSL argv 의 `env K=V…` 순서를 정한다).
@@ -135,12 +141,18 @@ mod tests {
     fn build_git_args_는_dash_c_저장소_전역_인자_args_순서다() {
         let v = build_git_args("/r", &["log", "-z"]);
         assert_eq!(&v[..2], ["-C", "/r"]);
-        assert_eq!(&v[2..12], GIT_GLOBAL_ARGS);
-        assert_eq!(&v[12..], ["log", "-z"]);
+        assert_eq!(&v[2..16], GIT_GLOBAL_ARGS);
+        assert_eq!(&v[16..], ["log", "-z"]);
     }
 
     #[test]
     fn 전역_인자가_core_protect_ntfs_를_true_로_고정한다() {
         assert!(GIT_GLOBAL_ARGS.windows(2).any(|w| w == ["-c", "core.protectNTFS=true"]));
+    }
+
+    #[test]
+    fn 전역_인자가_서브모듈_diff_와_재귀를_고정한다() {
+        assert!(GIT_GLOBAL_ARGS.windows(2).any(|w| w == ["-c", "diff.submodule=short"]));
+        assert!(GIT_GLOBAL_ARGS.windows(2).any(|w| w == ["-c", "submodule.recurse=false"]));
     }
 }

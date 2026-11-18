@@ -10,7 +10,7 @@ const AREAS = new Set(['staged', 'unstaged', 'untracked'])
 
 /** 덮어쓸 수 없는 필터 드라이버가 있어 작업 트리 조회를 거부할 때의 메시지 */
 export const UNSAFE_FILTER_MSG =
-  '이 저장소의 filter 드라이버(이름에 "=" 나 잘못된 UTF-8 이 있거나 개수가 너무 많음)를 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.'
+  '이 저장소의 filter 드라이버(이름이 비었거나 "=" 나 잘못된 UTF-8 이 있거나 개수가 너무 많음)를 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.'
 
 /**
  * 드라이버 수 상한. 드라이버마다 `-c` 4쌍(약 90자 + 이름 길이 ×4)이 붙는데 Windows 명령줄은 32767자까지라
@@ -46,9 +46,12 @@ export function parseFilterDrivers(stdout: Buffer): string[] {
       throw unsafeFilter()
     }
     if (key.includes('�')) throw unsafeFilter()
-    const m = /^filter\.(.+)\.(clean|smudge|process)$/s.exec(key)
+    // 이름이 빈 `[filter ""]` 도 드라이버다: `.git/info/attributes` 의 `* filter=` 가 빈 이름을 가리키고 git 은 그 clean 을 실행한다(실측).
+    // `-c filter..clean=` 로 덮을 수는 있지만 정상 저장소에 빈 이름은 없으니 이름에 '=' 가 든 경우처럼 거부한다
+    const m = /^filter\.(.*)\.(clean|smudge|process)$/s.exec(key)
     if (!m) continue
     const d = m[1]!
+    if (d === '') throw unsafeFilter()
     // git 은 `-c` 인자를 첫 '=' 에서 키와 값으로 자른다. 이름에 '=' 가 든 드라이버(gitattributes 에서 `filter=a=b` 로 쓸 수 있다)는
     // `-c filter.a=b.clean=` 이 `filter.a` = `b.clean=` 으로 읽혀 덮어쓰기가 조용히 실패한다 — 그런 저장소는 작업 트리를 읽지 않는다
     if (d.includes('=')) throw unsafeFilter()
@@ -114,6 +117,33 @@ export function assertRelPath(p: unknown): asserts p is string {
 }
 
 /**
+ * staged·unstaged diff 의 공통 인자. porcelain `git diff` 대신 plumbing(`diff-index --cached`·`diff-files`)을 쓰는 이유(악성 저장소 방어, 실측):
+ * - porcelain `diff` 는 stat 만 바뀐 파일이 있으면 index 를 갱신해 쓰고 `post-index-change` 훅을 실행한다(`GIT_OPTIONAL_LOCKS=0` 이어도).
+ *   plumbing 은 index 를 갱신하지 않는다(쓰기·훅 없음).
+ * - porcelain `diff` 는 ui 설정을 읽는다: 상위 저장소의 `diff.submodule=diff` 와 작업 트리의 중첩 저장소(인덱스에는 파일인 경로)가 겹치면
+ *   서브모듈 안에서 자식 git diff 를 `--no-ext-diff` 없이 띄워 그 저장소의 `diff.external` 명령이 실행된다. plumbing 은 ui 설정을 읽지 않는다.
+ * 그래도 명시한다: 외부 diff·textconv·서브모듈 재귀를 끄고 서브모듈 출력은 short 로 고정한다.
+ * 차이: plumbing 은 refresh 를 하지 않아 stat 만 바뀐 파일(내용 동일)은 hunk 없이 헤더만 나오거나 아무것도 나오지 않는다 — 둘 다 빈 diff 로 보인다.
+ */
+const PLUMBING_DIFF_ARGS = ['-p', '--no-color', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', '--submodule=short', '-U3']
+
+/** 빈 트리 해시(SHA-1·SHA-256 저장소) */
+const EMPTY_TREES = ['4b825dc642cb6eb9a060e54bf8d69288fbee4904', '6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321']
+
+/**
+ * staged diff 의 비교 기준. 커밋이 있으면 `HEAD`, 없는 저장소(unborn)면 빈 트리다 — porcelain `diff --cached` 는 후자를 알아서 했지만
+ * `diff-index` 는 트리를 요구한다. 해시 알고리즘은 저장소가 아는 쪽을 고른다.
+ */
+async function stagedBase(exec: GitExecutor, repoPath: string, opts?: RunOpts): Promise<string> {
+  const head = await exec.run(repoPath, ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], opts)
+  if (head.code === 0) return 'HEAD'
+  for (const t of EMPTY_TREES) {
+    if ((await exec.run(repoPath, ['rev-parse', '--verify', '--quiet', `${t}^{tree}`], opts)).code === 0) return t
+  }
+  throw new GitError('빈 트리를 찾을 수 없습니다', 1, '', ['rev-parse'])
+}
+
+/**
  * 작업 트리 파일 하나의 diff. FileDiff 형식은 커밋 diff 와 같아 같은 뷰어가 그린다.
  * untrackedAllow: 마지막 wipStatus 가 git 출력으로 보고한 추적 안 되는 경로 집합. area 가 untracked 면 **정확히 일치**하는 경로만 받는다
  * (없으면 거부 — 닫힌 기본값). assertRelPath 의 문자열 비교는 Windows NTFS 8.3 짧은 이름(`GIT~1/config`)을 `.git` 으로 알아보지 못해
@@ -148,15 +178,15 @@ export async function wipFileDiff(
 
   // --no-index 도 `-C` 저장소의 설정·.gitattributes·info/attributes 를 읽어 그 파일에 맞는 clean 필터를 돈다(실측) — 모든 영역에 건다
   const guard = await filterOverrides(exec, repoPath, opts)
-  const common = [...guard, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3']
+  // staged·unstaged 는 porcelain `git diff` 가 아니라 plumbing(diff-index·diff-files)으로 만든다 — 이유는 PLUMBING_DIFF_ARGS 주석
   const paths = req.oldPath !== undefined && req.oldPath !== req.path ? [req.oldPath, req.path] : [req.path]
   const args =
     req.area === 'staged'
-      ? [...common, '--cached', '-M', '--', ...paths]
+      ? [...guard, 'diff-index', ...PLUMBING_DIFF_ARGS, '--cached', '-M', await stagedBase(exec, repoPath, opts), '--', ...paths]
       : req.area === 'unstaged'
-        ? [...common, '--no-renames', '--', req.path]
+        ? [...guard, 'diff-files', ...PLUMBING_DIFF_ARGS, '--no-renames', '--', req.path]
         : // 추적 안 되는 파일은 빈 파일과의 비교로 "전부 추가" diff 를 만든다. /dev/null 은 git 이 모든 OS 에서 직접 해석한다
-          [...common, '--no-index', '--', '/dev/null', req.path]
+          [...guard, 'diff', '--no-color', '--no-ext-diff', '--no-textconv', '-U3', '--no-index', '--', '/dev/null', req.path]
   let produced = false
   try {
     for await (const chunk of exec.stream(repoPath, args, opts)) {

@@ -15,7 +15,7 @@ use crate::git::fetch::js_to_lowercase;
 
 /// 덮어쓸 수 없는 필터 드라이버가 있어 작업 트리 조회를 거부할 때의 메시지
 pub const UNSAFE_FILTER_MSG: &str =
-    "이 저장소의 filter 드라이버(이름에 \"=\" 나 잘못된 UTF-8 이 있거나 개수가 너무 많음)를 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.";
+    "이 저장소의 filter 드라이버(이름이 비었거나 \"=\" 나 잘못된 UTF-8 이 있거나 개수가 너무 많음)를 안전하게 무력화할 수 없습니다. 작업 트리 변경은 표시하지 않습니다.";
 
 /// 드라이버 수 상한. 드라이버마다 `-c` 4쌍(약 90자 + 이름 길이 ×4)이 붙는데 Windows 명령줄은 32767자까지라 256개면 이름이 짧아도 한계에 가깝다.
 /// 정상 저장소의 드라이버는 한두 개다. 총 길이 상한([`MAX_OVERRIDE_CHARS`])도 함께 둔다.
@@ -48,7 +48,7 @@ pub struct FilterGuard {
 fn driver_name(key: &str) -> Option<&str> {
     let rest = key.strip_prefix("filter.")?;
     let name = [".clean", ".smudge", ".process"].iter().find_map(|s| rest.strip_suffix(s))?;
-    (!name.is_empty()).then_some(name)
+    Some(name)
 }
 
 impl FilterGuard {
@@ -129,7 +129,8 @@ pub fn filter_driver_names(stdout: &[u8]) -> Result<Vec<&str>, UnsafeFilterName>
         }
         let Some(name) = driver_name(key) else { continue };
         // git 은 `-c` 인자를 첫 '=' 에서 키와 값으로 자른다(UnsafeFilterName 설명)
-        if name.contains('=') {
+        // 빈 이름(`[filter ""]`)도 드라이버다 — `filter=` 가 가리키면 git 이 그 clean 을 실행한다(실측). 정상 저장소에는 없으니 거부한다
+        if name.is_empty() || name.contains('=') {
             return Err(UnsafeFilterName);
         }
         if seen.insert(name) {
@@ -259,8 +260,8 @@ mod tests {
     fn 이름의_점과_개행_키_모양() {
         assert_eq!(guard(&[("filter.a.b.clean", "x")]).unwrap().args(), driver_args("a.b"));
         assert_eq!(guard(&[("filter.a.clean.process", "x")]).unwrap().args(), driver_args("a.clean"));
-        // 이름이 비었거나 접미사가 다르면 드라이버가 아니다
-        assert!(guard(&[("filter..clean", "x"), ("filter.a.required", "x"), ("filter.a", "x"), ("xfilter.a.clean", "x"), ("Filter.a.clean", "x")]).unwrap().is_empty());
+        // 접미사가 다르면 드라이버가 아니다
+        assert!(guard(&[("filter.a.required", "x"), ("filter.a", "x"), ("filter.clean", "x"), ("xfilter.a.clean", "x"), ("Filter.a.clean", "x")]).unwrap().is_empty());
         // 값에 개행이 있어도 첫 개행에서 키와 값이 갈린다
         let g = FilterGuard::from_config_output(b"filter.a.clean\nline1\nline2\0").unwrap();
         assert_eq!(g.args(), driver_args("a"));
@@ -277,6 +278,17 @@ mod tests {
         // 다른 드라이버가 먼저여도 거부는 전체다
         assert_eq!(guard(&[("filter.ok.clean", "x"), ("filter.a=b.smudge", "y")]), Err(UnsafeFilterName));
         assert!(UnsafeFilterName.message().contains('='));
+    }
+
+    #[test]
+    fn 이름이_빈_드라이버는_거부한다() {
+        for key in ["filter..clean", "filter..smudge", "filter..process"] {
+            assert_eq!(guard(&[(key, "x")]), Err(UnsafeFilterName), "{key}");
+        }
+        // 다른 드라이버가 먼저여도 거부는 전체다
+        assert_eq!(guard(&[("filter.ok.clean", "x"), ("filter..clean", "y")]), Err(UnsafeFilterName));
+        // `filter...clean` 의 이름은 "." 이다(빈 이름 아님)
+        assert_eq!(guard(&[("filter...clean", "x")]).unwrap().args(), driver_args("."));
     }
 
     #[test]
