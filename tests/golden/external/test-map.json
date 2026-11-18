@@ -69,5 +69,6 @@
   "externalClsid > buildRevealPlan(Windows): 이름 확장 폴더 > 폴더 바로 가기로 해석되는 이름은 열지 않고 그 폴더를 부모에서 보여 준다": "external.rs::plan_골든이_ts_와_같다",
   "externalClsid > ExternalOpener(Windows): name.{CLSID} 폴더 > 파일 관리자: openPath 대신 showItem": "external.rs::opener_시나리오_골든이_ts_와_같다",
   "externalClsid > ExternalOpener(Windows): name.{CLSID} 폴더 > 터미널: 조건을 만족하는 가장 가까운 상위(저장소 루트)에서 연다": "external.rs::opener_시나리오_골든이_ts_와_같다",
-  "externalClsid > ExternalOpener(Windows): name.{CLSID} 폴더 > 저장소 루트 자체가 이름 확장 폴더이면 터미널을 거부한다": "external.rs::opener_시나리오_골든이_ts_와_같다"
+  "externalClsid > ExternalOpener(Windows): name.{CLSID} 폴더 > 저장소 루트 자체가 이름 확장 폴더이면 터미널을 거부한다": "external.rs::opener_시나리오_골든이_ts_와_같다",
+  "externalOpener > ExternalOpener: 로컬 > 원격 UNC 를 가리키는 링크는 realpath 를 부르기 전에 거부한다": "external.rs::정션_사슬은_로컬_대상이면_통과하고_원격_판정이면_사슬_중간에서_거부한다"
 }
