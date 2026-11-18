@@ -98,20 +98,23 @@ pub fn scan_local_repos(root: &str) -> Result<RepoScanResult, String> {
     Ok(RepoScanResult { path: root.to_string(), is_repo: false, repos, truncated })
 }
 
-/// 링크 대상 문자열이 원격(SMB)을 가리키는가 — 순수 판정이다. `\\host\share`·`//host/share`·`\\?\UNC\…`·`\??\UNC\…`·장치 경로(`\\.\`)는 원격,
-/// `\\wsl.localhost\…`·`\\wsl$\…`·`\\?\C:\…`·`\??\C:\…`(정션의 일반 대상)·드라이브·상대 경로는 로컬이다.
-/// 볼륨 GUID(`\\?\Volume{…}`)는 보수적으로 원격으로 본다. TS 판(`linkGuard.ts` 의 `isRemoteLinkTarget`)과 같은 사례표
+/// 링크 대상 문자열이 원격(SMB)을 가리키는가 — 순수 판정이고 **허용 목록**이다. 로컬: 드라이브 경로(`C:\`·`\\?\C:\`·`\??\C:\`)·상대 경로·
+/// 단일 `/` 시작 경로·WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`). 그 밖의 `\\…`·`//…`와 `\??\`·`\\?\` 뒤가 드라이브가 아닌 것
+/// (`UNC\`·`Volume{`·`GLOBALROOT\…`·`Device\…`)은 전부 원격이다. TS 판(`linkGuard.ts` 의 `isRemoteLinkTarget`)과 같은 사례표
 /// (`tests/fixtures/repos/link-target.cases.json`)로 시험한다
 fn is_remote_link_target(target: &str) -> bool {
     let t = target.trim();
     let is_sep = |c: char| c == '\\' || c == '/';
-    let starts_ci = |s: &str, p: &str| s.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
-    // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): `UNC\`·`Volume{` 이 이어지면 원격, 아니면 그 뒤가 로컬 경로(드라이브)다
-    for prefix in ["\\??\\", "\\\\?\\", "//?/"] {
-        if starts_ci(t, prefix) {
-            let rest = &t[prefix.len()..];
-            return starts_ci(rest, "UNC\\") || starts_ci(rest, "UNC/") || starts_ci(rest, "Volume{");
-        }
+    // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): 뒤가 드라이브 문자 경로일 때만 로컬이다
+    let b = t.as_bytes();
+    let nt_ns = b.len() >= 4
+        && is_sep(b[0] as char)
+        && is_sep(b[3] as char)
+        && ((b[1] == b'?' && b[2] == b'?') || (is_sep(b[1] as char) && b[2] == b'?'));
+    if nt_ns {
+        let r = &b[4..];
+        let drive = r.len() >= 2 && r[0].is_ascii_alphabetic() && r[1] == b':' && (r.len() == 2 || is_sep(r[2] as char));
+        return !drive;
     }
     let mut chars = t.chars();
     if !matches!((chars.next(), chars.next()), (Some(a), Some(b)) if is_sep(a) && is_sep(b)) {
