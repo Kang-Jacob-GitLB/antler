@@ -133,6 +133,24 @@ describe('ExternalOpener: 로컬', () => {
     expect(f.shown).toEqual([])
   })
 
+  it('원격 UNC 를 가리키는 링크는 realpath 를 부르기 전에 거부한다', async () => {
+    const f = fake('linux', LINUX)
+    let realpathCalls = 0
+    const realpathSync = f.deps.fs.realpathSync
+    f.deps.fs.realpathSync = (p) => {
+      realpathCalls++
+      return realpathSync(p)
+    }
+    f.deps.fs.linksStayLocal = (p) => !p.includes('evil')
+    const o = new ExternalOpener(f.deps)
+    for (const action of ['fileManager', 'terminal', 'editor'] as const) {
+      await expect(o.open(local, action, 'evil/x', action === 'editor' ? { editor: 'vscode' } : {})).rejects.toThrow(/원격 링크/)
+    }
+    expect(realpathCalls).toBe(0)
+    expect(f.spawned).toEqual([])
+    expect(f.shown).toEqual([])
+  })
+
   it('저장소 밖을 가리키는 심볼릭 링크는 실행 전에 거부한다', async () => {
     const f = fake('linux', { ...LINUX, links: { '/home/u/repo/evil': '/etc' } })
     const o = new ExternalOpener(f.deps)

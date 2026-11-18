@@ -36,6 +36,8 @@ export interface OpenerDeps {
     statSync(p: string): StatLike
     /** 링크 자체를 본다(Windows 앱 실행 별칭 wt.exe 는 statSync 가 EACCES 로 실패한다) */
     lstatSync(p: string): StatLike
+    /** realpath 전에 부른다: 경로 안의 링크가 원격 UNC 를 가리키면 false(접속·인증 방지). 없으면 확인하지 않는다(시험용) */
+    linksStayLocal?(p: string): boolean
   }
   spawn(file: string, args: string[], opts: { cwd?: string; detached: true; stdio: 'ignore'; shell: false; windowsHide: false; env: NodeJS.ProcessEnv }): ChildLike
   shell: { openPath(p: string): Promise<string>; showItemInFolder(p: string): void }
@@ -239,6 +241,8 @@ export class ExternalOpener {
     const m = !wsl && deps.platform !== 'win32' ? posix : win32
     const nRoot = wsl ? uncFromWsl(target.distro, root) : root
     const nAbs = wsl ? uncFromWsl(target.distro, abs) : abs
+    // realpath·stat 은 링크를 따라간다 — WSL(UNC)이 아닌 로컬은 원격 UNC 링크가 있으면 접속하기 전에 거부한다
+    if (!wsl && deps.fs.linksStayLocal && !deps.fs.linksStayLocal(abs)) throw new Error('저장소 밖을 가리키는 경로입니다(원격 링크)')
     const io = { realpath: (p: string): string => deps.fs.realpathSync(p) }
     const checked = checkRealContainment(nRoot, nAbs, io, m)
     if (!checked) {

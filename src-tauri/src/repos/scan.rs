@@ -99,15 +99,18 @@ pub fn scan_local_repos(root: &str) -> Result<RepoScanResult, String> {
 }
 
 /// 링크 대상 문자열이 원격(SMB)을 가리키는가 — 순수 판정이다. `\\host\share`·`//host/share`·`\\?\UNC\…`·`\??\UNC\…`·장치 경로(`\\.\`)는 원격,
-/// `\\wsl.localhost\…`·`\\wsl$\…`·`\\?\C:\…`·`\??\C:\…`(정션의 일반 대상)·드라이브·상대 경로는 로컬이다
+/// `\\wsl.localhost\…`·`\\wsl$\…`·`\\?\C:\…`·`\??\C:\…`(정션의 일반 대상)·드라이브·상대 경로는 로컬이다.
+/// 볼륨 GUID(`\\?\Volume{…}`)는 보수적으로 원격으로 본다. TS 판(`linkGuard.ts` 의 `isRemoteLinkTarget`)과 같은 사례표
+/// (`tests/fixtures/repos/link-target.cases.json`)로 시험한다
 fn is_remote_link_target(target: &str) -> bool {
     let t = target.trim();
     let is_sep = |c: char| c == '\\' || c == '/';
     let starts_ci = |s: &str, p: &str| s.get(..p.len()).is_some_and(|h| h.eq_ignore_ascii_case(p));
-    // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): `UNC\` 가 이어지면 원격, 아니면 그 뒤가 로컬 경로(드라이브)다
+    // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): `UNC\`·`Volume{` 이 이어지면 원격, 아니면 그 뒤가 로컬 경로(드라이브)다
     for prefix in ["\\??\\", "\\\\?\\", "//?/"] {
         if starts_ci(t, prefix) {
-            return starts_ci(&t[prefix.len()..], "UNC\\") || starts_ci(&t[prefix.len()..], "UNC/");
+            let rest = &t[prefix.len()..];
+            return starts_ci(rest, "UNC\\") || starts_ci(rest, "UNC/") || starts_ci(rest, "Volume{");
         }
     }
     let mut chars = t.chars();
@@ -320,6 +323,21 @@ mod tests {
     fn 없는_폴더는_오류() {
         let t = Tmp::new("missing");
         assert!(scan_local_repos(&format!("{}\\nope", t.root())).is_err());
+    }
+
+    /// TS 판과 공유하는 사례표(`tests/fixtures/repos/link-target.cases.json`)를 그대로 돌린다
+    #[test]
+    fn 링크_대상_판정이_ts_사례표와_같다() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!("../../../tests/fixtures/repos/link-target.cases.json")).unwrap();
+        let list = |k: &str| cases[k].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>();
+        let (remote, local) = (list("remote"), list("local"));
+        assert!(remote.len() > 10 && local.len() > 5);
+        for t in remote {
+            assert!(is_remote_link_target(&t), "원격이어야 한다: {t:?}");
+        }
+        for t in local {
+            assert!(!is_remote_link_target(&t), "로컬이어야 한다: {t:?}");
+        }
     }
 
     #[test]

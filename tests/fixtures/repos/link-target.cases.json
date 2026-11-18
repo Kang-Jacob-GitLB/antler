@@ -1,0 +1,31 @@
+{
+  "_doc": "isRemoteLinkTarget(TS, src/main/git/linkGuard.ts)·is_remote_link_target(Rust, src-tauri/src/repos/scan.rs) 가 같은 판정을 내는지 보는 사례표. 양쪽 시험이 이 파일을 읽는다.",
+  "remote": [
+    "\\\\host\\share\\x",
+    "//host/share",
+    "\\\\host@SSL\\DavWWWRoot\\x",
+    "\\\\host@SSL@8443\\DavWWWRoot\\x",
+    "\\\\?\\UNC\\host\\share",
+    "\\??\\UNC\\host\\share",
+    "\\??\\unc\\h\\s",
+    "//?/UNC/h/s",
+    "\\\\.\\pipe\\x",
+    "\\\\.\\C:\\x",
+    "\\\\?\\Volume{01234567-89ab-cdef-0123-456789abcdef}\\x",
+    "\\??\\Volume{01234567-89ab-cdef-0123-456789abcdef}\\",
+    "\\\\wsl.localhostevil\\x",
+    "  \\\\host\\s"
+  ],
+  "local": [
+    "C:\\work\\repo",
+    "\\??\\C:\\work\\repo",
+    "\\\\?\\C:\\work",
+    "\\\\wsl.localhost\\Ubuntu\\home",
+    "\\\\WSL$\\Ubuntu\\x",
+    "//wsl.localhost/Ubuntu/home",
+    "../sibling",
+    "repo",
+    "/usr/x",
+    ""
+  ]
+}
