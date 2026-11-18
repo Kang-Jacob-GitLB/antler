@@ -471,6 +471,140 @@ fn 링크_사슬은_원격_대상과_깊이_상한에서_거부하고_로컬_대
     fs::remove_dir_all(&dir).unwrap();
 }
 
+/// 정션 시험용 임시 디렉터리. 만든 정션을 기억해 두었다가 Drop 에서 정션부터 `remove_dir`(rmdir)로 지운다 —
+/// 정션을 따라 원본을 지우지 않도록 `remove_dir_all` 은 정션이 하나도 남지 않은 뒤에만 쓴다
+#[cfg(windows)]
+struct JunctionDir {
+    root: PathBuf,
+    junctions: Vec<PathBuf>,
+}
+
+#[cfg(windows)]
+impl JunctionDir {
+    fn new(tag: &str) -> Self {
+        let root = std::env::temp_dir().join(format!("antler-junc-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("real").join("deep")).unwrap();
+        JunctionDir { root, junctions: Vec::new() }
+    }
+
+    /// `cmd /c mklink /J` 로 정션을 만든다. 실패하면 시험이 실패한다(건너뛰지 않는다)
+    fn junction(&mut self, name: &str, target: &Path) -> PathBuf {
+        let link = self.root.join(name);
+        // git 이 아니라 cmd 의 mklink 를 부른다(정션은 std 로 만들 수 없다)
+        #[allow(clippy::disallowed_methods)]
+        let out = std::process::Command::new("cmd")
+            .arg("/c")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link)
+            .arg(target)
+            .output()
+            .expect("cmd 실행");
+        assert!(
+            out.status.success(),
+            "mklink /J 실패: {} {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let meta = fs::symlink_metadata(&link).expect("정션이 만들어져야 한다");
+        assert!(meta.is_dir() || meta.file_type().is_symlink(), "{}", link.display());
+        self.junctions.push(link.clone());
+        link
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JunctionDir {
+    fn drop(&mut self) {
+        for j in self.junctions.iter().rev() {
+            let _ = fs::remove_dir(j);
+        }
+        // 정션이 남아 있으면 원본을 지울 수 있으니 지우지 않는다
+        if self.junctions.iter().all(|j| fs::symlink_metadata(j).is_err()) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn 정션_사슬은_로컬_대상이면_통과하고_원격_판정이면_사슬_중간에서_거부한다() {
+    use antler_lib::external::launch::links_stay_local;
+    let mut d = JunctionDir::new("chain");
+    let real = d.root.join("real");
+    // b -> a -> real (정션은 대상을 절대 경로로 저장한다)
+    let a = d.junction("a", &real);
+    let b = d.junction("b", &a);
+    // 정션을 링크로 인식해야 한다 — 인식 못 하면 아래 판정 함수가 한 번도 불리지 않는다
+    assert!(fs::symlink_metadata(&a).unwrap().file_type().is_symlink(), "정션이 링크로 보여야 한다");
+    let via = b.join("deep");
+    assert!(links_stay_local(&via, |_| false), "로컬 대상 정션 사슬은 통과해야 한다");
+    // 판정 함수가 호출된 횟수와 대상(사슬 b -> a -> real 의 두 홉)
+    let seen = RefCell::new(Vec::<String>::new());
+    assert!(links_stay_local(&via, |t| {
+        seen.borrow_mut().push(t.to_string());
+        false
+    }));
+    assert_eq!(seen.borrow().len(), 2, "{:?}", seen.borrow());
+    // 사슬 중간(a 의 대상 = real)만 원격이라 하면 b -> a 는 통과하고 a -> real 에서 거부한다
+    let real_lower = real.to_string_lossy().to_lowercase();
+    let calls = RefCell::new(0);
+    let reject_real = |t: &str| {
+        *calls.borrow_mut() += 1;
+        t.to_lowercase().ends_with(&real_lower)
+    };
+    assert!(!links_stay_local(&via, reject_real), "사슬 중간 정션에서 거부해야 한다");
+    assert_eq!(*calls.borrow(), 2, "첫 홉은 통과하고 둘째 홉에서 거부해야 한다");
+    // 첫 홉(b 의 대상 = a)만 원격이라 하면 첫 홉에서 멈춘다
+    let a_lower = a.to_string_lossy().to_lowercase();
+    let calls = RefCell::new(0);
+    assert!(!links_stay_local(&via, |t| {
+        *calls.borrow_mut() += 1;
+        t.to_lowercase().ends_with(&a_lower)
+    }));
+    assert_eq!(*calls.borrow(), 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn 정션_대상의_nt_접두는_win32_확장_접두로_바뀌어_판정_함수에_넘어간다() {
+    use antler_lib::external::launch::links_stay_local;
+    let mut d = JunctionDir::new("prefix");
+    let real = d.root.join("real");
+    let a = d.junction("a", &real);
+    let seen = RefCell::new(Vec::<String>::new());
+    assert!(links_stay_local(&a.join("deep"), |t| {
+        seen.borrow_mut().push(t.to_string());
+        false
+    }));
+    let seen = seen.borrow();
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(!seen[0].starts_with("\\??\\"), "NT 접두가 남아 있다: {}", seen[0]);
+    // 로컬 드라이브 정션은 std 의 read_link 가 이미 `\??\` 를 벗겨 `C:\…` 로 돌려준다 — `\\?\` 로 바뀐 형태가 아니어도 정상이다.
+    // (launch.rs 의 `\??\` → `\\?\` 변환은 std 가 벗기지 않는 대상용이며, 원격 UNC 정션은 만들 수 없어 여기서는 닿지 않는다)
+    let b = seen[0].as_bytes();
+    let drive_path = b.len() > 3 && b[0].is_ascii_alphabetic() && &seen[0][1..3] == ":\\";
+    assert!(drive_path || seen[0].starts_with("\\\\?\\"), "절대 경로여야 한다: {}", seen[0]);
+    assert!(seen[0].to_lowercase().ends_with("\\real"), "{}", seen[0]);
+}
+
+#[cfg(windows)]
+#[test]
+fn 정션_사슬_길이_16_은_통과하고_17_은_거부한다() {
+    use antler_lib::external::launch::links_stay_local;
+    let mut d = JunctionDir::new("hops");
+    let mut prev = d.root.join("real");
+    let mut links = Vec::new();
+    for i in 0..17 {
+        prev = d.junction(&format!("c{i}"), &prev);
+        links.push(prev.clone());
+    }
+    assert_eq!(links.len(), 17);
+    assert!(links_stay_local(&links[15].join("deep"), |_| false), "홉 16 은 통과해야 한다");
+    assert!(!links_stay_local(&links[16].join("deep"), |_| false), "홉 17 은 거부해야 한다");
+}
+
 /// 앱 실행 별칭(`%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe`)은 `stat` 이 접근 거부로 실패하고 `lstat` 만 된다 — 있는 PC 에서 직접 확인하는 시험이다
 /// (`cargo test --test external -- --ignored`). 파일을 **열거나 실행하지 않고** 메타데이터만 읽는다
 #[cfg(windows)]
