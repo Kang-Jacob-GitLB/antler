@@ -4,12 +4,12 @@
 //! 환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아닐 때. 그 밖에는 전부 사이드카가 지금까지처럼 처리한다
 //! (미러에 없는 id 의 오류 문구도 사이드카가 만든다). `ANTLER_RUST_GIT=0` 은 즉시 되돌리는 스위치다.
 //!
-//! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl(그리고 ssh 가 Rust 로 풀릴 때는 ssh) 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
-//! `ANTLER_RUST_FETCH_KINDS=local,wsl[,ssh]` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
+//! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl(그리고 ssh·github 가 Rust 로 풀릴 때는 ssh·github) 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
+//! `ANTLER_RUST_FETCH_KINDS=local,wsl[,ssh][,github]` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
 //! 스위치가 꺼져 있으면 env 도 서비스도 없다 — 사이드카가 전부 맡는다(이중 fetch 없음).
 //!
 //! 감시의 소유권(Phase 6a PR 7b): 활성 저장소 감시(`repos:watch` 가 시작·교체·중지, 창 포커스는 [`Router::watch_focus`])도 **같은 술어 하나**로 정한다 — Rust 는 fetch 를 맡는 종류의 저장소만 감시하고
-//! (notify·폴링 — `git::watcher`), 사이드카는 같은 env 로 그 저장소를 감시하지 않는다(`src/sidecar/index.ts` 가 `FetchService` 와 같은 `fetchOwner` 를 `RepoWatcher` 에 준다). github 저장소는 사이드카가 감시한다.
+//! (notify·폴링 — `git::watcher`), 사이드카는 같은 env 로 그 저장소를 감시하지 않는다(`src/sidecar/index.ts` 가 `FetchService` 와 같은 `fetchOwner` 를 `RepoWatcher` 에 준다). github 저장소의 bare 캐시 폴더도 같다(Phase 6b PR 7).
 //! 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) env 도 감시자도 없다 — 사이드카가 전부 감시한다.
 //!
 //! ssh(Phase 5 PR 3): `ANTLER_RUST_SSH` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이면 함께 꺼진다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 git 채널을 Rust 가 처리한다(Phase 5 PR 4: `git:fetch` 포함).
@@ -29,10 +29,12 @@
 //! (결과 캐시 60초), 캐시 실행기가 없는 github kind·미러에 없는 id 는 사이드카가 답한다. GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
 //!
 //! GitHub 원격 전용 저장소(github kind, Phase 6b PR 6)의 **조회**: 스위치가 켜져 있고 GitHub 서비스와 캐시 실행기가 주입돼 있으면(`Router::set_github_cache` — 토큰의 출처는 그 서비스 하나) 위 git 채널을 Rust 가 처리한다
-//! (`Target::Github` — 실행기 `GitExecutor::Github` 가 캐시 경로에서만 토큰·lazy fetch 환경을 연다). 아니면 사이드카가 전부 맡는다. **fetch·감시의 소유는 바꾸지 않는다** — `rust_fetch_kinds` 에 github 가 없어
-//! 둘 다 사이드카가 맡고(PR 7 에서 함께 넘긴다), 그래서 Rust 의 `activity` 는 github 저장소의 기억한 시그니처를 쓰지 않는다. github 갈래: refs 의 worktrees 를 비우고 refsDetails 는 서브모듈을 건너뛰며,
+//! //! (`Target::Github` — 실행기 `GitExecutor::Github` 가 캐시 경로에서만 토큰·lazy fetch 환경을 연다). 아니면 사이드카가 전부 맡는다. **fetch·감시의 소유도 같은 스위치 하나다**(Phase 6b PR 7) —
+//! `rust_fetch_kinds` 의 github 는 `Router::github_cache_active` 가 켜졌을 때만이고(사이드카 env 와 미러의 `resolve_fetch` 가 같은 함수), 그래서 Rust 의 `activity` 도 github 저장소의 기억한 시그니처를 쓴다.
+//! github 갈래: refs 의 worktrees 를 비우고 refsDetails 는 서브모듈을 건너뛰며,
 //! commit·compare 는 오프라인에서 통계 없는 목록을 돌려주고(lenient) onRemote 는 항상 true, wip 은 빈 결과, `gh:repo` 는 레코드의 링크로 답한다.
-//! `repos:remove` 는 사이드카로 넘기기 전에 그 저장소의 진행 중 조회·열린 로그 커서를 끊고 끝나기를 기다린다 — 사이드카가 fetch·감시를 멈춘 뒤 캐시 폴더를 지울 때 이 쪽 핸들이 남아 있지 않게.
+//! `repos:remove` 는 사이드카로 넘기기 전에 그 저장소의 fetch 를 멈추고 끝나기를 기다리고(`FetchControl::forget_and_wait`) 감시를 멈추고 진행 중 조회·열린 로그 커서를 끊고 끝나기를 기다린다 —
+//! 사이드카가 캐시 폴더를 지울 때(설정 소유 PR 9 까지) 이 쪽 핸들이 남아 있지 않게.
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
@@ -171,19 +173,22 @@ pub const API_SIDECAR_CHANNELS: &[&str] = &["gh:repo"];
 
 /// Rust 가 fetch 를 맡는 소스 종류(사이드카 env `ANTLER_RUST_FETCH_KINDS` 의 값. `src/sidecar/fetchOwns.ts` 가 읽는다).
 /// **계산 값이다**: local·wsl 은 항상, ssh 는 Rust 가 ssh 저장소를 푸는 때(`Router::ssh_active`)만 더한다. 미러의 fetch 소유 판정(`RepoMirror::resolve_fetch`)과
-/// 사이드카 env 가 모두 이 함수 하나를 부르므로, 둘이 어긋나 아무도 fetch 하지 않거나(미소유) 둘이 fetch 하는(이중) 일이 없다
-pub fn rust_fetch_kinds(ssh_active: bool) -> &'static str {
-    if ssh_active {
-        "local,wsl,ssh"
-    } else {
-        "local,wsl"
+/// 사이드카 env 가 모두 이 함수 하나를 부르므로, 둘이 어긋나 아무도 fetch 하지 않거나(미소유) 둘이 fetch 하는(이중) 일이 없다.
+/// github(GitHub 원격 전용 저장소, Phase 6b PR 7)는 Rust 가 github 저장소를 푸는 때(`Router::github_cache_active` — 스위치·GitHub 서비스·캐시 실행기가 모두 있다)만 더한다 —
+/// 조회·fetch·감시의 github 소유가 같은 스위치 하나다
+pub fn rust_fetch_kinds(ssh_active: bool, github_active: bool) -> &'static str {
+    match (ssh_active, github_active) {
+        (false, false) => "local,wsl",
+        (true, false) => "local,wsl,ssh",
+        (false, true) => "local,wsl,github",
+        (true, true) => "local,wsl,ssh,github",
     }
 }
 
 /// 사이드카를 띄울 때 넣을 `ANTLER_RUST_FETCH_KINDS` 값. 라우터가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 없다 — 사이드카가 fetch 를 전부 맡는다.
-/// `ssh_active` 는 [`Router::ssh_active`] 와 같은 값이어야 한다(`ANTLER_RUST_SSH` 도 같은 값으로 넘어간다)
-pub fn sidecar_fetch_kinds(router_enabled: bool, ssh_active: bool) -> Option<&'static str> {
-    router_enabled.then(|| rust_fetch_kinds(ssh_active))
+/// `ssh_active` 는 [`Router::ssh_active`]·`github_active` 는 [`Router::github_cache_active`] 와 같은 값이어야 한다(`ANTLER_RUST_SSH` 도 같은 값으로 넘어간다)
+pub fn sidecar_fetch_kinds(router_enabled: bool, ssh_active: bool, github_active: bool) -> Option<&'static str> {
+    router_enabled.then(|| rust_fetch_kinds(ssh_active, github_active))
 }
 
 /// `ANTLER_RUST_SSH`(`0` 이면 끔)와 `ANTLER_RUST_GIT`(`0` 이면 함께 끔)으로 ssh 저장소의 git 채널(fetch 제외)을 Rust 가 처리할지 정한다.
@@ -769,7 +774,7 @@ impl Router {
     }
 
     /// GitHub 원격 전용 저장소의 캐시 실행기를 주입한다(Phase 6b PR 6). **GitHub 서비스가 주입돼 있을 때만**(`github_active`) 받는다 — 토큰의 출처가 그 서비스 하나라서다.
-    /// 받으면 미러가 github 소스 저장소의 **조회**를 Rust 로 풀기 시작한다(fetch·감시는 PR 7 전까지 사이드카). 서비스가 없거나 스위치가 꺼져 있으면 아무것도 하지 않는다 — github 는 사이드카가 전부 맡는다.
+    /// 받으면 미러가 github 소스 저장소의 **조회·fetch·감시**를 Rust 로 풀기 시작한다(`rust_fetch_kinds` 의 github — 같은 플래그). 서비스가 없거나 스위치가 꺼져 있으면 아무것도 하지 않는다 — github 는 사이드카가 전부 맡는다.
     /// 실행기가 토큰·사용자 네트워크 설정의 출처(`TokenSource`·`NetConfigSource`)와 캐시 기준 폴더를 쥔다. 호출은 `set_github` 뒤, 사이드카를 띄우기 전이다
     pub fn set_github_cache(&self, exec: GithubExecutor) {
         if self.enabled && self.github_active() {
@@ -822,6 +827,13 @@ impl Router {
     pub fn fetch_on_focus(&self) {
         if let Some(service) = self.fetch_port() {
             service.on_focus();
+        }
+    }
+
+    /// GitHub 로그인 상태가 바뀌었다(로그인·로그아웃·토큰 만료) — 인증 문제로 멈춘 github 저장소의 fetch 를 다시 연다(TS `resumeGithubAuth`). 런타임 안에서 불러야 한다
+    pub fn github_auth_changed(&self) {
+        if let Some(service) = self.fetch_port() {
+            service.resume_github_auth();
         }
     }
 
@@ -895,7 +907,9 @@ impl Router {
     /// Rust 가 맡는 저장소가 아니면(github·미러에 없음·검사에 걸림) `None` 이고 이전 감시를 멈춘다 — 사이드카가 맡지 않는 구간도 겹치는 구간도 없다.
     /// 같은 저장소라도 대상(경로·호스트)이 달라졌으면 다시 시작한다. tokio 런타임 안에서 불러야 한다
     fn set_watch(&self, active: Option<&str>) {
-        let next = active.and_then(|id| match self.mirror.resolve_fetch(id) {
+        // 삭제 중인 github 저장소(`repos:remove` 가 정리를 시작했다)는 다시 감시하지 않는다 — 캐시 폴더를 지우기 전에 핸들을 다시 쥐지 않게
+        let removing = |id: &str| self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).get(id).is_some_and(|until| *until > Instant::now());
+        let next = active.filter(|id| !removing(id)).and_then(|id| match self.mirror.resolve_fetch(id) {
             Resolved::Rust(target) => Some((id.to_string(), target)),
             _ => None,
         });
@@ -1181,16 +1195,27 @@ impl Router {
         }
     }
 
-    /// `repos:remove` 의 Rust 쪽 정리(Phase 6b PR 6): 이 저장소를 github 소스로 풀고 있으면 "삭제 중" 표식을 달고, 진행 중인 조회와 활동 공유 시그니처 계산을 끊고,
+    /// `repos:remove` 의 Rust 쪽 정리(Phase 6b PR 6): 이 저장소를 github 소스로 풀고 있으면 "삭제 중" 표식을 달고, **fetch 를 멈추고 끝나기를 기다리고 감시를 멈추고**(Phase 6b PR 7), 진행 중인 조회와 활동 공유 시그니처 계산을 끊고,
     /// 열려 있는 로그 커서·앵커를 닫고, 그 저장소의 git 프로세스가 모두 끝나기를 기다린다
     /// (실행기가 센다 — 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있어, 최대 [`SCOPE_DRAIN_TIMEOUT`] 까지만 기다린다). 이 뒤에 사이드카가 캐시 폴더를 지운다. 캐시 삭제 자체는 사이드카의 몫이다:
-    /// fetch·감시가 아직 사이드카의 소유라 "멈춘 뒤 지운다"는 순서를 한 프로세스가 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
+    /// 설정(레코드)·삭제의 소유가 아직 사이드카라 "Rust 가 멈춘 뒤 사이드카가 지운다"는 순서를 이 호출이 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
     async fn release_github_repo(&self, repo_id: &str) {
         let Resolved::Rust(target @ Target::Github { .. }) = self.mirror.resolve(repo_id) else { return };
         let path = target.path().to_string();
         // "삭제 중" 표식을 **먼저** 단다 — 이 뒤에 들어오는 새 조회는 범위에 들지 못하고 거부된다(사이드카가 레코드를 지워 미러가 바뀔 때까지)
         self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), Instant::now() + REMOVING_TTL);
-        let scope = self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
+        // fetch 를 먼저 멈추고 끝나기를 기다린다(최대 5초 — TS `forgetAndWait`). 서비스도 같은 저장소의 새 fetch 를 거부한다. 그다음 감시를 멈춘다(`watch_target` 과 함께 — 같은 잠금 안에서)
+        if let Some(service) = self.fetch_port() {
+            service.forget_and_wait(repo_id).await;
+        }
+        {
+            let mut current = self.watch_target.lock().unwrap_or_else(PoisonError::into_inner);
+            if current.as_ref().is_some_and(|(id, _)| id == repo_id) {
+                *current = None;
+            }
+            self.watcher.unwatch_if(repo_id);
+        }
+        let scope =self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
         if let Some(scope) = &scope {
             scope.cancel.cancel();
         }
@@ -1911,7 +1936,7 @@ impl Router {
                 let t = token.clone();
                 rt.queue.run(None, Some(token.clone()), move || async move { search(&exec, &path, &req, &t).await.map(Arc::new) }).await
             }
-            HistoryJob::Activity(req) => self.activity_job(repo_id, &rt, path, req, matches!(target, Target::Github { .. }), token).await,
+            HistoryJob::Activity(req) => self.activity_job(repo_id, &rt, path, req, token).await,
         }
     }
 
@@ -1921,15 +1946,15 @@ impl Router {
     /// **기억한 시그니처(`known_signature`)를 먼저 쓴다**(TS `knownSigs.get(repoId) ?? sharedSignature`): 감시(PR 7b)가 확인마다 갱신하고 `logStale`·`fetchChanged`·재 `arm` 이 버린다.
     /// 기억이 없으면 `shared_signature`(진행 중인 계산에 합류, 제한 20초)로 얻는다. 감시하지 않는 저장소의 기억은 알림 없이 낡을 수 있다 — TS 도 같다
     ///
-    /// **github 저장소는 기억한 시그니처를 쓰지 않는다**(`github`): fetch·감시가 사이드카에 있어 ref 가 바뀌어도 Rust 에는 알림이 오지 않는다 — 매번 공유 계산을 한다(계획 §13 C2)
-    async fn activity_job(&self, repo_id: &str, rt: &SourceRuntime, path: String, req: ActivityRequest, github: bool, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+    /// github 저장소도 같다(Phase 6b PR 7): fetch 와 감시가 모두 Rust 라 ref 가 바뀌면 `fetchChanged` 알림이 기억을 버리고 감시가 갱신한다
+    async fn activity_job(&self, repo_id: &str, rt: &SourceRuntime, path: String, req: ActivityRequest, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
         let (state, cache, queue, exec) = (self.repo_state.clone(), self.activity_cache.clone(), rt.queue.clone(), rt.exec.clone());
         let repo = repo_id.to_string();
         let join_key = format!("activity\0{repo_id}\0{}", req.scope_key());
         let cache_key = format!("{repo_id}\0{}", req.scope_key());
         let run = self.joins.run(Some(&join_key), None, move || async move {
             state.after_first_page(&repo).await;
-            let sig = match state.known_signature(&repo).filter(|_| !github) {
+            let sig = match state.known_signature(&repo) {
                 Some(known) => known,
                 None => {
                     let (queue, exec, path) = (queue.clone(), exec.clone(), path.clone());

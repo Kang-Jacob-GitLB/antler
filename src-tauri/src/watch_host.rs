@@ -4,7 +4,7 @@
 //!   실행기·큐는 라우터가 쥔 [`Runtimes`] 다. 그래서 SSH 저장소의 감시도 라우터·fetch 서비스와 같은 풀의 연결 하나를 쓴다(호스트당 연결 하나).
 //! - **시그니처**: 취소 신호가 있는 호출(확인)은 `RepoState::compute_signature` 로 따로 계산하고(합치면 변화를 놓친다), 없는 호출(기준)은 제한 시간이 있는 공유 계산이다.
 //!   둘 다 성공하면 `known_signature` 를 갱신한다 — `activity` 가 이 기억값을 재사용한다(TS 와 같다).
-//! - **감시할 디렉터리**는 로컬 저장소만 구한다(`rev-parse --git-dir --git-common-dir`). WSL·SSH 는 폴링만이라 `None` 이다.
+//! - **감시할 디렉터리**는 로컬 저장소와 GitHub 원격 전용 저장소(앱 캐시 — 실행기가 로컬이다)만 구한다(`rev-parse --git-dir --git-common-dir`). WSL·SSH 는 폴링만이라 `None` 이다.
 //!
 //! 이 모듈은 `AppHandle` 에 기대지 않는다 — 변화는 주입한 싱크([`ChangeSink`])로 낸다(앱은 renderer 이벤트로, 시험은 수집기로).
 
@@ -58,6 +58,8 @@ impl WatchHost for RouterWatchHost {
             Resolved::Rust(Target::Local { .. }) => Some(WatchKind::Local),
             Resolved::Rust(Target::Wsl { .. }) => Some(WatchKind::Wsl),
             Resolved::Rust(Target::Ssh { .. }) => Some(WatchKind::Ssh),
+            // GitHub 원격 전용 저장소의 bare 캐시 폴더는 로컬 폴더라 notify 로 본다(Phase 6b PR 7)
+            Resolved::Rust(Target::Github { .. }) => Some(WatchKind::Github),
             _ => None,
         }
     }
@@ -89,7 +91,7 @@ impl WatchHost for RouterWatchHost {
 
     fn local_git_dirs(&self, repo_id: &str, cancel: CancellationToken) -> BoxFuture<'static, Option<Vec<String>>> {
         let target = match self.mirror.resolve_fetch(repo_id) {
-            Resolved::Rust(t @ Target::Local { .. }) => t,
+            Resolved::Rust(t @ (Target::Local { .. } | Target::Github { .. })) => t,
             _ => return async { None }.boxed(),
         };
         let Ok(rt) = self.runtimes.get(&target) else { return async { None }.boxed() };

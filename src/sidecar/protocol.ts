@@ -40,6 +40,11 @@ export type ToSidecar =
    * 보내는 곳은 Rust fetch 서비스의 두 지점(수동 fetch 성공 뒤, "항상 허용" 응답 뒤)뿐이다
    */
   | { t: 'fetchApprove'; kind: FetchApproveKind; repoId: string; fingerprint: string }
+  /**
+   * GitHub 원격 전용 저장소의 fetch(Rust)가 HEAD 를 맞추며 알아낸 기본 브랜치를 레코드에 기록해 달라는 부탁(설정 소유 PR 9 까지). 사이드카가 저장소 존재·github 소스·`isSafeBranch` 를 다시 검사한다.
+   * 보내는 곳은 Rust fetch 서비스의 github 갈래 한 군데다
+   */
+  | { t: 'githubBranch'; repoId: string; branch: string }
   | { t: 'focus'; focused: boolean }
   /**
    * 저장소 정보 질의. `id` 가 있으면 `res`(`{t:'res',id,env}`)로 답하고 없으면 알림이다(invalidateGhRemotes). 매개변수는 `p` 안에만 있다.
@@ -81,9 +86,10 @@ export interface MirrorRepo {
   sshHost?: string
   /**
    * github 소스(GitHub 원격 전용 저장소)의 owner/repo 링크. Rust 가 `gh:repo` 를 git 없이 이 값으로 답한다(RepoService.ghRepo 와 같다).
-   * 경로는 항상 앱 캐시 경로이고, Rust 는 캐시 모양(`<기준>/<owner>/<repo>.git`)을 통과한 경로에서만 토큰·lazy fetch 환경을 연다
+   * 경로는 항상 앱 캐시 경로이고, Rust 는 캐시 모양(`<기준>/<owner>/<repo>.git`)을 통과한 경로에서만 토큰·lazy fetch 환경을 연다.
+   * defaultBranch 는 레코드의 기본 브랜치(알면)다 — Rust fetch 가 HEAD 를 맞출 때 첫 후보로 쓰고, 다르게 알아내면 `githubBranch` 로 기록을 부탁한다
    */
-  github?: { owner: string; repo: string }
+  github?: { owner: string; repo: string; defaultBranch?: string }
 }
 
 /** Node → Rust */

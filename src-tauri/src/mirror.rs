@@ -9,7 +9,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use serde_json::Value;
 
 use crate::git::exec::wsl_paths::is_wsl_unc;
-use crate::git::github_link::sanitize_github_link;
+use crate::git::github_link::{is_safe_branch, sanitize_github_link};
 use crate::git::parsers::js_trim;
 use crate::net::json::Json;
 use crate::git::scope::is_js_space;
@@ -96,6 +96,9 @@ struct Inner {
     names: HashMap<String, String>,
     /// 저장소 id → github 소스 저장소의 owner/repo 링크(`gh:repo` 의 답에만 쓴다. 경로·kind·환경 판정에는 쓰지 않는다 — `names` 와 같은 자리)
     links: HashMap<String, GhLink>,
+    /// 저장소 id → 레코드의 기본 브랜치(`github.defaultBranch`, `is_safe_branch` 를 통과한 것만). fetch 가 HEAD 를 맞출 때 첫 후보로 쓴다.
+    /// **`Target` 에 넣지 않는다** — 첫 fetch 가 브랜치를 기록해 미러가 바뀌어도 감시·로그 커서가 "대상이 바뀌었다"고 다시 시작하지 않게
+    branches: HashMap<String, String>,
 }
 
 #[derive(Clone, Default)]
@@ -104,23 +107,28 @@ pub struct RepoMirror {
     /// ssh 저장소를 Rust 로 풀어도 되는가. 꺼져 있으면(기본) ssh 는 사이드카다. 라우터가 SSH 풀을 주입할 때 켠다(`Router::ssh_active`) —
     /// 해석이 이 한 곳에서만 갈려야 로그 커서·fetch 서비스·라우터가 같은 답을 본다
     ssh: Arc<AtomicBool>,
-    /// github 소스 저장소의 **조회**를 Rust 로 풀어도 되는가(Phase 6b PR 6). 꺼져 있으면(기본) github 는 사이드카다. 라우터가 GitHub 서비스(토큰)와 캐시 실행기를 주입할 때 켠다 —
-    /// `resolve`(조회·로그 커서·`gh:*` 질의)만 이것을 보고, **fetch·감시의 소유(`resolve_fetch`)는 이것과 무관하게 종류 목록(`rust_fetch_kinds`)으로만** 정한다(PR 7 전까지 사이드카)
+    /// github 소스 저장소를 Rust 로 풀어도 되는가(조회: Phase 6b PR 6, fetch·감시: PR 7). 꺼져 있으면(기본) github 는 사이드카다. 라우터가 GitHub 서비스(토큰)와 캐시 실행기를 주입할 때 켠다 —
+    /// `resolve`(조회·로그 커서·`gh:*` 질의)와 fetch·감시의 소유(`resolve_fetch` — 종류 목록 `rust_fetch_kinds` 가 이 값을 입력으로 받는다)가 **같은 플래그 하나**를 본다
     github: Arc<AtomicBool>,
 }
 
 impl RepoMirror {
     /// 미러를 통째로 바꾼다. 이미 받은 것보다 gen 이 작거나 같으면 버린다(뒤처진 메시지). 바꿨으면 true
     pub fn apply(&self, gen: u64, repos: Vec<MirrorRepo>) -> bool {
-        self.apply_named(gen, repos, HashMap::new(), HashMap::new())
+        self.apply_named(gen, repos, HashMap::new(), HashMap::new(), HashMap::new())
     }
 
     /// github 링크가 있는 미러(시험·설정 소유 쪽이 쓴다). `links` 는 저장소 id → 링크
     pub fn apply_with_links(&self, gen: u64, repos: Vec<MirrorRepo>, links: HashMap<String, GhLink>) -> bool {
-        self.apply_named(gen, repos, HashMap::new(), links)
+        self.apply_named(gen, repos, HashMap::new(), links, HashMap::new())
     }
 
-    fn apply_named(&self, gen: u64, repos: Vec<MirrorRepo>, names: HashMap<String, String>, links: HashMap<String, GhLink>) -> bool {
+    /// [`apply_with_links`](Self::apply_with_links) 에 레코드의 기본 브랜치(저장소 id → 브랜치)를 더한다(시험·설정 소유 쪽이 쓴다). 쓸 수 없는 이름은 버린다
+    pub fn apply_with_branches(&self, gen: u64, repos: Vec<MirrorRepo>, links: HashMap<String, GhLink>, branches: HashMap<String, String>) -> bool {
+        self.apply_named(gen, repos, HashMap::new(), links, branches)
+    }
+
+    fn apply_named(&self, gen: u64, repos: Vec<MirrorRepo>, names: HashMap<String, String>, links: HashMap<String, GhLink>, branches: HashMap<String, String>) -> bool {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         if gen <= inner.gen {
             return false;
@@ -130,6 +138,7 @@ impl RepoMirror {
         inner.names = names;
         // github 소스가 아닌 저장소에 붙은 링크는 버린다
         inner.links = links.into_iter().filter(|(id, _)| inner.repos.get(id).is_some_and(|r| r.kind == "github")).collect();
+        inner.branches = branches.into_iter().filter(|(id, b)| inner.repos.get(id).is_some_and(|r| r.kind == "github") && is_safe_branch(b)).collect();
         true
     }
 
@@ -162,6 +171,11 @@ impl RepoMirror {
             .collect()
     }
 
+    /// github 저장소 레코드의 기본 브랜치(없거나 쓸 수 없는 이름이면 없다)
+    pub fn github_branch(&self, repo_id: &str) -> Option<String> {
+        self.inner.read().unwrap_or_else(PoisonError::into_inner).branches.get(repo_id).cloned()
+    }
+
     /// 저장소 이름(사이드카가 `name` 을 보냈을 때만)
     pub fn name(&self, repo_id: &str) -> Option<String> {
         self.inner.read().unwrap_or_else(PoisonError::into_inner).names.get(repo_id).cloned()
@@ -178,7 +192,16 @@ impl RepoMirror {
             .filter(|(id, _)| repos.iter().any(|r| &r.id == id))
             .collect();
         let links = list.iter().filter_map(|v| Some((v.get("id")?.as_str()?.to_string(), parse_link(v.get("github")?)?))).collect();
-        self.apply_named(gen, repos, names, links)
+        // 기본 브랜치는 링크가 유효할 때만 받는다(링크가 버려진 레코드의 브랜치는 쓰지 않는다)
+        let branches = list
+            .iter()
+            .filter_map(|v| {
+                let github = v.get("github")?;
+                parse_link(github)?;
+                Some((v.get("id")?.as_str()?.to_string(), github.get("defaultBranch")?.as_str()?.to_string()))
+            })
+            .collect();
+        self.apply_named(gen, repos, names, links, branches)
     }
 
     pub fn resolve(&self, repo_id: &str) -> Resolved {
@@ -216,11 +239,11 @@ impl RepoMirror {
     }
 
     /// fetch 를 Rust 서비스가 맡는 저장소만 거른 해석. **소스 종류(`rust_fetch_kinds`)가 먼저다** — 해석 결과(`Resolved::Rust`)가 아니라 종류로 소유를 정해야
-    /// 사이드카(`ANTLER_RUST_FETCH_KINDS`)와 같은 술어를 쓴다. 이 술어(ssh 는 `ssh` 스위치가 켜졌을 때만 포함)가 두 쪽에서 같으므로 이중 fetch 도 미소유도 없다.
-    /// fetch 의 서비스·라우터·자동 예약은 모두 이 함수만 쓴다. 종류가 맡는 것이 아니면(github, 꺼진 ssh) 검증보다 먼저 `Sidecar` 다 —
+    /// 사이드카(`ANTLER_RUST_FETCH_KINDS`)와 같은 술어를 쓴다. 이 술어(ssh·github 는 각 스위치가 켜졌을 때만 포함)가 두 쪽에서 같으므로 이중 fetch 도 미소유도 없다.
+    /// fetch·감시의 서비스·라우터·자동 예약은 모두 이 함수만 쓴다. 종류가 맡는 것이 아니면(꺼진 github·ssh) 검증보다 먼저 `Sidecar` 다 —
     /// 호스트가 잘못된 ssh 저장소의 fetch 는 켜져 있으면 Rust 가 `Invalid` 로, 꺼져 있으면 사이드카가 오류를 만든다
     pub fn resolve_fetch(&self, repo_id: &str) -> Resolved {
-        let kinds = rust_fetch_kinds(self.ssh.load(Ordering::SeqCst));
+        let kinds = rust_fetch_kinds(self.ssh.load(Ordering::SeqCst), self.github.load(Ordering::SeqCst));
         let owned = {
             let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
             inner.repos.get(repo_id).is_some_and(|r| kinds.split(',').any(|k| k == r.kind))
@@ -391,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn github_는_스위치가_켜졌을_때만_조회를_rust_가_맡고_fetch_소유는_늘_사이드카다() {
+    fn github_는_스위치가_켜졌을_때만_조회와_fetch_소유를_rust_가_맡는다() {
         let m = RepoMirror::default();
         let msg = json!({ "t": "repos", "gen": 1, "repos": [
             { "id": "g", "kind": "github", "path": "C:\\c\\o\\r.git", "name": "r", "github": { "owner": "o", "repo": "r" } },
@@ -415,12 +438,43 @@ mod tests {
         }
         // github 소스가 아닌 저장소에 붙은 링크는 버린다
         assert_eq!(m.resolve("a"), Resolved::Rust(Target::Local { path: "/r".into() }));
-        // fetch·감시의 소유는 스위치와 무관하게 종류 목록이다 — github 는 PR 7 전까지 사이드카가 맡는다(둘 다 맡는 일도 아무도 안 맡는 일도 없다)
-        for id in ["g", "nolink", "unc", "nt"] {
-            assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}");
+        // fetch·감시의 소유도 같은 스위치 하나다(종류 목록 `rust_fetch_kinds` 가 이 플래그를 입력으로 받는다 — 사이드카 env 와 같은 술어). 검증은 소유 판정 뒤다: 경로가 잘못된 것은 사이드카가 아니라 오류
+        assert_eq!(m.resolve_fetch("g"), m.resolve("g"));
+        assert_eq!(m.resolve_fetch("nolink"), m.resolve("nolink"));
+        for id in ["unc", "nt"] {
+            assert!(matches!(m.resolve_fetch(id), Resolved::Invalid(_)), "{id}");
         }
+        m.set_github(false);
+        for id in ["g", "nolink", "unc", "nt"] {
+            assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}: 스위치가 꺼지면 fetch 도 사이드카다");
+        }
+        m.set_github(true);
         let t = Target::Github { path: "/p".into(), link: None };
         assert_eq!((t.source_key().as_str(), t.kind(), t.path()), ("github", "github", "/p"));
+    }
+
+    #[test]
+    fn 기본_브랜치는_유효한_링크와_쓸_수_있는_이름일_때만_받고_대상에는_넣지_않는다() {
+        let m = RepoMirror::default();
+        m.set_github(true);
+        let rec = |id: &str, link: Value| json!({ "id": id, "kind": "github", "path": "C:\\c\\o\\r.git", "name": id, "github": link });
+        let msg = json!({ "gen": 1, "repos": [
+            rec("ok", json!({ "owner": "o", "repo": "r", "defaultBranch": "release/1.x" })),
+            rec("none", json!({ "owner": "o", "repo": "r" })),
+            rec("flag", json!({ "owner": "o", "repo": "r", "defaultBranch": "-x" })),
+            rec("badlink", json!({ "owner": "-o", "repo": "r", "defaultBranch": "main" })),
+            { "id": "local", "kind": "local", "path": "/r", "name": "l", "github": { "owner": "o", "repo": "r", "defaultBranch": "main" } }
+        ]});
+        assert!(m.apply_message(&msg));
+        assert_eq!(m.github_branch("ok").as_deref(), Some("release/1.x"));
+        for id in ["none", "flag", "badlink", "local", "nope"] {
+            assert_eq!(m.github_branch(id), None, "{id}");
+        }
+        // 브랜치가 바뀌어도 해석 결과(= 감시·로그 커서가 비교하는 대상)는 같다
+        let before = m.resolve("ok");
+        assert!(m.apply_message(&json!({ "gen": 2, "repos": [rec("ok", json!({ "owner": "o", "repo": "r", "defaultBranch": "trunk" }))] })));
+        assert_eq!(m.github_branch("ok").as_deref(), Some("trunk"));
+        assert_eq!(m.resolve("ok"), before);
     }
 
     #[test]

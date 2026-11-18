@@ -1,4 +1,4 @@
-//! GitHub 원격 전용 저장소 캐시의 실행 기반(`src/main/git/githubCache.ts` 119-367 의 이식, Phase 6b PR 2 — 앱에 연결하지 않는다).
+//! GitHub 원격 전용 저장소 캐시의 실행 기반(`src/main/git/githubCache.ts` 119-367 의 이식, Phase 6b PR 2). 조회는 PR 6, fetch·감시는 PR 7 이 앱에 연결했다(추가·삭제·고아 정리는 PR 9 까지 사이드카).
 //!
 //! 앱 캐시(`<userData>/remote-repos/<owner>/<repo>.git`)는 사용자 저장소에 쓰지 않는다는 규칙의 **유일한 예외**다. 이 모듈이 그 예외를 한 곳에 가둔다:
 //! - [`GithubCachePath`] — 캐시 모양(`github_cache_slug`)을 통과한 경로만 담는 newtype. 환경을 만들고 저장소를 만드는 함수는 이 타입만 받는다.
@@ -117,6 +117,19 @@ fn cancel_opts(cancel: Option<&CancellationToken>) -> RunOpts {
 /// 통과하면 빈 목록, 아니면 사유 목록. 설정을 읽지 못하면 Err(검사할 수 없으므로 fetch 하지 않는다)
 pub async fn inspect_github_repo<R: GitRunner>(r: &R, dir: &GithubCachePath, link: &GithubLink, cancel: Option<&CancellationToken>) -> Result<Vec<String>, ExecError> {
     inspect_with_url(r, dir, &github_remote_url(&link.owner, &link.repo, GITHUB_ORIGIN), cancel).await
+}
+
+/// fetch 서비스가 부르는 검사: [`inspect_github_repo`] 인데 원격 URL 의 출처를 받는다. `None` 이 프로덕션(`https://github.com` 고정)이고, 서비스가 `Some` 을 쥐는 길은
+/// `test-hooks` 뒤의 `FetchService::with_github_origin_for_test` 뿐이다(`tests/github_fetch.rs` 가 소스로 강제한다)
+pub async fn inspect_github_repo_at<R: GitRunner>(r: &R, dir: &GithubCachePath, link: &GithubLink, origin: Option<&str>, cancel: Option<&CancellationToken>) -> Result<Vec<String>, ExecError> {
+    inspect_with_url(r, dir, &github_remote_url(&link.owner, &link.repo, origin.unwrap_or(GITHUB_ORIGIN)), cancel).await
+}
+
+/// ref 가 하나도 없는가(아직 한 번도 fetch 하지 못한 원격 전용 저장소) — TS `RepoService.hasNoRefs`. 읽지 못하면(종료 코드 ≠ 0) 있다고 본다
+pub async fn has_no_refs<R: GitRunner>(r: &R, dir: &GithubCachePath, cancel: Option<&CancellationToken>) -> Result<bool, ExecError> {
+    let args = ["for-each-ref", "--count=1", "--format=%(refname)"].map(str::to_string);
+    let out = r.run(dir.as_str(), &args, &cancel_opts(cancel)).await?;
+    Ok(out.code == 0 && js_trim(&String::from_utf8_lossy(&out.stdout)).is_empty())
 }
 
 /// [`inspect_github_repo`] 에 원격 URL 의 출처를 주입한다. **테스트 전용**(프로덕션은 `https://github.com` 고정)
@@ -400,8 +413,8 @@ const REMOVE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis
 /// owner 폴더나 저장소 폴더가 링크(정션 포함)면 링크 너머의 실제 폴더를 지우게 되므로 아무것도 지우지 않고 `Ok(false)` 다. 폴더가 없어도 `Ok(false)`.
 /// 지웠으면 `Ok(true)` 이고 비게 된 owner 폴더도 정리한다(다른 저장소가 있으면 남는다). 파일을 쥔 프로세스가 있어 끝내 못 지우면 `Err`.
 ///
-/// 읽기 전용 pack 이 든 폴더도 `remove_dir_all` 이 그대로 지운다(`github_cache_exec.rs` 시험). **연결은 PR 9** — 지금 `repos:remove` 의 삭제는 fetch·감시를 쥔 사이드카가
-/// 멈춘 뒤에 한다(TS `RepoService.removeGithubCache` — 레코드의 owner/repo 와 캐시 경로가 맞을 때만 부른다). 호출자는 이 함수를 부르기 전에 이 저장소의 git(조회·fetch·감시)을 모두 멈춰야 한다
+/// 읽기 전용 pack 이 든 폴더도 `remove_dir_all` 이 그대로 지운다(`github_cache_exec.rs` 시험). **연결은 PR 9** — 지금 `repos:remove` 의 삭제는 Rust 가 fetch·감시·조회를 멈추고 기다린 뒤(PR 6·7)
+/// 사이드카가 한다(TS `RepoService.removeGithubCache` — 레코드의 owner/repo 와 캐시 경로가 맞을 때만 부른다). 호출자는 이 함수를 부르기 전에 이 저장소의 git(조회·fetch·감시)을 모두 멈춰야 한다
 pub fn remove_github_cache(path: &GithubCachePath) -> Result<bool, String> {
     let repo = std::path::Path::new(path.as_str());
     let Some(owner) = repo.parent() else { return Ok(false) };

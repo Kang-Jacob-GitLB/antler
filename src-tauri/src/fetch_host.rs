@@ -81,6 +81,12 @@ impl FetchHost for AppFetchHost {
         (self.notes)(op, repo_id);
     }
 
+    fn github_branch(&self, repo_id: &str, branch: &str) {
+        if let Some(sidecar) = self.app.try_state::<Sidecar>() {
+            sidecar.github_branch(repo_id, branch);
+        }
+    }
+
     fn repo_name(&self, repo_id: &str) -> Option<String> {
         self.mirror.name(repo_id)
     }

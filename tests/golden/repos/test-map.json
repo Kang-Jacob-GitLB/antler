@@ -74,7 +74,7 @@
   "githubRemote > RepoService: 원격 전용 저장소 > 아직 받지 않은 저장소는 조회가 에러 대신 빈 결과다": "github_route.rs::아직_받지_않은_저장소는_조회가_에러_대신_빈_결과다",
   "githubRemote > RepoService: 원격 전용 저장소 > 작업 트리 조회는 빈 결과이고 ghRepo 는 레코드에서 바로 돌려준다": "github_route.rs::github_만의_갈래는_ts_repo_service_와_같다",
   "githubRemote > RepoService: 원격 전용 저장소 > github 환경(토큰)은 캐시 경로의 github 저장소에만 열린다": "github_cache_exec.rs::github_환경은_캐시_경로의_저장소에만_열린다",
-  "githubRemote > RepoService: 원격 전용 저장소 > RepoWatcher 가 bare 캐시 저장소의 ref 변화를 알아챈다": "N/A: PR 7",
+  "githubRemote > RepoService: 원격 전용 저장소 > RepoWatcher 가 bare 캐시 저장소의 ref 변화를 알아챈다": "github_fetch.rs::rust_감시가_bare_캐시_저장소의_ref_변화를_알아챈다",
   "githubRemote > RepoService: 원격 전용 저장소 > 캐시 폴더를 지우고 빈 소유자 폴더도 정리한다": "N/A: PR 9",
   "githubRemote > RepoService: 원격 전용 저장소 > 모양이 틀린 경로는 지우지 않는다": "N/A: PR 9",
   "githubRemote > RepoService: 원격 전용 저장소 > 소유자 폴더가 링크면 따라가지 않는다": "N/A: PR 9",
@@ -84,8 +84,8 @@
   "githubRemote > RepoService: 원격 전용 저장소 > 로드 때 버려진 레코드(링크가 틀림)의 폴더도 고아로 지운다": "N/A: PR 9",
   "githubRemote > RepoService: 원격 전용 저장소 > 설정 파일을 읽지 못한 채 시작했으면(저장소 목록이 빈 것이 사실이 아니다) 아무것도 지우지 않는다": "N/A: PR 9",
   "githubRemote > RepoService: 원격 전용 저장소 > 소유자 폴더가 링크면 따라가지 않는다 #2": "N/A: PR 9",
-  "githubRemote > RepoService: 원격 전용 저장소 > github 저장소는 인증 문제로 본다(백오프하지 않고 멈춤): %s": "N/A: PR 7",
-  "githubRemote > RepoService: 원격 전용 저장소 > 일반 저장소의 분류는 그대로다": "N/A: PR 7",
-  "githubRemote > RepoService: 원격 전용 저장소 > 설정이 달라진 저장소는 확인 창 없이 차단하고 네트워크를 쓰지 않는다": "N/A: PR 7",
-  "githubRemote > RepoService: 원격 전용 저장소 > 캐시 경로가 저장소와 맞지 않는 레코드는 일반 저장소 흐름으로 가지 않고 차단한다": "N/A: PR 7"
+  "githubRemote > RepoService: 원격 전용 저장소 > github 저장소는 인증 문제로 본다(백오프하지 않고 멈춤): %s": "github_fetch.rs::실패_분류는_github_일_때만_권한_없음을_인증으로_본다",
+  "githubRemote > RepoService: 원격 전용 저장소 > 일반 저장소의 분류는 그대로다": "github_fetch.rs::실패_분류는_github_일_때만_권한_없음을_인증으로_본다",
+  "githubRemote > RepoService: 원격 전용 저장소 > 설정이 달라진 저장소는 확인 창 없이 차단하고 네트워크를 쓰지 않는다": "github_fetch.rs::설정이_달라진_캐시는_확인_없이_차단하고_받지_않는다",
+  "githubRemote > RepoService: 원격 전용 저장소 > 캐시 경로가 저장소와 맞지 않는 레코드는 일반 저장소 흐름으로 가지 않고 차단한다": "github_fetch.rs::캐시_경로가_저장소와_맞지_않는_레코드는_일반_흐름으로_가지_않고_차단한다"
 }

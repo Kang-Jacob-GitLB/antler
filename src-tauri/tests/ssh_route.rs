@@ -338,7 +338,7 @@ fn 앱은_풀을_fetch_서비스와_사이드카_env_보다_먼저_주입하고_
     let guard = lib.find("if router.ssh_enabled()").expect("스위치 확인");
     let fetch = lib.find("router.set_fetch(").expect("fetch 서비스 주입");
     let active = lib.find("let rust_ssh = router.ssh_active();").expect("사이드카 env 값(미러 해석과 같은 판정)");
-    let kinds = lib.find("let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh);").expect("fetch 소유 종류도 같은 판정(ssh_active)으로 정한다");
+    let kinds = lib.find("let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github);").expect("fetch 소유 종류도 같은 판정(ssh_active)으로 정한다");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
     assert!(guard < pool && pool < fetch && fetch < active && active < kinds && kinds < manage && manage < spawn);

@@ -18,7 +18,7 @@ function setup(): { c: ConfigStore; ids: Record<'local' | 'wsl' | 'ssh', string>
 
 describe('사이드카 fetch 소유권(ANTLER_RUST_FETCH_KINDS)', () => {
   it('값이 없거나 알 수 없는 토큰뿐이면 사이드카가 전부 맡는다(되돌리기)', () => {
-    for (const v of [undefined, '', ' ', 'github', 'LOCAL', 'SSH', 'x,y', ',']) {
+    for (const v of [undefined, '', ' ', 'GITHUB', 'LOCAL', 'SSH', 'x,y', ',']) {
       expect(parseRustFetchKinds(v).size, String(v)).toBe(0)
     }
     const { c, ids } = setup()
@@ -29,8 +29,8 @@ describe('사이드카 fetch 소유권(ANTLER_RUST_FETCH_KINDS)', () => {
   it('local,wsl 이면 그 환경의 저장소는 맡지 않고 ssh 와 알 수 없는 저장소는 맡는다(ssh 스위치가 꺼진 구성)', () => {
     const kinds = parseRustFetchKinds('local,wsl')
     expect([...kinds].sort()).toEqual(['local', 'wsl'])
-    // 공백·중복·알 수 없는 토큰(github·오타)은 무시한다 — github 는 Rust 가 맡을 수 없는 종류다
-    expect([...parseRustFetchKinds(' local , github,local,x')]).toEqual(['local'])
+    // 공백·중복·알 수 없는 토큰(오타)은 무시한다
+    expect([...parseRustFetchKinds(' local , local,x')]).toEqual(['local'])
     const { c, ids } = setup()
     const owns = fetchOwner(() => c.get(), kinds)
     expect(owns(ids.local)).toBe(false)
@@ -63,6 +63,28 @@ describe('사이드카 fetch 소유권(ANTLER_RUST_FETCH_KINDS)', () => {
     await expect(svc.fetch(ids.ssh, { manual: true })).rejects.toThrow(/맡지 않습니다/)
     svc.setActive(ids.local)
     svc.onFocus()
+    expect(statuses).toEqual([])
+    svc.dispose()
+  })
+
+  it('github 종류가 들어오면(Rust 가 원격 전용 저장소를 풀 때) github 저장소의 fetch 도 맡지 않는다 — 다른 종류와 같은 술어 하나', async () => {
+    const { c, ids } = setup()
+    const g = c.addRepo({ sourceId: 'github', path: 'C:\\cache\\octocat\\hello.git', name: 'hello', github: { owner: 'octocat', repo: 'hello' } }, { id: 'github', kind: 'github', label: 'GitHub' })
+    const kinds = parseRustFetchKinds('local,wsl,github')
+    expect([...kinds].sort()).toEqual(['github', 'local', 'wsl'])
+    const owns = fetchOwner(() => c.get(), kinds)
+    expect(owns(g.id)).toBe(false)
+    expect(owns(ids.ssh)).toBe(true)
+    // 없으면(github 스위치가 꺼진 구성 — local,wsl) 사이드카가 맡는다
+    expect(fetchOwner(() => c.get(), parseRustFetchKinds('local,wsl,ssh'))(g.id)).toBe(true)
+    // 소유하지 않으면 FetchService 는 fetch 도 자동 예약도 원격 전용 저장소 흐름(fetchIfEmpty·resumeGithubAuth)도 하지 않는다(이중 fetch 없음)
+    const repos = new Proxy({}, { get: (_t, p) => () => Promise.reject(new Error(`RepoService.${String(p)} 호출`)) })
+    const statuses: unknown[] = []
+    const svc = new FetchService(c, repos as never, (s) => statuses.push(s), () => {}, null, owns)
+    await expect(svc.fetch(g.id, { manual: true })).rejects.toThrow(/맡지 않습니다/)
+    svc.setActive(g.id)
+    svc.resumeGithubAuth()
+    await Promise.resolve()
     expect(statuses).toEqual([])
     svc.dispose()
   })

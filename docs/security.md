@@ -146,9 +146,11 @@ command scope(`GIT_CONFIG_KEY_n`)는 로컬 config 보다 우선하므로 토큰
 **남는 위험**: 로컬 config 의 더 구체적인 URL 범위 키(`http.https://github.com/<owner>/<repo>.git.sslVerify`)는 호스트 범위 고정값을 이긴다(git 의 URL 일치는 경로가 긴 쪽이 우선 — 실측 확인). 원격 URL 의 대소문자가 캐시 경로(소문자)와 달라 `githubEnv` 가 그 URL 을 알 수 없어 고정하지 않았다.
 `http.sslCAInfo`·`http.curloptResolve`·`http.proxySSLVerify` 를 로컬 config 에 심는 경우도 같은 수준(네트워크 위치까지 필요)의 잔여 위험이다.
 
-Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`)은 같은 예외를 세 겹으로 가둔다. 앱에는 **조회 채널만** 연결돼 있다(Phase 6b PR 6 — fetch·감시·추가·삭제는 아직 Node 사이드카).
+Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`)은 같은 예외를 세 겹으로 가둔다. 앱에는 **조회 채널(PR 6)과 fetch·감시(PR 7)** 가 연결돼 있다(추가·삭제·고아 정리는 설정 소유 PR 9 까지 Node 사이드카).
+fetch 는 일반 저장소의 허용 목록을 타지 않는 **별도 갈래**다(`git/fetch/service/github.rs`): 레코드의 owner/repo 와 캐시 경로가 맞지 않으면 일반 흐름으로 가지 않고 차단하고, 설정이 앱이 만든 것과 **정확히 일치**하지 않으면(`include.path` 등 다른 키·remote 둘) 확인 없이 차단하며,
+fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=false`·remote `origin` 하나·고정 refspec·`--refmap=`)뿐이다. 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)와 Rust 의 소유 판정은 같은 함수·같은 플래그 하나라 이중 fetch·무감시가 없다.
 라우터는 GitHub 서비스(토큰의 출처)와 캐시 실행기가 주입됐고 스위치가 켜져 있을 때만 github 저장소를 푼다(`Router::set_github_cache`). 토큰은 Rust 안에서만 읽혀 실행기의 환경 변수로만 가고 어떤 응답·오류 봉투에도 실리지 않으며(시험 `tests/github_route.rs`),
-`repos:remove` 는 사이드카가 캐시 폴더를 지우기 전에 이 쪽의 진행 중 조회·활동 시그니처 계산을 끊고 로그 커서를 닫은 뒤, 그 저장소의 git 프로세스가 끝나기를(실행기가 센다, 최대 5초) 기다린다.
+`repos:remove` 는 사이드카가 캐시 폴더를 지우기 전에 이 쪽의 fetch(멈추고 끝나기를 기다린다 — 최대 5초)·감시·진행 중 조회·활동 시그니처 계산을 끊고 로그 커서를 닫은 뒤, 그 저장소의 git 프로세스가 끝나기를(실행기가 센다, 최대 5초) 기다린다.
 보장은 "트리 종료를 요청했고 호출이 돌아왔다"까지이고 파일 핸들이 풀리는 짧은 틈은 사이드카의 삭제 재시도가 흡수한다. 정리를 시작한 id 에는 "삭제 중" 표식이 달려 새 조회가 폴더를 다시 쥐지 못한다(미러가 바뀌면 풀리고, 아니면 30초 뒤). 세 겹은 이렇다:
 캐시 모양을 통과한 경로만 담는 `GithubCachePath` 타입이 환경·init·HEAD 쓰기의 입력이고, 환경(`github_env`)을 만드는 곳은 그 파일 한 곳(소스 검사로 강제)이며,
 캐시 밖 경로의 git 은 토큰도 읽지 않고 기본 환경(전송 금지)으로 돈다. `http.followRedirects=false` 는 `-c` 로도 명시한다(`-c` 는 환경의 설정을 이긴다). 일반 저장소의 fetch 허용 목록은 바뀌지 않는다.

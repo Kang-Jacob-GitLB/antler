@@ -96,27 +96,28 @@ fn fetch_prefs_받는_곳은_사이드카를_띄우기_전에_등록한다() {
     let manage_router = lib.find("app.manage(router)").expect("라우터 등록");
     assert!(set_fetch < manage_router && manage_router < sink);
     // 사이드카 기동 인자는 라우터 스위치에서 정한 값이다
-    assert!(lib.contains("sidecar_fetch_kinds(router.enabled(), rust_ssh)"));
+    assert!(lib.contains("sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github)"));
     // 포커스·sink 는 런타임 밖 스레드에서 불린다 — 라우터 호출은 앱 런타임 안에서
-    assert_eq!(lib.matches("in_runtime_of(").count(), 2);
+    // (fetchPrefs sink·창 포커스, 그리고 GitHub 로그인 변경 콜백이 부르는 `github_auth_changed` — Phase 6b PR 7)
+    assert_eq!(lib.matches("in_runtime_of(").count(), 3);
 }
 
 #[test]
 fn 사이드카_env_는_스위치가_켜졌을_때만_있고_ssh_는_ssh_활성일_때만_더한다() {
-    assert_eq!(sidecar_fetch_kinds(true, false), Some("local,wsl"));
-    assert_eq!(sidecar_fetch_kinds(true, true), Some("local,wsl,ssh"));
-    assert_eq!(rust_fetch_kinds(false), "local,wsl");
-    assert_eq!(rust_fetch_kinds(true), "local,wsl,ssh");
+    assert_eq!(sidecar_fetch_kinds(true, false, false), Some("local,wsl"));
+    assert_eq!(sidecar_fetch_kinds(true, true, false), Some("local,wsl,ssh"));
+    assert_eq!(rust_fetch_kinds(false, false), "local,wsl");
+    assert_eq!(rust_fetch_kinds(true, false), "local,wsl,ssh");
     // 라우터가 꺼져 있으면 ssh 가 활성이라는 값이 와도 env 는 없다(사이드카가 전부 맡는다)
-    assert_eq!(sidecar_fetch_kinds(false, false), None);
-    assert_eq!(sidecar_fetch_kinds(false, true), None);
+    assert_eq!(sidecar_fetch_kinds(false, false, false), None);
+    assert_eq!(sidecar_fetch_kinds(false, true, true), None);
     // 사이드카 기동은 값이 없을 때 부모의 env 를 지운다(되돌리기가 뒤집히지 않게)
     assert!(prod_code("src/sidecar.rs").contains("env_remove(\"ANTLER_RUST_FETCH_KINDS\")"));
     // 사이드카가 읽는 이름·토큰이 TS 와 같다
     let ts = read_src("../src/sidecar/index.ts");
     assert!(ts.contains("ANTLER_RUST_FETCH_KINDS"));
     let owns = read_src("../src/sidecar/fetchOwns.ts");
-    assert!(owns.contains("['local', 'wsl', 'ssh']"));
+    assert!(owns.contains("['local', 'wsl', 'ssh', 'github']"));
 }
 
 #[test]
@@ -248,7 +249,7 @@ async fn 스위치가_꺼지면_모든_fetch_가_사이드카로_가고_서비�
     router.shutdown();
     assert!(log(&calls).is_empty(), "{:?}", log(&calls));
     assert_eq!(router.rust_handled(), 0);
-    assert!(sidecar_fetch_kinds(router.enabled(), router.ssh_active()).is_none());
+    assert!(sidecar_fetch_kinds(router.enabled(), router.ssh_active(), router.github_cache_active()).is_none());
 }
 
 #[tokio::test]
@@ -422,8 +423,8 @@ async fn ssh_저장소의_git_fetch_는_ssh_활성이면_rust_로_가고_사이�
     }
     assert_eq!(router.rust_handled(), 2);
     // 사이드카 env 가 ssh 를 포함한다(같은 ssh_active 값) — 포함하지 않으면 사이드카도 fetch 해 이중 fetch 가 된다
-    assert_eq!(sidecar_fetch_kinds(router.enabled(), router.ssh_active()), Some("local,wsl,ssh"));
-    assert_eq!(rust_fetch_kinds(router.ssh_active()), "local,wsl,ssh");
+    assert_eq!(sidecar_fetch_kinds(router.enabled(), router.ssh_active(), router.github_cache_active()), Some("local,wsl,ssh"));
+    assert_eq!(rust_fetch_kinds(router.ssh_active(), router.github_cache_active()), "local,wsl,ssh");
 }
 
 #[tokio::test]
@@ -439,17 +440,17 @@ async fn ssh_스위치가_꺼지면_ssh_fetch_는_사이드카이고_env_에_ssh
         assert!(is_sidecar(&off.route("git:fetch", &json!([id, true])).await), "{id}");
     }
     assert!(log(&calls).is_empty());
-    assert_eq!(sidecar_fetch_kinds(off.enabled(), off.ssh_active()), Some("local,wsl"));
+    assert_eq!(sidecar_fetch_kinds(off.enabled(), off.ssh_active(), off.github_cache_active()), Some("local,wsl"));
     // ANTLER_RUST_GIT=0: env 도 서비스도 없다
     let git_off = Router::new(false, false, ssh_mirror());
     git_off.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\\nonexistent-antler-home"));
-    assert!(sidecar_fetch_kinds(git_off.enabled(), git_off.ssh_active()).is_none());
+    assert!(sidecar_fetch_kinds(git_off.enabled(), git_off.ssh_active(), git_off.github_cache_active()).is_none());
     assert!(is_sidecar(&git_off.route("git:fetch", &json!(["ssh", true])).await));
     // 풀이 없는 기본 라우터도 같다(미러의 ssh 해석이 꺼져 있으므로 fetch 소유도 사이드카다)
     let bare = Router::new(true, false, ssh_mirror());
     bare.set_fetch(Arc::new(Fake(Arc::new(Calls::default()))));
     assert!(is_sidecar(&bare.route("git:fetch", &json!(["ssh", true])).await));
-    assert_eq!(sidecar_fetch_kinds(bare.enabled(), bare.ssh_active()), Some("local,wsl"));
+    assert_eq!(sidecar_fetch_kinds(bare.enabled(), bare.ssh_active(), bare.github_cache_active()), Some("local,wsl"));
 }
 
 #[tokio::test]
@@ -587,6 +588,10 @@ fn fetch_소유_판정은_소스_종류만_쓴다() {
     let service = prod_code("src/git/fetch/service.rs");
     assert!(!service.contains("mirror.resolve("), "fetch 서비스가 mirror.resolve 로 소유를 정한다");
     assert_eq!(service.matches("mirror.resolve_fetch(").count(), 2);
+    // github 갈래(`service/github.rs`)도 같은 함수만 쓴다
+    let github = prod_code("src/git/fetch/service/github.rs");
+    assert!(!github.contains("mirror.resolve("), "github 갈래가 mirror.resolve 로 소유를 정한다");
+    assert_eq!(github.matches("mirror.resolve_fetch(").count(), 2);
     let router = prod_code("src/router.rs");
     assert_eq!(router.matches("mirror.resolve_fetch(").count(), 4, "git_fetch·repos:watch 의 자동 fetch 대상, 그리고 감시 소유(set_watch·sync_watch — PR 7b, fetch 와 같은 술어)");
     // git_fetch 안에는 해석 함수가 resolve_fetch 하나뿐이다
@@ -595,9 +600,11 @@ fn fetch_소유_판정은_소스_종류만_쓴다() {
     assert!(body.contains("resolve_fetch(") && !body.contains("mirror.resolve("));
     // 소유 종류는 계산 값 하나(rust_fetch_kinds)다 — 미러의 판정과 사이드카 env 가 같은 함수를 부른다. 상수가 남아 있지 않다
     let mirror = prod_code("src/mirror.rs");
-    assert!(mirror.contains("rust_fetch_kinds(self.ssh.load("));
+    assert!(mirror.contains("rust_fetch_kinds(self.ssh.load(Ordering::SeqCst), self.github.load("));
     assert!(router.contains("pub fn rust_fetch_kinds(") && !router.contains("RUST_FETCH_KINDS"));
-    assert!(router.contains("rust_fetch_kinds(ssh_active)"));
-    assert_eq!(rust_fetch_kinds(false), "local,wsl");
-    assert_eq!(rust_fetch_kinds(true), "local,wsl,ssh");
+    assert!(router.contains("rust_fetch_kinds(ssh_active, github_active)"));
+    assert_eq!(rust_fetch_kinds(false, false), "local,wsl");
+    assert_eq!(rust_fetch_kinds(true, false), "local,wsl,ssh");
+    assert_eq!(rust_fetch_kinds(false, true), "local,wsl,github");
+    assert_eq!(rust_fetch_kinds(true, true), "local,wsl,ssh,github");
 }
