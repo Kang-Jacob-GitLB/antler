@@ -125,3 +125,8 @@ required-features = ["test-hooks"]
 [[test]]
 name = "config_route"
 required-features = ["test-hooks"]
+
+# 사이드카 범위 불변식(Phase 6b PR 10): 설정 소유 실행에서 사이드카로 가는 채널은 update:* 7개뿐 — `ConfigStore::open_for_test` 가 test-hooks 뒤에 있다
+[[test]]
+name = "sidecar_scope"
+required-features = ["test-hooks"]

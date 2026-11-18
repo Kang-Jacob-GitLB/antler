@@ -332,18 +332,17 @@ async fn log_ok_at(router: &Router, id: &str, commits: usize) -> bool {
 // ── 앱 배선(소스 검사) ─────────────────────────────────────
 
 #[test]
-fn 앱은_풀을_fetch_서비스와_사이드카_env_보다_먼저_주입하고_판정은_ssh_active_하나다() {
+fn 앱은_풀을_fetch_서비스보다_먼저_주입하고_판정은_ssh_active_하나다() {
     let lib = read_src("src/lib.rs");
     let pool = lib.find("router.set_ssh_pool(").expect("풀 주입");
     let guard = lib.find("if router.ssh_enabled()").expect("스위치 확인");
     let fetch = lib.find("router.set_fetch(").expect("fetch 서비스 주입");
-    let active = lib.find("let rust_ssh = router.ssh_active();").expect("사이드카 env 값(미러 해석과 같은 판정)");
-    let kinds = lib.find("let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github);").expect("fetch 소유 종류도 같은 판정(ssh_active)으로 정한다");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(guard < pool && pool < fetch && fetch < active && active < kinds && kinds < manage && manage < spawn);
+    assert!(guard < pool && pool < fetch && fetch < manage && manage < spawn);
     assert_eq!(lib.matches("router.set_ssh_pool(").count(), 1);
-    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh, config_owned)"));
+    assert!(!lib.contains("rust_ssh") && !lib.contains("sidecar_fetch_kinds"), "PR 10: 사이드카에 ssh·fetch 소유를 알리지 않는다");
+    assert!(lib.contains("mirror, config_owned)?"));
     // 홈을 알 수 없으면 풀을 주입하지 않는다(사이드카가 처리한다) — 빈 홈으로 만들지 않는다
     assert!(lib.contains("app.path().home_dir()"));
     // 하위 스위치 `ANTLER_RUST_SSH` 는 Phase 6b PR 9 부터 은퇴했다(결정 D5) — 라우터도 앱·사이드카도 이 값을 읽지 않는다(사이드카 env 로 *내보내기만* 한다)
@@ -355,9 +354,8 @@ fn 앱은_풀을_fetch_서비스와_사이드카_env_보다_먼저_주입하고_
 }
 
 #[test]
-fn 사이드카_env_는_ssh_active_일_때만_1_이고_아니면_부모_값도_지운다() {
+fn 사이드카에_ssh_소유를_알리는_env_는_없다() {
+    // Phase 6b PR 10: 소유하는 실행의 사이드카는 ssh 저장소를 맡지 않고(어떤 git 채널도 받지 않는다) 되돌리기는 전부 맡으므로 알릴 값이 없다
     let sidecar = read_src("src/sidecar.rs");
-    assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_SSH\", \"1\")"));
-    assert!(sidecar.contains("cmd.env_remove(\"ANTLER_RUST_SSH\")"));
-    assert!(sidecar.contains("rust_ssh: bool"));
+    assert!(!sidecar.contains("cmd.env(\"ANTLER_RUST_SSH\"") && !sidecar.contains("env_remove(\"ANTLER_RUST_SSH\")") && !sidecar.contains("rust_ssh: bool"));
 }

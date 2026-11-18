@@ -1,6 +1,6 @@
 //! 저장소 감시(`git::watcher::RepoWatcher`)의 앱 쪽 호스트(Phase 6a PR 7b). 라우터가 만들어 감시자에게 준다.
 //!
-//! - **저장소 종류·실행기는 라우터와 같은 것**이다: 소유 판정은 fetch 와 같은 한 술어(`RepoMirror::resolve_fetch` — 소스 종류가 먼저, 사이드카 env `ANTLER_RUST_FETCH_KINDS` 와 같다)이고
+//! - **저장소 종류·실행기는 라우터와 같은 것**이다: 소유 판정은 fetch 와 같은 한 술어(`RepoMirror::resolve_fetch` — 소스 종류가 먼저)이고
 //!   실행기·큐는 라우터가 쥔 [`Runtimes`] 다. 그래서 SSH 저장소의 감시도 라우터·fetch 서비스와 같은 풀의 연결 하나를 쓴다(호스트당 연결 하나).
 //! - **시그니처**: 취소 신호가 있는 호출(확인)은 `RepoState::compute_signature` 로 따로 계산하고(합치면 변화를 놓친다), 없는 호출(기준)은 제한 시간이 있는 공유 계산이다.
 //!   둘 다 성공하면 `known_signature` 를 갱신한다 — `activity` 가 이 기억값을 재사용한다(TS 와 같다).

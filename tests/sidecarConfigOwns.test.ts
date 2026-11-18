@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConfigStore } from '../src/main/services/ConfigStore'
-import { RUST_CONFIG_CHANNELS, rustOwnsConfig, sidecarSkipsConfig } from '../src/sidecar/configOwns'
+import { RUST_CONFIG_CHANNELS, SIDECAR_UPDATE_CHANNELS, rustOwnsConfig, sidecarAccepts } from '../src/sidecar/configOwns'
 import { IPC_CHANNELS } from '../src/shared/ipc'
 
 // Rust 가 설정 파일을 소유하는 실행(Phase 6b PR 9, env ANTLER_RUST_CONFIG=1): 한 실행에서 설정 파일을 쓰는 쪽은 하나다.
-// 이때 사이드카는 파일을 열지도 쓰지도 않는 읽기 전용 설정을 쓰고, 설정 소유 채널을 받지 않는다. Electron 판은 이 옵션을 쓰지 않아 동작이 그대로다.
+// 이때(PR 10) 사이드카는 `update:*` 7채널만 받는다. `ConfigStore` 의 readOnly 옵션은 Electron 판 코드(src/main)에 남아 있어 계속 시험한다(6c 에서 정리). Electron 판은 이 옵션을 쓰지 않아 동작이 그대로다.
 
 const dir = (): string => mkdtempSync(join(tmpdir(), 'antler-cfgowns-'))
 
@@ -17,15 +17,33 @@ describe('사이드카의 설정 소유 판정', () => {
     for (const v of [undefined, '', '0', 'true', 'yes', '1 ', ' 1']) expect(rustOwnsConfig(v), String(v)).toBe(false)
   })
 
-  it('설정 소유 채널 11개는 IPC 허용 목록의 부분집합이고 소유할 때만 사이드카가 건너뛴다', () => {
+  it('설정 소유 채널 11개는 IPC 허용 목록의 부분집합이고 소유할 때는 사이드카가 받지 않는다', () => {
     expect(RUST_CONFIG_CHANNELS).toHaveLength(11)
     for (const ch of RUST_CONFIG_CHANNELS) {
       expect((IPC_CHANNELS as readonly string[]).includes(ch), ch).toBe(true)
-      expect(sidecarSkipsConfig(ch, true), ch).toBe(true)
-      expect(sidecarSkipsConfig(ch, false), ch).toBe(false)
+      expect(sidecarAccepts(ch, true), ch).toBe(false)
+      expect(sidecarAccepts(ch, false), ch).toBe(true)
     }
-    // update:* 같은 사이드카에 남는 채널·git 채널은 건너뛰지 않는다(Rust 가 맡지 않는 저장소는 사이드카가 오류를 만든다)
-    for (const ch of ['update:get', 'update:check', 'git:log', 'gh:repo', 'env:test', 'dialog:pickFolder']) expect(sidecarSkipsConfig(ch, true), ch).toBe(false)
+  })
+
+  it('소유할 때 사이드카가 받는 채널은 update:* 7개뿐이다(IPC_CHANNELS 의 update: 접두 채널과 정확히 같다)', () => {
+    const updates = (IPC_CHANNELS as readonly string[]).filter((c) => c.startsWith('update:'))
+    expect([...SIDECAR_UPDATE_CHANNELS].sort()).toEqual([...updates].sort())
+    expect(SIDECAR_UPDATE_CHANNELS).toHaveLength(7)
+    // 허용 목록의 모든 채널을 돌려 본다 — 소유할 때 받는 것이 정확히 그 7개다
+    const accepted = (IPC_CHANNELS as readonly string[]).filter((c) => sidecarAccepts(c, true))
+    expect(accepted.sort()).toEqual([...updates].sort())
+    // 소유하지 않으면(ANTLER_RUST_GIT=0) 전부 받는다
+    expect((IPC_CHANNELS as readonly string[]).every((c) => sidecarAccepts(c, false))).toBe(true)
+    // 허용 목록 밖의 채널은 소유할 때 받지 않는다
+    for (const ch of ['', 'git:nope', 'update:', 'update:get ', 'UPDATE:GET', 'update:getX']) expect(sidecarAccepts(ch, true), ch).toBe(false)
+  })
+
+  it('Rust 의 UPDATE_CHANNELS(router.rs)와 같은 목록이다', () => {
+    const rs = readFileSync(new URL('../src-tauri/src/router.rs', import.meta.url), 'utf8')
+    const block = /pub const UPDATE_CHANNELS: &\[&str\] = &\[([\s\S]*?)\];/.exec(rs)![1]!
+    const rust = [...block.matchAll(/"([a-zA-Z:]+)"/g)].map((m) => m[1])
+    expect(rust).toEqual([...SIDECAR_UPDATE_CHANNELS])
   })
 
   it('Rust 의 CONFIG_CHANNELS(router.rs)와 같은 목록이다', () => {

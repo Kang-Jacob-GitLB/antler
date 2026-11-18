@@ -288,7 +288,9 @@ fn 설정_소유_채널_목록은_ipc_허용_목록의_부분집합이고_다른
     }
     // 사이드카의 TS 목록(`configOwns.ts`)과 같다 — 사이드카는 이 채널을 받지 않는다
     let ts = read_src("../src/sidecar/configOwns.ts");
-    let listed: Vec<&str> = ts.lines().filter_map(|l| l.trim().strip_prefix('\'')).filter_map(|l| l.split('\'').next()).filter(|c| c.contains(':')).collect();
+    let block = &ts[ts.find("export const RUST_CONFIG_CHANNELS").expect("RUST_CONFIG_CHANNELS")..];
+    let block = &block[..block.find("] as const").expect("목록 끝")];
+    let listed: Vec<&str> = block.lines().filter_map(|l| l.trim().strip_prefix('\'')).filter_map(|l| l.split('\'').next()).filter(|c| c.contains(':')).collect();
     assert_eq!(listed, CONFIG_CHANNELS, "src/sidecar/configOwns.ts 의 RUST_CONFIG_CHANNELS 와 router.rs 의 CONFIG_CHANNELS 가 같아야 한다");
 }
 
@@ -1103,13 +1105,15 @@ fn 설정_파일을_여는_곳은_스위치가_켜진_분기_하나이고_사이
     let sidecar = prod_code("src/sidecar.rs");
     assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_CONFIG\", \"1\")") && sidecar.contains("cmd.env_remove(\"ANTLER_RUST_CONFIG\")"));
     assert!(sidecar.contains("config_owned && is_config_line(t)"));
-    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh, config_owned)"));
-    // 사이드카 쪽: Rust 가 소유하면 파일을 열지 않고(읽기 전용) 미러·fetch 설정을 보내지 않으며 고아 정리를 하지 않는다
+    assert!(lib.contains("mirror, config_owned)?"));
+    // 사이드카 쪽(PR 10): Rust 가 소유하면 설정·저장소 서비스를 조립하지 않는다(조립은 되돌리기 전용 legacy.ts 한 곳). update:* 밖의 채널은 거부한다
     let ts = read_src("../src/sidecar/index.ts");
-    assert!(ts.contains("{ cacheDir, readOnly: rustConfig }"));
-    assert!(ts.contains("if (!rustConfig) {\n  // Rust 라우터가 쓰는 저장소 미러"));
-    assert!(ts.contains("if (!rustConfig) repos.cleanupGithubCache()"));
-    assert!(ts.contains("sidecarSkipsConfig(ch, rustConfig)"));
+    assert!(ts.contains("const legacy = rustConfig ? null : assembleLegacy("));
+    assert!(ts.contains("if (rustConfig) registerUpdateIpc(updates)"));
+    assert!(ts.contains("sidecarAccepts(ch, rustConfig)"));
+    assert!(!ts.contains("ConfigStore") && !ts.contains("RepoService") && !ts.contains("registerIpc("), "소유 실행의 조립은 UpdateService 뿐이다");
+    let legacy = read_src("../src/sidecar/legacy.ts");
+    assert!(legacy.contains("new ConfigStore(join(userData, 'antler.config.json'), { cacheDir })"), "되돌리기에서만 설정을 연다");
     // 설정 소유 채널의 가로채기는 배열이 아닌 인자를 사이드카로 보내는 `as_array() else` 보다 앞이다
     let router = prod_code("src/router.rs");
     let intercept = router.find("CONFIG_CHANNELS.contains(&channel)").expect("가로채기");

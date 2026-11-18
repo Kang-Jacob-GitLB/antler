@@ -44,7 +44,7 @@
   (2) 사용자가 "알 수 없는 설정" 확인 창에서 허용하면, 저장소의 `http.<url>.*` 같은 키가 우리가 `-c` 로 준 기본값을 덮을 수 있다 — 허용은 사용자의 결정이다.
   (3) renderer 가 주장하는 `manual` 값은 main 이 검증할 수 없다. 침해된 renderer 가 수동 fetch 를 요청해도 알 수 없는 설정은 main 의 확인 창에서 사용자가 눌러야 한다.
   **Tauri 판**: local·WSL 저장소의 fetch 가드(허용 목록·URL 판정·상태 기계)는 Rust(`src-tauri/src/git/fetch/`)에 있고, 사이드카의 FetchService 는 그 저장소를 맡지 않는다(이중 fetch 없음).
-  확인 창은 webview 가 아니라 Rust 네이티브 대화상자(`dialogs::message_box`)이며 renderer 에는 그것을 띄우거나 누를 경로가 없다. 승인은 Rust 가 사이드카에 부탁해(`fetchApprove`) 설정 파일에 남기고, renderer 의 값은 그 경로로 가지 않는다 — 자세한 것은 docs/tauri.md "fetch 라우팅".
+  확인 창은 webview 가 아니라 Rust 네이티브 대화상자(`dialogs::message_box`)이며 renderer 에는 그것을 띄우거나 누를 경로가 없다. 승인은 설정 파일의 유일한 작성자인 Rust 가 직접 남기고(Phase 6b PR 9 — 사이드카에 부탁하던 `fetchApprove` 줄은 PR 10 에서 없앴다), renderer 의 값은 그 경로로 가지 않는다 — 자세한 것은 docs/tauri.md "fetch 라우팅".
 - 코드 탐색기: 저장소 문서(README 등)의 외부 링크는 사용자가 누를 때만 `code:openLink` 로 연다 — https 만, 사용자 정보가 든 URL 은 거부, 마우스를 올리면 실제 주소를 보여 준다.
 - 경로·diff: `GIT_LITERAL_PATHSPECS=1` 이라 renderer 가 보낸 경로가 pathspec 매직으로 해석되지 않고,
   `--no-textconv`·`--no-ext-diff` 로 저장소 설정이 외부 프로그램을 실행하지 못하게 한다.
@@ -97,8 +97,8 @@
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
-Jira 토큰은 Rust 프로세스 밖(renderer·사이드카)으로 나가지 않는다 — 사이드카는 `ANTLER_RUST_API=1` 이면 `jira:`·`gh:`(`gh:repo` 제외)를 처리하지 않는다.
-GitHub 토큰은 renderer 로도 **사이드카로도 가지 않는다**(Phase 6b PR 9 부터 사이드카로 보내던 메모리 사본 `ghToken` 줄이 없다 — 원격 전용 저장소의 fetch·조회 인증은 Rust 의 캐시 실행기가 환경 변수로만 쓴다). 하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 은퇴했고 `ANTLER_RUST_GIT=0` 만 6c 까지 산다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
+Jira 토큰은 Rust 프로세스 밖(renderer·사이드카)으로 나가지 않는다 — 설정을 Rust 가 소유한 실행의 사이드카는 `update:*` 7채널만 받고(Phase 6b PR 10, 시험 `tests/sidecar_scope.rs`) 그 밖의 채널은 라우터가 사이드카로 보내지 않고 Rust 가 명시적 오류로 답한다 — 서비스를 만들지 못했거나 포트가 없어도 토큰 인자가 사이드카 stdin 으로 가는 길이 없다.
+GitHub 토큰은 renderer 로도 **사이드카로도 가지 않는다**(Phase 6b PR 9 부터 사이드카로 보내던 메모리 사본 `ghToken` 줄이 없다 — 원격 전용 저장소의 fetch·조회 인증은 Rust 의 캐시 실행기가 환경 변수로만 쓴다). 하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 은퇴했고(사이드카에 넘기던 env `ANTLER_RUST_API`·`ANTLER_RUST_SSH`·`ANTLER_RUST_FETCH_KINDS` 도 PR 10 에서 없앴다) `ANTLER_RUST_GIT=0` 만 6c 까지 산다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
 리다이렉트를 따라가지 않으며, `jira:openExternal` 은 연결한 사이트의 https 주소만, `gh:openExternal` 은 `https://github.com` 의 주소만 연다. 자세한 것은 docs/tauri.md "PR 6"·"PR 9".
 
 **Tauri 판의 SSH**(`src-tauri/src/git/exec/ssh/`, `russh`): Electron 판(`ssh2` + 자체 설정 파서)과 같은 규칙을 Rust 로 옮겼다. 호스트 키는 known_hosts 로만 검증한다(TOFU 없음 — 모르는 호스트·키가 바뀐 호스트·폐기된 키는 거부하고
@@ -148,7 +148,7 @@ command scope(`GIT_CONFIG_KEY_n`)는 로컬 config 보다 우선하므로 토큰
 
 Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`)은 같은 예외를 세 겹으로 가둔다. 앱에는 **조회 채널(PR 6)과 fetch·감시(PR 7)** 가 연결돼 있다(추가·삭제·고아 정리는 설정 소유 PR 9 까지 Node 사이드카).
 fetch 는 일반 저장소의 허용 목록을 타지 않는 **별도 갈래**다(`git/fetch/service/github.rs`): 레코드의 owner/repo 와 캐시 경로가 맞지 않으면 일반 흐름으로 가지 않고 차단하고, 설정이 앱이 만든 것과 **정확히 일치**하지 않으면(`include.path` 등 다른 키·remote 둘) 확인 없이 차단하며,
-fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=false`·remote `origin` 하나·고정 refspec·`--refmap=`)뿐이다. 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)와 Rust 의 소유 판정은 같은 함수·같은 플래그 하나라 이중 fetch·무감시가 없다.
+fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=false`·remote `origin` 하나·고정 refspec·`--refmap=`)뿐이다. fetch·조회·감시의 소유 판정은 같은 함수·같은 플래그 하나(`RepoMirror::resolve_fetch`)이고 설정을 소유한 실행의 사이드카는 fetch 서비스·감시자를 만들지 않으므로 이중 fetch·무감시가 없다.
 라우터는 GitHub 서비스(토큰의 출처)와 캐시 실행기가 주입됐고 스위치가 켜져 있을 때만 github 저장소를 푼다(`Router::set_github_cache`). 토큰은 Rust 안에서만 읽혀 실행기의 환경 변수로만 가고 어떤 응답·오류 봉투에도 실리지 않으며(시험 `tests/github_route.rs`),
 `repos:remove` 는 캐시 폴더를 지우기 전에(PR 9 부터 폴더도 Rust 가 지운다 — 아래 "설정 소유") fetch(멈추고 끝나기를 기다린다 — 최대 5초)·감시·진행 중 조회·활동 시그니처 계산을 끊고 로그 커서를 닫은 뒤, 그 저장소의 git 프로세스가 끝나기를(실행기가 센다, 최대 5초) 기다린다.
 보장은 "트리 종료를 요청했고 호출이 돌아왔다"까지이고 파일 핸들이 풀리는 짧은 틈은 `remove_github_cache` 의 재시도(10회×100ms)가 흡수한다. 정리를 시작한 id 에는 "삭제 중" 표식이 달려 새 조회가 폴더를 다시 쥐지 못한다(미러가 바뀌면 풀리고, 아니면 30초 뒤). 세 겹은 이렇다:

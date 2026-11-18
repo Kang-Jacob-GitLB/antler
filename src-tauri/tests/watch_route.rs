@@ -273,12 +273,10 @@ fn 감시_소유는_사이드카_env_의_종류와_같은_술어다() {
             assert_eq!(rust_watches, kinds(ssh_active, github_active).contains(&kind), "{kind} ssh_active={ssh_active} github_active={github_active}");
         }
     }
-    // 사이드카는 같은 술어를 감시에도 쓴다(소스 검사 — 둘에 같은 `ownsRepo` 를 준다)
+    // 소유하는 실행의 사이드카는 감시자를 만들지 않는다(PR 10 — 소유 판정 env·`fetchOwner` 는 없다). 감시자를 만드는 곳은 되돌리기 전용 조립(legacy.ts)뿐이다
     let ts = read_src("../src/sidecar/index.ts");
-    assert!(ts.contains("const ownsRepo = fetchOwner(() => config.get(), parseRustFetchKinds(process.env['ANTLER_RUST_FETCH_KINDS']))"));
-    assert!(ts.contains("new RepoWatcher(repos, (repoId) => emit('repo:changed', { repoId }), ownsRepo)"));
-    assert!(ts.contains("  noHooksDir,\n  ownsRepo\n)"), "FetchService 도 같은 술어다");
-    assert_eq!(ts.matches("fetchOwner(").count(), 1, "소유 판정은 한 곳에서 만든다");
+    assert!(!ts.contains("RepoWatcher") && !ts.contains("fetchOwner") && !ts.contains("ANTLER_RUST_FETCH_KINDS"));
+    assert!(read_src("../src/sidecar/legacy.ts").contains("new RepoWatcher(repos, (repoId) => emit('repo:changed', { repoId }))"));
 }
 
 #[test]

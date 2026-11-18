@@ -231,8 +231,8 @@ describe('설정 저장소 골든', () => {
     expect(Object.keys(map).filter((k) => !keys.includes(k)), '원본에 없는 대응표 항목').toEqual([])
     const sources = new Map<string, string>()
     for (const [title, value] of Object.entries(map)) {
-      // 뒤 PR 이 옮길 것(PR 번호는 docs/tauri.md 의 Phase 6b 표) — 마지막 PR 에서 이 예외가 0 개여야 한다
-      if (/^N\/A: PR (?:[2-9]|10)[ab]?$/.test(value)) continue
+      // 뒤 PR 로 미루는 항목(`N/A: PR n`)은 없다 — Phase 6b 의 마지막 PR(10)에서 0 개로 고정했다
+      expect(value.startsWith('N/A: PR '), `${title}: 'N/A: PR n' 은 남길 수 없다(옮기거나 사유를 적는다) → ${value}`).toBe(false)
       if (value.startsWith('N/A: ')) {
         expect(value.length, `${title}: N/A 사유가 비어 있다`).toBeGreaterThan(8)
         continue

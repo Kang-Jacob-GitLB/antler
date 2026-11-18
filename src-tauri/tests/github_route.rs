@@ -199,7 +199,7 @@ async fn github_저장소의_조회_fetch_감시는_같은_스위치로_rust_가
     assert_eq!(r.watching().as_deref(), Some(G));
     // 소유 술어: 종류 목록의 github 는 같은 플래그(github_cache_active)를 따른다
     assert!(antler_lib::router::rust_fetch_kinds(false, true).contains("github") && !antler_lib::router::rust_fetch_kinds(true, false).contains("github"));
-    assert_eq!(antler_lib::router::sidecar_fetch_kinds(r.enabled(), r.ssh_active(), r.github_cache_active()), Some("local,wsl,github"));
+    assert_eq!(antler_lib::router::rust_fetch_kinds(r.ssh_active(), r.github_cache_active()), "local,wsl,github");
 }
 
 #[tokio::test]
