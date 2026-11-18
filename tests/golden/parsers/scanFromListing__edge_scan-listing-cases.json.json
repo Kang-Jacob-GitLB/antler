@@ -1,0 +1,221 @@
+[
+  {
+    "in": {
+      "dirs": [
+        {
+          "isRepo": true,
+          "name": "a"
+        },
+        {
+          "isRepo": false,
+          "name": "b"
+        },
+        {
+          "isRepo": true,
+          "name": "c"
+        }
+      ],
+      "isRepo": false,
+      "parent": "/home/me",
+      "path": "/home/me/work",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/home/me/work",
+      "repos": [
+        {
+          "name": "a",
+          "path": "/home/me/work/a"
+        },
+        {
+          "name": "c",
+          "path": "/home/me/work/c"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "in": {
+      "dirs": [
+        {
+          "isRepo": true,
+          "name": "a"
+        }
+      ],
+      "isRepo": false,
+      "parent": "/home/me",
+      "path": "/home/me/work/",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/home/me/work/",
+      "repos": [
+        {
+          "name": "a",
+          "path": "/home/me/work/a"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "in": {
+      "dirs": [
+        {
+          "isRepo": true,
+          "name": "srv"
+        }
+      ],
+      "isRepo": false,
+      "parent": null,
+      "path": "/",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/",
+      "repos": [
+        {
+          "name": "srv",
+          "path": "/srv"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "in": {
+      "dirs": [
+        {
+          "isRepo": true,
+          "name": "a"
+        }
+      ],
+      "isRepo": true,
+      "parent": "/",
+      "path": "/w",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": true,
+      "path": "/w",
+      "repos": [],
+      "truncated": false
+    }
+  },
+  {
+    "in": {
+      "dirs": [
+        {
+          "name": "a"
+        }
+      ],
+      "isRepo": false,
+      "parent": "/",
+      "path": "/w",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/w",
+      "repos": [],
+      "truncated": true
+    }
+  },
+  {
+    "in": {
+      "dirs": [
+        {
+          "isRepo": false,
+          "name": "a"
+        }
+      ],
+      "isRepo": false,
+      "parent": "/",
+      "path": "/w",
+      "truncated": true
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/w",
+      "repos": [],
+      "truncated": true
+    }
+  },
+  {
+    "in": {
+      "dirs": [],
+      "isRepo": false,
+      "parent": "/",
+      "path": "/w",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/w",
+      "repos": [],
+      "truncated": false
+    }
+  },
+  {
+    "in": {
+      "dirs": [
+        {
+          "isRepo": true,
+          "name": "x y"
+        },
+        {
+          "isRepo": true,
+          "name": "한글"
+        }
+      ],
+      "isRepo": false,
+      "parent": "/a",
+      "path": "/a//b/.",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/a//b/.",
+      "repos": [
+        {
+          "name": "x y",
+          "path": "/a/b/x y"
+        },
+        {
+          "name": "한글",
+          "path": "/a/b/한글"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "in": {
+      "dirs": [
+        {
+          "isRepo": true,
+          "name": "c"
+        }
+      ],
+      "isRepo": false,
+      "parent": "/",
+      "path": "/a/b/..",
+      "truncated": false
+    },
+    "out": {
+      "isRepo": false,
+      "path": "/a/b/..",
+      "repos": [
+        {
+          "name": "c",
+          "path": "/a/c"
+        }
+      ],
+      "truncated": false
+    }
+  }
+]

@@ -1,0 +1,16 @@
+[
+ "",
+ "Ubuntu\nDebian\n",
+ "Ubuntu\r\nDebian\r\n",
+ "docker-desktop\nUbuntu\ndocker-desktop-data\n",
+ "  My Distro  \n\n   \nUbuntu-24.04\n",
+ "\u0085Ubuntu\u0085\n",
+ "﻿Ubuntu\n",
+ { "utf16": "Ubuntu-24.04\r\nDebian\r\n", "bom": true },
+ { "utf16": "Ubuntu\r\n" },
+ { "utf16": "docker-desktop\r\n\r\nUbuntu\r\ndocker-desktop-data\r\n  \r\n", "bom": true },
+ { "utf16": "My Distro\r\n", "bom": true },
+ { "utf16": "배포판\r\n한글 이름\r\n", "bom": true },
+ { "parts": [{ "hex": "fffe" }, { "hex": "55006200750000" }] },
+ { "parts": ["Ubuntu\n", { "hex": "0000" }, "Debian\n"] }
+]

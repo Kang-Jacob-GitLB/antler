@@ -59,7 +59,8 @@ rand = "0.10"
 # 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판
 # Job Object(프로세스 트리 종료, src/git/exec/job.rs)에 JobObjects 가, CreateJobObjectW 의 인자 타입에 Security 가 필요하다
 # Time: GitHub 한도 해제 시각을 로컬 시간대로 표시한다(src/github/local_time.rs — SystemTimeToTzSpecificLocalTime). 새 크레이트가 아니라 같은 크레이트의 기능이다
-windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Time", "Win32_System_WindowsProgramming"] }
+windows = { version = "0.62.2", features = ["Win32_UI_Input_KeyboardAndMouse", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_Security", "Win32_System_Time", "Win32_System_WindowsProgramming", "Win32_System_Registry"] }
+# (위 windows) Win32_System_Registry: WSL 등록 배포판 조회(src/git/exec/wsl.rs — HKCU\...\Lxss 읽기). reg.exe 를 띄우지 않으려는 것이고, 새 크레이트가 아니라 같은 크레이트의 기능이다
 # (위 windows) Win32_System_WindowsProgramming: SSH 설정 해석의 로컬 사용자 이름(src/git/exec/ssh/config.rs — GetUserNameW). 새 크레이트가 아니라 같은 크레이트의 기능이다
 # 확인 창을 플러그인 없이 직접 띄운다 — 플러그인은 Esc 를 "cancel 자리 버튼"으로 바꿔 돌려줘 취소를 기본 버튼으로 둘 수 없다
 # (src-tauri/src/dialogs.rs). tauri-plugin-dialog 2.8 이 쓰는 것과 같은 판·기능이라 따로 빌드되지 않는다

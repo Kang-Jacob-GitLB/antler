@@ -1,0 +1,11 @@
+[
+ { "path": "/home/me/work", "parent": "/home/me", "isRepo": false, "dirs": [{ "name": "a", "isRepo": true }, { "name": "b", "isRepo": false }, { "name": "c", "isRepo": true }], "truncated": false },
+ { "path": "/home/me/work/", "parent": "/home/me", "isRepo": false, "dirs": [{ "name": "a", "isRepo": true }], "truncated": false },
+ { "path": "/", "parent": null, "isRepo": false, "dirs": [{ "name": "srv", "isRepo": true }], "truncated": false },
+ { "path": "/w", "parent": "/", "isRepo": true, "dirs": [{ "name": "a", "isRepo": true }], "truncated": false },
+ { "path": "/w", "parent": "/", "isRepo": false, "dirs": [{ "name": "a" }], "truncated": false },
+ { "path": "/w", "parent": "/", "isRepo": false, "dirs": [{ "name": "a", "isRepo": false }], "truncated": true },
+ { "path": "/w", "parent": "/", "isRepo": false, "dirs": [], "truncated": false },
+ { "path": "/a//b/.", "parent": "/a", "isRepo": false, "dirs": [{ "name": "x y", "isRepo": true }, { "name": "한글", "isRepo": true }], "truncated": false },
+ { "path": "/a/b/..", "parent": "/", "isRepo": false, "dirs": [{ "name": "c", "isRepo": true }], "truncated": false }
+]

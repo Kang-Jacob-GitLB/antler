@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 
 use antler_lib::git::activity::{bucketize, TimeStreamParser};
 use antler_lib::git::code_browse::{image_mime, is_resolvable_ref, normalize_dir, normalize_file_path, parse_tree, CommitId};
+use antler_lib::git::exec::{parse_lxss_query, parse_wsl_list};
+use antler_lib::repos::env::{remote_relative, resolve_env, EnvInput};
+use antler_lib::repos::scan::{scan_from_listing, RemoteDirListing};
 use antler_lib::git::lfs::{added_lines, gitattributes_uses_lfs, parse_check_attr_lfs, parse_gitflow_config, parse_lfs_pointer};
 use antler_lib::git::parsers::blame::parse_blame;
 use antler_lib::git::parsers::changes::{parse_changes, parse_name_status, parse_numstat};
@@ -83,6 +86,12 @@ fn as_text<'a>(c: &'a Value, error: &str) -> Result<&'a str, String> {
 fn case_bytes(c: &Value) -> Result<Vec<u8>, String> {
     if let Some(s) = c.as_str() {
         return Ok(s.as_bytes().to_vec());
+    }
+    // `{utf16, bom?}`: UTF-16LE(bom 이면 FF FE 가 앞에 붙는다)
+    if let Some(text) = c["utf16"].as_str() {
+        let mut out = if c["bom"].as_bool() == Some(true) { vec![0xff, 0xfe] } else { Vec::new() };
+        out.extend(text.encode_utf16().flat_map(u16::to_le_bytes));
+        return Ok(out);
     }
     let mut out = Vec::new();
     for p in c["parts"].as_array().ok_or("parts")? {
@@ -221,6 +230,24 @@ fn run_parser(parser: &str, input: &[u8], args: &Value) -> Option<Value> {
         }),
         "remoteConfig" => cases(input, |c| sv(parse_remote_config(as_text(c, "text")?))),
         "pushedShas" => cases(input, |c| sv(parse_pushed_shas(as_text(c, "text")?))),
+        // ---- Phase 6b PR 4a ----
+        "wslList" => cases(input, |c| sv(parse_wsl_list(&case_bytes(c)?))),
+        "lxssQuery" => cases(input, |c| sv(parse_lxss_query(as_text(c, "text")?))),
+        "scanFromListing" => cases(input, |c| {
+            let listing: RemoteDirListing = serde_json::from_value(c.clone()).map_err(|e| e.to_string())?;
+            sv(scan_from_listing(&listing))
+        }),
+        "resolveEnv" => cases(input, |c| {
+            let s = |k: &str| c[k].as_str();
+            let r = resolve_env(&EnvInput { kind: s("kind").ok_or("kind")?, path: s("path").ok_or("path")?, distro: s("distro"), ssh_host: s("sshHost") })?;
+            // TS 는 target 이 없으면 키를 두지 않는다(JSON 에서 undefined 는 빠진다)
+            let mut out = json!({ "kind": r.kind, "path": r.path });
+            if let Some(t) = r.target {
+                out["target"] = json!(t);
+            }
+            Ok(out)
+        }),
+        "remoteRelative" => cases(input, |c| Ok(json!(remote_relative(c["kind"].as_str().ok_or("kind")?, c["path"].as_str().ok_or("path")?)))),
         _ => return None,
     })
 }

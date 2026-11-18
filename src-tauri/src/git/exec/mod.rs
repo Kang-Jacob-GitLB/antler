@@ -24,7 +24,7 @@ pub use common::{build_git_args, merged_env, FetchEnv, RunOpts, RunResult, DEFAU
 pub use error::ExecError;
 pub use local::LocalExecutor;
 pub use process::{set_jobs_disabled, shutdown_kills, GitStream, ProcessStream};
-pub use wsl::{wsl_argv, wsl_argv_with, WslExecutor, WSL_SPAWN_ENV};
+pub use wsl::{list_distros, list_distros_with, parse_lxss_query, parse_wsl_list, registered_distro_names, wsl_argv, wsl_argv_with, WslExecutor, WSL_LIST_ARGV, WSL_SPAWN_ENV};
 
 /// 환경별 git 실행. 저장소가 있는 환경 안에서 `git -C <repo> …` 를 실행한다
 /// (repo 경로는 그 환경의 원래 형식이며 변환하지 않는다).

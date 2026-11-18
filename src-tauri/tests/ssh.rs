@@ -16,7 +16,8 @@ use antler_lib::git::exec::ssh::config::{list_hosts, load_ssh_config, Ctx, RealF
 use antler_lib::git::exec::ssh::quote::build_remote_command;
 #[cfg(feature = "test-hooks")]
 use antler_lib::git::exec::ssh::is_read_ahead_exceeded;
-use antler_lib::git::exec::ssh::{SshExecutor, SshOptions, SshStream, SHELL_PROBE};
+use antler_lib::git::exec::ssh::{SshExecutor, SshOptions, SshPool, SshStream, SHELL_PROBE};
+use antler_lib::repos::env::test_ssh_env;
 use antler_lib::git::exec::{ExecError, GitExecutor, RunOpts, RunResult, GIT_ENV};
 #[cfg(feature = "test-hooks")]
 use antler_lib::git::log_service::NoteOp;
@@ -1424,6 +1425,66 @@ async fn log_ssh_상한으로_커밋을_하나도_못_받으면_빈_페이지가
     svc.close_all();
     wait_for("슬롯 반환", || ex.free_slots() == 6).await;
     ex.dispose();
+}
+
+// ── 저장 전 연결(Phase 6b PR 4a): SshPool::hold·test_ssh_env ──────────────────────
+
+/// 임시 홈을 쓰는 풀. 호스트 이름은 그 홈의 `~/.ssh/config` 별칭으로 푼다(agent 는 끈다)
+fn pool_for(e: &Env) -> (Arc<SshPool>, Arc<Home>) {
+    let home = Arc::new(Home::new(&e.client));
+    home.write_config(&Env::host_block("test", e.server.port, &home, ""));
+    home.write_known_hosts(&known_hosts_line(e.server.port, &e.server.host_key));
+    let h = home.clone();
+    (SshPool::new(move |host| h.executor(host)), home)
+}
+
+#[tokio::test]
+async fn 저장_전_연결_테스트는_git_버전을_돌려주고_저장되지_않은_호스트의_연결은_닫는다() {
+    let e = Env::new().await;
+    let (pool, _home) = pool_for(&e);
+    let v = test_ssh_env(&pool, "test").await.unwrap();
+    assert!(v.starts_with("git version"), "{v}");
+    assert!(pool.hosts().is_empty(), "저장되지 않은 호스트는 풀에서 빠진다");
+    wait_for("연결 종료", || e.server.open_connections() == 0).await;
+}
+
+#[tokio::test]
+async fn 저장_전_연결_테스트가_모르는_호스트를_거부하면_지문과_ssh_별칭_안내를_담고_known_hosts_에_쓰지_않는다() {
+    let e = Env::new().await;
+    let (pool, home) = pool_for(&e);
+    home.write_known_hosts("");
+    let err = test_ssh_env(&pool, "test").await.unwrap_err();
+    assert!(err.contains("알 수 없는 호스트") && err.contains("SHA256:"), "{err}");
+    assert!(err.contains("ssh test"), "{err}");
+    assert!(!err.contains("PRIVATE"));
+    assert_eq!(std::fs::read_to_string(&home.known_hosts).unwrap(), "", "known_hosts 에 쓰지 않는다");
+    assert_eq!(e.server.exec_log().len(), 0, "거부한 호스트에는 명령을 보내지 않는다");
+    assert!(pool.hosts().is_empty());
+}
+
+#[tokio::test]
+async fn 저장_전_연결_테스트가_바뀐_키를_거부하면_지문과_안내를_담는다() {
+    let e = Env::new().await;
+    let (pool, home) = pool_for(&e);
+    home.write_known_hosts(&known_hosts_line(e.server.port, new_key().public_key()));
+    let err = test_ssh_env(&pool, "test").await.unwrap_err();
+    assert!(err.contains("중간자") && err.contains("SHA256:") && err.contains("ssh test"), "{err}");
+    assert_eq!(e.server.exec_log().len(), 0);
+}
+
+#[tokio::test]
+async fn 잡은_연결은_다른_미러_변경_retain_에_끊기지_않고_놓으면_닫힌다() {
+    let e = Env::new().await;
+    let (pool, _home) = pool_for(&e);
+    let guard = pool.hold("test");
+    assert_eq!(run(guard.executor(), &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0);
+    // 다른 저장소가 저장돼 미러가 바뀌어도(미러에 이 호스트가 없다) 잡힌 연결은 그대로다
+    assert!(pool.retain(&std::collections::HashSet::new()).is_empty());
+    assert_eq!(run(guard.executor(), &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0);
+    assert_eq!(e.server.connections(), 1, "연결이 다시 맺어지지 않았다");
+    drop(guard);
+    assert!(pool.hosts().is_empty());
+    wait_for("연결 종료", || e.server.open_connections() == 0).await;
 }
 
 // ── 실제 sshd(수동) ────────────────────────────────────────────────────────────

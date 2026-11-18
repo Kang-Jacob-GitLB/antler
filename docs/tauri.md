@@ -1577,6 +1577,33 @@ TS: `RepoService.ghRepo`·`ghRemotes`·`pushedShasByAuthor`·`invalidateGhRemote
 - 이 PR 만으로 이중 연결이 사라지지는 않는다: `wipStatus`·`wipDiff`(PR 6)·RepoWatcher(PR 7b)·저장소 추가 흐름(6b)이 남아 있다.
 - URL 해석은 두 WHATWG 구현의 일치에 기댄다. 골든 137개가 같았지만 `url` 크레이트가 올라 규칙이 바뀌면 골든이 알려 준다(`UPDATE_GOLDEN` 으로 덮지 않고 원인을 본다).
 
+## 설정·저장소 관리·env·external·github 원격 전용(Phase 6b)
+
+6b 는 PR 11개로 나뉜다(계획은 PR 별 절에 적는다). 각 절은 독립이다.
+
+### PR 4a — WSL 목록·경로 해석·폴더 찾기·저장 전 SSH 연결(앱에 연결하지 않는다)
+
+`src-tauri/src/git/exec/wsl.rs`(추가)·`src-tauri/src/repos/{env,scan}.rs`(새)·`ssh/pool.rs`(`hold`). 새 크레이트 없음 — `windows` 크레이트에 `Win32_System_Registry` 기능만 켰다(`Cargo.lock` 변화 없음, 결정 D6). **Electron·사이드카 동작은 그대로**다.
+
+- **WSL 목록**(`list_distros`): 레지스트리 `HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss\{GUID}\DistributionName` 을 `windows` API 로 **읽기만** 해(reg.exe 를 띄우지 않는다) 사용자 배포판(`docker-desktop*` 제외)이 하나도 없으면 **`wsl.exe` 를 부르지 않는다** — WSL 을 지운 PC 에도 system32 의 스텁이 남아 부르면 "WSL 설치" 창이 뜬다(#109).
+  있을 때만 `wsl.exe -l -q`(`WSL_UTF8=1`, 8초 제한, `process.rs` 의 `run_process` — spawn 지점을 늘리지 않았다)를 부르고 `parse_wsl_list`(UTF-16LE·BOM·UTF-8 판별, `docker-desktop*`·빈 줄 제외)로 푼다.
+  레지스트리 읽기와 실행은 `list_distros_with(registered, run)` 에 **주입**된다 — 시험은 가짜 `run` 으로 argv(`-l -q`)만 검증하고 실제 `wsl.exe` 를 부르지 않는다(등록 없음 → `run` 호출 0 을 시험).
+  `parse_lxss_query` 는 reg.exe 출력 해석(TS `parseLxssQuery`)으로, 운영 경로에서는 안 쓰고 TS 와의 골든 대조에만 둔다.
+- **경로 해석**(`repos/env.rs`): `resolve_env`(trim 은 JS trim, WSL 공유 경로를 WSL 저장소로, github·모르는 종류 거부)와 `remote_relative`(`~`·`~/x` → `.`·`x`). TS `resolveEnv`·`remoteRelative` 를 export 해 같은 케이스로 골든을 만들었다.
+- **폴더 찾기**(`repos/scan.rs`): `scan_local_repos`(숨김·파일 제외, 링크는 따라가 폴더인지 확인, 2000개 상한, `.git` 확인은 동시 8개)·`scan_from_listing`(SFTP 목록 → 저장소 후보, 목록은 PR 4b).
+- **저장 전 SSH 연결**: `SshPool::hold(host) -> HoldGuard`(참조 횟수). 잡힌 호스트는 `retain`(다른 저장소의 미러 변경)이 닫지 않고, 마지막 잡기가 풀릴 때 **미러에 없는 호스트면** 닫고 풀에서 뺀다(`retain` 이 기록한 보존 목록 기준 — `retain` 이 건너뛴 호스트도 이때 닫는다).
+  `dispose_all` 은 잡힌 호스트도 닫는다. `repos::env::test_ssh_env(pool, host)` 가 `hold` 로 `git --version` 을 돌린다(25초 제한).
+  **호스트 키는 TOFU 금지 그대로**(결정 D3): 모르는 호스트·바뀐 키는 거부하고, 실행기의 오류(키 지문 포함)에 `with_host_key_hint` 가 `확인 명령: ssh <별칭>`(`user@host:port` 는 `ssh -p port user@host`)을 덧붙인다. 앱은 `known_hosts` 를 쓰지 않는다(clippy `disallowed-methods` 유지).
+
+**시험**: `--lib`(WSL 목록 6·풀 잡기 5·scan 6·env 5 외), `--test golden`(manifest 에 `wslList`·`lxssQuery`·`scanFromListing`·`resolveEnv`·`remoteRelative` 5종, 케이스는 `tests/fixtures/edge/*-cases.json`), `--test ssh`(127.0.0.1 루프백 서버·임시 홈만: 저장 전 연결 성공 뒤 닫힘·모르는 호스트 거부+지문+`ssh test` 안내+`known_hosts` 불변·바뀐 키·`retain` 중 잡힌 연결 유지).
+
+**TS 와 다른 점**
+- `docker-desktop` 만 등록돼 있으면 TS 는 `wsl.exe` 를 부르지만(결과는 빈 목록) Rust 는 부르지 않는다(스텁 위험만 남는다).
+- 이름순 정렬은 `localeCompare` 의 **근사**다(`parsers::refs` 의 `natural_compare` 와 같은 CLDR 기호 순서·대소문자 규칙이되 numeric 이 아니다). 읽기 실패 문구는 Node 가 아니라 Rust `io::Error` 다.
+- 호스트 키 안내 문구는 TS 에 없다(TS 는 `ssh CLI` 안내만). 실행기의 오류 문구(골든 대상)는 바꾸지 않고 `test_ssh_env` 가 덧붙인다.
+
+**남은 위험**: 레지스트리 열거는 `windows` API 를 직접 부르는 `unsafe` 다(키 이름·값 버퍼 크기와 256개 열거 상한으로 막았다). 이 PC 는 WSL 이 제거돼 **등록된 배포판이 있는 레지스트리를 실제로 읽는 경로는 확인하지 못했다**(시험은 읽기가 패닉 없이 정리된 이름 목록을 돌려주는지만 본다). 앱 연결(PR 8·9)에서 WSL 이 있는 PC 로 사람이 확인한다.
+
 ## Phase 0 에서 확인한 것
 
 - renderer 를 고치지 않고 WebView2 에서 그대로 동작한다(그래프·사이드바·커밋 상세가 그려지고, 로드 뒤 CDP 로 붙어 본 콘솔 오류는 0).

@@ -93,7 +93,7 @@ pub struct Tracking {
 // ---------- 자연 정렬 ----------
 
 /// CLDR root 정렬에서 ASCII 기호의 순서(공백이 가장 앞, 숫자·글자보다 앞)
-const SYMBOL_ORDER: &str = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$";
+pub(crate) const SYMBOL_ORDER: &str = " _-,;:!?.'\"()[]{}@*/\\&#%`^+<=>|~$";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum SortKey {

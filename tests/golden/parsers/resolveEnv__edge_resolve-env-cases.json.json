@@ -1,0 +1,184 @@
+[
+  {
+    "in": {
+      "kind": "local",
+      "path": "C:\\work\\repo"
+    },
+    "out": {
+      "kind": "local",
+      "path": "C:\\work\\repo"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "  C:\\work\\repo \n"
+    },
+    "out": {
+      "kind": "local",
+      "path": "C:\\work\\repo"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "C:\\x"
+    },
+    "out": {
+      "kind": "local",
+      "path": "C:\\x"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "/home/me/repo"
+    },
+    "out": {
+      "kind": "local",
+      "path": "/home/me/repo"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "\\\\wsl.localhost\\Ubuntu\\home\\me\\repo"
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "/home/me/repo",
+      "target": "Ubuntu"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "  \\\\wsl$\\Ubuntu\\home\\me\\repo  "
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "/home/me/repo",
+      "target": "Ubuntu"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "//wsl.localhost/Ubuntu/home/me/repo/"
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "/home/me/repo",
+      "target": "Ubuntu"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "\\\\WSL.LOCALHOST\\Ubuntu"
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "/",
+      "target": "Ubuntu"
+    }
+  },
+  {
+    "in": {
+      "kind": "local",
+      "path": "\\\\wsl.localhost\\Ubuntu\\a\nb"
+    },
+    "out": {
+      "kind": "local",
+      "path": "\\\\wsl.localhost\\Ubuntu\\a\nb"
+    }
+  },
+  {
+    "in": {
+      "distro": "Debian",
+      "kind": "wsl",
+      "path": "/home/me/repo"
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "/home/me/repo",
+      "target": "Debian"
+    }
+  },
+  {
+    "in": {
+      "kind": "wsl",
+      "path": "/home/me/repo"
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "/home/me/repo"
+    }
+  },
+  {
+    "in": {
+      "distro": "Other",
+      "kind": "wsl",
+      "path": "\\\\wsl.localhost\\Ubuntu\\home\\me"
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "/home/me",
+      "target": "Ubuntu"
+    }
+  },
+  {
+    "in": {
+      "distro": " Padded ",
+      "kind": "wsl",
+      "path": "~/proj"
+    },
+    "out": {
+      "kind": "wsl",
+      "path": "~/proj",
+      "target": " Padded "
+    }
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": " ~/proj ",
+      "sshHost": "  me@host  "
+    },
+    "out": {
+      "kind": "ssh",
+      "path": "~/proj",
+      "target": "me@host"
+    }
+  },
+  {
+    "in": {
+      "kind": "ssh",
+      "path": "/srv/git/repo"
+    },
+    "out": {
+      "kind": "ssh",
+      "path": "/srv/git/repo"
+    }
+  },
+  {
+    "in": {
+      "distro": "Ubuntu",
+      "kind": "ssh",
+      "path": "\\\\wsl.localhost\\Ubuntu\\x",
+      "sshHost": "h"
+    },
+    "out": {
+      "kind": "ssh",
+      "path": "\\\\wsl.localhost\\Ubuntu\\x",
+      "target": "h"
+    }
+  },
+  {
+    "error": "GitHub 원격 저장소는 여기서 추가할 수 없습니다",
+    "in": {
+      "kind": "github",
+      "path": "x"
+    }
+  }
+]

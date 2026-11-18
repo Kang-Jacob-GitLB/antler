@@ -1,0 +1,19 @@
+[
+ { "kind": "local", "path": "C:\\work\\repo" },
+ { "kind": "local", "path": "  C:\\work\\repo \n" },
+ { "kind": "local", "path": "\u0085C:\\x" },
+ { "kind": "local", "path": "/home/me/repo" },
+ { "kind": "local", "path": "\\\\wsl.localhost\\Ubuntu\\home\\me\\repo" },
+ { "kind": "local", "path": "  \\\\wsl$\\Ubuntu\\home\\me\\repo  " },
+ { "kind": "local", "path": "//wsl.localhost/Ubuntu/home/me/repo/" },
+ { "kind": "local", "path": "\\\\WSL.LOCALHOST\\Ubuntu" },
+ { "kind": "local", "path": "\\\\wsl.localhost\\Ubuntu\\a\nb" },
+ { "kind": "wsl", "path": "/home/me/repo", "distro": "Debian" },
+ { "kind": "wsl", "path": "/home/me/repo" },
+ { "kind": "wsl", "path": "\\\\wsl.localhost\\Ubuntu\\home\\me", "distro": "Other" },
+ { "kind": "wsl", "path": "~/proj", "distro": " Padded " },
+ { "kind": "ssh", "path": " ~/proj ", "sshHost": "  me@host  " },
+ { "kind": "ssh", "path": "/srv/git/repo" },
+ { "kind": "ssh", "path": "\\\\wsl.localhost\\Ubuntu\\x", "sshHost": "h", "distro": "Ubuntu" },
+ { "kind": "github", "path": "x" }
+]

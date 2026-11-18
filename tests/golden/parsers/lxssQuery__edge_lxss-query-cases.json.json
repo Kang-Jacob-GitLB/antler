@@ -1,0 +1,76 @@
+[
+  {
+    "in": "",
+    "out": []
+  },
+  {
+    "in": "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{0d1e7a1c-0000-0000-0000-000000000001}\r\n    DistributionName    REG_SZ    Ubuntu-22.04\r\n\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\\{0d1e7a1c-0000-0000-0000-000000000002}\r\n    DistributionName    REG_SZ    docker-desktop\r\n\r\n검색 종료: 2 일치하는 항목이 있습니다.",
+    "out": [
+      "Ubuntu-22.04",
+      "docker-desktop"
+    ]
+  },
+  {
+    "in": "    DistributionName    REG_SZ    Ubuntu\n    DistributionName    REG_SZ    Debian\n",
+    "out": [
+      "Ubuntu",
+      "Debian"
+    ]
+  },
+  {
+    "in": "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss\r\n    DefaultDistribution    REG_SZ    {x}",
+    "out": []
+  },
+  {
+    "in": "DistributionName REG_SZX Ubuntu",
+    "out": []
+  },
+  {
+    "in": "DistributionNameX REG_SZ Ubuntu",
+    "out": []
+  },
+  {
+    "in": "DistributionName\tREG_SZ\tTab Distro",
+    "out": [
+      "Tab Distro"
+    ]
+  },
+  {
+    "in": "DistributionName REG_SZ    ",
+    "out": []
+  },
+  {
+    "in": "DistributionName REG_SZ",
+    "out": []
+  },
+  {
+    "in": "DistributionName REG_DWORD 0x1",
+    "out": []
+  },
+  {
+    "in": "  DistributionName    REG_SZ    My Distro  \r\n",
+    "out": [
+      "My Distro"
+    ]
+  },
+  {
+    "in": "DistributionName REG_SZ Mid\rdle",
+    "out": []
+  },
+  {
+    "in": "DistributionName REG_SZ Trail\r\r\n",
+    "out": [
+      "Trail"
+    ]
+  },
+  {
+    "in": "DistributionName REG_SZ 한글 배포판",
+    "out": [
+      "한글 배포판"
+    ]
+  },
+  {
+    "in": "distributionname REG_SZ lower",
+    "out": []
+  }
+]

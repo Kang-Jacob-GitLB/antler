@@ -1,0 +1,15 @@
+[
+ { "kind": "local", "path": "~/x" },
+ { "kind": "local", "path": "~" },
+ { "kind": "ssh", "path": "~" },
+ { "kind": "wsl", "path": "~" },
+ { "kind": "ssh", "path": "~/" },
+ { "kind": "wsl", "path": "~/proj" },
+ { "kind": "ssh", "path": "~/a/b" },
+ { "kind": "ssh", "path": "~//a" },
+ { "kind": "ssh", "path": "/abs/path" },
+ { "kind": "ssh", "path": "~user/x" },
+ { "kind": "ssh", "path": "rel/path" },
+ { "kind": "wsl", "path": "" },
+ { "kind": "github", "path": "~/x" }
+]

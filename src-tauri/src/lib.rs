@@ -12,6 +12,8 @@ pub mod mirror;
 pub mod net;
 // Rust → Node 질의(`repoq`)·토큰 사본(`ghToken`)의 메시지와 검증(Phase 4 PR 9). 통합 테스트(tests/repoq.rs)가 별도 크레이트라 pub 이다
 pub mod repoq;
+// 저장소 추가 흐름의 순수 로직(Phase 6b PR 4a). 앱에는 연결하지 않는다. 통합 테스트(tests/ssh.rs)가 별도 크레이트라 pub 이다
+pub mod repos;
 pub mod router;
 // GitHub 서비스의 저장소 질의를 Rust 가 맡는 저장소는 라우터가, 나머지는 사이드카(repoq)가 답한다(Phase 6a PR 8)
 pub mod routed_repos;
