@@ -7,7 +7,7 @@
 - 창: contextIsolation · sandbox · nodeIntegration off, preload 는 허용 목록 채널만 노출, 권한 요청은 모두 거부,
   프로덕션 빌드에 CSP 메타 태그 주입, 외부 링크는 기본 브라우저로. 외부 HTML 은 sanitize 로 정화한다.
 - IPC: main 이 모든 입력(경로·해시·ref 등)을 검증한다.
-- 악성 저장소 방어: 모든 git 호출에 `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `-c core.fsmonitor=false`, `-c core.protectNTFS=true` 를 줘
+- 악성 저장소 방어: 모든 git 호출에 `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `-c core.fsmonitor=false`, `-c core.protectNTFS=true`, `-c diff.submodule=short`, `-c submodule.recurse=false` 를 줘
   저장소 설정이 네트워크 접근이나 외부 명령 실행을 일으키지 못하게 한다.
 - fetch: 사용자 저장소에 하는 유일한 쓰기이자 유일한 git 네트워크 접근이다 — GitHub 원격 전용 저장소는 아래 별도 절을 본다(remote 마다 `git fetch --prune --no-prune-tags --no-recurse-submodules --no-write-fetch-head --refmap= -- <이름> +refs/heads/*:refs/remotes/<이름>/*`).
   **로컬 ref 는 쓰지 않는다**: 설정의 `remote.<n>.fetch` 를 쓰는 `fetch --all` 은 목적지를 설정이 정해 `refs/heads`·`refs/stash`·`refs/replace`·`HEAD` 를 덮어쓰고
@@ -64,13 +64,21 @@
   체크아웃 직후 수정 없는 LFS 파일은 인덱스 stat 캐시 덕분에 수정됨으로 보이지 않는다(`tests/lfsFilterExemption.test.ts` 로 확인). 단 파일과 인덱스가 같은 타임스탬프 단위에 쓰인 직후(racy-git)는 git 이 내용을 다시 해시해 수정됨으로 보일 수 있다. repoExtras 의 LFS 판정(`lfs`)은 속성 파일 텍스트만 읽어 바뀌지 않는다.
   (fetch 가드의 `filter.lfs.*` 기본값 허용 목록은 별개다 — fetch 는 작업 트리를 읽지 않아 clean 을 돌지 않는다.)
   `git config -z --get-regexp '^filter\.'` 출력을 **바이트로** 받아 키를 UTF-8 로 엄격히 검증하고(접미사 판정도 JS 에서 — git 정규식의 로캘 의존 제거),
-  **무력화할 수 없는 저장소는 작업 트리를 읽지 않고 거부한다**: 이름에 `=` 가 있음, 이름이 UTF-8 이 아님(`\xff` 등 — 문자열로 바꾸면 U+FFFD 가 돼 `-c` 가 실제 드라이버를 덮지 못하고,
+  **무력화할 수 없는 저장소는 작업 트리를 읽지 않고 거부한다**: 이름이 비었음(`[filter ""]` + `.git/info/attributes` 의 `* filter=` 가 빈 이름 드라이버의 clean 을 실행한다 — 실측.
+  `-c filter..clean=` 로 덮을 수는 있지만 정상 저장소에 빈 이름은 없어 거부로 단순화했다. TS·Rust 가 같다), 이름에 `=` 가 있음, 이름이 UTF-8 이 아님(`\xff` 등 — 문자열로 바꾸면 U+FFFD 가 돼 `-c` 가 실제 드라이버를 덮지 못하고,
   Windows 는 argv 가 UTF-16 이라 원래 바이트로 `-c` 를 만들 수도 없다. 재현: 악성 `.git/config` + `.gitattributes` 로 status 가 저장소가 심은 명령을 실행했다), 드라이버가 256개를 넘거나 `-c` 총 길이가 24000자를 넘음(Windows 명령줄 한계 32767자).
   WSL·SSH 실행기는 Node 가 그 파일 시스템을 볼 수 없어 이 검사를 하지 않는다. Linux git 의 status 는 디렉터리 symlink 를 따라 들어가지 않고 링크 자체를 한 항목으로 보고하므로 `j/config` 가 허용 목록에 들어오지 않는다고 본다 — **미확인**(실측하지 않았다).
   확인과 git 의 읽기 사이 경쟁(TOCTOU)은 막지 못한다. **알려진 한계**: 정션이 순환(`mklink /J a .`)하면 status 의 재귀가 길어지는 로컬 DoS 가 가능하다 — 이 가드의 범위 밖이다.
   **`git diff --no-index` 도 필터를 돈다**(실측, git 2.49): "저장소 속성을 읽지 않는다"는 전제는 틀렸다. `-C` 저장소의 설정에 `filter.<이름>.clean|process` 가 있고 `.gitattributes`·`.git/info/attributes` 규칙이 읽는 파일에 맞으면
   그 명령이 실행된다. 그래서 `--no-index` 를 쓰는 모든 호출에 같은 가드를 건다 — untracked diff(`wipFileDiff`, 모든 area 공통)와 LFS 판정용 파일 읽기(`repoExtras.ts` `fileUsesLfs`: 작업 트리 `.gitattributes`·`info/attributes`, 저장소를 열 때마다 돈다.
   가드 조회는 저장소당 한 번). 무력화할 수 없으면 wip 는 오류로 거부하고, repoExtras 는 그 파일을 읽지 않고 기존 실패 처리(`lfs: false`)와 같게 둔다. Tauri 판의 `repoExtras`(Rust `lfs.rs` `read_worktree_attributes`)도 `wip::filter_overrides`·`FilterGuard` 로 같은 가드를 건다(가드 없이는 `--no-index` argv 를 만들 수 없는 시그니처 — `docs/tauri.md` PR 5). Rust 의 untracked `wipDiff` 는 PR 6 에서 같게 건다.
+  **WIP staged·unstaged diff 는 plumbing 이다**(`wip.ts` `wipFileDiff`: `diff-index -p --cached <HEAD|빈 트리>`·`diff-files -p`). porcelain `git diff` 는 실측으로 두 가지가 샜다.
+  (1) stat 만 바뀐 파일이 있으면 index 를 갱신해 **쓰고** `.git/hooks/post-index-change` 를 **실행**한다(`GIT_OPTIONAL_LOCKS=0` 이어도). plumbing 은 refresh 를 하지 않는다.
+  (2) 상위 저장소 `diff.submodule=diff` + 인덱스에는 파일이고 작업 트리에는 중첩 저장소인 경로(status 가 `1 .T` 로 보고)면 서브모듈 안에서 자식 git diff 를 `--no-ext-diff` 없이 띄워 그 저장소의 `diff.external` 이 실행된다.
+  plumbing 은 `diff.submodule`·`diff.external` 같은 ui 설정을 읽지 않는다. 그래도 `--no-ext-diff --no-textconv --ignore-submodules=all --submodule=short` 를 명시하고 filter 가드 `-c` 도 그대로 건다.
+  출력 차이: 헤더·hunk 형식은 같다. stat 만 바뀐 파일(내용 동일)은 refresh 를 안 해 hunk 없이 나오므로 UI 에서 빈 diff 다. 커밋이 없는 저장소는 `HEAD` 대신 빈 트리(SHA-1·SHA-256 중 저장소가 아는 쪽)와 비교한다.
+  untracked(`diff --no-index`)는 index 를 읽지 않아 porcelain 그대로다. Rust 의 wip diff argv 는 PR 6 에서 같게 옮긴다.
+  전역 인자에도 `-c diff.submodule=short`·`-c submodule.recurse=false` 를 더했다(`GIT_GLOBAL_ARGS`, Rust `exec/common.rs`) — 어떤 호출이 porcelain diff 를 부르더라도 서브모듈 재귀가 켜지지 않는 방어 심층이다.
   작업 트리를 읽지 않는 호출(`blame`·`cat-file blob`·`ls-files`·`stash list`·`check-attr`·`ls-tree`)은 필터를 돌리지 않아 가드 대상이 아니다.
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 

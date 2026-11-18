@@ -50,6 +50,9 @@ export class AbortError extends Error {
  * 지금은 index 를 읽지 않지만 앞으로 status 등을 더해도 안전하도록 미리 끈다.
  * core.protectNTFS=true: Windows 기본값이지만 저장소 로컬 설정이 false 로 꺼 NTFS 위험 경로(`.git.`·`::$INDEX_ALLOCATION`·8.3) 보호를
  * 풀 수 있어 `-c` 로 고정한다. 모든 플랫폼의 git 이 인식하고(true 면 그런 경로만 거부), 모르는 core 키는 무시하므로 WSL·SSH 의 Linux git 에도 무해하다.
+ * diff.submodule=short: 저장소 설정이 `diff` 로 두면 porcelain diff 가 서브모듈 안에서 자식 git diff 를 띄워 그 저장소의 diff.external 이 실행될 수 있다.
+ * submodule.recurse=false: 저장소 설정이 서브모듈 재귀를 켜 읽기 명령이 서브모듈 안으로 들어가지 못하게 한다.
+ * 둘 다 모르는 옛 git 은 무시한다.
  */
 export const GIT_GLOBAL_ARGS = [
   '-c',
@@ -61,7 +64,11 @@ export const GIT_GLOBAL_ARGS = [
   '-c',
   'core.fsmonitor=false',
   '-c',
-  'core.protectNTFS=true'
+  'core.protectNTFS=true',
+  '-c',
+  'diff.submodule=short',
+  '-c',
+  'submodule.recurse=false'
 ]
 
 /**
