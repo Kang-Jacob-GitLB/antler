@@ -225,3 +225,17 @@ fn run_host(app: &AppHandle, op: &str, arg: &Value) -> Option<Value> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_config_line;
+
+    #[test]
+    fn 설정을_소유하면_사이드카의_미러와_fetch_설정_줄만_버린다() {
+        assert!(is_config_line(Some("repos")) && is_config_line(Some("fetchPrefs")));
+        for t in ["res", "evt", "host", "ready", "ghToken", "fetchApprove", ""] {
+            assert!(!is_config_line(Some(t)), "{t}");
+        }
+        assert!(!is_config_line(None));
+    }
+}

@@ -971,8 +971,125 @@ async fn 에디터_실행_파일_선택은_확인한_뒤에만_설정에_저장�
 
 // ── 소스 검사 ───────────────────────────────────────────────────────────────
 
+/// 지금 설정의 원격 전용 저장소 id 들
+fn github_ids(rig: &Rig) -> Vec<String> {
+    match rig.store.get() {
+        Json::Obj(cfg) => match cfg.iter().find(|(k, _)| k == "repos") {
+            Some((_, Json::Arr(repos))) => repos.iter().filter_map(|r| r.get("id").and_then(Json::as_str).map(str::to_string)).collect(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 삭제와_재추가가_겹쳐도_새_레코드의_캐시를_지우지_않고_레코드와_폴더가_함께_있거나_함께_없다() {
+    let rig = Rig::new(true);
+    let dir = cache_of(&rig).join("octo").join("hello.git");
+    let add = json!([{ "repos": [{ "owner": "octo", "repo": "hello" }] }]);
+    for round in 0..6 {
+        ok(&rig.call("repos:addGithub", add.clone()).await);
+        let id = github_ids(&rig).first().cloned().expect("등록된 저장소");
+        // 같은 저장소를 두 번 지우면서 같은 owner/repo 를 다시 추가한다(`repos:remove` 와 `repos:addGithub` 겹침)
+        let (a, b, c) = tokio::join!(rig.call("repos:remove", json!([id.clone()])), rig.call("repos:remove", json!([id])), rig.call("repos:addGithub", add.clone()));
+        for r in [&a, &b, &c] {
+            assert_eq!(r["ok"], true, "{round}: {r}");
+        }
+        // 불변식: 레코드가 있으면 폴더도 있고 bare 저장소다(새 레코드의 캐시가 지워지지 않았다). 레코드가 없으면 폴더도 없다(삭제 중 레코드를 등록된 것으로 보고 건너뛰지 않았다)
+        let ids = github_ids(&rig);
+        assert!(ids.len() <= 1, "{round}: 레코드가 둘 이상이다 {ids:?}");
+        if ids.is_empty() {
+            assert!(!dir.exists(), "{round}: 레코드가 없는데 폴더가 남았다");
+        } else {
+            assert!(is_bare(&dir), "{round}: 레코드가 있는데 캐시가 없거나 깨졌다");
+            assert!(matches!(rig.mirror.resolve(&ids[0]), Resolved::Rust(Target::Github { .. })));
+        }
+        // 다음 회차의 시작 상태를 맞춘다
+        for id in ids {
+            ok(&rig.call("repos:remove", json!([id])).await);
+        }
+        assert!(!dir.exists());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 서로_다른_저장소의_삭제와_추가는_서로_막지_않고_각자_폴더를_지키며_삭제_중인_레코드를_등록된_것으로_보지_않는다() {
+    let rig = Rig::new(true);
+    ok(&rig.call("repos:addGithub", json!([{ "repos": [{ "owner": "octo", "repo": "keep" }, { "owner": "octo", "repo": "gone" }] }])).await);
+    let ids = github_ids(&rig);
+    let (r, a) = tokio::join!(rig.call("repos:remove", json!([ids[1].clone()])), rig.call("repos:addGithub", json!([{ "repos": [{ "owner": "octo", "repo": "gone" }, { "owner": "octo", "repo": "new" }] }])));
+    assert_eq!((r["ok"].clone(), a["ok"].clone()), (json!(true), json!(true)));
+    let cache = cache_of(&rig);
+    assert!(is_bare(&cache.join("octo").join("keep.git")) && is_bare(&cache.join("octo").join("new.git")));
+    // `gone` 은 삭제와 추가 중 어느 쪽이 이겼든 레코드와 폴더가 함께 있거나 함께 없다
+    let has_record = names(&rig.file_json(), "repos").iter().any(|n| n == "gone");
+    assert_eq!(has_record, cache.join("octo").join("gone.git").exists());
+}
+
+#[tokio::test]
+async fn 설정에_든_unc_와_nt_네임스페이스_루트는_열기를_거부하고_프로그램을_띄우지_않는다() {
+    let text = r#"{"version":1,"sources":[{"id":"local","kind":"local","label":"Local"}],"repos":[{"id":"u1","sourceId":"local","path":"\\\\127.0.0.1\\share\\r","name":"u1"},{"id":"u2","sourceId":"local","path":"\\??\\UNC\\127.0.0.1\\share\\r","name":"u2"},{"id":"u3","sourceId":"local","path":"C:\\ok\u0000bad","name":"u3"}],"ui":{}}"#;
+    let rig = Rig::with_file(false, Some(text));
+    let net = "네트워크 공유 경로는 지원하지 않습니다(WSL 경로는 \\\\wsl.localhost\\… 로 고르세요)";
+    for (id, action, msg) in [("u1", "fileManager", net), ("u1", "editor", net), ("u1", "terminal", net), ("u2", "fileManager", net), ("u3", "terminal", "잘못된 경로입니다")] {
+        fail(&rig.call("external:open", json!([id, { "action": action }])).await, msg);
+    }
+    assert!(rig.deps.spawned.lock().unwrap().is_empty() && rig.deps.opened.lock().unwrap().is_empty() && rig.deps.shown.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn 고아_정리는_userdata_경로에_점점과_중복_구분자가_있어도_등록된_폴더를_지키고_고아만_지운다() {
+    if !cfg!(windows) {
+        return;
+    }
+    let rig = Rig::new(true);
+    ok(&rig.call("repos:addGithub", json!([{ "repos": [{ "owner": "octo", "repo": "keep" }] }])).await);
+    let cache = cache_of(&rig);
+    fs::create_dir_all(cache.join("octo").join("stale.git").join("objects")).unwrap();
+    // 같은 폴더를 `..`·중복 구분자로 가리키는 기준 폴더
+    let weird = format!("{}\\..\\remote-repos\\\\", cache.to_string_lossy());
+    assert_eq!(cleanup_github_cache(rig.host.store(), &weird, rig.host.locks()).await, 1);
+    assert!(is_bare(&cache.join("octo").join("keep.git")), "등록된 폴더가 고아로 지워졌다");
+    assert!(!cache.join("octo").join("stale.git").exists());
+}
+
+#[tokio::test]
+async fn 추가_실패_목록의_이름은_js_string_변환_규칙을_따른다() {
+    let rig = Rig::new(true);
+    let r = rig.call("repos:addGithub", json!([{ "repos": [{ "owner": ["a", ["b", null], "c"], "repo": "x" }, { "owner": null, "repo": 5 }, { "owner": true, "repo": { "k": 1 } }, { "repo": "only" }, 7] }])).await;
+    let labels: Vec<String> = ok(&r)["failed"].as_array().unwrap().iter().map(|f| f["fullName"].as_str().unwrap().to_string()).collect();
+    assert_eq!(labels, ["a,b,,c/x", "null/5", "true/[object Object]", "undefined/only", "?"]);
+}
+
+#[tokio::test]
+async fn wsl_저장소_추가는_대소문자만_다른_기존_소스를_재사용해_소스와_레코드가_갈라지지_않는다() {
+    if !cfg!(windows) {
+        return;
+    }
+    // Electron 에서 가져온 소스가 `ubuntu` 로 적혀 있다(설치 목록의 표기는 `Ubuntu`)
+    let text = r#"{"version":1,"sources":[{"id":"local","kind":"local","label":"Local"},{"id":"wsl:ubuntu","kind":"wsl","label":"WSL · ubuntu","distro":"ubuntu"}],"repos":[],"ui":{}}"#;
+    let rig = Rig::with_file(false, Some(text));
+    let a = rig.repo("a");
+    // 실행기는 가짜(로컬 git)라 임시 폴더로 추가를 끝까지 돌린다
+    let r = rig.call("repos:add", json!([{ "kind": "wsl", "distro": "UBUNTU", "path": a.to_string_lossy() }])).await;
+    assert_eq!(ok(&r)["sourceId"], "wsl:ubuntu", "{r}");
+    let again = rig.call("repos:add", json!([{ "kind": "wsl", "distro": "Ubuntu", "path": a.to_string_lossy() }])).await;
+    assert_eq!(ok(&again)["id"], ok(&r)["id"], "같은 저장소가 둘로 갈라졌다");
+    assert_eq!(names(&rig.file_json(), "sources"), ["local", "wsl:ubuntu"]);
+    assert_eq!(names(&rig.file_json(), "repos").len(), 1);
+}
+
 #[test]
 fn 설정_파일을_여는_곳은_스위치가_켜진_분기_하나이고_사이드카_중계는_설정을_모른다() {
+    // 배선 순서: 변경 알림을 단 뒤에 첫 반영을 하고, 첫 반영은 라우터 등록 뒤·사이드카 기동 앞이다. D1 가져오기 판정은 `should_import` 한 곳이다
+    let lib = prod_code("src/lib.rs");
+    let listen = lib.find("store.set_on_change(").expect("변경 알림");
+    let manage = lib.find("app.manage(router)").expect("라우터 등록");
+    let first = lib.find("sync.push(None,").expect("첫 반영");
+    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
+    assert!(listen < manage && manage < first && first < spawn);
+    assert!(lib.contains("config::import::should_import(std::env::var_os(\"ANTLER_USER_DATA\").as_deref(), &file)"));
+    assert_eq!(lib.matches("import_electron_config(").count(), 1);
     let lib = prod_code("src/lib.rs");
     // ConfigStore 를 만드는 호출은 `open_config` 안 한 곳이고, 그 함수는 `router.enabled()` 분기에서만 부른다(`ANTLER_RUST_GIT=0` 이면 Rust 가 파일을 열지 않는다)
     assert_eq!(lib.matches("ConfigStore::open(").count(), 1);
@@ -1010,9 +1127,13 @@ fn 설정_소유자는_승인을_쓰지_않고_삭제는_링크_검사_뒤에_�
     // repos:remove 의 순서: (fetch 정지·감시 정지·조회 드레인) → 링크·경로 일치 검사 → 폴더 삭제 → 레코드 삭제
     let release = host.find("router.release_github_repo(&id).await").expect("정리");
     let target = host.find("github_target_of(&host.store").expect("링크 검사");
-    let remove = host.find("remove_cache_dir(&gp)").expect("폴더 삭제");
+    let lock = host.find("host.locks.lock(&canonical_key(").expect("경로 잠금");
+    let reread = host.find("host.store.repo(&id).and_then(|r| github_target_of").expect("잠금 안 재확인");
+    let remove = host.find("remove_cache_dir(&target)").expect("폴더 삭제");
     let record = host.find("store.remove_repo(&id)").expect("레코드 삭제");
-    assert!(release < target && target < remove && remove < record);
+    // 경로 잠금 안에서 레코드를 다시 확인한 뒤 폴더·레코드를 모두 지운다(잠금 밖 별도 삭제 없음)
+    assert!(release < target && target < lock && lock < reread && reread < remove && remove < record);
+    assert_eq!(host.matches("store.remove_repo(&id)").count(), 2, "github 갈래(잠금 안)와 그 밖의 갈래");
     // 폴더를 지우는 함수는 `GithubCachePath` 만 받고 직접 `remove_dir_all` 을 쓰는 곳은 github_cache.rs 한 곳이다
     for rel in ["src/config_host.rs", "src/repos/manage.rs", "src/router.rs", "src/lib.rs"] {
         assert!(!prod_code(rel).contains("remove_dir_all"), "{rel} 가 폴더를 직접 지운다");

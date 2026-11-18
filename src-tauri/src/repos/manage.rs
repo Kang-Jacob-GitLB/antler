@@ -17,7 +17,7 @@ use crate::config::{source_for, ConfigStore};
 use crate::git::exec::{GitExecutor, GithubExecutor};
 use crate::git::fetch::js_trim;
 use crate::git::github_cache::{init_github_repo, remove_github_cache, GithubCachePath};
-use crate::git::github_link::{cache_path_matches_link, github_cache_path, sanitize_github_link, validate_github_link, GithubLink, GITHUB_SOURCE_ID, MAX_ADD_GITHUB};
+use crate::git::github_link::{cache_path_matches_link, github_cache_path, github_cache_slug, sanitize_github_link, validate_github_link, GithubLink, GITHUB_SOURCE_ID, MAX_ADD_GITHUB};
 use crate::net::json::Json;
 
 /// 한 번에 추가하는 저장소의 그룹 이름 상한(UTF-16 단위)
@@ -80,9 +80,20 @@ fn js_string(v: Option<&Json>) -> String {
         Some(Json::Bool(b)) => b.to_string(),
         Some(Json::Num(n)) => crate::net::json::js_number_string(*n),
         Some(Json::Str(s)) => s.clone(),
-        Some(Json::Arr(_)) => String::new(),
+        // JS `String([a, b])` = `a,b`(null·undefined 항목은 빈 문자열, 중첩 배열은 재귀)
+        Some(Json::Arr(a)) => a.iter().map(|x| if matches!(x, Json::Null) { String::new() } else { js_string(Some(x)) }).collect::<Vec<_>>().join(","),
         Some(Json::Obj(_)) => "[object Object]".to_string(),
     }
+}
+
+/// 캐시 경로의 정규형(`github_cache_path` — 구분자·`..` 를 정리하고 소문자) 비교·잠금 키. 캐시 모양이 아니면 구분자만 맞춘 소문자 경로
+pub(crate) fn canonical_key(cache_dir: &str, path: &str) -> String {
+    match github_cache_slug(cache_dir, path) {
+        Some((owner, repo)) => github_cache_path(cache_dir, &owner, &repo),
+        None => path.to_string(),
+    }
+    .to_lowercase()
+    .replace('/', "\\")
 }
 
 /// 오류 목록의 항목 이름(TS: `${owner}/${repo}`.slice(0, 200) — UTF-16 단위로 자른다)
@@ -209,7 +220,7 @@ pub async fn add_github_repos(store: &Arc<ConfigStore>, exec: Option<GithubExecu
 
 /// 레코드가 가리키는 캐시 폴더들(저장된 경로와 링크로 다시 계산한 경로, 소문자·구분자 통일) — 등록 여부 판정용
 fn record_paths(store: &ConfigStore, cache_dir: &str) -> HashSet<String> {
-    let norm = |p: &str| p.to_lowercase().replace('/', "\\");
+    let norm = |p: &str| canonical_key(cache_dir, p);
     let mut out = HashSet::new();
     let Json::Obj(cfg) = store.get() else { return out };
     let Some(Json::Arr(repos)) = crate::config::model::get(&cfg, "repos") else { return out };
@@ -251,9 +262,11 @@ pub async fn cleanup_github_cache(store: &Arc<ConfigStore>, cache_dir: &str, loc
             let path = entry.to_string_lossy().into_owned();
             // 모양이 틀린 폴더는 건드리지 않는다
             let Some(gp) = GithubCachePath::new(cache_dir, &path) else { continue };
-            // 추가 중인 폴더를 지우지 않도록 같은 경로 잠금 안에서, 등록 여부를 다시 확인한 뒤 지운다
-            let _guard = locks.lock(&path).await;
-            if record_paths(store, cache_dir).contains(&path.to_lowercase().replace('/', "\\")) {
+            // 추가 중인 폴더를 지우지 않도록 같은 경로 잠금 안에서, 등록 여부를 다시 확인한 뒤 지운다. 잠금 키·비교는 디스크 항목 경로가 아니라 정규형(`..`·중복 구분자를 정리한 `github_cache_path`)이다 —
+            // 추가·삭제가 쓰는 키와 같아야 서로 겹치는 작업을 직렬화한다
+            let key = canonical_key(cache_dir, &path);
+            let _guard = locks.lock(&key).await;
+            if record_paths(store, cache_dir).contains(&key) {
                 continue;
             }
             // 아직 쥐고 있다 — 다음 시작 때 다시 시도한다
@@ -278,7 +291,12 @@ pub async fn restore_missing_github_caches(store: &Arc<ConfigStore>, exec: Optio
         // 소스가 github 이고 링크가 유효하며 저장된 경로가 그 링크의 캐시 경로인 레코드만(`github_target_of` — 로드가 경로를 이미 맞춘다)
         let Some((gp, link)) = github_target_of(store, cache_dir, &r) else { continue };
         let path = gp.as_str().to_string();
-        let _guard = locks.lock(&path).await;
+        let _guard = locks.lock(&canonical_key(cache_dir, &path)).await;
+        // 잠금을 기다리는 사이 삭제·재추가가 있었을 수 있다 — 잠금 안에서 등록 여부(같은 id·링크·경로)를 다시 확인한다
+        let id = str_of(js_get(&r, "id")).unwrap_or_default();
+        if !store.repo(id).and_then(|cur| github_target_of(store, cache_dir, &cur)).is_some_and(|(p, _)| p == gp) {
+            continue;
+        }
         let dir = Path::new(&path);
         if std::fs::symlink_metadata(dir).is_ok() || dir.parent().is_some_and(is_link) {
             continue;

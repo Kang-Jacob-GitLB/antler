@@ -25,7 +25,7 @@ use crate::git::exec::wsl_paths::wsl_from_unc;
 use crate::mirror::check_path;
 use crate::net::json::{parse, Json};
 use crate::repos::env::{remote_relative, resolve_env, with_host_key_hint, EnvInput, ResolvedEnv};
-use crate::repos::manage::{add_github_repos, blocking, github_target_of, remove_cache_dir, PathLocks};
+use crate::repos::manage::{add_github_repos, blocking, canonical_key, github_target_of, remove_cache_dir, PathLocks};
 use crate::router::Router;
 
 const BAD_INPUT: &str = "잘못된 입력입니다";
@@ -96,7 +96,7 @@ impl From<ExecError> for Fail {
 
 type R<T> = Result<T, Fail>;
 
-/// 설정 트리를 응답 값으로(키 순서를 보존한다 — `serde_json` 의 `preserve_order`)
+/// 설정 트리를 응답 값으로. `serde_json` 의 `preserve_order` 가 꺼져 있어 **객체 키는 정렬돼 나간다**(renderer 는 순서에 기대지 않는다 — 파일 바이트는 순서를 보존하는 `Json` 트리가 쓴다)
 pub fn to_value(j: &Json) -> Value {
     serde_json::from_str(&crate::net::js_value::stringify(j)).unwrap_or(Value::Null)
 }
@@ -182,12 +182,21 @@ async fn remove_repo(router: &Router, host: &ConfigHost, id: Option<&Value>) -> 
     let is_github = record.as_ref().and_then(|r| str_of(js_get(r, "sourceId"))).and_then(|s| host.store.source(s)).is_some_and(|s| str_of(js_get(&s, "kind")) == Some("github"));
     if is_github {
         router.release_github_repo(&id).await;
-        if let Some((gp, _)) = record.as_ref().and_then(|r| github_target_of(&host.store, &host.cache_dir, r)) {
-            // 같은 경로의 추가·고아 정리와 겹치지 않게 경로 잠금 안에서 지운다
-            let _guard = host.locks.lock(gp.as_str()).await;
-            if let Err(e) = blocking(move || remove_cache_dir(&gp)).await? {
-                eprintln!("[repos] 원격 저장소 캐시 폴더를 지우지 못했다(다음 시작 때 정리한다): {e}");
+        if let Some((gp, link)) = record.as_ref().and_then(|r| github_target_of(&host.store, &host.cache_dir, r)) {
+            // 같은 경로의 추가·고아 정리와 겹치지 않게 경로 잠금 **안에서** 레코드를 다시 읽어 아직 같은 레코드(id·링크·경로)인지 보고,
+            // 폴더 삭제와 레코드 삭제를 모두 이 잠금 안에서 한다 — 잠금을 놓은 사이에 끼어든 같은 owner/repo 의 재추가가 만든 새 캐시를 지우지 않고,
+            // `addGithub` 가 폴더가 이미 지워진 삭제 중 레코드를 등록된 것으로 보지 않는다
+            let _guard = host.locks.lock(&canonical_key(&host.cache_dir, gp.as_str())).await;
+            let same = host.store.repo(&id).and_then(|r| github_target_of(&host.store, &host.cache_dir, &r)).is_some_and(|(p, l)| p == gp && l.owner == link.owner && l.repo == link.repo);
+            if same {
+                let target = gp.clone();
+                if let Err(e) = blocking(move || remove_cache_dir(&target)).await? {
+                    eprintln!("[repos] 원격 저장소 캐시 폴더를 지우지 못했다(다음 시작 때 정리한다): {e}");
+                }
             }
+            let store = host.store.clone();
+            let out = blocking(move || store.remove_repo(&id)).await??;
+            return Ok(to_value(&out));
         }
     }
     let store = host.store.clone();
@@ -249,7 +258,23 @@ async fn add_path(host: &ConfigHost, runner: &Runner, env: &ResolvedEnv, group: 
     if env.path.is_empty() {
         return Err("경로를 입력하세요".into());
     }
-    let source = source_for(env.kind, env.target.as_deref())?;
+    // 배포판 이름은 설치된 표기로 맞춰 오지만(`check_env_input`), 설정에 이미 대소문자만 다른 같은 배포판 소스(Electron 에서 가져온 레코드)가 있으면 그 표기를 쓴다 —
+    // 소스 id(`wsl:<이름>`)가 달라져 같은 저장소가 소스 둘·레코드 둘로 갈라지지 않게. TS 는 입력 표기를 그대로 쓰지만 설치 목록과 정확히 일치해야 통과하므로 결과가 같다
+    let existing_distro = (env.kind == "wsl")
+        .then(|| match host.store.get() {
+            Json::Obj(cfg) => match crate::config::model::get(&cfg, "sources") {
+                Some(Json::Arr(sources)) => sources
+                    .iter()
+                    .filter(|s| str_of(js_get(s, "kind")) == Some("wsl"))
+                    .filter_map(|s| str_of(js_get(s, "distro")))
+                    .find(|d| env.target.as_deref().is_some_and(|t| d.eq_ignore_ascii_case(t)))
+                    .map(str::to_string),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flatten();
+    let source = source_for(env.kind, existing_distro.as_deref().or(env.target.as_deref()))?;
     let rel = remote_relative(env.kind, &env.path);
     // 고른 폴더(로컬)가 링크로 원격에 이어지면 `git -C` 가 따라가는 순간 SMB 인증(NTLM)이 샌다 — git 을 띄우기 전에 구성 요소 단위로 확인한다(`repos:scan` 과 같은 관문)
     if cfg!(windows) && env.kind == "local" {
@@ -387,8 +412,12 @@ async fn external_open(host: &ConfigHost, repo_id: Option<&Value>, req: Option<&
     let root = str_of(js_get(&repo, "path")).unwrap_or_default().to_string();
     let kind = str_of(js_get(&source, "kind")).unwrap_or_default();
     // 원격 전용 저장소는 작업 폴더가 없다(path 는 앱 캐시) — 폴더·에디터·터미널로 열 대상이 아니다
+    if kind == "github" {
+        return Err("원격 전용 저장소는 작업 폴더가 없어 열 수 없습니다".into());
+    }
+    // 설정에 든 루트도 쓰기 전에 미러가 쓸 때마다 하는 검사(NT 네임스페이스·UNC(WSL 제외)·NUL·길이)를 거친다 — 손상·변조된 설정 파일의 UNC 루트로 `realpath`·`stat` 이 SMB 에 접속(NTLM)하지 않게
+    check_path(if matches!(kind, "wsl" | "ssh") { kind } else { "local" }, &root)?;
     let target = match kind {
-        "github" => return Err("원격 전용 저장소는 작업 폴더가 없어 열 수 없습니다".into()),
         "wsl" => Target::Wsl { root, distro: str_of(js_get(&source, "distro")).unwrap_or_default().to_string() },
         "ssh" => Target::Ssh { root, host: str_of(js_get(&source, "sshHost")).unwrap_or_default().to_string() },
         _ => Target::Local { root },

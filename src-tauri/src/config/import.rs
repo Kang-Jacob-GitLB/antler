@@ -24,6 +24,12 @@ pub fn electron_config_file(appdata: Option<&std::ffi::OsStr>) -> Option<PathBuf
     Some(Path::new(base).join("Antler").join("antler.config.json"))
 }
 
+/// 가져오기를 시도할 조건: `ANTLER_USER_DATA` 가 **없고**(측정·자동화 실행은 실사용 설정을 건드리지 않는다) Tauri 설정 파일이 **없을 때**다.
+/// "없을 때마다"이므로 사용자가 Tauri 설정 파일을 지우면 다음 시작에 Electron 설정을 다시 가져온다(의도 — 가져온 뒤에는 파일이 있으므로 한 번만 돈다)
+pub fn should_import(user_data_env: Option<&std::ffi::OsStr>, tauri_file: &Path) -> bool {
+    user_data_env.is_none() && fs::symlink_metadata(tauri_file).is_err()
+}
+
 /// 가져왔으면 `true`. Tauri 설정이 이미 있으면(폴더·손상 파일 포함) 아무것도 하지 않는다. 쓰기 실패는 `Err`(호출자는 로그만 남기고 빈 설정으로 시작한다)
 pub fn import_electron_config(tauri_file: &Path, electron_file: &Path, cache_dir: &str) -> Result<bool, String> {
     // 있는지만 본다(링크를 따라가도 좋다 — 내용을 읽지 않는다). 없을 때만 가져온다
@@ -106,6 +112,24 @@ mod tests {
         let got = parse(&fs::read_to_string(&tauri).unwrap()).unwrap();
         let Some(Json::Arr(repos)) = js_get(&got, "repos") else { panic!("repos") };
         assert_eq!(js_get(&repos[0], "path").and_then(Json::as_str), Some("C:\\new\\cache\\o\\r.git"));
+    }
+
+    #[test]
+    fn 가져오기_조건은_user_data_가_없고_tauri_설정_파일이_없을_때다() {
+        let d = Dir::new("cond");
+        let file = d.0.join("antler.config.json");
+        let env = std::ffi::OsStr::new("C:/custom");
+        assert!(should_import(None, &file), "둘 다 없으면 가져온다");
+        assert!(!should_import(Some(env), &file), "ANTLER_USER_DATA 가 있으면 가져오지 않는다");
+        fs::write(&file, "{}").unwrap();
+        assert!(!should_import(None, &file), "Tauri 설정이 있으면 가져오지 않는다");
+        assert!(!should_import(Some(env), &file));
+        // 설정 파일을 지우면 다음 시작에 다시 가져온다(의도)
+        fs::remove_file(&file).unwrap();
+        assert!(should_import(None, &file));
+        // 폴더·손상 파일도 "있음"이다 — 덮지 않는다
+        fs::create_dir(&file).unwrap();
+        assert!(!should_import(None, &file));
     }
 
     #[test]

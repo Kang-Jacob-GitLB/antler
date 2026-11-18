@@ -129,11 +129,11 @@ fn pick_exe_port(app: tauri::AppHandle) -> config_host::PickExe {
 }
 
 /// 설정 파일을 연다(Rust 가 설정을 소유할 때만 — `ANTLER_RUST_GIT=0` 이면 부르지 않는다. 그 실행은 사이드카가 파일의 유일한 작성자다).
-/// Tauri 설정이 **없을 때 한 번만**, Electron 판의 설정을 읽어 가져온다(사용자 결정 D1 — `config::import`: Electron 파일은 읽기만, `trustedConfigs`·창 위치·GitHub 캐시·토큰은 가져오지 않는다).
-/// `ANTLER_USER_DATA` 로 도는 측정·자동화 실행은 가져오지 않는다(실사용 설정을 건드리지 않는다)
+/// Tauri 설정이 **없을 때마다** Electron 판의 설정을 읽어 가져온다(사용자 결정 D1 — `config::import`: Electron 파일은 읽기만, `trustedConfigs`·창 위치·GitHub 캐시·토큰은 가져오지 않는다. 설정 파일을 지우면 다시 가져온다 — 의도).
+/// `ANTLER_USER_DATA` 로 도는 측정·자동화 실행은 가져오지 않는다(실사용 설정을 건드리지 않는다) — 판정은 `config::import::should_import` 한 곳이다
 fn open_config(user_data: &Path, cache_dir: &str) -> Arc<ConfigStore> {
     let file = user_data.join("antler.config.json");
-    if std::env::var_os("ANTLER_USER_DATA").is_none() {
+    if config::import::should_import(std::env::var_os("ANTLER_USER_DATA").as_deref(), &file) {
         if let Some(electron) = config::import::electron_config_file(std::env::var_os("APPDATA").as_deref()) {
             match config::import::import_electron_config(&file, &electron, cache_dir) {
                 Ok(true) => eprintln!("[config] Electron 판 설정을 가져왔다"),
