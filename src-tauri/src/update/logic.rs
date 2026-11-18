@@ -39,6 +39,11 @@ pub const MAX_INSTALLER_BYTES: usize = 300_000_000;
 /// Windows NSIS 설치본의 매니페스트 플랫폼 키와, 없을 때 쓰는 일반 키
 pub const PLATFORM_KEY_NSIS: &str = "windows-x86_64-nsis";
 pub const PLATFORM_KEY_GENERIC: &str = "windows-x86_64";
+/// 수동 경로(macOS dmg·Linux deb)의 매니페스트 플랫폼 키. **정확히 이 키 하나만** 본다(일반 키 `darwin-<arch>`·`linux-x86_64` 로 내려가지 않는다 —
+/// 같은 매니페스트에 다른 형태(AppImage 등)의 항목이 일반 키로 섞여도 dmg·deb 로 받지 않게). `scripts/make-update-manifests.mjs` 의 `MANUAL_ASSETS` 와 같아야 한다(`tests/updateManifests.test.ts` 가 대조한다)
+pub const PLATFORM_KEY_DMG_ARM64: &str = "darwin-aarch64-dmg";
+pub const PLATFORM_KEY_DMG_X64: &str = "darwin-x86_64-dmg";
+pub const PLATFORM_KEY_DEB_X64: &str = "linux-x86_64-deb";
 
 const GENERIC_ERROR: &str = "업데이트 정보가 올바르지 않습니다";
 
@@ -222,6 +227,105 @@ pub fn is_safe_file_name(n: &str) -> bool {
     !b.is_empty() && b.len() <= 201 && b[0].is_ascii_alphanumeric() && b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) && !n.contains("..")
 }
 
+// ── 설치 대상(Windows NSIS·macOS dmg·Linux deb) ───────────────────────
+
+/// 이 빌드가 업데이트를 받는 방식. NSIS 는 앱 안에서 설치하고(`auto`), dmg·deb 는 검증한 파일을 받아 열어 줄 뿐이다(수동 — TS `manual.ts`)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallKind {
+    Nsis,
+    Dmg,
+    Deb,
+}
+
+/// 번들러가 실행 파일에 심은 표식(`tauri::utils::platform::bundle_type()`)을 순수 값으로 옮긴 것. `Unknown` 은 표식이 없는 빌드(`--no-bundle`)다
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BundleMark {
+    Nsis,
+    Deb,
+    /// macOS 의 `.app`(Tauri 는 표식이 없어도 macOS 에서는 `App` 을 돌려준다 — 그래서 실행 파일 위치도 함께 본다)
+    App,
+    Other,
+    Unknown,
+}
+
+/// 이 빌드의 업데이트 대상: 설치 형태와 매니페스트에서 볼 키·기대 파일 이름. [`detect_target`] 가 정한다
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Target {
+    pub kind: InstallKind,
+    /// 수동 경로가 매니페스트에서 보는 단 하나의 키(NSIS 는 [`PLATFORM_KEY_NSIS`]·[`PLATFORM_KEY_GENERIC`] 순서로 본다)
+    platform: &'static str,
+    /// 자산 이름의 아키텍처(`Antler-<버전>-<arm64|x64>.dmg`·`antler_<버전>_amd64.deb`)
+    asset_arch: &'static str,
+}
+
+impl Target {
+    pub const fn nsis() -> Self {
+        Target { kind: InstallKind::Nsis, platform: PLATFORM_KEY_NSIS, asset_arch: "x64" }
+    }
+
+    /// `UpdateState.mode`: `auto`(앱 안 설치)·`manual-dmg`(dmg 를 열어 준다)·`manual-file`(deb 를 열어 준다)
+    pub const fn mode(&self) -> &'static str {
+        match self.kind {
+            InstallKind::Nsis => "auto",
+            InstallKind::Dmg => "manual-dmg",
+            InstallKind::Deb => "manual-file",
+        }
+    }
+
+    pub const fn is_manual(&self) -> bool {
+        !matches!(self.kind, InstallKind::Nsis)
+    }
+
+    /// 매니페스트에서 찾을 키(앞이 우선). 수동 경로는 하나뿐이다
+    pub fn keys(&self) -> Vec<&'static str> {
+        match self.kind {
+            InstallKind::Nsis => vec![PLATFORM_KEY_NSIS, PLATFORM_KEY_GENERIC],
+            _ => vec![self.platform],
+        }
+    }
+
+    /// 서명을 통과한 바이트가 이 대상의 파일 형식인가(저장·열기 직전의 마지막 확인). 서명은 형식을 보증하지 않으므로(같은 키로 서명한 다른 플랫폼 자산도 통과한다) 형식 표식만 본다:
+    /// deb 는 `ar` 아카이브(`!<arch>\n` + 첫 멤버 `debian-binary`), dmg 는 끝 512바이트의 UDIF 꼬리표 시그니처 `koly`. NSIS 는 플러그인이 설치 직전에 형식을 확인하므로 여기서는 보지 않는다
+    pub fn check_bytes(&self, bytes: &[u8]) -> bool {
+        match self.kind {
+            InstallKind::Nsis => true,
+            InstallKind::Deb => bytes.starts_with(b"!<arch>\ndebian-binary"),
+            InstallKind::Dmg => bytes.len() >= 512 && &bytes[bytes.len() - 512..bytes.len() - 508] == b"koly",
+        }
+    }
+
+    /// 수동 경로가 기대하는 자산 이름(TS `pickAsset` — electron-builder 의 artifactName 규칙이고 `tauri-package.yml` 이 같은 이름으로 맞춘다). NSIS 는 이름 규칙이 없다(안전한 이름이면 된다)
+    pub fn asset_name(&self, version: &str) -> Option<String> {
+        let v = strip_v(version);
+        match self.kind {
+            InstallKind::Nsis => None,
+            InstallKind::Dmg => Some(format!("Antler-{v}-{}.dmg", self.asset_arch)),
+            InstallKind::Deb => Some(format!("antler_{v}_{}.deb", self.asset_arch)),
+        }
+    }
+}
+
+/// 실행 파일이 macOS 앱 번들 안(`<이름>.app/Contents/MacOS/<실행 파일>`)에 있는가. `--no-bundle`·`cargo run` 빌드는 아니다
+pub fn in_app_bundle(exe: &std::path::Path) -> bool {
+    let parts: Vec<String> = exe.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    parts.len() >= 4 && parts[parts.len() - 4].ends_with(".app") && parts[parts.len() - 3] == "Contents" && parts[parts.len() - 2] == "MacOS"
+}
+
+/// 이 빌드가 앱 안 업데이트를 받는 방식. `None` 이면 확인하지 않는다(`--no-bundle` 개발·측정 빌드, 지원하지 않는 형태·아키텍처).
+/// 번들 표식이 아니면 켜지 않는다(환경 변수는 믿지 않는다): Windows 는 NSIS, Linux 는 deb(AppImage·rpm 은 이 PR 의 CI 가 만들지 않는다), macOS 는 앱 번들 안에서 실행 중일 때만
+pub fn detect_target(os: &str, arch: &str, mark: BundleMark, exe_in_app_bundle: bool) -> Option<Target> {
+    match (os, mark) {
+        ("windows", BundleMark::Nsis) => Some(Target::nsis()),
+        ("linux", BundleMark::Deb) if arch == "x86_64" => Some(Target { kind: InstallKind::Deb, platform: PLATFORM_KEY_DEB_X64, asset_arch: "amd64" }),
+        ("macos", BundleMark::App) if exe_in_app_bundle => match arch {
+            "aarch64" => Some(Target { kind: InstallKind::Dmg, platform: PLATFORM_KEY_DMG_ARM64, asset_arch: "arm64" }),
+            "x86_64" => Some(Target { kind: InstallKind::Dmg, platform: PLATFORM_KEY_DMG_X64, asset_arch: "x64" }),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 // ── 매니페스트(latest.json) ──────────────────────────────────────────
 
 /// [`check_manifest`] 가 통과시킨 업데이트. `url`·`signature` 는 검사를 마친 값이라 그대로 내려받기·서명 검증(PR 4)에 넘긴다
@@ -236,7 +340,14 @@ pub struct ManifestOffer {
     pub platform: &'static str,
 }
 
-/// Tauri `latest.json` 을 검사한다. `current` 는 지금 실행 중인 버전.
+impl ManifestOffer {
+    /// 자산 파일 이름(URL 의 마지막 조각 — [`check_manifest_for`] 가 안전한 이름임을 이미 확인했다)
+    pub fn file_name(&self) -> &str {
+        self.url.rsplit('/').next().unwrap_or("")
+    }
+}
+
+/// Tauri `latest.json` 을 검사한다(Windows NSIS 용 — [`check_manifest_for`] 의 `Target::nsis()`). `current` 는 지금 실행 중인 버전.
 ///
 /// - `Ok(None)`: 새 버전이 아니다(같거나 낮음 — **다운그레이드는 여기서 걸러진다**) 또는 프리릴리스인데 `current` 가 정식이다
 /// - `Err`: 본문이 너무 크거나 JSON·필드가 올바르지 않다. 새 버전일 때만 플랫폼 항목을 검사한다
@@ -245,6 +356,13 @@ pub struct ManifestOffer {
 /// `url` 은 [`is_release_asset_url`] 을 통과하고, **버전의 태그 아래**(`…/releases/download/v<버전>/<파일>`)여야 한다 — 매니페스트 생성 실수를 거른다(롤백 방어가 아니다: 옛 서명 설치본을 새 태그에 다시 올리는 경우는 PR 4 의 서명 버전 결속만 막는다).
 /// 서명은 형식만 본다(실제 검증은 설치 직전 minisign). 매니페스트의 `notes` 등 다른 필드는 쓰지 않는다
 pub fn check_manifest(text: &str, current: &str) -> Result<Option<ManifestOffer>, String> {
+    check_manifest_for(text, current, &Target::nsis())
+}
+
+/// [`check_manifest`] 의 일반형. `target` 이 볼 키와 파일 이름 규칙을 정한다 — 수동 경로(dmg·deb)는 **그 키 하나만** 보고,
+/// URL 의 파일 이름이 기대 이름(`Target::asset_name`)과 정확히 같아야 한다 — **매니페스트 생성 실수를 거르는 검사일 뿐 보안 경계가 아니다**: 서명(minisign)은 바이트와 버전에만 묶이고 파일 이름·플랫폼에는 묶이지 않으므로,
+/// 같은 키로 서명된 다른 플랫폼 자산을 끼워 넣는 것은 이 검사가 막지 못한다(파일 형식은 `Target::check_bytes` 가 저장 직전에 한 번 더 본다)
+pub fn check_manifest_for(text: &str, current: &str, target: &Target) -> Result<Option<ManifestOffer>, String> {
     if text.len() > MAX_MANIFEST_BYTES {
         return Err("응답이 너무 큽니다".to_string());
     }
@@ -257,7 +375,8 @@ pub fn check_manifest(text: &str, current: &str) -> Result<Option<ManifestOffer>
         return Ok(None);
     }
     let platforms = root.get("platforms").filter(|p| matches!(p, Json::Obj(_))).ok_or_else(|| GENERIC_ERROR.to_string())?;
-    let (platform, entry) = [PLATFORM_KEY_NSIS, PLATFORM_KEY_GENERIC]
+    let (platform, entry) = target
+        .keys()
         .into_iter()
         .find_map(|k| platforms.get(k).map(|e| (k, e)))
         .ok_or_else(|| "이 환경에 맞는 업데이트가 없습니다".to_string())?;
@@ -267,7 +386,7 @@ pub fn check_manifest(text: &str, current: &str) -> Result<Option<ManifestOffer>
         return Err("업데이트 서명 정보가 올바르지 않습니다".to_string());
     }
     let tag_dir = format!("{RELEASE_DOWNLOAD_PREFIX}v{version}/");
-    let file_ok = url.strip_prefix(&tag_dir).is_some_and(is_safe_file_name);
+    let file_ok = url.strip_prefix(&tag_dir).is_some_and(|f| is_safe_file_name(f) && target.asset_name(version).is_none_or(|want| want == f));
     if !is_release_asset_url(url) || !file_ok {
         return Err("업데이트 주소가 올바르지 않습니다".to_string());
     }

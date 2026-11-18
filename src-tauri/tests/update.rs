@@ -551,6 +551,118 @@ fn 업데이트_모듈은_라우터와_앱_진입점만_쓴다() {
 
 // ── CI 가 만드는 latest.json ─────────────────────────────────────────────────
 
+// ── 수동 경로(macOS dmg·Linux deb, PR 4b)의 판정 — 순수 함수라 Windows 에서도 전 분기를 시험한다 ─────────────
+
+#[test]
+fn 번들_표식과_실행_위치로_업데이트_대상을_고른다() {
+    use logic::{detect_target, BundleMark as M, InstallKind as K};
+    let kind = |os, arch, mark, in_app| detect_target(os, arch, mark, in_app).map(|t| (t.kind, t.mode()));
+    assert_eq!(kind("windows", "x86_64", M::Nsis, false), Some((K::Nsis, "auto")));
+    assert_eq!(kind("linux", "x86_64", M::Deb, false), Some((K::Deb, "manual-file")));
+    assert_eq!(kind("macos", "aarch64", M::App, true), Some((K::Dmg, "manual-dmg")));
+    assert_eq!(kind("macos", "x86_64", M::App, true), Some((K::Dmg, "manual-dmg")));
+    // 꺼지는 경우: 표식 없음(--no-bundle)·다른 형태(AppImage·rpm·msi)·다른 OS 의 표식·지원하지 않는 아키텍처
+    assert_eq!(kind("windows", "x86_64", M::Unknown, false), None, "표식 없는 Windows 빌드");
+    assert_eq!(kind("windows", "x86_64", M::Other, false), None, "msi");
+    assert_eq!(kind("linux", "x86_64", M::Other, false), None, "AppImage·rpm 은 CI 가 만들지 않는다");
+    assert_eq!(kind("linux", "x86_64", M::Unknown, false), None);
+    assert_eq!(kind("linux", "aarch64", M::Deb, false), None, "deb 는 x86_64 만 만든다");
+    assert_eq!(kind("macos", "x86_64", M::App, false), None, "macOS 의 표식은 항상 App 이라 앱 번들 안인지 따로 본다(--no-bundle 개발 빌드 제외)");
+    assert_eq!(kind("macos", "riscv64", M::App, true), None);
+    assert_eq!(kind("windows", "x86_64", M::Deb, false), None, "OS 가 맞지 않는 표식");
+    assert_eq!(kind("linux", "x86_64", M::Nsis, false), None);
+    assert_eq!(kind("freebsd", "x86_64", M::App, true), None);
+}
+
+#[test]
+fn 대상_파일_형식_표식을_본다() {
+    use logic::{detect_target, BundleMark as M, Target};
+    let deb = detect_target("linux", "x86_64", M::Deb, false).expect("deb");
+    let dmg = detect_target("macos", "aarch64", M::App, true).expect("dmg");
+    // deb: ar 아카이브 + 첫 멤버 debian-binary
+    let good_deb = [b"!<arch>\ndebian-binary   ".as_slice(), &[0u8; 100]].concat();
+    assert!(deb.check_bytes(&good_deb));
+    for bad in [b"".as_slice(), b"!<arch>\n", b"!<arch>\nsomething-else", b"\x7fELF....", b"MZ......", b"koly"] {
+        assert!(!deb.check_bytes(bad), "{bad:?}");
+    }
+    // dmg: 끝 512바이트의 첫 4바이트가 `koly`
+    let mut good_dmg = vec![0u8; 4096];
+    let at = good_dmg.len() - 512;
+    good_dmg[at..at + 4].copy_from_slice(b"koly");
+    assert!(dmg.check_bytes(&good_dmg));
+    assert!(!dmg.check_bytes(&[0u8; 4096]));
+    assert!(!dmg.check_bytes(&good_deb), "deb 는 dmg 가 아니다");
+    assert!(!dmg.check_bytes(&good_dmg[..good_dmg.len() - 1]), "꼬리표가 밀리면 거부");
+    assert!(!dmg.check_bytes(&[b'k'; 511]) && !dmg.check_bytes(b"") && !dmg.check_bytes(b"koly"));
+    assert!(!deb.check_bytes(&good_dmg), "dmg 는 deb 가 아니다");
+    // NSIS 는 플러그인이 형식을 확인한다
+    assert!(Target::nsis().check_bytes(b""));
+}
+
+#[test]
+fn 앱_번들_안의_실행_파일만_앱_번들로_본다() {
+    let yes = |p: &str| logic::in_app_bundle(Path::new(p));
+    assert!(yes("/Applications/Antler.app/Contents/MacOS/antler"));
+    assert!(yes("/Users/me/Applications/Antler.app/Contents/MacOS/Antler"));
+    assert!(!yes("/Users/me/src/antler/src-tauri/target/release/antler"));
+    assert!(!yes("/Applications/Antler.app/Contents/Resources/antler"), "MacOS 폴더가 아니다");
+    assert!(!yes("/Applications/Antler.app/Contents/MacOS/sub/antler"), "실행 파일이 MacOS 바로 아래가 아니다");
+    assert!(!yes("/Applications/Antler/Contents/MacOS/antler"), ".app 이 아니다");
+    assert!(!yes("antler"));
+    assert!(!yes(""));
+}
+
+#[test]
+fn 수동_경로의_매니페스트_키와_기대_파일_이름() {
+    use logic::{check_manifest_for, detect_target, BundleMark as M};
+    let dmg_arm = detect_target("macos", "aarch64", M::App, true).expect("arm64");
+    let dmg_x64 = detect_target("macos", "x86_64", M::App, true).expect("x64");
+    let deb = detect_target("linux", "x86_64", M::Deb, false).expect("deb");
+    assert_eq!(dmg_arm.asset_name("2.0.0").as_deref(), Some("Antler-2.0.0-arm64.dmg"));
+    assert_eq!(dmg_x64.asset_name("v2.0.0").as_deref(), Some("Antler-2.0.0-x64.dmg"));
+    assert_eq!(deb.asset_name("2.0.0").as_deref(), Some("antler_2.0.0_amd64.deb"));
+    assert_eq!(logic::Target::nsis().asset_name("2.0.0"), None);
+    // (대상, 키, 파일) — 한 매니페스트에 세 플랫폼이 다 있어도 대상마다 자기 것만 고른다
+    let all = json!({
+        "darwin-aarch64-dmg": { "url": format!("{BASE}/v1.1.0/Antler-1.1.0-arm64.dmg"), "signature": SIG },
+        "darwin-x86_64-dmg": { "url": format!("{BASE}/v1.1.0/Antler-1.1.0-x64.dmg"), "signature": SIG },
+        "linux-x86_64-deb": { "url": format!("{BASE}/v1.1.0/antler_1.1.0_amd64.deb"), "signature": SIG },
+        "windows-x86_64-nsis": { "url": format!("{BASE}/v1.1.0/Antler-Setup-1.1.0-x64.exe"), "signature": SIG },
+    });
+    let text = manifest("1.1.0", &all);
+    for (target, key, file) in [(dmg_arm, "darwin-aarch64-dmg", "Antler-1.1.0-arm64.dmg"), (dmg_x64, "darwin-x86_64-dmg", "Antler-1.1.0-x64.dmg"), (deb, "linux-x86_64-deb", "antler_1.1.0_amd64.deb")] {
+        let o = check_manifest_for(&text, "1.0.0", &target).expect("검사").expect("새 버전");
+        assert_eq!((o.platform, o.file_name()), (key, file));
+    }
+    assert_eq!(check_manifest_for(&text, "1.0.0", &logic::Target::nsis()).expect("검사").expect("새 버전").platform, "windows-x86_64-nsis");
+    // 같거나 낮은 버전은 제안하지 않는다
+    assert_eq!(check_manifest_for(&text, "1.1.0", &dmg_arm), Ok(None));
+    assert_eq!(check_manifest_for(&text, "2.0.0", &deb), Ok(None));
+    // 키가 없으면 일반 키(`darwin-aarch64`·`linux-x86_64`)로 내려가지 않는다
+    let generic = json!({ "darwin-aarch64": all["darwin-aarch64-dmg"].clone(), "linux-x86_64": all["linux-x86_64-deb"].clone(), "windows-x86_64": all["windows-x86_64-nsis"].clone() });
+    for t in [dmg_arm, deb] {
+        assert_eq!(check_manifest_for(&manifest("1.1.0", &generic), "1.0.0", &t), Err("이 환경에 맞는 업데이트가 없습니다".to_string()));
+    }
+    // 키는 맞는데 파일 이름이 기대와 다르다(다른 플랫폼 자산·다른 버전·다른 확장자·안전하지 않은 이름) → 거부
+    for (key, t, good) in [("darwin-aarch64-dmg", dmg_arm, "Antler-1.1.0-arm64.dmg"), ("linux-x86_64-deb", deb, "antler_1.1.0_amd64.deb")] {
+        let url_ok = |file: &str| check_manifest_for(&manifest("1.1.0", &json!({ key: { "url": format!("{BASE}/v1.1.0/{file}"), "signature": SIG } })), "1.0.0", &t).is_ok();
+        assert!(url_ok(good), "{key}: 기대 이름은 통과한다");
+        for bad in ["Antler-1.1.0-x64.dmg", "antler_1.1.0_amd64.deb", "Antler-Setup-1.1.0-x64.exe", "Antler-1.0.0-arm64.dmg", "Antler-1.1.0-arm64.dmg.exe", "latest.json", "..%2fx.dmg", "a/Antler-1.1.0-arm64.dmg"] {
+            if bad != good {
+                assert!(!url_ok(bad), "{key} {bad}");
+            }
+        }
+    }
+    // 서명이 없거나 형식이 틀리면 수동 경로도 거부한다
+    for sig in ["", "not base64 !!"] {
+        let m = manifest("1.1.0", &json!({ "darwin-aarch64-dmg": { "url": format!("{BASE}/v1.1.0/Antler-1.1.0-arm64.dmg"), "signature": sig } }));
+        assert_eq!(check_manifest_for(&m, "1.0.0", &dmg_arm), Err("업데이트 서명 정보가 올바르지 않습니다".to_string()), "{sig}");
+    }
+    // 프리릴리스 버전의 이름도 같은 규칙이다
+    let pre = manifest("1.1.0-rc.1", &json!({ "darwin-aarch64-dmg": { "url": format!("{BASE}/v1.1.0-rc.1/Antler-1.1.0-rc.1-arm64.dmg"), "signature": SIG } }));
+    assert!(check_manifest_for(&pre, "1.1.0-rc.0", &dmg_arm).expect("검사").is_some());
+}
+
 /// `scripts/make-update-manifests.mjs` 가 만든 표본(`tests/fixtures/update/latest.json`)을 실제 `check_manifest` 가 받는지.
 /// 표본이 스크립트 출력과 같은지는 vitest(`tests/updateManifests.test.ts`)가 바이트로 대조한다 — 둘이 합쳐 "CI 산출물 → 앱의 검사"를 잇는다
 #[test]
@@ -566,6 +678,24 @@ fn ci_가_만드는_latest_json_표본을_검사가_받는다() {
     assert_eq!(doc["platforms"]["windows-x86_64-nsis"], doc["platforms"]["windows-x86_64"]);
     // 이미 이 버전이면 제안하지 않는다
     assert_eq!(check_manifest(&text, "2.0.0"), Ok(None));
+}
+
+/// 수동 경로 항목까지 담은 CI 표본(`latest-all.json`)을 대상마다 `check_manifest_for` 가 받는다 — 스크립트의 키·파일 이름과 앱의 기대가 어긋나면 여기서 깨진다
+#[test]
+fn ci_표본의_수동_경로_항목을_대상마다_검사가_받는다() {
+    use logic::{check_manifest_for, detect_target, BundleMark as M};
+    let path = root().join("tests").join("fixtures").join("update").join("latest-all.json");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    for (target, key, file) in [
+        (detect_target("macos", "aarch64", M::App, true), "darwin-aarch64-dmg", "Antler-2.0.0-arm64.dmg"),
+        (detect_target("macos", "x86_64", M::App, true), "darwin-x86_64-dmg", "Antler-2.0.0-x64.dmg"),
+        (detect_target("linux", "x86_64", M::Deb, false), "linux-x86_64-deb", "antler_2.0.0_amd64.deb"),
+        (detect_target("windows", "x86_64", M::Nsis, false), "windows-x86_64-nsis", "Antler-Setup-2.0.0-x64.exe"),
+    ] {
+        let o = check_manifest_for(&text, "1.12.3", &target.expect("대상")).expect("검사").expect("새 버전");
+        assert_eq!((o.platform, o.file_name()), (key, file));
+        assert_eq!(check_manifest_for(&text, "2.0.0", &target.expect("대상")), Ok(None));
+    }
 }
 
 // ── 서비스(Phase 6c PR 4): 상태 순서 골든·시계·라우터 ─────────────────────────────
@@ -603,6 +733,8 @@ mod service {
         notes: AtomicUsize,
         /// 릴리스 노트 요청이 실패하는가(시험이 바꾼다)
         notes_fail: Mutex<bool>,
+        /// 마지막 확인이 돌려준 버전(수동 모드의 파일 이름을 만든다)
+        last_version: Mutex<Option<String>>,
     }
 
     impl Script {
@@ -614,6 +746,7 @@ mod service {
                 installs: AtomicUsize::new(0),
                 notes: AtomicUsize::new(0),
                 notes_fail: Mutex::new(false),
+                last_version: Mutex::new(None),
             })
         }
     }
@@ -627,7 +760,27 @@ mod service {
                 if let Some(e) = step.get("error") {
                     return Err(s(e).to_string());
                 }
-                Ok(step.get("version").map(|v| s(v).to_string()))
+                let version = step.get("version").map(|v| s(v).to_string());
+                self.last_version.lock().unwrap().clone_from(&version);
+                Ok(version)
+            }
+        }
+
+        /// 시나리오의 `manual`(`dmg`·`deb`)이 수동 모드를 정한다 — TS 쪽 실행기는 플랫폼·설치 형태로 같은 모드를 얻는다
+        fn mode(&self) -> &'static str {
+            match self.script["manual"].as_str() {
+                Some("dmg") => "manual-dmg",
+                Some("deb") => "manual-file",
+                _ => "auto",
+            }
+        }
+
+        fn file_name(&self) -> Option<String> {
+            let v = self.last_version.lock().unwrap().clone()?;
+            match self.script["manual"].as_str() {
+                Some("dmg") => Some(format!("Antler-{v}-arm64.dmg")),
+                Some("deb") => Some(format!("antler_{v}_amd64.deb")),
+                _ => None,
             }
         }
 
@@ -640,6 +793,10 @@ mod service {
                 if step.get("hang").is_some() {
                     cancel.cancelled().await;
                     return Err("cancelled".to_string());
+                }
+                // 수동 모드: 검증한 파일을 열지 못했다(TS 는 가짜 `openPath` 가 오류를 돌려준다)
+                if step.get("openFails").is_some() {
+                    return Err("설치 파일을 열지 못했습니다. 다운로드 폴더에서 직접 여세요".to_string());
                 }
                 match step.get("error") {
                     Some(e) => Err(s(e).to_string()),
@@ -714,7 +871,10 @@ mod service {
         let fake = sc.get("fake").and_then(Value::as_str);
         let enabled = sc.get("enabled").and_then(Value::as_bool).unwrap_or(fake.is_none());
         let current = sc.get("current").and_then(Value::as_str).unwrap_or("0.1.0");
-        let h = harness(&sc["backend"], current, enabled, fake, sc.get("skipped").and_then(Value::as_str));
+        // 수동 경로(`manual`)는 백엔드 대본에 실어 가짜 백엔드의 `mode`·`file_name` 이 읽게 한다
+        let mut script = sc["backend"].clone();
+        script["manual"] = sc.get("manual").cloned().unwrap_or(Value::Null);
+        let h = harness(&script, current, enabled, fake, sc.get("skipped").and_then(Value::as_str));
         let mut results: Vec<Value> = Vec::new();
         let mut started: Option<tokio::task::JoinHandle<UpdateState>> = None;
         for st in sc["steps"].as_array().expect("steps") {
@@ -746,6 +906,8 @@ mod service {
                     h.svc.install().await;
                     results.push(json!({ "op": op, "state": state(&h.svc.get()) }));
                 }
+                // 받은 파일을 바꾸는 것은 TS 쪽 실행기만 한다(Rust 의 가짜 백엔드는 installs 의 error 로 같은 결과를 낸다)
+                "tamper" => results.push(json!({ "op": op })),
                 "get" => results.push(json!({ "op": op, "state": state(&h.svc.get()) })),
                 "dismiss" => results.push(match h.svc.dismiss(&st["action"], &st["version"]) {
                     Ok(v) => json!({ "op": op, "state": state(&v) }),
@@ -776,7 +938,8 @@ mod service {
         let want = g["scenarios"].as_array().expect("골든");
         let input = scenarios_input();
         assert_eq!(want.len(), input.len(), "골든과 입력의 시나리오 수");
-        assert!(input.len() >= 20, "시나리오를 건너뛴 것과 같다");
+        assert!(input.len() >= 29, "시나리오를 건너뛴 것과 같다");
+        assert!(input.iter().filter(|sc| sc.get("manual").is_some()).count() >= 9, "수동 경로(dmg·deb) 시나리오");
         let mut d = Diffs::default();
         for (sc, expected) in input.iter().zip(want) {
             let got = run_scenario(sc).await;

@@ -9,7 +9,12 @@
 //! **공개 키는 [`UPDATE_PUBKEY`] 한 곳이다**(믿는 키의 유일한 원천). 비어 있으면(`None`) **fail-closed**: 확인은 동작하지만 내려받기·설치는 시작하지 않고 설치 포트(`Engine::install`)는 절대 불리지 않는다.
 //! 플러그인 설정은 `tauri.conf.json` 이 아니라 [`updater_plugin_config`] 가 만들어 `lib.rs` 가 넣는다(conf 에는 `plugins` 가 없다 — 시험이 강제). `configure_client`·플러그인의 다운로드·`check()` 는 쓰지 않는다
 //! (HTTP 클라이언트는 `net::http` 한 곳이어야 리다이렉트 허용 목록·크기 상한이 우회되지 않는다 — 소스 검사가 강제한다).
+//!
+//! **수동 경로(macOS dmg·Linux deb, PR 4b)**: 1~3 은 같다(서명 검증은 같은 `Engine::verify`, 매니페스트 키만 `darwin-<arch>-dmg`·`linux-x86_64-deb`). 4 가 다르다 —
+//! **`Engine::install` 을 부르지 않는다**(플러그인의 macOS·Linux 설치는 앱 번들·실행 파일을 직접 교체한다. 우리는 사용자가 설치하게 파일만 열어 준다).
+//! 검증을 통과한 바이트를 앱 전용 폴더에 저장하고([`super::store`]) 기본 앱으로 연다(`OpenFile` 포트 — 운영 구현은 `lib.rs` 가 `external::launch::SystemDeps::open_file` 로 주입한다, 열기 실패는 오류). `install`(= 다시 열기)은 파일을 상한 읽기로 다시 읽어 **다시 검증한 뒤** 연다.
 
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{json, Value};
@@ -18,10 +23,11 @@ use tauri_plugin_updater::UpdaterExt;
 use tokio_util::sync::CancellationToken;
 
 use super::logic::{
-    check_manifest, fetch_release_notes, is_manifest_url, is_prerelease, is_offerable, is_release_asset_url, parse_release_response, prerelease_manifest_url, ManifestOffer, ReleaseNotes, MAX_API_BYTES, MAX_INSTALLER_BYTES,
-    MAX_MANIFEST_BYTES, RELEASE_LIST_PATH, REPO_NAME, REPO_OWNER, STABLE_MANIFEST_URL,
+    check_manifest_for, detect_target, fetch_release_notes, in_app_bundle, is_manifest_url, is_offerable, is_prerelease, is_release_asset_url, parse_release_response, prerelease_manifest_url, BundleMark, ManifestOffer,
+    ReleaseNotes, Target, MAX_API_BYTES, MAX_INSTALLER_BYTES, MAX_MANIFEST_BYTES, RELEASE_LIST_PATH, REPO_NAME, REPO_OWNER, STABLE_MANIFEST_URL,
 };
 use super::service::{Backend, Deps, UpdateService, UpdateState};
+use super::store::{read_stored, remove_open_copy, store_verified, write_open_copy};
 use crate::config::ConfigStore;
 use crate::net::http::{classify, or_abort, read_capped, read_capped_progress, AssetError, Failure, HttpClient, HttpInitError, ReadError, Redirects};
 use crate::net::json::Json;
@@ -38,6 +44,8 @@ const RATE_LIMITED: &str = "GitHub 요청 한도에 걸렸습니다. 잠시 후 
 const TOO_BIG: &str = "응답이 너무 큽니다";
 const BAD_INFO: &str = "업데이트 정보가 올바르지 않습니다";
 const NOT_STAGED: &str = "다시 확인한 뒤 시도하세요";
+const OPEN_FAILED: &str = "설치 파일을 열지 못했습니다. 다운로드 폴더에서 직접 여세요";
+const CANCELLED: &str = "취소되었습니다";
 
 /// 업데이트 플러그인 설정(`plugins.updater`). `lib.rs` 가 `Context` 에 넣는다 — 공개 키는 인자(운영은 [`UPDATE_PUBKEY`], 비면 빈 문자열이고 [`PluginEngine`] 이 키 없음으로 막는다).
 /// 엔드포인트는 비어 있다(우리가 매니페스트를 받고 플러그인은 `restore_update` 만 쓴다). `requireSignedVersion` 은 켠다(`restore_update` 가 어차피 강제한다), 다운그레이드는 허용하지 않는다
@@ -48,6 +56,24 @@ pub fn updater_plugin_config(pubkey: Option<&str>) -> Value {
 /// 번들러가 실행 파일에 심은 표식이 NSIS 인가 — 업데이트를 켜는 **유일한** 조건이다(환경 변수는 믿지 않는다). `--no-bundle` 개발·측정 빌드는 `None` 이라 꺼진다
 pub fn bundle_is_nsis() -> bool {
     matches!(tauri::utils::platform::bundle_type(), Some(tauri::utils::config::BundleType::Nsis))
+}
+
+/// 번들러가 심은 표식을 순수 값으로 옮긴다(`detect_target` 의 입력)
+pub fn bundle_mark() -> BundleMark {
+    use tauri::utils::config::BundleType as B;
+    match tauri::utils::platform::bundle_type() {
+        Some(B::Nsis) => BundleMark::Nsis,
+        Some(B::Deb) => BundleMark::Deb,
+        Some(B::App | B::Dmg) => BundleMark::App,
+        Some(_) => BundleMark::Other,
+        None => BundleMark::Unknown,
+    }
+}
+
+/// 이 빌드의 업데이트 대상. 번들 표식·OS·아키텍처·(macOS) 실행 파일 위치만 본다 — 환경 변수는 믿지 않는다. `None` 이면 확인하지 않는다
+pub fn current_target() -> Option<Target> {
+    let in_app = std::env::current_exe().is_ok_and(|p| in_app_bundle(&p));
+    detect_target(std::env::consts::OS, std::env::consts::ARCH, bundle_mark(), in_app)
 }
 
 /// 개발 장치(`ANTLER_UPDATE_FAKE`)의 상태 이름. **개발·cdp 빌드에서만** 읽는다 — 배포 바이너리에는 이 이름 자체가 없다(PR 2 의 바이너리 가드가 확인한다)
@@ -259,18 +285,108 @@ struct Staged {
     bytes: Arc<Vec<u8>>,
 }
 
+/// 설치 파일을 여는 포트(운영은 `lib.rs` 가 `external::launch::SystemDeps::open_file` 로 주입하고, 시험은 기록하는 가짜를 준다)
+pub type OpenFile = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
+
+/// 수동 경로의 저장·열기 설정
+struct Manual {
+    dir: PathBuf,
+    open: OpenFile,
+    /// 대상의 파일 형식 확인(운영은 `Target::check_bytes`. 시험만 `with_format_check` 로 바꾼다 — 시험 서명은 고정 바이트에 걸려 있어 형식 표식을 넣을 수 없다)
+    format_ok: FormatCheck,
+    /// 지금 열려 있는 열기용 사본 — 다음에 열 때 지운다
+    open_copy: Mutex<Option<PathBuf>>,
+}
+
+/// 서명을 통과한 바이트가 대상의 파일 형식인지 보는 함수
+pub type FormatCheck = fn(&Target, &[u8]) -> bool;
+
+fn production_format_check(target: &Target, bytes: &[u8]) -> bool {
+    target.check_bytes(bytes)
+}
+
+const BAD_FORMAT: &str = "설치 파일 형식이 올바르지 않습니다";
+
+/// 저장해 연 설치 파일(수동 경로) — 다시 열기가 이 파일을 다시 검증한다
+struct Delivered {
+    offer: ManifestOffer,
+    path: PathBuf,
+}
+
 pub struct HostBackend<E: Engine> {
     net: UpdateNet,
     engine: Arc<E>,
     current: String,
+    target: Target,
+    /// 수동 모드(dmg·deb)면 있다
+    manual: Option<Manual>,
     /// 마지막 확인이 고른 제안
     offer: Mutex<Option<ManifestOffer>>,
     staged: Mutex<Option<Staged>>,
+    delivered: Mutex<Option<Delivered>>,
 }
 
 impl<E: Engine> HostBackend<E> {
+    /// Windows NSIS(앱 안 설치)
     pub fn new(net: UpdateNet, engine: Arc<E>, current: String) -> Self {
-        Self { net, engine, current, offer: Mutex::new(None), staged: Mutex::new(None) }
+        Self { net, engine, current, target: Target::nsis(), manual: None, offer: Mutex::new(None), staged: Mutex::new(None), delivered: Mutex::new(None) }
+    }
+
+    /// 수동 경로(macOS dmg·Linux deb): 검증한 파일을 `dir` 에 저장하고 `open` 으로 연다. `target` 이 NSIS 면 `new` 와 같다
+    pub fn with_target(net: UpdateNet, engine: Arc<E>, current: String, target: Target, dir: PathBuf, open: OpenFile) -> Self {
+        let manual = target.is_manual().then_some(Manual { dir, open, format_ok: production_format_check, open_copy: Mutex::new(None) });
+        Self { target, manual, ..Self::new(net, engine, current) }
+    }
+
+    /// **시험 전용**: 형식 확인을 바꾼다. 운영 조립(`build_service`)은 부르지 않는다(소스 검사가 강제한다)
+    pub fn with_format_check(mut self, f: FormatCheck) -> Self {
+        if let Some(m) = &mut self.manual {
+            m.format_ok = f;
+        }
+        self
+    }
+
+    /// 방금 검증한 바이트를 **새 이름의 사본**으로 다시 써서 그것을 연다(옛 사본은 지운다). 저장해 둔 파일은 검증과 열기 사이에 바뀔 수 있어(TOCTOU) 열리는 것은 항상 검증한 바이트의 새 사본이다.
+    /// 열기 실패는 고정 문구다
+    fn open_verified(m: &Manual, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let copy = write_open_copy(&m.dir, name, bytes)?;
+        if let Some(old) = m.open_copy.lock().unwrap_or_else(PoisonError::into_inner).replace(copy.clone()) {
+            remove_open_copy(&old);
+        }
+        (m.open)(&copy).map_err(|_| OPEN_FAILED.to_string())
+    }
+
+    /// 수동 경로의 내려받기 마무리: 서명을 통과한 바이트의 **형식을 확인**하고 저장해 연다
+    async fn deliver(&self, m: &Manual, offer: ManifestOffer, bytes: Vec<u8>, cancel: &CancellationToken) -> Result<(), String> {
+        // 검증 뒤에도 취소를 존중한다(저장·열기 전에)
+        if cancel.is_cancelled() {
+            return Err(CANCELLED.to_string());
+        }
+        // 서명은 바이트와 버전에만 묶인다 — 같은 키로 서명한 다른 형식의 파일이 이 자리에 올 수 있어 저장 전에 형식 표식을 본다
+        if !(m.format_ok)(&self.target, &bytes) {
+            return Err(BAD_FORMAT.to_string());
+        }
+        let (dir, name) = (m.dir.clone(), offer.file_name().to_string());
+        let (dir2, name2, bytes2) = (dir.clone(), name.clone(), bytes);
+        let (path, bytes) = tokio::task::spawn_blocking(move || store_verified(&dir2, &name2, &bytes2).map(|p| (p, bytes2))).await.map_err(|_| crate::update::store::SAVE_FAILED.to_string())??;
+        *self.delivered.lock().unwrap_or_else(PoisonError::into_inner) = Some(Delivered { offer, path });
+        Self::open_verified(m, &name, &bytes)
+    }
+
+    /// 수동 경로의 다시 열기: 저장한 파일을 다시 읽어 **다시 검증한 뒤** 연다(받은 뒤 파일이 바뀌었을 수 있다)
+    fn reopen(&self, m: &Manual) -> Result<(), String> {
+        let (offer, path) = {
+            let d = self.delivered.lock().unwrap_or_else(PoisonError::into_inner);
+            let d = d.as_ref().ok_or_else(|| NOT_STAGED.to_string())?;
+            (d.offer.clone(), d.path.clone())
+        };
+        let bytes = read_stored(&path).map_err(|e| format!("다시 열기 전 검증 실패: {e}"))?;
+        self.engine.verify(&offer, &bytes).map_err(|e| format!("다시 열기 전 검증 실패: {e}"))?;
+        if !(m.format_ok)(&self.target, &bytes) {
+            return Err(format!("다시 열기 전 검증 실패: {BAD_FORMAT}"));
+        }
+        // 열리는 것은 방금 검증한 바이트의 새 사본이다(저장 파일은 그대로 둔다)
+        Self::open_verified(m, offer.file_name(), &bytes)
     }
 
     /// 프리릴리스 판이 최근 릴리스 목록에서 매니페스트 주소를 고른다
@@ -290,6 +406,7 @@ impl<E: Engine> Backend for HostBackend<E> {
     async fn check(&self) -> Result<Option<String>, String> {
         *self.offer.lock().unwrap_or_else(PoisonError::into_inner) = None;
         *self.staged.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *self.delivered.lock().unwrap_or_else(PoisonError::into_inner) = None;
         let url = if is_prerelease(&self.current) {
             match self.prerelease_manifest().await? {
                 Some(url) => url,
@@ -299,7 +416,7 @@ impl<E: Engine> Backend for HostBackend<E> {
             STABLE_MANIFEST_URL.to_string()
         };
         let text = self.net.get_manifest(&url).await?;
-        let Some(offer) = check_manifest(&text, &self.current)? else { return Ok(None) };
+        let Some(offer) = check_manifest_for(&text, &self.current, &self.target)? else { return Ok(None) };
         let version = offer.version.clone();
         *self.offer.lock().unwrap_or_else(PoisonError::into_inner) = Some(offer);
         Ok(Some(version))
@@ -315,6 +432,10 @@ impl<E: Engine> Backend for HostBackend<E> {
         let bytes = self.net.download_installer(&offer.url, progress, cancel).await?;
         // 검증 전에는 디스크에 쓰지 않는다 — 메모리 바이트에 서명·서명된 버전을 건다. 실패하면 버린다
         self.engine.verify(&offer, &bytes)?;
+        // 수동 경로(dmg·deb)는 설치 포트를 쓰지 않는다 — 검증한 파일을 저장해 열어 줄 뿐이다
+        if let Some(m) = &self.manual {
+            return self.deliver(m, offer, bytes, cancel).await;
+        }
         *self.staged.lock().unwrap_or_else(PoisonError::into_inner) = Some(Staged { offer, bytes: Arc::new(bytes) });
         Ok(())
     }
@@ -322,6 +443,10 @@ impl<E: Engine> Backend for HostBackend<E> {
     fn install(&self) -> Result<(), String> {
         if !self.engine.key_ready() {
             return Err(NO_KEY_MESSAGE.to_string());
+        }
+        // 수동 경로의 설치는 파일을 다시 여는 것이다(검증 뒤). 설치 포트에는 닿지 않는다
+        if let Some(m) = &self.manual {
+            return self.reopen(m);
         }
         let (offer, bytes) = {
             let staged = self.staged.lock().unwrap_or_else(PoisonError::into_inner);
@@ -333,6 +458,14 @@ impl<E: Engine> Backend for HostBackend<E> {
 
     fn cleanup_ran(&self) -> bool {
         self.engine.cleanup_ran()
+    }
+
+    fn mode(&self) -> &'static str {
+        self.target.mode()
+    }
+
+    fn file_name(&self) -> Option<String> {
+        self.delivered.lock().unwrap_or_else(PoisonError::into_inner).as_ref().map(|d| d.offer.file_name().to_string())
     }
 
     async fn release_notes(&self, version: &str) -> Result<ReleaseNotes, String> {
@@ -367,17 +500,25 @@ pub fn state_sink<R: Runtime>(app: AppHandle<R>) -> Arc<dyn Fn(&UpdateState) + S
 
 pub type AppBackend<R> = HostBackend<PluginEngine<R>>;
 
-/// 운영 서비스. 공개 키는 [`UPDATE_PUBKEY`], 사용 여부는 [`bundle_is_nsis`], 개발 장치는 [`fake_kind`] 다. `start` 는 호출자가 한다(런타임 안에서)
-pub fn build_service<R: Runtime>(app: AppHandle<R>, store: Arc<ConfigStore>, before_exit: Arc<dyn Fn() + Send + Sync>) -> Result<UpdateService<AppBackend<R>>, HttpInitError> {
+/// 운영 서비스. 공개 키는 [`UPDATE_PUBKEY`], 사용 여부·방식은 [`current_target`](번들 표식 — NSIS 는 앱 안 설치, dmg·deb 는 `updates_dir` 에 저장해 열기), 개발 장치는 [`fake_kind`] 다. `start` 는 호출자가 한다(런타임 안에서)
+pub fn build_service<R: Runtime>(
+    app: AppHandle<R>,
+    store: Arc<ConfigStore>,
+    before_exit: Arc<dyn Fn() + Send + Sync>,
+    updates_dir: PathBuf,
+    open: OpenFile,
+) -> Result<UpdateService<AppBackend<R>>, HttpInitError> {
     let current = app.package_info().version.to_string();
     let engine = Arc::new(PluginEngine::new(app.clone(), UPDATE_PUBKEY.map(str::to_string), before_exit));
-    let backend = Arc::new(HostBackend::new(UpdateNet::production()?, engine, current.clone()));
+    // 대상이 없으면(개발 빌드 등) 서비스는 꺼진 채 만든다 — 확인 0회, 수동 확인은 `not-available`
+    let detected = current_target();
+    let backend = Arc::new(HostBackend::with_target(UpdateNet::production()?, engine, current.clone(), detected.unwrap_or(Target::nsis()), updates_dir, open));
     let (read, write) = (store.clone(), store);
     Ok(UpdateService::new(
         backend,
         Deps {
             current_version: current,
-            enabled: bundle_is_nsis(),
+            enabled: detected.is_some(),
             fake: fake_kind(),
             skipped: Arc::new(move || read_skipped(&read)),
             set_skipped: Arc::new(move |v| write_skipped(&write, v)),

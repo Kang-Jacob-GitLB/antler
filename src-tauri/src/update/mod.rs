@@ -5,8 +5,11 @@
 //! - [`service`]: 상태 기계(`UpdateService.ts` 이식)와 `update:*` 7채널의 봉투. 네트워크·설치는 [`service::Backend`] 포트 뒤에 있다. 골든: `tests/fixtures/update.scenarios.json`(`tests/updateScenarios.rs`).
 //! - [`host`]: 운영 [`service::Backend`](net::http 로 받고 `tauri-plugin-updater` 로 검증·설치), 설정·이벤트 연결, **업데이트 공개 키 상수 `UPDATE_PUBKEY`**(비어 있으면 fail-closed).
 //!
-//! TS 의 설치 형태 판별·자산 선택·`latest*.yml`·해시 검증(`detectInstallKind`·`pickAsset`·`parseMetadata`·`verifyDigests`)은 옮기지 않는다 —
-//! Tauri 는 번들러가 심은 표식과 minisign 서명으로 대신한다(대응표의 `N/A`).
+//! - [`store`]: 수동 경로(macOS dmg·Linux deb, PR 4b)가 **검증을 마친** 설치 파일을 앱 전용 폴더에 저장·다시 읽는 곳(덮어쓰지 않는다).
+//!
+//! TS 의 `latest*.yml`·해시 검증(`parseMetadata`·`verifyDigests`)과 portable·AppImage 는 옮기지 않는다 — Tauri 는 minisign 서명으로 대신하고 portable 은 폐지됐으며 CI 는 AppImage 를 만들지 않는다(대응표의 `N/A`).
+//! 설치 형태 판별·자산 선택(`detectInstallKind`·`pickAsset`)은 번들 표식 + 실행 파일 위치로 [`logic::detect_target`] 가 한다.
 pub mod host;
 pub mod logic;
 pub mod service;
+pub mod store;

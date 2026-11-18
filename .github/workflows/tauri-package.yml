@@ -10,11 +10,12 @@ name: tauri-package
 # 시크릿을 주지 않을 수 있어 PR 에서는 돌리지 않는다. 그래서 머지 뒤 한 번 눌러 아티팩트를 확인한다(docs/build.md).
 #
 # 갈래:
-#   windows — NSIS 설치 프로그램(x64)을 **시크릿 없이** 빌드한다. 이어지는 windows-sign 잡이 빌드 산출물만 받아 시크릿 TAURI_SIGNING_PRIVATE_KEY 로
+#   windows — NSIS 설치 프로그램(x64)을 **시크릿 없이** 빌드한다. 이어지는 sign 잡이 빌드 산출물만 받아 시크릿 TAURI_SIGNING_PRIVATE_KEY 로
 #             업데이트 서명(.sig)을 만들고 latest.json 도 만든다. 키가 없으면 경고하고 서명 없이 계속한다(latest.yml 은 서명과 무관하게 만든다).
-#             windows-sign 이 Environment `release` 를 선언해 시크릿을 받는다 — 그 Environment 의 브랜치 제한·승인자 설정이 필수다(docs/build.md)
+#             sign 이 Environment `release` 를 선언해 시크릿을 받는다 — 그 Environment 의 브랜치 제한·승인자 설정이 필수다(docs/build.md)
 #   macos   — dmg x64·arm64(arm64 러너에서 둘 다 빌드). ad-hoc 서명(`-`), 공증 없음 — 처음 열 때 Gatekeeper 경고가 뜬다(docs/build.md)
 #   linux   — deb(x64). 의존: libwebkit2gtk-4.1-0 · libgtk-3-0
+#   (macOS·Linux 설치본도 같은 sign 잡이 업데이트 서명(.sig)을 하고 latest.json 의 수동 경로 항목(darwin-*-dmg·linux-x86_64-deb)을 만든다 — 빌드 잡에는 키가 없다)
 # macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다(fail-fast 를 꺼 갈래마다 따로 본다).
 on:
   workflow_dispatch:
@@ -62,7 +63,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     # 이 잡은 시크릿을 받지 않는다(environment 없음, secrets.* 참조 없음) — 빌드 중 도는 npm 빌드 코드·crate 의 build.rs·proc-macro 가 서명 키를 읽지 못하게.
-    # 서명은 아래 `windows-sign` 잡이 빌드 산출물만 받아서 한다
+    # 서명은 아래 `sign` 잡이 빌드 산출물만 받아서 한다
     env:
       VERSION: ${{ needs.version.outputs.version }}
     defaults:
@@ -131,9 +132,11 @@ jobs:
   # Tauri CLI 로 `tauri signer sign` 만 돈다(Rust·crate·빌드 스크립트·proc-macro 가 없고, 설치 스크립트도 안 돈다). 서명할 파일은 위 잡의 산출물이다.
   # 남는 신뢰: lockfile 이 고정한 `@tauri-apps/cli`(와 그 플랫폼 패키지) 한 벌의 코드. `cargo install tauri-cli` 로 바꾸면 이마저 줄지만 컴파일이 길다.
   # Environment `release` 는 main 브랜치로 제한하고 승인자를 두어야 한다(필수 사전 설정: docs/build.md "업데이트 서명") — 워크플로 파일 안의 `if:` 는 방어가 아니다.
-  windows-sign:
-    name: 서명·매니페스트 (windows)
-    needs: [version, windows]
+  # Windows·macOS·Linux 설치본을 한꺼번에 서명하고 매니페스트를 하나로 만든다(latest.json 이 세 플랫폼의 항목을 담는다). unix 잡은 일부 갈래가 실패해도 있는 것만 받는다
+  sign:
+    name: 서명·매니페스트
+    needs: [version, windows, unix]
+    if: ${{ !cancelled() && needs.windows.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
@@ -159,10 +162,58 @@ jobs:
       - name: Tauri CLI 설치
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      # 아티팩트마다 **서로 다른 입력 폴더**에 받는다(merge-multiple 없음) — unix 빌드 잡이 Windows 설치본과 같은 이름의 파일을 올려도 덮어쓰지 못하게.
+      # 서명 입력(out/)에는 아래 "서명 입력 복사" 단계가 기대 이름을 아티팩트별로 하나씩만 복사한다
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: tauri-win-unsigned
-          path: out
+          path: in/win
+
+      # macOS dmg·Linux deb(unix 잡이 올린 것). 갈래가 실패했거나 아티팩트가 없으면 단계가 실패해도 계속한다 — 복사 단계가 없는 설치본을 경고하고 건너뛴다
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          name: tauri-installers-mac-arm64-dev-sidecar
+          path: in/mac-arm64
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          name: tauri-installers-mac-x64-dev-sidecar
+          path: in/mac-x64
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        continue-on-error: true
+        with:
+          name: tauri-installers-linux-dev-sidecar
+          path: in/linux
+
+      # out/ 에 쓰는 것은 이 단계뿐이다. 각 아티팩트에서 기대 이름 하나만(Windows exe 는 win 아티팩트에서만, dmg·deb 는 각자의 아티팩트에서만) 일반 파일일 때 복사한다:
+      # 심볼릭 링크 거부·크기 0 또는 300MB 초과 거부(앱의 설치본 상한). 아티팩트 안의 .sig·latest.* 등 다른 파일은 들이지 않는다. Windows exe 가 없으면 실패, 나머지는 경고
+      - name: 서명 입력 복사
+        run: |
+          mkdir out
+          copy_one() {
+            dir="$1"; name="$2"; required="$3"; f="$dir/$name"
+            if [ -L "$dir" ] || [ -L "$f" ]; then
+              echo "::error::$f 가 심볼릭 링크입니다"; exit 1
+            fi
+            if [ ! -f "$f" ]; then
+              if [ "$required" = "yes" ]; then echo "::error::$f 가 없습니다"; exit 1; fi
+              echo "::warning::$name 이(가) 없어 건너뜁니다(그 갈래 빌드가 실패했거나 아티팩트가 없다)"; return 0
+            fi
+            size=$(stat -c %s "$f")
+            if [ "$size" -le 0 ] || [ "$size" -gt 300000000 ]; then
+              if [ "$required" = "yes" ]; then echo "::error::$name 의 크기가 올바르지 않습니다($size)"; exit 1; fi
+              echo "::warning::$name 의 크기가 올바르지 않아($size) 건너뜁니다"; return 0
+            fi
+            cp --no-dereference "$f" "out/$name"
+          }
+          copy_one in/win "Antler-Setup-${VERSION}-x64.exe" yes
+          copy_one in/mac-arm64 "Antler-${VERSION}-arm64.dmg" no
+          copy_one in/mac-x64 "Antler-${VERSION}-x64.dmg" no
+          copy_one in/linux "antler_${VERSION}_amd64.deb" no
+          ls -la out
 
       # 시크릿은 if: 에서 못 쓰므로 env 로 받아 비어 있는지만 본다. 값을 출력하지 않는다. 키가 없는 잡이 아니라 이 확인 단계만 키를 받는다
       - name: 서명 키 확인
@@ -184,24 +235,35 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          name="Antler-Setup-${VERSION}-x64.exe"
-          pnpm exec tauri signer sign --app-version "$VERSION" "out/$name"
-          if [ ! -s "out/$name.sig" ]; then
-            echo "::error::.sig 가 만들어지지 않았습니다"
-            ls -la out
-            exit 1
-          fi
+          sign() {
+            pnpm exec tauri signer sign --app-version "$VERSION" "out/$1"
+            if [ ! -s "out/$1.sig" ]; then
+              echo "::error::$1 의 .sig 가 만들어지지 않았습니다"
+              ls -la out
+              exit 1
+            fi
+          }
+          sign "Antler-Setup-${VERSION}-x64.exe"
+          # 수동 경로 자산(앱이 기대하는 이름 — scripts/make-update-manifests.mjs 의 MANUAL_ASSETS). 없는 갈래는 경고하고 건너뛴다
+          for name in "Antler-${VERSION}-arm64.dmg" "Antler-${VERSION}-x64.dmg" "antler_${VERSION}_amd64.deb"; do
+            if [ -f "out/$name" ]; then
+              sign "$name"
+            else
+              echo "::warning::$name 이(가) 없어 서명하지 않습니다(그 갈래 빌드가 실패했거나 아티팩트가 없다)"
+            fi
+          done
 
       # latest.json(Tauri 업데이터, 서명이 있을 때만)과 latest.yml(Electron 판 이관용). 저장소 변수 ELECTRON_MIGRATION 이 off·false·0·no 면 latest.yml 을 만들지 않는다(기본 on)
       - name: 업데이트 매니페스트 생성·검증
         env:
           ELECTRON_MIGRATION: ${{ vars.ELECTRON_MIGRATION }}
-        run: node scripts/make-update-manifests.mjs --version "$VERSION" --dir out --sig "out/Antler-Setup-${VERSION}-x64.exe.sig"
+        # --signed: 서명 단계가 실제로 돌았다는 표식. 아니면 .sig 가 있어도(잘린·남은 파일) 어떤 항목도 만들지 않는다
+        run: node scripts/make-update-manifests.mjs --version "$VERSION" --dir out --sig "out/Antler-Setup-${VERSION}-x64.exe.sig" --signed "${{ steps.key.outputs.signed }}"
 
       - name: 요약
         run: |
           {
-            echo "### Tauri 패키징 (windows) — $VERSION"
+            echo "### Tauri 패키징 (서명·매니페스트) — $VERSION"
             echo "서명: ${{ steps.key.outputs.signed }}"
             echo '```'
             (cd out && sha256sum *)
@@ -211,12 +273,23 @@ jobs:
       - name: 아티팩트 업로드
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: tauri-installers-win-dev-sidecar
-          path: out/*
+          name: tauri-installers-dev-sidecar
+          # out/ 의 예상 파일만(없는 것은 무시 — 서명·갈래 실패는 위 단계의 경고로 드러난다). 설치본은 필수라 하나도 없으면 실패한다
+          path: |
+            out/Antler-Setup-${{ env.VERSION }}-x64.exe
+            out/Antler-Setup-${{ env.VERSION }}-x64.exe.sig
+            out/Antler-${{ env.VERSION }}-arm64.dmg
+            out/Antler-${{ env.VERSION }}-arm64.dmg.sig
+            out/Antler-${{ env.VERSION }}-x64.dmg
+            out/Antler-${{ env.VERSION }}-x64.dmg.sig
+            out/antler_${{ env.VERSION }}_amd64.deb
+            out/antler_${{ env.VERSION }}_amd64.deb.sig
+            out/latest.json
+            out/latest.yml
           if-no-files-found: error
 
   # ── macOS dmg · Linux deb ─────────────────────────────────────────────
-  # 업데이트 서명은 하지 않는다 — 이 형태의 앱 안 업데이트는 수동 경로(릴리스 자산을 직접 내려받기)를 쓴다
+  # 이 잡은 서명하지 않는다(키가 없다) — 서명은 위 `sign` 잡이 한다. 이 형태의 앱 안 업데이트는 수동 경로(검증한 설치 파일을 받아 열어 줌)를 쓴다
   unix:
     name: 패키징 (${{ matrix.name }})
     needs: version

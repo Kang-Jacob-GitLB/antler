@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Tauri 판 Windows 설치본(NSIS)의 업데이트 매니페스트 두 개를 만든다(.github/workflows/tauri-package.yml 의 Windows 갈래가 쓴다).
-//   latest.json — Tauri 업데이터용(src-tauri/src/update/logic.rs 의 check_manifest 가 읽는 형식). 서명(.sig)이 있을 때만 만든다
+// Tauri 판 설치본의 업데이트 매니페스트 두 개를 만든다(.github/workflows/tauri-package.yml 의 서명 잡이 쓴다).
+//   latest.json — Tauri 업데이터용(src-tauri/src/update/logic.rs 의 check_manifest_for 가 읽는 형식). 서명(.sig)이 있는 설치본만 넣는다:
+//                 Windows NSIS(`windows-x86_64-nsis`·`windows-x86_64`)와, --dir 에 `.sig` 와 함께 있는 macOS dmg(`darwin-aarch64-dmg`·`darwin-x86_64-dmg`)·Linux deb(`linux-x86_64-deb`) 수동 경로 자산(MANUAL_ASSETS)
 //   latest.yml  — Electron 판(electron-updater)이 Tauri 설치본을 받아 가게 하는 이관용. electron-builder 가 만드는 모양을 따른다
 // 발행하지 않는다: 파일을 --dir 에 쓸 뿐이다. 실제 첨부는 나중의 릴리스 전환 PR(feat!:)이 한다.
 //
@@ -47,15 +48,43 @@ export function cleanSignature(text) {
   return sig
 }
 
-/** Tauri 업데이터 매니페스트(latest.json). 플랫폼 키는 `windows-x86_64-nsis` 와 `windows-x86_64` 둘 다 같은 항목이다. `notes` 는 서명되지 않은 필드라 넣지 않는다 */
-export function buildLatestJson({ version, fileName, signature, pubDate }) {
+/**
+ * 수동 경로(macOS dmg·Linux deb — 앱이 검증한 파일을 받아 열어 줄 뿐 앱 안에서 설치하지 않는다)의 자산. 키는 앱(src-tauri/src/update/logic.rs 의 PLATFORM_KEY_DMG_*·DEB_X64)이
+ * **정확히 그 키 하나만** 본다(일반 키로 내려가지 않는다). 파일 이름은 앱이 기대하는 이름(Target::asset_name)과 같아야 하고, tauri-package.yml 의 "설치본 이름 정리"가 같은 이름으로 맞춘다.
+ * 서명은 설치본 옆의 `<이름>.sig` 다(같은 서명 키 — 서명 잡이 만든다).
+ */
+export const MANUAL_ASSETS = [
+  { key: 'darwin-aarch64-dmg', name: (v) => `Antler-${v}-arm64.dmg` },
+  { key: 'darwin-x86_64-dmg', name: (v) => `Antler-${v}-x64.dmg` },
+  { key: 'linux-x86_64-deb', name: (v) => `antler_${v}_amd64.deb` }
+]
+
+/** Tauri 업데이터 매니페스트 본문. `entries`: [{ key, fileName, signature }] — 같은 파일이면 여러 키를 줄 수 있다 */
+export function buildManifest({ version, pubDate, entries }) {
   assertVersion(version)
-  if (!isSafeFileName(fileName)) throw new Error(`안전하지 않은 파일 이름입니다: ${fileName}`)
   const date = new Date(pubDate)
   if (Number.isNaN(date.getTime())) throw new Error(`날짜가 올바르지 않습니다: ${String(pubDate)}`)
-  const entry = { signature: cleanSignature(signature), url: `${DOWNLOAD_PREFIX}v${version}/${fileName}` }
-  const doc = { version, pub_date: date.toISOString(), platforms: { 'windows-x86_64-nsis': entry, 'windows-x86_64': { ...entry } } }
-  return `${JSON.stringify(doc, null, 2)}\n`
+  if (!Array.isArray(entries) || entries.length === 0) throw new Error('매니페스트에 넣을 항목이 없습니다')
+  const platforms = {}
+  for (const { key, fileName, signature } of entries) {
+    if (!isSafeFileName(fileName)) throw new Error(`안전하지 않은 파일 이름입니다: ${fileName}`)
+    if (key in platforms) throw new Error(`플랫폼 키가 겹칩니다: ${key}`)
+    platforms[key] = { signature: cleanSignature(signature), url: `${DOWNLOAD_PREFIX}v${version}/${fileName}` }
+  }
+  return `${JSON.stringify({ version, pub_date: date.toISOString(), platforms }, null, 2)}\n`
+}
+
+/**
+ * Tauri 업데이터 매니페스트(latest.json). Windows 플랫폼 키는 `windows-x86_64-nsis` 와 `windows-x86_64` 둘 다 같은 항목이다. `notes` 는 서명되지 않은 필드라 넣지 않는다.
+ * `extras`: 수동 경로 항목 [{ key, fileName, signature }](MANUAL_ASSETS)
+ */
+export function buildLatestJson({ version, fileName, signature, pubDate, extras = [] }) {
+  const entries = [
+    { key: 'windows-x86_64-nsis', fileName, signature },
+    { key: 'windows-x86_64', fileName, signature },
+    ...extras
+  ]
+  return buildManifest({ version, pubDate, entries })
 }
 
 /** Electron 호환 latest.yml. 키 순서·모양은 electron-builder(updateInfoBuilder.createUpdateInfo)와 같다: version, files[{url,sha512,size}], path, sha512, releaseDate */
@@ -86,7 +115,7 @@ export const migrationEnabled = (value) => !['off', 'false', '0', 'no'].includes
  * 설치본(디스크의 실물)을 읽어 매니페스트를 만들고, 만든 값이 실물과 맞는지 되짚는다(가드).
  * 돌려주는 값: { files: { <이름>: <내용> }, warnings: [문자열], sha512, size }
  */
-export function makeManifests({ dir, version, installer, signatureText, migration, now = new Date() }) {
+export function makeManifests({ dir, version, installer, signatureText: rawSignature, signed = false, migration, now = new Date() }) {
   assertVersion(version)
   const fileName = installer ?? installerName(version)
   if (fileName !== installerName(version)) throw new Error(`설치본 이름이 버전과 맞지 않습니다: ${fileName} (기대: ${installerName(version)})`)
@@ -98,10 +127,32 @@ export function makeManifests({ dir, version, installer, signatureText, migratio
   const files = {}
   const warnings = []
 
-  if (signatureText == null || String(signatureText).trim() === '') {
-    warnings.push('서명(.sig)이 없어 latest.json 을 만들지 않았습니다')
+  // 서명 단계가 실제로 돌았다(`signed`)는 표식이 없으면 어떤 서명도 쓰지 않는다 — .sig 가 있어도(이전 실행이 남겼거나 잘린 파일) 항목을 만들지 않는다
+  const signatureText = signed ? rawSignature : null
+  if (!signed) warnings.push('서명 단계가 돌았다는 표식(--signed true)이 없어 latest.json 의 서명 항목을 만들지 않았습니다')
+  // 수동 경로(dmg·deb): 설치본과 `<이름>.sig` 가 둘 다 있는 것만 넣는다. 없는 것은 경고하고 건너뛴다(그 플랫폼 사용자는 업데이트를 받지 못한다)
+  const extras = []
+  for (const { key, name } of signed ? MANUAL_ASSETS : []) {
+    const asset = name(version)
+    const assetFile = join(dir, asset)
+    const sigFile = join(dir, `${asset}.sig`)
+    if (!existsSync(assetFile) || !statSync(assetFile).isFile()) {
+      warnings.push(`${asset} 이(가) 없어 latest.json 의 ${key} 항목을 만들지 않았습니다`)
+    } else if (!existsSync(sigFile) || readFileSync(sigFile, 'utf8').trim() === '') {
+      warnings.push(`${asset} 의 서명(.sig)이 없어 latest.json 의 ${key} 항목을 만들지 않았습니다`)
+    } else {
+      extras.push({ key, fileName: asset, signature: readFileSync(sigFile, 'utf8') })
+    }
+  }
+
+  const hasWindowsSignature = !(signatureText == null || String(signatureText).trim() === '')
+  if (!hasWindowsSignature) warnings.push('서명(.sig)이 없어 latest.json 의 Windows 항목을 만들지 않았습니다')
+  if (hasWindowsSignature) {
+    files['latest.json'] = buildLatestJson({ version, fileName, signature: signatureText, pubDate: now, extras })
+  } else if (extras.length > 0) {
+    files['latest.json'] = buildManifest({ version, pubDate: now, entries: extras })
   } else {
-    files['latest.json'] = buildLatestJson({ version, fileName, signature: signatureText, pubDate: now })
+    warnings.push('서명(.sig)이 있는 설치본이 없어 latest.json 을 만들지 않았습니다')
   }
 
   if (migrationEnabled(migration)) {
@@ -113,8 +164,11 @@ export function makeManifests({ dir, version, installer, signatureText, migratio
   // 가드: url 의 파일 이름이 올릴 자산과 같고, 해시·크기가 실물과 같다
   if (files['latest.json']) {
     const doc = JSON.parse(files['latest.json'])
+    const manualByKey = Object.fromEntries(MANUAL_ASSETS.map((m) => [m.key, m.name(version)]))
     for (const [key, p] of Object.entries(doc.platforms)) {
-      if (basename(p.url) !== fileName || !p.url.startsWith(`${DOWNLOAD_PREFIX}v${doc.version}/`)) throw new Error(`latest.json ${key} 의 url 이 자산과 맞지 않습니다`)
+      // 키마다 올릴 자산 이름이 정해져 있다: Windows 키는 설치본, 수동 키는 MANUAL_ASSETS 의 이름
+      const want = manualByKey[key] ?? fileName
+      if (basename(p.url) !== want || !p.url.startsWith(`${DOWNLOAD_PREFIX}v${doc.version}/`)) throw new Error(`latest.json ${key} 의 url 이 자산과 맞지 않습니다`)
     }
     if (doc.version !== version) throw new Error('latest.json 의 버전이 입력과 다릅니다')
   }
@@ -137,12 +191,14 @@ function main() {
   try {
     const args = parseArgs(process.argv.slice(2))
     if (!args.version || !args.dir) throw new Error('--version 과 --dir 이 필요합니다')
-    const signatureText = args.sig && existsSync(args.sig) ? readFileSync(args.sig, 'utf8') : null
+    const signed = args.signed === 'true'
+    const signatureText = signed && args.sig && existsSync(args.sig) ? readFileSync(args.sig, 'utf8') : null
     const r = makeManifests({
       dir: args.dir,
       version: args.version,
       installer: args.installer,
       signatureText,
+      signed,
       migration: args['electron-migration'] ?? process.env.ELECTRON_MIGRATION
     })
     for (const [name, content] of Object.entries(r.files)) {

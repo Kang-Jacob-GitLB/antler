@@ -89,7 +89,7 @@ describe('tauri-package.yml', () => {
       'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'
     ])
     for (const [id, job] of Object.entries(jobs)) {
-      if (id === 'windows-sign') continue
+      if (id === 'sign') continue
       expect(JSON.stringify(job), `${id} 잡에 시크릿이 있다`).not.toContain('secrets.')
       expect(job.environment, `${id} 잡이 Environment 를 선언한다`).toBeUndefined()
     }
@@ -101,10 +101,10 @@ describe('tauri-package.yml', () => {
     expect(build.env).toEqual({ VERSION: '${{ needs.version.outputs.version }}' })
   })
 
-  it('windows-sign 잡: 키는 서명 단계에서만 쓰이고, 빌드·설치 스크립트가 도는 단계에는 없다', () => {
-    const sign = job('windows-sign')
+  it('sign 잡(Windows·macOS·Linux 서명): 키는 서명 단계에서만 쓰이고, 빌드·설치 스크립트가 도는 단계에는 없다', () => {
+    const sign = job('sign')
     expect(sign.environment).toBe('release')
-    expect(sign.needs).toEqual(['version', 'windows'])
+    expect(sign.needs).toEqual(['version', 'windows', 'unix'])
     expect(sign.env).toEqual({ VERSION: '${{ needs.version.outputs.version }}' })
     expect(stepsWithSecrets(sign)).toEqual(['서명 키 확인', '업데이트 서명'])
     const idx = (name: string): number => sign.steps.findIndex((s) => s.name === name)
@@ -124,10 +124,46 @@ describe('tauri-package.yml', () => {
     expect(Object.keys(step.env ?? {}).sort()).toEqual(['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD'])
     // 서명에 버전을 묶는다(requireSignedVersion). 매니페스트 생성은 서명 뒤, 키 없는 단계에서
     expect(step.run).toContain('tauri signer sign --app-version "$VERSION"')
+    // macOS dmg·Linux deb(수동 경로 자산)도 같은 단계에서 서명한다. unix 갈래가 실패해도 Windows 서명은 막지 않는다
+    for (const name of ['Antler-${VERSION}-arm64.dmg', 'Antler-${VERSION}-x64.dmg', 'antler_${VERSION}_amd64.deb']) expect(step.run, name).toContain(name)
+    expect((sign as { if?: string }).if).toBe("${{ !cancelled() && needs.windows.result == 'success' }}")
     const manifest = stepAt('업데이트 매니페스트 생성·검증')
     expect(idx('업데이트 매니페스트 생성·검증')).toBeGreaterThan(idx('업데이트 서명'))
     expect(manifest.env).toEqual({ ELECTRON_MIGRATION: '${{ vars.ELECTRON_MIGRATION }}' })
     expect(manifest.run).toContain('scripts/make-update-manifests.mjs')
+    expect(manifest.run).toContain('--signed "${{ steps.key.outputs.signed }}"')
+
+    // 서명 입력의 출처 고정: 아티팩트마다 다른 입력 폴더(in/…)에 받고(merge-multiple·pattern 없음), out/ 에 쓰는 것은 명시 복사 단계뿐이다
+    const downloads = sign.steps.filter((s) => s.uses?.startsWith('actions/download-artifact'))
+    expect(downloads.length).toBe(4)
+    const paths = downloads.map((s) => String(s.with?.['path']))
+    expect(new Set(paths).size).toBe(paths.length)
+    for (const s of downloads) {
+      expect(String(s.with?.['path']), '입력 폴더').toMatch(/^in\/[a-z0-9-]+$/)
+      expect(s.with).not.toHaveProperty('merge-multiple')
+      expect(s.with).not.toHaveProperty('pattern')
+    }
+    const copy = stepAt('서명 입력 복사')
+    expect(idx('서명 입력 복사')).toBeLessThan(idx('서명 키 확인'))
+    expect(copy.run).toContain('cp --no-dereference')
+    expect(copy.run).toContain('[ -L "$dir" ] || [ -L "$f" ]')
+    expect(copy.run).toContain('-gt 300000000')
+    expect([...(copy.run ?? '').matchAll(/^\s*copy_one (\S+) "([^"]+)" (yes|no)$/gm)].map((m) => `${m[1]} ${m[2]} ${m[3]}`)).toEqual([
+      'in/win Antler-Setup-${VERSION}-x64.exe yes',
+      'in/mac-arm64 Antler-${VERSION}-arm64.dmg no',
+      'in/mac-x64 Antler-${VERSION}-x64.dmg no',
+      'in/linux antler_${VERSION}_amd64.deb no'
+    ])
+    // out/ 를 만들거나 복사로 채우는 곳은 복사 단계뿐이다(서명·매니페스트 단계는 고정 이름·스크립트만)
+    for (const s of sign.steps) {
+      if (s === copy) continue
+      expect(s.run ?? '', s.name).not.toMatch(/\bmkdir\b|\bcp\b|\bmv\b|\bln\b|\bunzip\b|\btar\b/)
+      if (s.uses?.startsWith('actions/download-artifact')) expect(String(s.with?.['path']), '다운로드가 out/ 에 쓴다').not.toMatch(/^out(\/|$)/)
+    }
+    expect(step.run ?? '').not.toContain('*')
+    const upload = sign.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'))
+    expect(String(upload?.with?.['path'])).not.toContain('out/*')
+    for (const line of String(upload?.with?.['path']).split('\n').filter(Boolean)) expect(line).toMatch(/^out\/(Antler-Setup-\$\{\{ env\.VERSION \}\}-x64\.exe|Antler-\$\{\{ env\.VERSION \}\}-(arm64|x64)\.dmg|antler_\$\{\{ env\.VERSION \}\}_amd64\.deb)(\.sig)?$|^out\/latest\.(json|yml)$/)
   })
 
   it('cdp·test-hooks 를 켜지 않는다', () => {

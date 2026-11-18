@@ -21,6 +21,15 @@ const DETACHED_FLAGS: u32 = 0x0000_0008 | 0x0000_0200;
 /// 실제 시스템을 쓰는 [`OpenerDeps`]
 pub struct SystemDeps;
 
+impl SystemDeps {
+    /// 경로를 기본 앱으로 연다(`opener::open_path` — 폴더는 파일 관리자, dmg 는 마운트, deb 는 소프트웨어 센터). 업데이트의 수동 경로(`update::host::OpenFile`)가 `lib.rs` 를 거쳐 쓴다 —
+    /// 열 파일은 서명을 검증한 설치 파일뿐이고(`update` 가 검증), 외부 열기의 판정(`plan.rs`)과는 무관하다. 플러그인 호출이 이 파일에만 있게 하려고 여기에 둔다
+    pub fn open_file(&self, p: &Path) -> Result<(), String> {
+        let s = p.to_str().ok_or_else(|| "경로가 UTF-8 이 아닙니다".to_string())?;
+        tauri_plugin_opener::open_path(s, None::<&str>).map_err(|e| e.to_string())
+    }
+}
+
 impl OpenerDeps for SystemDeps {
     fn platform(&self) -> Platform {
         Platform::current()
@@ -92,7 +101,7 @@ impl OpenerDeps for SystemDeps {
     }
 
     fn open_path(&self, p: &str) -> Result<(), String> {
-        tauri_plugin_opener::open_path(p, None::<&str>).map_err(|e| e.to_string())
+        self.open_file(Path::new(p))
     }
 
     fn show_item(&self, p: &str) -> Result<(), String> {

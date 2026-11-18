@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget)·PR 3(external)·PR 4b(SFTP)·PR 5(앱 채널 4개)·PR 8(환경 채널)·PR 9(설정 소유 전환)·PR 10(사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만) 완료 — **Phase 6b 코드 완료**(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)"). 6c: PR 1(판정 로직)·PR 2(패키징 워크플로)·PR 3(단일 인스턴스)·PR 4(`update:*` 7채널 — 업데이트 공개 키 대기) 완료(아래 "업데이터·패키징·Electron 사용자 이관(Phase 6c)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget)·PR 3(external)·PR 4b(SFTP)·PR 5(앱 채널 4개)·PR 8(환경 채널)·PR 9(설정 소유 전환)·PR 10(사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만) 완료 — **Phase 6b 코드 완료**(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)"). 6c: PR 1(판정 로직)·PR 2(패키징 워크플로)·PR 3(단일 인스턴스)·PR 4(`update:*` 7채널 — 업데이트 공개 키 대기)·PR 4b(macOS dmg·Linux deb 수동 경로) 완료(아래 "업데이터·패키징·Electron 사용자 이관(Phase 6c)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -2258,6 +2258,7 @@ Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가
 | 2 | `ci:` | Tauri 패키징 워크플로(**발행 없음**): NSIS 설정·서명·`latest.json`·이관용 `latest.yml`·Electron 정리 NSIS 훅·배포 빌드 가드. 첫 단계는 go/no-go 스파이크 | 없음 | A(서명 키 결정 뒤) | **완료(워크플로 실행 전)** — 아래 "PR 2" |
 | 3 | `refactor:` | 단일 인스턴스(`tauri-plugin-single-instance` — 새 크레이트) | 있음 | A | **완료** — 아래 "PR 3" |
 | 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | **완료(공개 키 대기)** — 아래 "PR 4". 운영 공개 키(`UPDATE_PUBKEY`)가 비어 있어 확인만 동작하고 내려받기·설치는 fail-closed |
+| 4b | `refactor:` | macOS dmg·Linux deb **수동 경로**(`manual-dmg`·`manual-file` 모드): 같은 매니페스트·서명 검증, 설치만 "검증한 파일을 저장해 연다"로. 플랫폼 판정·매니페스트 키·`sign` 잡이 dmg·deb 도 서명 | 있음 | 직렬(4 뒤) | **완료** — 아래 "PR 4b". 사용자 결정 U4 가 PR 4 에 적었으나 PR 4 가 NSIS 만 해서 분리됐다 |
 | 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | |
 | R | (PR 아님) | 리허설: PR 6 브랜치 머리에 `v2.0.0-rc.N` 태그로 프리릴리스를 발행해 사람이 이관·자기 업데이트를 확인 | — | 5 뒤, 6 머지 전 | |
 | 6 | `feat!:` | Electron 제거 + 릴리스 전환(`release.yml` 을 Tauri 로, 골든 동결, 메이저 노트, 초안 발행 게이트·공개 전 릴리스 동결 가드) | 있음 | 직렬(R 뒤) | |
@@ -2266,7 +2267,7 @@ Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가
 - **업데이트는 Tauri 에서 한 번도 돈 적이 없다**(사이드카의 `UpdateService` 는 꺼진 PoC). TS 원본(`src/main/update/`, `tests/update.test.ts`)이 사양이다.
 - 사용 가능 판정은 번들러가 실행 파일에 심은 표식(`bundle_type()` 이 NSIS)이다 — 환경 변수는 믿지 않는다. `--no-bundle` 개발·측정 빌드는 꺼진다.
 - 무결성은 Electron 의 `latest.yml` sha512 에서 **minisign 서명**으로 바뀐다(공개키를 바이너리에 박는다). 매니페스트는 우리 HTTP 클라이언트(`net::http`)로 받고 플러그인은 서명 검증·설치에만 쓴다. 검증 전에는 디스크에 쓰지 않는다.
-- **사용자 결정(2026-11-18): v2.0.0 은 Windows(NSIS)·macOS(dmg)·Linux(deb) 를 함께 낸다**(계획 권고 U4 의 6d 분리 대신). 코드 서명 인증서는 없다고 가정한다(macOS 미서명·미공증 — Gatekeeper 안내는 PR 2·6 에서). **dmg·deb 수동 경로(`manual.ts`·`pickAsset`)는 6c PR 4 에서 옮긴다**.
+- **사용자 결정(2026-11-18): v2.0.0 은 Windows(NSIS)·macOS(dmg)·Linux(deb) 를 함께 낸다**(계획 권고 U4 의 6d 분리 대신). 코드 서명 인증서는 없다고 가정한다(macOS 미서명·미공증 — Gatekeeper 안내는 PR 2·6 에서). **dmg·deb 수동 경로(`manual.ts`·`pickAsset`)는 6c PR 4 범위로 정해졌으나 PR 4 는 NSIS 만 했고 PR 4b 가 옮겼다**.
 - Windows 코드 서명(Authenticode)은 없다 — 업데이트 진위는 minisign 이 맡는다.
 
 ### PR 1 — 업데이트 판정 순수 로직(앱에 연결하지 않는다)
@@ -2277,7 +2278,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 |---|---|
 | `src/update/logic.rs` | `logic.ts`·`releaseNotes.ts` 이식 + 새 검사. `parse_semver`·`compare_semver`·`is_offerable`(다운그레이드 방지·프리릴리스 규칙), `is_allowed_download_url`·`is_release_asset_url`(`net::url_rules` 재사용), `UpdatePolicy`(나중에·건너뛰기), `parse_dismiss`, `sanitize_error`, `check_manifest`·`prerelease_manifest_url`, `parse_release_response`·`fetch_release_notes`·`map_release_notes` |
 | `tests/fixtures/updateCases.ts` → `tests/goldenUpdate.test.ts` → `tests/golden/update/*.json` | 입력 표 → TS 로 골든 생성(`UPDATE_GOLDEN=1 pnpm exec vitest run tests/goldenUpdate.test.ts`). 릴리스 노트는 **실제 TS `fetchReleaseNotes` 를 모의 fetch 로** 돌려 요청 경로 순서까지 남긴다 |
-| `tests/update.rs`(새 시험 바이너리 `--test update`)·`tests/golden/update/test-map.json` | 골든 패리티 + TS 에 짝이 없는 검사의 단언 + 소스 검사. 대응표는 `tests/update.test.ts` 의 `it` 43개 전부다 — 16개가 Rust 시험에 대응하고 나머지는 `N/A`(사유 포함: 설치 형태·자산 선택·yml·해시 = 대체됨, mac·deb·portable = 6d, UpdateService·downloadVerified = PR 4) |
+| `tests/update.rs`(새 시험 바이너리 `--test update`)·`tests/golden/update/test-map.json` | 골든 패리티 + TS 에 짝이 없는 검사의 단언 + 소스 검사. 대응표는 `tests/update.test.ts` 의 `it` 43개 전부다 — 16개가 Rust 시험에 대응하고 나머지는 `N/A`(사유 포함: 설치 형태·자산 선택·yml·해시 = 대체됨, mac·deb = PR 4b(수동 경로), portable = 폐지, UpdateService·downloadVerified = PR 4) |
 | `src/net/url_rules.rs` | `has_encoded_separator` 를 `pub` 으로(`%2e`·`%2f`·`%5c` 검사를 복제하지 않는다) |
 
 **핵심 결정**
@@ -2307,7 +2308,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 
 | 파일 | 내용 |
 |---|---|
-| `.github/workflows/tauri-package.yml` | `workflow_dispatch` 전용. 갈래 windows(NSIS)·macOS(dmg x64·arm64, ad-hoc)·linux(deb). 아티팩트만 올린다(`contents: read`, 릴리스·태그 없음). Windows 는 `windows`(시크릿 없는 빌드) → `windows-sign`(Environment `release`, 서명 키는 `tauri signer sign` 단계 env 에만, 이어서 매니페스트) 두 잡. 시크릿이 없으면 경고하고 서명 없이 계속 |
+| `.github/workflows/tauri-package.yml` | `workflow_dispatch` 전용. 갈래 windows(NSIS)·macOS(dmg x64·arm64, ad-hoc)·linux(deb). 아티팩트만 올린다(`contents: read`, 릴리스·태그 없음). Windows 는 `windows`(시크릿 없는 빌드) → `sign`(Environment `release`, 서명 키는 `tauri signer sign` 단계 env 에만, 이어서 매니페스트) 두 잡이었고 **PR 4b 부터 `sign` 이 macOS·Linux 빌드 잡(`unix`)의 dmg·deb 도 받아 서명하고 `latest.json` 에 수동 경로 항목을 더한다**(잡 이름 `windows-sign` → `sign`). 시크릿이 없으면 경고하고 서명 없이 계속 |
 | `src-tauri/tauri.conf.json` | `version` 을 `../package.json` 으로(CI 가 `npm pkg set` 으로 넣는 값이 유일한 원천), `bundle.active: true`·NSIS(`currentUser`·훅·한국어/영어)·macOS ad-hoc·deb `Recommends: git`·아이콘에 `.icns`. `--no-bundle` 개발·측정 빌드는 그대로다 |
 | `scripts/make-update-manifests.mjs` | `latest.json`(Tauri)·`latest.yml`(Electron 이관용) 생성 + 실물 대조. `ELECTRON_MIGRATION=off` 면 yml 을 만들지 않는 비상 정지 |
 | `scripts/check-release-features.mjs` + `lib.rs` 표식 | 배포 빌드에 cdp·test-hooks 표식 문자열이 없는지 검사. test-hooks 는 고유한 문자열이 없어 `lib.rs` 의 `run()` 이 그 feature 에서만 표식을 출력한다 |
@@ -2333,7 +2334,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 5. 플러그인 크레이트 없이 `plugins.updater` 설정만 있어도 빌드되는지(지금은 설정을 넣지 않아 해당 없음).
 6. `tauri build --bundles nsis` 가 기본 설정(훅·`version` 경로·`bundle.active`)으로 실제로 끝나는지 — 로컬에서 번들링을 하지 않았다(메모리·실행 중인 앱). 설정은 `tauri-build`(`cargo test`)가 파싱하는 것까지만 확인했다.
 7. macOS·Linux 갈래의 컴파일·번들링, ad-hoc 서명된 dmg 의 Gatekeeper 동작, test-hooks 표식이 릴리스 프로파일에서 살아남는지.
-8. Environment `release` 의 시크릿이 이 워크플로의 `windows-sign` 잡에 실제로 전달되는지, 그리고 새 러너에서 `--ignore-scripts` 로 설치한 Tauri CLI 의 `tauri signer sign` 이 동작하는지(로컬에서는 `--help` 로 서브커맨드·`--app-version`·env 이름만 확인했다).
+8. Environment `release` 의 시크릿이 이 워크플로의 `sign` 잡에 실제로 전달되는지, 그리고 새 러너에서 `--ignore-scripts` 로 설치한 Tauri CLI 의 `tauri signer sign` 이 동작하는지(로컬에서는 `--help` 로 서브커맨드·`--app-version`·env 이름만 확인했다).
 9. `nsis_tauri_utils::RunAsUser` 가 스택에 값을 남기지 않는지(템플릿 사용례를 따라 `Pop` 하지 않았다 — 로컬에 템플릿 원문이 없어 확인 못 함).
 
 **사람 확인(머지 뒤)**: 먼저 Settings > Environments > `release` 를 설정한다 — Deployment branches and tags 를 `main` 만(태그를 허용해야 하면 tag ruleset 으로 `v*` 생성 제한), Required reviewers 를 소유자 1명으로. 다른 브랜치의 워크플로 파일로 dispatch 하면 시크릿이 그 파일로 전달되고 파일 안의 `if:` 가드는 무효이기 때문이다(build.md "업데이트 서명"). 그다음 Actions 에서 `tauri-package` 를 `workflow_dispatch` 로 한 번 실행해 세 갈래의 로그·아티팩트를 확인한다. 사용자가 서명 키를 시크릿에 등록하면 한 번 더 실행해 `.sig`·`latest.json` 을 확인한다. 공개 키가 오면 `UPDATE_PUBKEY` 한 줄을 채운다(아래 "PR 4"·[updates.md](updates.md)).
@@ -2426,7 +2427,7 @@ pub const UPDATE_PUBKEY: Option<&str> = Some("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaW
 - 대응표 `tests/golden/update/test-map.json` 의 `N/A: PR 4` 는 전부 바꿨다 — Rust 시험에 연결했거나, macOS·Linux 수동 경로(dmg·deb)는 **이 PR 의 범위 밖**이라고 사유를 고쳤다(아래).
 
 **TS 와 다른 점**
-- **macOS dmg·Linux deb 수동 경로(`manual.ts`·`pickAsset`)와 `manual-dmg`·`manual-file` 모드는 이 PR 에서 옮기지 않았다.** `UpdateMode` 는 항상 `auto` 이고 Windows NSIS 만 업데이트한다. 계획(PR 4 범위)은 NSIS 였지만 사용자 결정(U4: 세 OS 함께)은 이 경로를 PR 4 에서 옮긴다고 적었다 — **후속 PR(또는 PR 4 확장)이 필요하다**: 호출자의 결정 사항.
+- **(PR 4b 에서 해소 — 아래 "PR 4b")** **macOS dmg·Linux deb 수동 경로(`manual.ts`·`pickAsset`)와 `manual-dmg`·`manual-file` 모드는 이 PR 에서 옮기지 않았다.** `UpdateMode` 는 항상 `auto` 이고 Windows NSIS 만 업데이트한다. 계획(PR 4 범위)은 NSIS 였지만 사용자 결정(U4: 세 OS 함께)은 이 경로를 PR 4 에서 옮긴다고 적었다 — **후속 PR(또는 PR 4 확장)이 필요하다**: 호출자의 결정 사항.
 - 무결성이 `latest*.yml` sha512·API digest → **minisign 서명 + 서명된 버전 일치**다. 파일 해시 계산·`.part`·"다시 열기 전 해시 재확인" 대신 `install` 이 항상 다시 검증한다.
 - 사용 가능 판정은 `bundle_type()`(환경 변수·`ANTLER_UPDATE_DEV`·`ANTLER_UPDATE_FEED`·`ANTLER_UPDATE_FAKE_MODE` 없음). 가짜 상태(`ANTLER_UPDATE_FAKE`)만 개발·cdp 빌드에서 남는다. 피드 주소를 바꾸는 개발 장치는 없다 — 시험이 `UpdateNet::from_clients` 로 루프백 클라이언트를 주입한다.
 - 정식 판 확인은 API 가 아니라 고정 주소의 `latest.json` 한 번이다. 프리릴리스 판만 API 목록을 본다.
@@ -2456,6 +2457,70 @@ PR 3 이 남긴 "재실행이 옛 프로세스 종료와 겹치는가"는 **절�
 - 플러그인이 임시 폴더에 쓴 설치본과 실행 사이의 TOCTOU 는 같은 사용자 권한 범위다(계획 §7).
 - `Update::verify` 는 서명의 trusted comment 에서 버전을 읽는다 — CI 는 `tauri signer sign --app-version` 으로 서명해야 한다(`tauri-package.yml` 이 그렇게 한다). 버전 없는 서명은 거부된다(시험으로 확인).
 - 진짜 `Update::install` 의 설치 프로그램 실행·`exit(0)` 은 시험하지 못했다(설치 프로그램을 띄울 수 없다) — 설치 직전 경로(서명이 틀리면 거부·형식이 틀리면 거부·종료 정리가 불리지 않음)까지만 자동으로 확인한다.
+
+### PR 4b — macOS dmg·Linux deb 수동 경로(앱에 연결한다 · 업데이트 공개 키 대기)
+
+사용자 결정 U4(세 OS 함께)가 PR 4 의 범위로 적었으나 PR 4 가 NSIS 만 해서 따로 옮긴다. TS 의 `manual.ts`(업데이트 알림 → 릴리스 자산을 받아 사용자가 직접 설치)가 대상이다. 새 IPC 채널·renderer 변경·새 크레이트 없음
+(renderer 의 `UpdateSnackbar` 는 `mode`·`fileName` 으로 이미 수동 모드를 그렸고 문구 `update.openedDmg`·`openedDeb`·`reopen` 이 ko·en 에 있다). 키가 비어 있는 동안은 PR 4 와 같이 확인만 하고 내려받기는 fail-closed 다(같은 `UPDATE_PUBKEY`).
+
+| 파일 | 내용 |
+|---|---|
+| `src/update/logic.rs` | `InstallKind`·`BundleMark`·`Target`·`detect_target(os, arch, 번들 표식, 앱 번들 안인가)`·`in_app_bundle`(`*.app/Contents/MacOS/<실행 파일>`)·`check_manifest_for(text, current, target)`(`check_manifest` 는 `Target::nsis()` 래퍼 — 기존 골든·시험 그대로)·`ManifestOffer::file_name` — **전부 순수 함수**라 macOS·Linux 분기를 Windows 에서도 시험한다 |
+| `src/update/store.rs`(새) | 검증을 마친 바이트의 저장(`store_verified`)과 다시 읽기(`read_stored`) — 파일을 만들고 쓰는 곳은 여기뿐이다(소스 검사) |
+| `src/update/host.rs` | `HostBackend::with_target`(수동이면 저장 폴더·`OpenFile` 포트)·`deliver`(검증 → 저장 → 열기)·`reopen`(다시 읽어 다시 검증 → 열기)·`Backend::mode`·`file_name`·`current_target`·`bundle_mark`·`system_open`(`external::launch::SystemDeps::open_path`)·`build_service` 가 저장 폴더(`<userData>/updates`)를 받는다 |
+| `src/update/service.rs` | `UpdateState.fileName`(수동 `downloaded` 에서만)·`Backend::mode`·`file_name` 기본 메서드(auto = `auto`·없음)·수동 모드의 `install`(= 다시 열기)은 돌아오므로 `installing` 표식을 푼다 |
+| `scripts/make-update-manifests.mjs`·`.github/workflows/tauri-package.yml` | `MANUAL_ASSETS`(키·이름)·`buildManifest`·`latest.json` 에 수동 경로 항목. 워크플로의 서명 잡이 `windows-sign` → `sign` 으로 바뀌어 dmg·deb 도 서명한다 |
+| 시험 | `tests/update_security.rs`(수동 경로 절)·`tests/update.rs`(판정·키·이름·표본)·`tests/fixtures/update.scenarios.json`·`updateScenarios.ts`·`golden/update/scenarios.json`·`test-map.json`·`tests/updateManifests.test.ts`·`releaseFeatureGuard.test.ts`·표본 `tests/fixtures/update/latest-all.json` |
+
+**플랫폼 판정**(`detect_target`) — 번들 표식과 실행 위치만 본다(환경 변수는 믿지 않는다):
+
+| OS | 켜는 조건 | 모드 | 매니페스트 키 | 기대 자산 이름 |
+|---|---|---|---|---|
+| Windows | `bundle_type()` = NSIS | `auto` | `windows-x86_64-nsis` → `windows-x86_64` | 안전한 이름 |
+| macOS | 표식 `App` **그리고 실행 파일이 `*.app/Contents/MacOS/` 안** · arm64/x86_64 | `manual-dmg` | `darwin-aarch64-dmg` / `darwin-x86_64-dmg` | `Antler-<v>-arm64.dmg` / `Antler-<v>-x64.dmg` |
+| Linux | `bundle_type()` = Deb · x86_64 | `manual-file` | `linux-x86_64-deb` | `antler_<v>_amd64.deb` |
+| 그 밖 | 꺼짐(확인 0회·수동 확인은 `not-available`) — `--no-bundle`·AppImage·rpm·msi·portable·다른 아키텍처 | | | |
+
+- **macOS 는 표식만으로 켜면 안 된다**: `tauri-utils` 의 `bundle_type()` 은 표식이 없어도 macOS 에서 `Some(App)` 을 돌려준다(`platform.rs` 의 `_ =>` 갈래). 그대로 켜면 `--no-bundle` 개발 빌드가 확인을 돌려 PR 4 의 "확인 0회" 불변식이 깨진다. 그래서 실행 파일 위치도 본다.
+- **매니페스트 키 대조**: 플러그인이 스스로 찾는 키는 `{os}-{arch}-{installer}` → `{os}-{arch}` 인데(`updater.rs` 의 `get_urls`), 우리는 `target()` 을 고정하고 `restore_update` → `verify` 만 쓰므로 키 문자열은 자유다. 일반 키(`darwin-aarch64`·`linux-x86_64`)에는 AppImage 같은 다른 형태가 섞일 수 있어 **수동 경로는 `-dmg`·`-deb` 키 하나만 보고 일반 키로 내려가지 않는다**(시험). `scripts/make-update-manifests.mjs` 의 `MANUAL_ASSETS`·`tauri-package.yml` 의 "설치본 이름 정리"(`Antler-<v>-<arch>.dmg`·`antler_<v>_amd64.deb`)·`logic.rs` 의 상수·`asset_name` 이 같다는 것을 `tests/updateManifests.test.ts` 가 소스로 대조하고, 표본 `latest-all.json` 을 `check_manifest_for` 가 대상마다 받는지 `update.rs` 가 확인한다.
+- **AppImage 는 지원하지 않기로 했다(결정)**: Tauri 산출물(`tauri-package.yml`·`tauri.conf.json`)에 AppImage 가 없고, 플러그인의 AppImage 갈래는 실행 파일을 직접 덮어쓴다. `bundle_type()` 이 AppImage 인 빌드는 꺼진다. TS 의 AppImage(electron-updater)는 Tauri 판에서 만들어지지 않는다.
+
+**흐름**(PR 4 의 1~3 은 같다 — 매니페스트 검사·같은 정책의 내려받기·`Engine::verify`(minisign + 서명된 버전 = 매니페스트 버전))
+4. **`Engine::install` 을 부르지 않는다.** 플러그인의 macOS·Linux 설치는 앱 번들·실행 파일을 직접 교체한다 — 우리는 사용자가 설치하게 파일만 열어 준다. 검증을 통과한 바이트를 `<userData>/updates`(TS 와 같은 위치·0700)에 **자산 이름 그대로** 저장한다: 이름은 `is_safe_file_name` 을 다시 통과해야 하고(경로 구분자·`..`·앞의 `.` 거부), 임시 이름(`<이름>.part`)에 `create_new` 로 쓴 뒤 `hard_link` 로 최종 이름에 옮긴다(목적지가 있으면 원자적으로 실패 — 덮어쓰는 `rename` 이 아니다). 열기는 `SystemDeps::open_path`(dmg → 마운트, deb → 소프트웨어 센터), 실패하면 고정 문구 오류(원문 경로는 싣지 않는다)이고 검증한 파일은 남는다.
+5. **다시 열기**(`install`): 디스크의 파일을 상한(300MB) 안에서 다시 읽어 `Engine::verify` 를 한 번 더 건 뒤에만 연다(받은 뒤 파일이 바뀌었을 수 있다 — TS 의 `verifyFile`). 실패하면 `error` 상태(`다시 열기 전 검증 실패: …`)이고 열지 않는다. 키가 없으면 여기도 `NO_KEY_MESSAGE` 로 끝난다.
+   - **보안 리뷰 반영**: 열리는 것은 저장 파일이 아니라 **방금 검증한 바이트를 새 이름(`<이름>.open-<pid>-<시각>-<순번>.<확장자>`, `create_new`, 0400/읽기 전용)으로 다시 쓴 사본**이다(최초 열기·다시 열기 모두, 옛 사본은 지운다). 저장 폴더가 심볼릭 링크면 거부하고, 유닉스에서 링크 수가 1 이 아닌 저장 파일(하드 링크)은 읽지도 재사용하지도 않는다. 서명을 통과한 바이트도 **저장 전에 형식 표식**을 본다(deb: `!<arch>
+debian-binary`, dmg: 끝 512바이트의 `koly` — `Target::check_bytes`). 서명은 바이트와 버전에만 묶여 같은 키로 서명한 다른 플랫폼 자산이 통과할 수 있으므로 매니페스트의 파일 이름 검사는 생성 실수를 거르는 용도일 뿐 보안 경계가 아니다.
+
+**TS 와 다른 점(PR 4b)**
+- **같은 이름의 파일을 덮어쓰지 않는다**(TS 는 `rm` 후 `rename`). 일반 파일이고 내용이 같으면(같은 버전을 다시 받는 경우) 그대로 쓰고, 링크·폴더·다른 내용이면 건드리지 않고 "같은 이름의 파일이 이미 있어 덮어쓰지 않았습니다. 업데이트 폴더에서 그 파일을 지운 뒤 다시 시도하세요" 오류다. 받은 뒤 사용자가 파일을 바꿔 놓으면 [다시 시도]도 이 오류로 막히는 대가가 있다(사용자가 지워야 한다).
+- 무결성이 `latest-mac.yml`·`latest-linux.yml` sha512 → API sha256 이 아니라 **minisign 서명**이고, 검증 전에는 디스크에 쓰지 않는다(TS 는 `.part` 에 쓰며 해시를 계산했다). 크기 상한은 설치본 300MB(TS 1.5GB)다. 정식 판 확인은 API 가 아니라 `latest.json` 한 번이다.
+- 다시 열기에서 **열기에 실패하면 `error` 상태**다(TS 는 예외를 던져 상태가 `downloaded` 로 남는다). 다시 열기 전 검증 실패 문구는 해시가 아니라 서명 문구(`업데이트 서명이 올바르지 않습니다`)다 — 골든에는 문구가 같은 흐름만 넣었다.
+- portable(`manual-file` 의 Windows 쪽)은 폐지됐고 AppImage 는 지원하지 않는다. `ANTLER_UPDATE_FAKE_MODE` 는 없다(가짜 상태의 모드는 실제 모드, 가짜 deb 파일 이름은 `antler_0.2.0_amd64.deb`).
+- 수동 경로의 `.sig` 가 없는 자산은 `latest.json` 에 들어가지 않아(스크립트가 경고하고 건너뛴다) 그 플랫폼은 업데이트 알림을 받지 못한다(오류가 아니라 "이 환경에 맞는 업데이트가 없습니다" — 자동 확인은 조용하고 수동 확인만 알린다).
+
+**시험**
+- 골든(`tests/fixtures/update.scenarios.json` 9개 추가 → 29개): TS 쪽은 **실제 `manual.ts`**(`findManualUpdate`·`downloadVerified`)를 가짜 fetch·임시 폴더로 돌린다(`chunks` 가 진행률을, `openFails` 가 열기 실패를 정한다) — Rust 쪽은 같은 입력의 `progress`·`error` 로 가짜 백엔드를 돌린다. 정상(dmg·deb)·열기 실패 → 재시도·네트워크 오류 → 재시도·취소·받은 파일 변조 → 다시 열기 실패(오류 문구는 TS 해시 문구를 가짜 백엔드가 그대로 낸다 — 상태 모양만 보증)·없음/오류·사용할 수 없는 빌드·가짜 `downloaded` 의 `fileName`. 기존 20개 골든은 한 글자도 바뀌지 않았다.
+- `update_security.rs`(루프백만, 진짜 플러그인 엔진): 세 대상(dmg arm64·x64·deb) × 정상(저장·열기 1회·설치 포트 미호출·다시 열기 재검증)·서명 5종(변조·다른 키·서명된 버전 불일치·버전 없음·깨짐 — 저장 폴더가 **생기지도 않는다**·열지 않는다)·키 없음(요청 0건·폴더 없음)·서명 없음/깨짐 매니페스트·다른 플랫폼·일반 키 매니페스트·기대 파일 이름과 다른 URL 6종·크기 상한·리다이렉트 4종·취소·기존 파일 덮어쓰기 거부/같은 내용 재사용·다시 열기 전 파일 변조/삭제/폴더·열기 실패(경로 비노출)·서비스 상태 순서와 다시 열기 반복. `store` 단독: 이름 경로 탈출 14종·`.part` 잔재·폴더와 겹침·링크(유닉스)·권한 0600(유닉스)·읽기 상한.
+- 소스 검사: `Engine::install` 호출은 한 곳이고 수동 분기가 그 앞이다·수동 내려받기는 검증 → 저장 순서·파일 입출력은 `store.rs` 뿐.
+- `update.rs`: `detect_target` 격자(OS × 표식 × 아키텍처 × 앱 번들)·`in_app_bundle`·`check_manifest_for`(키·이름·일반 키 거부·프리릴리스)·CI 표본.
+- 대응표: 범위 밖이던 5개(`플랫폼·아키텍처별 자산`·`다른 버전·위험한 이름`·`mac: 해시 정보…`·`mac: dmg 를 검증해…`·`mac: 해시가 틀리면…`)와 `설치 형태 판별`·`다시 열기 전에 해시를 다시 확인한다` 를 Rust 시험에 연결했다. `N/A` 는 yml·해시 = 서명으로 대체, portable = 폐지만 남는다.
+
+**자동으로 확인하지 못한 것(이 환경은 Windows 뿐)**
+- **macOS·Linux 는 컴파일조차 하지 않았다.** `#[cfg(unix)]` 는 권한 모드(`0o700`·`0o600`)와 링크 시험뿐이고 나머지는 `cfg!()` 없는 순수 함수라 Windows 에서 타입 검사되지만, `SystemDeps::open_path`(opener 플러그인의 macOS `open`·Linux `xdg-open`)와 `bundle_type()` 의 실제 값은 실행해 보지 못했다.
+- `tauri-package.yml` 은 실행하지 못했다(워크플로 정적 검사만) — 합쳐진 `sign` 잡(아티팩트별 입력 폴더 `in/…` → "서명 입력 복사" 단계가 기대 이름 하나씩만 `out/` 에 복사: 심볼릭 링크·크기 0·300MB 초과 거부, 서명·매니페스트·업로드는 `out/` 의 고정 이름만, 매니페스트 스크립트는 `--signed true` 표식 없이는 서명 항목을 만들지 않는다), 부분 실패 때의 `download-artifact`(`continue-on-error`) 동작, dmg·deb 의 `tauri signer sign` 이 모두 미확인이다.
+- `src/renderer/tauri/bridge.ts` 의 `platform: 'win32'` 고정(계획 §6c)이 macOS·Linux 화면(창 버튼·스냅 등)에 주는 영향은 이 PR 이 건드리지 않았다 — 업데이트 스낵바는 `platform` 을 보지 않는다.
+
+**사람 확인(리허설 R — macOS·Linux)**
+- macOS(arm64·x64 각각): 앱 번들(`/Applications/Antler.app`)로 실행 → `bundle_type()` 이 `App` 이고 `--no-bundle` 빌드는 확인하지 않는지, 시작 10초 뒤 스낵바 → [업데이트] 진행률 → dmg 가 마운트되는지(Finder 에 창이 뜨는지)·`~/Library/Application Support/<앱>/updates/` 에 `Antler-<v>-<arch>.dmg` 가 생기는지·[다시 열기]가 되는지, Gatekeeper 가 미서명 앱을 처음 열 때 안내(build.md)대로 열리는지, 같은 버전을 다시 받아도 오류가 없는지(같은 내용 재사용), 파일을 바꾼 뒤 [다시 열기]가 거부되는지.
+- Linux(deb): `dpkg -i`/소프트웨어 센터로 설치한 앱에서 `bundle_type()` 이 `Deb` 인지·`xdg-open` 이 `.deb` 를 소프트웨어 센터로 여는지(데스크톱 환경별로 다를 수 있다 — GNOME 소프트웨어·Discover·Ubuntu 소프트웨어 센터)·열리지 않으면 "다운로드 폴더에서 직접 여세요" 오류가 보이는지.
+- 공통: 공개 키가 들어간 뒤 `tauri-package.yml` 로 만든 `latest.json` 에 세 수동 키가 있고 `.sig` 가 앱의 공개 키와 한 쌍인지, 서명이 없는 갈래는 알림만 없고 오류가 없는지.
+
+**남은 위험**
+- **열기 TOCTOU 는 완전히 없앨 수 없다**: 검증한 바이트를 새 사본에 쓴 뒤 OS 의 열기(마운트·소프트웨어 센터)가 그 경로를 읽기까지의 틈이 남는다(같은 사용자 권한의 프로세스는 사본을 바꾸거나 폴더를 가로챌 수 있다 — 0700 폴더·0400 사본·링크/하드 링크 거부로 줄였을 뿐이다). 형식 표식은 위조를 막지 못하고 다른 형식을 거를 뿐이다. 마운트 중인 dmg 사본은 지워지지 않을 수 있다(다음 열기 때 다시 시도한다).
+- 덮어쓰기 거부 때문에 업데이트 폴더의 같은 이름 파일이 깨져 있으면 사용자가 직접 지우기 전까지 그 버전의 [다시 시도]가 막힌다(경로는 오류 문구에 싣지 않는다 — 폴더 위치 안내가 없다).
+- `download-artifact` 의 `pattern` 이 일치하는 것이 없을 때의 동작을 확인하지 못해 `continue-on-error` 로 감쌌다(진짜 실패도 삼킨다 — 이어지는 매니페스트 단계가 설치본이 없으면 경고한다).
+- macOS 앱 번들 판정은 경로 모양(`.app/Contents/MacOS/`)이다 — 번들 밖으로 복사한 실행 파일·이름이 `.app` 인 다른 폴더는 의도와 다르게 판정될 수 있으나 어느 쪽이든 서명 검증을 거친다.
+- 수동 경로는 앱이 스스로 설치하지 않으므로 사용자가 열린 설치기를 끝내지 않으면 구버전이 계속 돈다(같은 알림이 6시간마다 뜬다 — TS 와 같다).
 
 ## Phase 0 에서 확인한 것
 

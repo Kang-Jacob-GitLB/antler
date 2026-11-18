@@ -4,7 +4,7 @@
 //!
 //! TS 와 같은 점: `update:check` 는 항상 수동 확인(`check(true)`)이고 자동 확인(시작 10초 뒤·6시간마다)의 실패는 조용하다, 받아 둔 업데이트가 있으면 다시 확인하지 않는다,
 //! 건너뛴 버전은 이 서비스만 쓴다(`Deps::set_skipped`), dismiss 는 지금 알리는 버전만 받는다.
-//! 다른 점: ① 수동 모드(`manual-dmg`·`manual-file`)는 없다(Windows NSIS 만 — 모드는 항상 `auto`). ② 설치(`Backend::install`)는 프로세스를 끝내는 동기 호출이라 블로킹 스레드에서 돈다.
+//! 다른 점: ① 수동 모드(`manual-dmg`·`manual-file` — macOS dmg·Linux deb, PR 4b)의 파일 저장·열기·다시 열기는 TS 의 `manual.ts` 처럼 [`Backend`] 가 한다(`Backend::mode`·`file_name`) — 서비스는 상태 순서만 가진다. ② 설치(`Backend::install`)는 프로세스를 끝내는 동기 호출이라 블로킹 스레드에서 돈다.
 //! ③ 릴리스 노트의 동시 요청 합치기는 같은 키의 진행 중 future 를 공유한다(TS 는 같은 `Promise`).
 //!
 //! `Deps::send` 는 서비스 잠금 안에서 불린다 — 상태가 바뀐 순서대로 나가게 하려는 것이므로 **서비스를 다시 부르지 않는다**(이벤트를 내보내기만 한다).
@@ -31,7 +31,9 @@ const NOTES_TTL: Duration = Duration::from_secs(10 * 60);
 /// 개발 장치가 받는 상태 이름(TS `FAKE`)
 const FAKE_KINDS: [&str; 4] = ["available", "downloading", "downloaded", "error"];
 
-const MODE: &str = "auto";
+/// 수동 모드(`manual-*`)가 내려받은 파일 이름을 보이는 예시(개발 장치 전용)
+const FAKE_FILE_DMG: &str = "Antler-0.2.0-arm64.dmg";
+const FAKE_FILE_DEB: &str = "antler_0.2.0_amd64.deb";
 const RETRY_AFTER_CHECK: &str = "다시 확인한 뒤 시도하세요";
 const NOT_NOTIFIED: &str = "현재 알림 중인 버전이 아닙니다";
 const BAD_VERSION: &str = "잘못된 버전입니다";
@@ -50,7 +52,7 @@ pub enum Status {
     NotAvailable,
 }
 
-/// `@shared/types` 의 `UpdateState`(`fileName` 은 수동 모드 전용이라 없다)
+/// `@shared/types` 의 `UpdateState`. `file_name` 은 수동 모드의 `downloaded` 에서만 있다(받아 연 설치 파일 이름 — renderer 가 안내 문구를 고른다)
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateState {
@@ -65,6 +67,8 @@ pub struct UpdateState {
     pub progress: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
 }
 
 /// 확인·내려받기·설치를 실제로 하는 쪽(TS `AutoBackend` + 릴리스 노트). 오류 문구는 사용자에게 보여 줘도 되는 고정 문구여야 한다(요청 주소·경로가 섞이지 않게 — 서비스가 한 번 더 `sanitize_error` 를 건다)
@@ -80,6 +84,14 @@ pub trait Backend: Send + Sync + 'static {
     /// 방금 실패한 `install` 이 **되돌릴 수 없는 종료 정리를 이미 돌렸는가**(설치 프로그램을 띄우기 직전의 `on_before_exit`). 돌았으면 앱은 반쯤 정리된 상태라 재시작이 필요하다
     fn cleanup_ran(&self) -> bool {
         false
+    }
+    /// `UpdateState.mode`: `auto`(앱 안 설치)·`manual-dmg`·`manual-file`(검증한 설치 파일을 받아 열어 준다 — 이 모드의 `install` 은 **다시 열기**라 프로세스를 끝내지 않고 돌아온다)
+    fn mode(&self) -> &'static str {
+        "auto"
+    }
+    /// 수동 모드: 방금 내려받아 연 설치 파일 이름(`downloaded` 상태에 싣는다). `auto` 는 없다
+    fn file_name(&self) -> Option<String> {
+        None
     }
 }
 
@@ -147,7 +159,7 @@ impl<B: Backend> Core<B> {
     }
 
     fn base(&self, status: Status) -> UpdateState {
-        UpdateState { status, mode: MODE, current_version: self.d.current_version.clone(), version: None, notes_url: None, progress: None, error: None }
+        UpdateState { status, mode: self.backend.mode(), current_version: self.d.current_version.clone(), version: None, notes_url: None, progress: None, error: None, file_name: None }
     }
 
     fn with_version(&self, status: Status, version: &str) -> UpdateState {
@@ -165,7 +177,14 @@ impl<B: Backend> Core<B> {
         match kind {
             "available" => self.with_version(Status::Available, version),
             "downloading" => UpdateState { progress: Some(42), ..self.with_version(Status::Downloading, version) },
-            "downloaded" => self.with_version(Status::Downloaded, version),
+            "downloaded" => {
+                let file_name = match self.backend.mode() {
+                    "manual-dmg" => Some(FAKE_FILE_DMG.to_string()),
+                    "manual-file" => Some(FAKE_FILE_DEB.to_string()),
+                    _ => None,
+                };
+                UpdateState { file_name, ..self.with_version(Status::Downloaded, version) }
+            }
             _ => UpdateState { error: Some("GitHub 요청 한도에 걸렸습니다. 잠시 후 다시 시도하세요".to_string()), ..self.with_version(Status::Error, version) },
         }
     }
@@ -175,12 +194,13 @@ impl<B: Backend> UpdateService<B> {
     pub fn new(backend: Arc<B>, d: Deps) -> Self {
         let enabled = d.enabled;
         let fake = d.fake.clone().filter(|f| FAKE_KINDS.contains(&f.as_str()));
+        let mode = backend.mode();
         let core = Core {
             backend,
             enabled,
             fake,
             st: Mutex::new(St {
-                state: UpdateState { status: Status::Idle, mode: MODE, current_version: d.current_version.clone(), version: None, notes_url: None, progress: None, error: None },
+                state: UpdateState { status: Status::Idle, mode, current_version: d.current_version.clone(), version: None, notes_url: None, progress: None, error: None, file_name: None },
                 policy: UpdatePolicy::new(),
                 busy: false,
                 installing: false,
@@ -321,7 +341,8 @@ impl<B: Backend> UpdateService<B> {
         let mut st = c.lock();
         st.cancel = None;
         match outcome {
-            Ok(()) => c.set(&mut st, c.with_version(Status::Downloaded, &version)),
+            // 수동 모드는 검증한 파일을 이미 열었다 — 이름을 실어 renderer 가 안내 문구를 고르게 한다(auto 는 없다)
+            Ok(()) => c.set(&mut st, UpdateState { file_name: c.backend.file_name(), ..c.with_version(Status::Downloaded, &version) }),
             Err(e) => {
                 // `cancel()` 가 이미 상태를 되돌렸다 — 취소로 끝난 실패는 오류로 알리지 않는다
                 if token.is_cancelled() || st.state.status != Status::Downloading {
@@ -369,7 +390,13 @@ impl<B: Backend> UpdateService<B> {
         let backend = c.backend.clone();
         let result = tokio::task::spawn_blocking(move || backend.install()).await;
         let error = match result {
-            Ok(Ok(())) => return,
+            Ok(Ok(())) => {
+                // 수동 모드의 설치는 파일을 다시 여는 일이라 돌아온다 — 다시 누를 수 있게 표식을 푼다(auto 는 프로세스가 끝나 여기에 오지 않는다)
+                if c.backend.mode() != "auto" {
+                    c.lock().installing = false;
+                }
+                return;
+            }
             Ok(Err(e)) => sanitize_error(&e),
             Err(_) => INSTALL_FAILED.to_string(),
         };

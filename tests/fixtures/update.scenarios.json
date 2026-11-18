@@ -1,5 +1,5 @@
 {
-  "_doc": "업데이트 서비스 상태 순서 골든의 입력(Phase 6c PR 4). TS UpdateService(tests/fixtures/updateScenarios.ts — 가짜 AutoBackend)와 Rust update::service(src-tauri/tests/update.rs — 가짜 Backend)가 같은 입력을 돌려 상태가 나간 순서(sent)·단계 결과(results)·호출 횟수(calls)가 같은지 본다. 골든은 tests/golden/update/scenarios.json(UPDATE_GOLDEN=1 pnpm exec vitest run tests/goldenUpdate.test.ts). backend: checks/downloads/installs 는 호출 순서대로 하나씩 쓰고 마지막 것을 반복한다. checks: {version}|{none}|{error}, downloads: {progress:[..]}|{error}|{hang}(취소될 때까지 멈춤)|{progress,error}, installs: {ok}|{error}. steps: check{manual}|download|downloadStart|downloadEnd|cancel|install|dismiss{action,version}|get",
+  "_doc": "업데이트 서비스 상태 순서 골든의 입력(Phase 6c PR 4). TS UpdateService(tests/fixtures/updateScenarios.ts — 가짜 AutoBackend)와 Rust update::service(src-tauri/tests/update.rs — 가짜 Backend)가 같은 입력을 돌려 상태가 나간 순서(sent)·단계 결과(results)·호출 횟수(calls)가 같은지 본다. 골든은 tests/golden/update/scenarios.json(UPDATE_GOLDEN=1 pnpm exec vitest run tests/goldenUpdate.test.ts). backend: checks/downloads/installs 는 호출 순서대로 하나씩 쓰고 마지막 것을 반복한다. checks: {version}|{none}|{error}, downloads: {progress:[..]}|{error}|{hang}(취소될 때까지 멈춤)|{progress,error}, installs: {ok}|{error}. steps: check{manual}|download|downloadStart|downloadEnd|cancel|install|dismiss{action,version}|get|tamper. 수동 경로(PR 4b): `manual`: dmg|deb 이면 TS 는 실제 manual.ts 를 가짜 fetch·임시 폴더로 돌리고(downloads 의 chunks 가 진행률을, openFails 가 열기 실패를 정한다), Rust 는 같은 입력의 progress·error 로 가짜 백엔드를 돌린다(openFails 는 열기 실패 문구, tamper 는 TS 쪽만 파일을 바꾸고 Rust 는 installs 의 error 가 같은 결과를 낸다). 그래서 chunks·progress 는 서로 같은 상태 순서를 낳게 짝을 맞춰 쓴다",
   "scenarios": [
     {
       "name": "정상: 수동 확인 → 내려받기(진행) → 설치",
@@ -133,6 +133,62 @@
       "fake": "bogus",
       "backend": { "checks": [{ "version": "0.2.0" }] },
       "steps": [{ "op": "get" }, { "op": "check", "manual": true }]
+    },
+    {
+      "name": "수동 dmg: 확인 → 내려받기(진행) → 열기 → 다시 열기 두 번",
+      "manual": "dmg",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "chunks": [250, 250, 500], "progress": [25, 50, 99, 100] }], "installs": [{ "ok": true }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "install" }, { "op": "install" }, { "op": "get" }]
+    },
+    {
+      "name": "수동 deb: 확인 → 내려받기 → 열기 → 다시 열기",
+      "manual": "deb",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "chunks": [100, 900], "progress": [10, 99, 100] }], "installs": [{ "ok": true }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "install" }]
+    },
+    {
+      "name": "수동 dmg: 열기 실패는 오류 상태(다시 시도하면 받아 연다)",
+      "manual": "dmg",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "chunks": [1000], "progress": [99, 100], "openFails": true }, { "chunks": [1000], "progress": [99, 100] }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "download" }]
+    },
+    {
+      "name": "수동 dmg: 내려받기 네트워크 오류 → 다시 시도",
+      "manual": "dmg",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "error": "net::ERR_INTERNET_DISCONNECTED https://github.com/x?token=abc" }, { "chunks": [1000], "progress": [99, 100] }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "download" }]
+    },
+    {
+      "name": "수동 dmg: 내려받는 중 취소는 available 로",
+      "manual": "dmg",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "hang": true }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "downloadStart" }, { "op": "cancel" }, { "op": "downloadEnd" }]
+    },
+    {
+      "name": "수동 dmg: 받은 파일이 바뀌면 다시 열기 전 검증이 실패해 오류 상태",
+      "manual": "dmg",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "chunks": [1000], "progress": [99, 100] }], "installs": [{ "error": "다시 열기 전 검증 실패: 파일 크기가 맞지 않습니다" }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "tamper" }, { "op": "install" }]
+    },
+    {
+      "name": "수동 deb: 새 버전 없음·자동 확인 실패는 조용히·수동 확인 실패는 오류",
+      "manual": "deb",
+      "backend": { "checks": [{ "none": true }, { "error": "offline" }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "check", "manual": false }, { "op": "check", "manual": true }]
+    },
+    {
+      "name": "수동 dmg: 사용할 수 없는 빌드는 확인하지 않는다(모드는 유지)",
+      "manual": "dmg",
+      "enabled": false,
+      "backend": { "checks": [{ "version": "0.2.0" }] },
+      "steps": [{ "op": "check", "manual": false }, { "op": "check", "manual": true }, { "op": "download" }]
+    },
+    {
+      "name": "수동 dmg 개발 장치: 가짜 downloaded 는 파일 이름을 싣는다",
+      "manual": "dmg",
+      "fake": "downloaded",
+      "backend": {},
+      "steps": [{ "op": "get" }, { "op": "install" }, { "op": "dismiss", "action": "later", "version": "0.2.0" }]
     }
   ]
 }
