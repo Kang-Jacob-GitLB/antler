@@ -1,12 +1,13 @@
 name: tauri-package
 
-# Tauri 판 설치본을 빌드해 워크플로 아티팩트로 올린다. **발행하지 않는다**: 릴리스·태그를 만들지 않고 쓰기 권한도 없다.
-# release.yml(Electron)과 이어져 있지 않다 — 야간 릴리스는 계속 Electron 판을 낸다. 전환은 마지막 `feat!:` PR 이 한다(docs/tauri.md "Phase 6c").
+# Tauri 판 설치본을 빌드해 워크플로 아티팩트(`tauri-installers`)로 올린다. **이 워크플로는 발행하지 않는다**: 릴리스·태그를 만들지 않고 쓰기 권한도 없다.
+# 발행은 release.yml 이 이 워크플로를 재사용 호출(workflow_call)한 뒤 자산 점검(scripts/check-release-assets.mjs)을 통과한 아티팩트로만 한다.
+# 여기서는 서명 키가 없거나 macOS·Linux 갈래가 실패해도 경고하고 끝난다(점검용 수동 실행) — 그 느슨함이 발행으로 새지 않게 release.yml 이 자산 목록을 엄격히 본다.
 #
-# 산출물은 배포 후보다: Node 사이드카를 없앤(6c PR 5) 뒤라 Tauri 판은 Node 런타임에 기대지 않는다. 그래도 발행은 마지막 `feat!:` PR 과 리허설이 끝난 뒤다.
-#
-# 실행: Actions 탭에서 수동 실행(workflow_dispatch)만. 워크플로 파일이 기본 브랜치에 있어야 실행되고, Environment `release` 는 main 이 아닌 브랜치에
-# 시크릿을 주지 않을 수 있어 PR 에서는 돌리지 않는다. 그래서 머지 뒤 한 번 눌러 아티팩트를 확인한다(docs/build.md).
+# 실행 경로 둘:
+#   1) release.yml 이 부른다(workflow_call: version·sha — 계산한 그 커밋을 빌드한다. 모든 checkout 이 `ref: inputs.sha` 를 쓴다)
+#   2) Actions 탭에서 수동 실행(workflow_dispatch) — 점검용. 워크플로 파일이 기본 브랜치에 있어야 실행되고, Environment `release` 는 main 이 아닌 브랜치에
+#      시크릿을 주지 않을 수 있어 PR 에서는 돌리지 않는다(docs/build.md)
 #
 # 갈래:
 #   windows — NSIS 설치 프로그램(x64)을 **시크릿 없이** 빌드한다. 이어지는 sign 잡이 빌드 산출물만 받아 시크릿 TAURI_SIGNING_PRIVATE_KEY 로
@@ -24,6 +25,16 @@ on:
         type: string
         required: false
         default: ""
+  workflow_call:
+    inputs:
+      version:
+        description: "빌드할 버전(접두사 v 없이, 예: 2.0.0)"
+        type: string
+        required: true
+      sha:
+        description: "빌드할 커밋(release.yml 이 계산한 그 커밋)"
+        type: string
+        required: true
 
 concurrency:
   group: tauri-package-${{ github.ref }}
@@ -71,6 +82,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # 재사용 호출이면 release.yml 이 계산한 커밋을, 수동 실행이면 이 실행의 커밋을 빌드한다
+          ref: ${{ inputs.sha || github.sha }}
           persist-credentials: false
 
       # 버전을 package.json 에 넣는다(이 러너 안에서만, 커밋하지 않음). tauri.conf.json 의 version 이 이 파일을 가리킨다
@@ -152,6 +165,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # 재사용 호출이면 release.yml 이 계산한 커밋을, 수동 실행이면 이 실행의 커밋을 빌드한다
+          ref: ${{ inputs.sha || github.sha }}
           persist-credentials: false
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
@@ -330,6 +345,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # 재사용 호출이면 release.yml 이 계산한 커밋을, 수동 실행이면 이 실행의 커밋을 빌드한다
+          ref: ${{ inputs.sha || github.sha }}
           persist-credentials: false
 
       - name: 버전 → package.json
