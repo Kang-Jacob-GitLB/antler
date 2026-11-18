@@ -89,7 +89,7 @@ describe('tauri-package.yml', () => {
       'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'
     ])
     for (const [id, job] of Object.entries(jobs)) {
-      if (id === 'windows-sign') continue
+      if (id === 'sign') continue
       expect(JSON.stringify(job), `${id} 잡에 시크릿이 있다`).not.toContain('secrets.')
       expect(job.environment, `${id} 잡이 Environment 를 선언한다`).toBeUndefined()
     }
@@ -101,10 +101,10 @@ describe('tauri-package.yml', () => {
     expect(build.env).toEqual({ VERSION: '${{ needs.version.outputs.version }}' })
   })
 
-  it('windows-sign 잡: 키는 서명 단계에서만 쓰이고, 빌드·설치 스크립트가 도는 단계에는 없다', () => {
-    const sign = job('windows-sign')
+  it('sign 잡(Windows·macOS·Linux 서명): 키는 서명 단계에서만 쓰이고, 빌드·설치 스크립트가 도는 단계에는 없다', () => {
+    const sign = job('sign')
     expect(sign.environment).toBe('release')
-    expect(sign.needs).toEqual(['version', 'windows'])
+    expect(sign.needs).toEqual(['version', 'windows', 'unix'])
     expect(sign.env).toEqual({ VERSION: '${{ needs.version.outputs.version }}' })
     expect(stepsWithSecrets(sign)).toEqual(['서명 키 확인', '업데이트 서명'])
     const idx = (name: string): number => sign.steps.findIndex((s) => s.name === name)
@@ -124,6 +124,9 @@ describe('tauri-package.yml', () => {
     expect(Object.keys(step.env ?? {}).sort()).toEqual(['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD'])
     // 서명에 버전을 묶는다(requireSignedVersion). 매니페스트 생성은 서명 뒤, 키 없는 단계에서
     expect(step.run).toContain('tauri signer sign --app-version "$VERSION"')
+    // macOS dmg·Linux deb(수동 경로 자산)도 같은 단계에서 서명한다. unix 갈래가 실패해도 Windows 서명은 막지 않는다
+    for (const name of ['Antler-${VERSION}-arm64.dmg', 'Antler-${VERSION}-x64.dmg', 'antler_${VERSION}_amd64.deb']) expect(step.run, name).toContain(name)
+    expect((sign as { if?: string }).if).toBe("${{ !cancelled() && needs.windows.result == 'success' }}")
     const manifest = stepAt('업데이트 매니페스트 생성·검증')
     expect(idx('업데이트 매니페스트 생성·검증')).toBeGreaterThan(idx('업데이트 서명'))
     expect(manifest.env).toEqual({ ELECTRON_MIGRATION: '${{ vars.ELECTRON_MIGRATION }}' })

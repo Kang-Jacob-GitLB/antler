@@ -251,8 +251,10 @@ pub fn run() {
                 store.set_on_change(Box::new(move |gen, config| listener.push(Some(gen), config)));
                 sync
             });
+            // 프로세스·파일 관리자를 건드리는 운영 실행기는 이 한 인스턴스다 — 설정의 외부 열기와 업데이트의 수동 경로(검증한 설치 파일 열기)가 나눠 쓴다
+            let system_deps = Arc::new(external::launch::SystemDeps);
             let config_host: Option<Arc<config_host::ConfigHost>> = config_store.as_ref().map(|store| {
-                Arc::new(config_host::ConfigHost::new(store.clone(), env_host.clone(), cache_dir.clone(), pick_exe_port(app.handle().clone()), Arc::new(external::launch::SystemDeps)))
+                Arc::new(config_host::ConfigHost::new(store.clone(), env_host.clone(), cache_dir.clone(), pick_exe_port(app.handle().clone()), system_deps.clone()))
             });
             if let Some(host) = &config_host {
                 router.set_config(host.clone());
@@ -368,7 +370,9 @@ pub fn run() {
                     exit_cleanup(&exit_app);
                     exit_app.cleanup_before_exit();
                 });
-                match update::host::build_service(app.handle().clone(), store, before_exit) {
+                // macOS dmg·Linux deb 는 앱 안에서 설치하지 않는다 — 검증한 설치 파일을 `<userData>/updates` 에 받아 열어 준다(TS 와 같은 위치)
+                let opener = system_deps.clone();
+                match update::host::build_service(app.handle().clone(), store, before_exit, user_data.join("updates"), Arc::new(move |p: &std::path::Path| opener.open_file(p))) {
                     Ok(service) => {
                         router.set_update(Arc::new(service.clone()));
                         service.start(tauri::async_runtime::handle().inner());

@@ -64,13 +64,13 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 
 | 갈래 | 러너 | 산출물(아티팩트 `tauri-installers-<갈래>-dev-sidecar`) |
 |---|---|---|
-| windows | `windows-latest` | `Antler-Setup-<버전>-x64.exe`(NSIS, 사용자별 설치) · 서명 키가 있으면 `.exe.sig`·`latest.json` · `latest.yml` |
+| windows | `windows-latest` | `Antler-Setup-<버전>-x64.exe`(NSIS, 사용자별 설치) · 서명 키가 있으면 `.exe.sig`·`latest.json` · `latest.yml` (서명·매니페스트는 `sign` 잡) |
 | mac-arm64 · mac-x64 | `macos-latest`(arm64 러너에서 둘 다 빌드) | `Antler-<버전>-arm64.dmg` · `Antler-<버전>-x64.dmg` (ad-hoc 서명 `-`) |
 | linux | `ubuntu-22.04` | `antler_<버전>_amd64.deb` |
 
 이름은 Electron 판의 규칙을 그대로 따른다(앱 안 수동 업데이트가 자산을 고르는 규칙, `pickAsset`).
 
-**업데이트 서명** — 빌드는 키 없이 한다. `windows` 잡이 시크릿 없이 NSIS 를 빌드해 서명 전 설치본을 중간 아티팩트(`tauri-win-unsigned`, 1일 보관)로 올리고, 이어서 `windows-sign` 잡(Environment `release`)이 그것을 받아 `tauri signer sign --app-version <버전>` 으로 `.sig` 를 만들고 매니페스트를 만든다. 키(`TAURI_SIGNING_PRIVATE_KEY`·`_PASSWORD`)는 서명 단계의 env 에만 있다 — 빌드 중에 도는 npm 빌드 코드·모든 crate 의 `build.rs`·proc-macro 가 키를 읽을 수 없게 하려는 분리다. `windows-sign` 은 새 러너에서 `pnpm install --frozen-lockfile --ignore-scripts` 로 Tauri CLI 만 설치해 쓰며(Rust·빌드 없음), 남는 신뢰는 lockfile 이 고정한 `@tauri-apps/cli` 의 코드뿐이다(`cargo install tauri-cli` 로 바꾸면 더 줄지만 컴파일이 길다). 시크릿이 없으면 경고(`::warning::`)를 내고 서명을 건너뛴다 — `latest.json` 만 빠진다. macOS·Linux 는 서명하지 않는다(이 형태의 앱 안 업데이트는 수동 경로).
+**업데이트 서명** — 빌드는 키 없이 한다. `windows` 잡이 시크릿 없이 NSIS 를 빌드해 서명 전 설치본을 중간 아티팩트(`tauri-win-unsigned`, 1일 보관)로 올리고, 이어서 `sign` 잡(Environment `release`)이 그것과 macOS·Linux 빌드 잡(`unix`)의 dmg·deb 를 받아 `tauri signer sign --app-version <버전>` 으로 각각 `.sig` 를 만들고 매니페스트를 만든다(`unix` 의 일부 갈래가 실패해도 있는 것만 서명하고 없는 것은 경고한다). 키(`TAURI_SIGNING_PRIVATE_KEY`·`_PASSWORD`)는 서명 단계의 env 에만 있다 — 빌드 중에 도는 npm 빌드 코드·모든 crate 의 `build.rs`·proc-macro 가 키를 읽을 수 없게 하려는 분리다. `sign` 은 새 러너에서 `pnpm install --frozen-lockfile --ignore-scripts` 로 Tauri CLI 만 설치해 쓰며(Rust·빌드 없음), 남는 신뢰는 lockfile 이 고정한 `@tauri-apps/cli` 의 코드뿐이다(`cargo install tauri-cli` 로 바꾸면 더 줄지만 컴파일이 길다). 시크릿이 없으면 경고(`::warning::`)를 내고 서명을 건너뛴다 — `latest.json` 만 빠진다. macOS dmg·Linux deb 의 앱 안 업데이트는 **수동 경로**(Phase 6c PR 4b — 앱이 검증한 파일을 받아 열어 준다)라 설치본 옆의 `.sig` 가 그 무결성이고, 서명이 없는 자산은 `latest.json` 에 들어가지 않는다(그 플랫폼은 업데이트 알림을 받지 못한다).
 
 **필수 사전 설정(저장소 Settings > Environments > `release`)** — 시크릿을 넣기 전에 먼저 한다.
 - Deployment branches and tags: **Selected branches and tags → `main` 만**. 태그를 허용해야 한다면 tag ruleset 으로 `v*` 태그 생성을 제한한다.
@@ -79,7 +79,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 키는 사용자가 만들어 시크릿으로 넣고, **공개 키는 아직 저장소에 없다**(사용자 공개 키 대기). 공개 키는 `src-tauri/src/update/host.rs` 의 `UPDATE_PUBKEY` 한 곳에 넣는다(Phase 6c PR 4 가 업데이터를 앱에 연결했고 `tauri.conf.json` 에는 `plugins` 를 두지 않는다 — [updates.md](updates.md#tauri-판-phase-6c-pr-4)). 상수가 `None` 인 동안 앱은 업데이트를 확인만 하고 내려받기·설치는 거부한다.
 
 **매니페스트** — `scripts/make-update-manifests.mjs` 가 만든다(순수 함수 + `tests/updateManifests.test.ts`).
-- `latest.json`: Tauri 업데이터 형식. `url` 은 `https://github.com/Kang-Jacob-GitLB/antler/releases/download/v<버전>/<파일>`, 플랫폼 키는 `windows-x86_64-nsis` 와 `windows-x86_64`(같은 항목). 앱의 `check_manifest`(`update/logic.rs`)가 읽는 형식이고, 실제 검사가 표본 `tests/fixtures/update/latest.json` 을 받는지 `src-tauri/tests/update.rs` 가 확인한다.
+- `latest.json`: Tauri 업데이터 형식. `url` 은 `https://github.com/Kang-Jacob-GitLB/antler/releases/download/v<버전>/<파일>`, 플랫폼 키는 Windows 가 `windows-x86_64-nsis` 와 `windows-x86_64`(같은 항목), 수동 경로가 `darwin-aarch64-dmg`·`darwin-x86_64-dmg`·`linux-x86_64-deb`(각각 `Antler-<버전>-arm64.dmg`·`Antler-<버전>-x64.dmg`·`antler_<버전>_amd64.deb` — 앱이 **그 키 하나만, 그 이름과 정확히 같을 때만** 받는다)다. 앱의 `check_manifest_for`(`update/logic.rs`)가 읽는 형식이고, 실제 검사가 표본 `tests/fixtures/update/latest.json`·`latest-all.json` 을 받는지 `src-tauri/tests/update.rs` 가 확인한다. 서명(`.sig`)이 있는 설치본만 들어간다.
 - `latest.yml`: Electron 판(electron-updater)이 Tauri 설치본을 받아 가게 하는 이관용. `url`·`path` 는 **파일 이름만**이다(절대 URL 이면 electron-updater 가 경로를 깨뜨린다). 서명과 무관하게 만든다.
 - **비상 정지**: 저장소 변수 `ELECTRON_MIGRATION` 이 `off`·`false`·`0`·`no`(대소문자 무시)면 `latest.yml` 을 만들지 않는다(기본 on). 이미 발행된 릴리스에서는 사람이 `latest.yml` 자산도 지워야 한다.
 - 스크립트가 파일을 쓰기 전에 버전·파일 이름·해시·크기를 실물과 대조하고, 어긋나면 워크플로가 실패한다.
@@ -91,7 +91,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 
 **Linux — deb 의존** — Tauri 번들러가 `libwebkit2gtk-4.1-0`(WebKitGTK 4.1)·`libgtk-3-0` 를 `Depends` 로 기록하고, git 은 `Recommends` 로 둔다(`tauri.conf.json`). 따라서 WebKitGTK 4.1 이 있는 배포판(Ubuntu 22.04+ · Debian 12+)이 필요하다. 빌드 러너는 `libwebkit2gtk-4.1-dev` 등을 설치하며, 실제 `Depends` 는 실행 요약(deb 메타데이터)에서 확인한다.
 
-**머지 뒤 사람 확인** — (1) Actions 에서 `tauri-package` 를 한 번 실행해 세 갈래가 끝나는지, 아티팩트 이름·크기를 본다(**macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다** — 실패하면 갈래별 로그를 본다). (2) 위 "필수 사전 설정"(Environment `release` 의 브랜치 제한·승인자)을 한 뒤 서명 키를 시크릿에 등록하고 다시 실행해 `.sig`·`latest.json` 이 생기고 시크릿이 `windows-sign` 잡에 실제로 전달되는지 본다(승인 대기가 뜨는지 포함). 이관 훅(NSIS)의 실제 설치·제거는 리허설 R 에서 확인한다.
+**머지 뒤 사람 확인** — (1) Actions 에서 `tauri-package` 를 한 번 실행해 세 갈래가 끝나는지, 아티팩트 이름·크기를 본다(**macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다** — 실패하면 갈래별 로그를 본다). (2) 위 "필수 사전 설정"(Environment `release` 의 브랜치 제한·승인자)을 한 뒤 서명 키를 시크릿에 등록하고 다시 실행해 `.sig`·`latest.json` 이 생기고 시크릿이 `sign` 잡에 실제로 전달되는지 본다(승인 대기가 뜨는지 포함). 이관 훅(NSIS)의 실제 설치·제거는 리허설 R 에서 확인한다.
 
 아이콘은 `pnpm icons` 로 `resources/icon.svg`(48px 이상)와 `resources/icon-small.svg`(16–32px)에서
 `resources/icon.png`·`icon.ico`·`icon.icns` 와 `resources/icons/*.png` 를 다시 만든다(`@resvg/resvg-js` + `png2icons`).

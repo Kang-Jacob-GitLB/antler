@@ -1490,6 +1490,781 @@
         "download": 0,
         "install": 0
       }
+    },
+    {
+      "name": "수동 dmg: 확인 → 내려받기(진행) → 열기 → 다시 열기 두 번",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 25
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 50
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 99
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "fileName": "Antler-0.2.0-arm64.dmg"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        },
+        {
+          "op": "get",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 2
+      }
+    },
+    {
+      "name": "수동 deb: 확인 → 내려받기 → 열기 → 다시 열기",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 10
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 99
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "fileName": "antler_0.2.0_amd64.deb"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "manual-file",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-file",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "antler_0.2.0_amd64.deb"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-file",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "antler_0.2.0_amd64.deb"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 1
+      }
+    },
+    {
+      "name": "수동 dmg: 열기 실패는 오류 상태(다시 시도하면 받아 연다)",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 99
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "error",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "error": "설치 파일을 열지 못했습니다. 다운로드 폴더에서 직접 여세요"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 99
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "fileName": "Antler-0.2.0-arm64.dmg"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "error",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "error": "설치 파일을 열지 못했습니다. 다운로드 폴더에서 직접 여세요"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 2,
+        "install": 0
+      }
+    },
+    {
+      "name": "수동 dmg: 내려받기 네트워크 오류 → 다시 시도",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "error",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "error": "net::ERR_INTERNET_DISCONNECTED https://github.com"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 99
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "fileName": "Antler-0.2.0-arm64.dmg"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "error",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "error": "net::ERR_INTERNET_DISCONNECTED https://github.com"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 2,
+        "install": 0
+      }
+    },
+    {
+      "name": "수동 dmg: 내려받는 중 취소는 available 로",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "available",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "downloadStart"
+        },
+        {
+          "op": "cancel",
+          "state": {
+            "status": "available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "downloadEnd",
+          "state": {
+            "status": "available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 0
+      }
+    },
+    {
+      "name": "수동 dmg: 받은 파일이 바뀌면 다시 열기 전 검증이 실패해 오류 상태",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 99
+        },
+        {
+          "status": "downloading",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "fileName": "Antler-0.2.0-arm64.dmg"
+        },
+        {
+          "status": "error",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "error": "다시 열기 전 검증 실패: 파일 크기가 맞지 않습니다"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        },
+        {
+          "op": "tamper"
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "error",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "error": "다시 열기 전 검증 실패: 파일 크기가 맞지 않습니다"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 1
+      }
+    },
+    {
+      "name": "수동 deb: 새 버전 없음·자동 확인 실패는 조용히·수동 확인 실패는 오류",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "not-available",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "idle",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "checking",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "error",
+          "mode": "manual-file",
+          "currentVersion": "0.1.0",
+          "error": "offline"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "not-available",
+            "mode": "manual-file",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "manual-file",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "error",
+            "mode": "manual-file",
+            "currentVersion": "0.1.0",
+            "error": "offline"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 3,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "수동 dmg: 사용할 수 없는 빌드는 확인하지 않는다(모드는 유지)",
+      "sent": [
+        {
+          "status": "not-available",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "not-available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "not-available",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 0,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "수동 dmg 개발 장치: 가짜 downloaded 는 파일 이름을 싣는다",
+      "sent": [
+        {
+          "status": "idle",
+          "mode": "manual-dmg",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "get",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "downloaded",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "fileName": "Antler-0.2.0-arm64.dmg"
+          }
+        },
+        {
+          "op": "dismiss",
+          "state": {
+            "status": "idle",
+            "mode": "manual-dmg",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 0,
+        "download": 0,
+        "install": 0
+      }
     }
   ]
 }

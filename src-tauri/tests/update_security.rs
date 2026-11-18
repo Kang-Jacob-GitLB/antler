@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use antler_lib::net::http::{AssetError, HttpClient, Redirects, Rewrite};
-use antler_lib::update::host::{bundle_is_nsis, updater_plugin_config, Engine, HostBackend, PluginEngine, UpdateNet, NO_KEY_MESSAGE, UPDATE_PUBKEY};
-use antler_lib::update::logic::{is_manifest_url, is_release_asset_url, ManifestOffer, STABLE_MANIFEST_URL};
+use antler_lib::update::host::{bundle_is_nsis, updater_plugin_config, Engine, HostBackend, OpenFile, PluginEngine, UpdateNet, NO_KEY_MESSAGE, UPDATE_PUBKEY};
+use antler_lib::update::logic::{detect_target, is_manifest_url, is_release_asset_url, BundleMark, ManifestOffer, Target, STABLE_MANIFEST_URL};
 use antler_lib::update::service::{Backend, Deps, Status, UpdateService, UpdateState};
 use serde_json::{json, Value};
 use tauri::test::MockRuntime;
@@ -725,7 +725,435 @@ async fn 릴리스_노트는_토큰_없이_api_에서_받는다() {
     assert!(server.requests().iter().all(|r| r.headers.iter().all(|(k, _)| k != "authorization")));
 }
 
+// ── 수동 경로(macOS dmg·Linux deb, PR 4b): 검증한 파일만 저장하고 연다 ─────────────────────
+
+/// 시험 대상: (이름, 대상, 매니페스트 키, 자산 이름 — 버전 2.0.0)
+fn manual_cases() -> Vec<(&'static str, Target, &'static str, &'static str)> {
+    let dmg_arm = detect_target("macos", "aarch64", BundleMark::App, true).expect("dmg arm64");
+    let dmg_x64 = detect_target("macos", "x86_64", BundleMark::App, true).expect("dmg x64");
+    let deb = detect_target("linux", "x86_64", BundleMark::Deb, false).expect("deb");
+    vec![
+        ("dmg arm64", dmg_arm, "darwin-aarch64-dmg", "Antler-2.0.0-arm64.dmg"),
+        ("dmg x64", dmg_x64, "darwin-x86_64-dmg", "Antler-2.0.0-x64.dmg"),
+        ("deb", deb, "linux-x86_64-deb", "antler_2.0.0_amd64.deb"),
+    ]
+}
+
+static DIRS: AtomicUsize = AtomicUsize::new(0);
+
+/// 수동 경로의 시험판: 저장 폴더는 시스템 임시 폴더 아래 새 폴더(끝나면 지운다), 여는 포트는 기록만 한다(진짜 열기 없음)
+struct ManualEnv {
+    inner: Env,
+    dir: PathBuf,
+    opened: Arc<Mutex<Vec<PathBuf>>>,
+}
+
+impl Drop for ManualEnv {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(self.dir.parent().unwrap_or(&self.dir));
+    }
+}
+
+impl ManualEnv {
+    fn backend(&self) -> &HostBackend<TestEngine> {
+        &self.inner.backend
+    }
+    fn engine(&self) -> &TestEngine {
+        &self.inner.engine
+    }
+    fn server(&self) -> &Server {
+        &self.inner.server
+    }
+    /// 저장 폴더의 파일 이름들(폴더가 없으면 빈 목록)
+    fn files(&self) -> Vec<String> {
+        let mut v: Vec<String> = fs::read_dir(&self.dir).map(|rd| rd.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        v.sort();
+        v
+    }
+}
+
+async fn manual_env(target: Target, pubkey: Option<&str>, stall: Duration, open_result: Result<(), String>, route: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> ManualEnv {
+    let app = mock_app(pubkey);
+    let server = Server::start(route).await;
+    let (manifest, api, download) = clients(&server, stall);
+    let engine = Arc::new(TestEngine { real: PluginEngine::new(app.handle().clone(), pubkey.map(|k| k.trim().to_string()), Arc::new(|| {})), verifies: AtomicUsize::new(0), installs: Mutex::new(Vec::new()) });
+    // 폴더는 한 겹 더 둔다 — 정리는 바깥 폴더를 지운다(저장 폴더 자체는 처음엔 없어야 한다: 앱이 만든다)
+    let outer = std::env::temp_dir().join(format!("antler-update-manual-{}-{}", std::process::id(), DIRS.fetch_add(1, Ordering::SeqCst)));
+    let dir = outer.join("updates");
+    let opened: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+    let log = opened.clone();
+    let open: OpenFile = Arc::new(move |p: &Path| {
+        log.lock().unwrap().push(p.to_path_buf());
+        open_result.clone()
+    });
+    let backend = Arc::new(HostBackend::with_target(UpdateNet::from_clients(manifest, api, download), engine.clone(), CURRENT.to_string(), target, dir.clone(), open));
+    ManualEnv { inner: Env { _app: app, server, engine, backend }, dir, opened }
+}
+
+fn manual_manifest(version: &str, key: &str, url: &str, sig: &str) -> String {
+    json!({ "version": version, "platforms": { key: { "url": url, "signature": sig.trim() } } }).to_string()
+}
+
+/// 정식 판의 매니페스트 → 자산(`file`) 경로(리다이렉트 둘)
+fn manual_site(manifest_body: String, file: &'static str, installer: impl Fn() -> Resp + Send + Sync + 'static) -> impl Fn(&Req) -> Resp + Send + Sync + 'static {
+    let asset = format!("/github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/{file}");
+    move |req| match req.path.as_str() {
+        "/github.com/Kang-Jacob-GitLB/antler/releases/latest/download/latest.json" => Resp::redirect("https://github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/latest.json"),
+        "/github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/latest.json" => Resp::ok(manifest_body.as_bytes()),
+        p if p == asset => Resp::redirect("https://release-assets.githubusercontent.com/gh/asset?token=redirected"),
+        p if p.starts_with("/release-assets.githubusercontent.com/gh/asset") => installer(),
+        _ => Resp::status(404),
+    }
+}
+
+fn asset_url(file: &str) -> String {
+    format!("{REPO}/v2.0.0/{file}")
+}
+
+#[tokio::test]
+async fn 수동_경로는_서명을_검증한_파일을_저장해_열고_설치_포트를_부르지_않는다() {
+    for (name, target, key, file) in manual_cases() {
+        let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+        assert_eq!(env.backend().mode(), target.mode(), "{name}");
+        assert_eq!(env.backend().check().await, Ok(Some("2.0.0".to_string())), "{name}");
+        assert!(env.files().is_empty(), "{name}: 검증 전에는 디스크에 아무것도 없다(폴더도 없다)");
+        let seen = Mutex::new(Vec::<f64>::new());
+        env.backend().download("2.0.0", &|p| seen.lock().unwrap().push(p), &CancellationToken::new()).await.unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(*seen.lock().unwrap(), [100.0], "{name}");
+        // 자산 이름 그대로 저장되고(임시 파일은 남지 않는다) 그 경로를 한 번 열었다
+        assert_eq!(env.files(), [file.to_string()], "{name}");
+        assert_eq!(fs::read(env.dir.join(file)).unwrap(), PAYLOAD, "{name}");
+        assert_eq!(*env.opened.lock().unwrap(), [env.dir.join(file)], "{name}");
+        assert_eq!(env.backend().file_name().as_deref(), Some(file), "{name}");
+        assert!(env.engine().installs.lock().unwrap().is_empty(), "{name}: 수동 경로는 설치 포트를 부르지 않는다");
+        // 다시 열기: 파일을 다시 읽어 **다시 검증한 뒤** 연다
+        env.backend().install().unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(env.engine().verifies.load(Ordering::SeqCst), 2, "{name}: 내려받을 때 + 다시 열기 전");
+        assert_eq!(env.opened.lock().unwrap().len(), 2, "{name}");
+        assert!(env.engine().installs.lock().unwrap().is_empty(), "{name}");
+        // 요청은 토큰·쿠키 없이 나갔다
+        assert!(env.server().requests().iter().all(|r| r.headers.iter().all(|(k, _)| k != "authorization" && k != "cookie")), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn 수동_경로도_서명이_틀린_바이트는_저장하지도_열지도_않는다() {
+    // (이름, 서버가 주는 바이트, 매니페스트의 서명, 기대 오류)
+    let cases: [(&str, Vec<u8>, &str, &str); 5] = [
+        ("바이트 변조", [PAYLOAD, b"x"].concat(), SIG_GOOD, "업데이트 서명이 올바르지 않습니다"),
+        ("다른 키로 서명", PAYLOAD.to_vec(), SIG_WRONGKEY, "업데이트 서명이 올바르지 않습니다"),
+        ("서명된 버전이 다르다", PAYLOAD.to_vec(), SIG_OLDVER, "업데이트 서명의 버전이 맞지 않습니다"),
+        ("서명에 버전이 없다", PAYLOAD.to_vec(), SIG_NOVER, "업데이트 서명의 버전이 맞지 않습니다"),
+        ("서명이 깨졌다", PAYLOAD.to_vec(), "AAAA", "업데이트 서명이 올바르지 않습니다"),
+    ];
+    for (cname, target, key, file) in manual_cases() {
+        for (name, bytes, sig, want) in &cases {
+            let bytes = bytes.clone();
+            let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), sig), file, move || Resp::ok(&bytes))).await;
+            assert_eq!(env.backend().check().await, Ok(Some("2.0.0".to_string())), "{cname} {name}");
+            assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err(want.to_string()), "{cname} {name}");
+            assert!(env.files().is_empty(), "{cname} {name}: 최종 위치(폴더 포함)에 아무것도 없다: {:?}", env.files());
+            assert!(env.opened.lock().unwrap().is_empty(), "{cname} {name}: 열었다");
+            assert!(env.engine().installs.lock().unwrap().is_empty(), "{cname} {name}");
+            assert_eq!(env.backend().file_name(), None, "{cname} {name}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn 수동_경로는_공개_키가_없으면_네트워크를_열기_전에_거부하고_폴더도_만들지_않는다() {
+    for (name, target, key, file) in manual_cases() {
+        let env = manual_env(target, None, Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+        assert_eq!(env.backend().check().await, Ok(Some("2.0.0".to_string())), "{name}: 확인은 동작한다");
+        let before = env.server().requests().len();
+        assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err(NO_KEY_MESSAGE.to_string()), "{name}");
+        assert_eq!(env.server().requests().len(), before, "{name}: 설치본을 요청하지 않았다");
+        assert!(env.files().is_empty() && !env.dir.exists(), "{name}");
+        assert_eq!(env.backend().install(), Err(NO_KEY_MESSAGE.to_string()), "{name}");
+        assert!(env.opened.lock().unwrap().is_empty() && env.engine().installs.lock().unwrap().is_empty(), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn 수동_경로는_서명이_없거나_다른_플랫폼_키뿐인_매니페스트를_받지_않는다() {
+    let (_, target, key, file) = manual_cases().remove(0);
+    // 서명 없음·깨짐: 설치본 요청 전에 거부
+    for sig in ["", "not base64 !!"] {
+        let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), sig), file, || Resp::ok(PAYLOAD))).await;
+        assert_eq!(env.backend().check().await, Err("업데이트 서명 정보가 올바르지 않습니다".to_string()), "{sig}");
+        assert_eq!(env.server().hits("asset"), 0);
+        assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err("다시 확인한 뒤 시도하세요".to_string()));
+        assert!(env.files().is_empty());
+    }
+    // 이 환경의 키가 없고 다른 키만 있다(일반 키·다른 아키텍처·Windows 키 포함) — 일반 키로 내려가지 않는다
+    for other in ["darwin-aarch64", "darwin-x86_64-dmg", "linux-x86_64-deb", "windows-x86_64-nsis", "windows-x86_64", "darwin-aarch64-app"] {
+        let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", other, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+        assert_eq!(env.backend().check().await, Err("이 환경에 맞는 업데이트가 없습니다".to_string()), "{other}");
+        assert_eq!(env.server().hits("asset"), 0, "{other}");
+    }
+}
+
+#[tokio::test]
+async fn 수동_경로는_이미_있는_파일을_덮어쓰지_않는다() {
+    let (_, target, key, file) = manual_cases().remove(0);
+    // 같은 이름의 다른 내용: 건드리지 않고 거부한다(검증은 통과했지만 저장하지 않는다 — 열지도 않는다)
+    let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+    fs::create_dir_all(&env.dir).unwrap();
+    fs::write(env.dir.join(file), b"OLD-CONTENT").unwrap();
+    env.backend().check().await.expect("확인");
+    assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err(antler_lib::update::store::EXISTS.to_string()));
+    assert_eq!(fs::read(env.dir.join(file)).unwrap(), b"OLD-CONTENT", "기존 파일은 그대로다");
+    assert_eq!(env.files(), [file.to_string()], "임시 파일이 남지 않았다");
+    assert!(env.opened.lock().unwrap().is_empty());
+    // 같은 내용(같은 버전을 다시 받는 경우)은 다시 쓰지 않고 그것을 연다
+    fs::write(env.dir.join(file), PAYLOAD).unwrap();
+    env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await.expect("같은 내용은 재사용");
+    assert_eq!(env.files(), [file.to_string()]);
+    assert_eq!(*env.opened.lock().unwrap(), [env.dir.join(file)]);
+}
+
+#[tokio::test]
+async fn 수동_경로의_다시_열기는_디스크의_파일이_바뀌었으면_열지_않는다() {
+    let (_, target, key, file) = manual_cases().remove(0);
+    let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+    env.backend().check().await.expect("확인");
+    env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await.expect("내려받기");
+    assert_eq!(env.opened.lock().unwrap().len(), 1);
+    // 받은 뒤 파일이 바뀌었다
+    fs::write(env.dir.join(file), [PAYLOAD, b"tampered"].concat()).unwrap();
+    assert_eq!(env.backend().install(), Err("다시 열기 전 검증 실패: 업데이트 서명이 올바르지 않습니다".to_string()));
+    assert_eq!(env.opened.lock().unwrap().len(), 1, "열지 않았다");
+    // 지워졌다
+    fs::remove_file(env.dir.join(file)).unwrap();
+    let e = env.backend().install().expect_err("없다");
+    assert!(e.starts_with("다시 열기 전 검증 실패: "), "{e}");
+    assert_eq!(env.opened.lock().unwrap().len(), 1);
+    // 링크·폴더로 바뀌었다(일반 파일만 읽는다)
+    fs::create_dir(env.dir.join(file)).unwrap();
+    assert!(env.backend().install().is_err());
+    assert_eq!(env.opened.lock().unwrap().len(), 1);
+    assert!(env.engine().installs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn 수동_경로의_열기_실패는_오류로_알리고_파일은_남긴다() {
+    let (_, target, key, file) = manual_cases().remove(0);
+    let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Err("denied C:\\secret\\path".to_string()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+    env.backend().check().await.expect("확인");
+    // 오류 문구에 열기 실패의 원문(경로)이 섞이지 않는다
+    assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err("설치 파일을 열지 못했습니다. 다운로드 폴더에서 직접 여세요".to_string()));
+    assert_eq!(env.files(), [file.to_string()], "검증한 파일은 남는다(직접 열 수 있게)");
+}
+
+#[tokio::test]
+async fn 수동_경로의_크기_상한_리다이렉트_취소는_아무것도_저장하지_않는다() {
+    let (_, target, key, file) = manual_cases().remove(2);
+    // 크기 상한(300MB)은 받기 전에
+    let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::Lie { content_length: 300_000_001 })).await;
+    env.backend().check().await.expect("확인");
+    assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err("응답이 너무 큽니다".to_string()));
+    assert!(env.files().is_empty());
+    assert_eq!(env.engine().verifies.load(Ordering::SeqCst), 0);
+    // 허용 목록 밖 리다이렉트
+    for to in ["https://evil.example/a.deb", "http://release-assets.githubusercontent.com/a", "https://github.com:8443/a", "https://u:p@github.com/a"] {
+        let (label, to) = (to, to.to_string());
+        let route = move |r: &Req| match r.path.as_str() {
+            "/github.com/Kang-Jacob-GitLB/antler/releases/latest/download/latest.json" => Resp::redirect("https://github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/latest.json"),
+            "/github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/latest.json" => Resp::ok(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD).as_bytes()),
+            p if p.ends_with(file) => Resp::redirect(&to),
+            _ => Resp::ok(PAYLOAD),
+        };
+        let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), route).await;
+        env.backend().check().await.expect("확인");
+        assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err("허용되지 않은 다운로드 주소입니다".to_string()), "{label}");
+        assert!(env.files().is_empty() && env.opened.lock().unwrap().is_empty(), "{label}");
+    }
+    // 받는 도중 취소
+    let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::Stall { content_length: 1000, prefix: vec![b'x'; 10] })).await;
+    env.backend().check().await.expect("확인");
+    let cancel = CancellationToken::new();
+    let canceller = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        cancel.cancel();
+    };
+    let (got, ()) = tokio::join!(env.backend().download("2.0.0", &|_| {}, &cancel), canceller);
+    assert_eq!(got, Err("취소되었습니다".to_string()));
+    assert!(env.files().is_empty() && env.opened.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn 수동_경로의_매니페스트는_기대_파일_이름과_다르면_설치본을_요청하지_않는다() {
+    let (_, target, key, _) = manual_cases().remove(0);
+    // 같은 키로 서명된 다른 플랫폼·다른 버전의 자산을 끼워 넣는 경우
+    for wrong in ["Antler-2.0.0-x64.dmg", "antler_2.0.0_amd64.deb", "Antler-Setup-2.0.0-x64.exe", "Antler-1.9.0-arm64.dmg", "Antler-2.0.0-arm64.dmg.exe", "latest.json"] {
+        let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(wrong), SIG_GOOD), "x", || Resp::ok(PAYLOAD))).await;
+        assert_eq!(env.backend().check().await, Err("업데이트 주소가 올바르지 않습니다".to_string()), "{wrong}");
+        assert_eq!(env.server().hits("asset"), 0, "{wrong}");
+    }
+}
+
+#[tokio::test]
+async fn 수동_서비스는_상태_순서를_지키고_다시_열기를_여러_번_누를_수_있다() {
+    let (_, target, key, file) = manual_cases().remove(0);
+    let env = manual_env(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+    let sent: Arc<Mutex<Vec<UpdateState>>> = Arc::default();
+    let sink = sent.clone();
+    let svc = UpdateService::new(
+        env.inner.backend.clone(),
+        Deps { current_version: CURRENT.to_string(), enabled: true, fake: None, skipped: Arc::new(|| None), set_skipped: Arc::new(|_| Ok(())), send: Arc::new(move |s| sink.lock().unwrap().push(s.clone())) },
+    );
+    assert_eq!(svc.get().mode, "manual-dmg");
+    assert_eq!(svc.check(true).await.status, Status::Available);
+    let done = svc.download().await;
+    assert_eq!((done.status, done.file_name.as_deref(), done.mode), (Status::Downloaded, Some(file), "manual-dmg"));
+    svc.install().await;
+    svc.install().await;
+    assert_eq!(env.opened.lock().unwrap().len(), 3, "내려받을 때 한 번 + 다시 열기 두 번(표식이 풀려 두 번째도 동작한다)");
+    assert_eq!(svc.get().status, Status::Downloaded);
+    let order: Vec<Status> = sent.lock().unwrap().iter().map(|s| s.status).collect();
+    assert_eq!(order, [Status::Checking, Status::Available, Status::Downloading, Status::Downloading, Status::Downloaded]);
+    assert!(env.engine().installs.lock().unwrap().is_empty());
+    // 파일이 바뀌면 다시 열기는 오류 상태로 알린다(열지 않는다)
+    fs::write(env.dir.join(file), b"tampered").unwrap();
+    svc.install().await;
+    let s = svc.get();
+    assert_eq!(s.status, Status::Error);
+    assert!(s.error.as_deref().is_some_and(|e| e.starts_with("다시 열기 전 검증 실패: ")), "{:?}", s.error);
+    assert_eq!(env.opened.lock().unwrap().len(), 3);
+}
+
+// ── 수동 경로의 파일 저장(`update::store`) ─────────────────────────────────────
+
+struct TmpDir(PathBuf);
+
+impl TmpDir {
+    fn new() -> Self {
+        let p = std::env::temp_dir().join(format!("antler-update-store-{}-{}", std::process::id(), DIRS.fetch_add(1, Ordering::SeqCst)));
+        fs::create_dir_all(&p).unwrap();
+        TmpDir(p)
+    }
+    fn names(&self, dir: &str) -> Vec<String> {
+        let mut v: Vec<String> = fs::read_dir(self.0.join(dir)).map(|rd| rd.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        v.sort();
+        v
+    }
+}
+
+impl Drop for TmpDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn 저장은_안전한_이름만_받고_폴더_밖에_쓰지_않는다() {
+    use antler_lib::update::store::{store_verified, BAD_NAME};
+    let tmp = TmpDir::new();
+    let dir = tmp.0.join("updates");
+    let long = "a".repeat(202);
+    for bad in ["../evil.dmg", "..\\evil.dmg", "a/b.dmg", "a\\b.dmg", "", ".hidden.dmg", "/abs.dmg", "C:evil.dmg", "x\0.dmg", "a..b.dmg", "..", "evil.dmg\n", "é.dmg", long.as_str()] {
+        assert_eq!(store_verified(&dir, bad, PAYLOAD), Err(BAD_NAME.to_string()), "{bad:?}");
+    }
+    assert!(!dir.exists(), "거부는 폴더를 만들기 전이다");
+    assert!(tmp.names("").is_empty(), "임시 폴더 밖·안 어디에도 파일이 생기지 않았다: {:?}", tmp.names(""));
+}
+
+#[test]
+fn 저장은_덮어쓰지_않고_같은_내용만_재사용한다() {
+    use antler_lib::update::store::{store_verified, EXISTS, SAVE_FAILED};
+    let tmp = TmpDir::new();
+    let dir = tmp.0.join("updates");
+    let name = "Antler-2.0.0-arm64.dmg";
+    // 새 파일: 만들고 임시 파일은 남기지 않는다
+    assert_eq!(store_verified(&dir, name, PAYLOAD), Ok(dir.join(name)));
+    assert_eq!(fs::read(dir.join(name)).unwrap(), PAYLOAD);
+    assert_eq!(tmp.names("updates"), [name.to_string()]);
+    // 같은 내용을 다시: 재사용(다시 쓰지 않는다)
+    assert_eq!(store_verified(&dir, name, PAYLOAD), Ok(dir.join(name)));
+    // 다른 내용: 거부하고 기존 파일은 그대로
+    assert_eq!(store_verified(&dir, name, b"OTHER"), Err(EXISTS.to_string()));
+    assert_eq!(store_verified(&dir, name, &[PAYLOAD, b"x"].concat()), Err(EXISTS.to_string()));
+    assert_eq!(fs::read(dir.join(name)).unwrap(), PAYLOAD);
+    assert_eq!(tmp.names("updates"), [name.to_string()]);
+    // 같은 이름이 폴더다: 거부
+    fs::create_dir(dir.join("dir.dmg")).unwrap();
+    assert_eq!(store_verified(&dir, "dir.dmg", PAYLOAD), Err(EXISTS.to_string()));
+    assert!(dir.join("dir.dmg").is_dir());
+    // 이전 실행이 남긴 임시 파일은 지우고 새로 쓴다
+    fs::write(dir.join("stale.dmg.part"), b"STALE").unwrap();
+    assert_eq!(store_verified(&dir, "stale.dmg", PAYLOAD), Ok(dir.join("stale.dmg")));
+    assert_eq!(fs::read(dir.join("stale.dmg")).unwrap(), PAYLOAD);
+    assert!(!dir.join("stale.dmg.part").exists());
+    // 임시 이름이 폴더면 저장하지 못한다(최종 이름은 생기지 않는다)
+    fs::create_dir(dir.join("blocked.dmg.part")).unwrap();
+    assert_eq!(store_verified(&dir, "blocked.dmg", PAYLOAD), Err(SAVE_FAILED.to_string()));
+    assert!(!dir.join("blocked.dmg").exists());
+    // 저장 폴더 자리에 파일이 있으면 저장하지 못한다
+    let file_as_dir = tmp.0.join("not-a-dir");
+    fs::write(&file_as_dir, b"x").unwrap();
+    assert_eq!(store_verified(&file_as_dir, name, PAYLOAD), Err(SAVE_FAILED.to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn 저장은_심볼릭_링크를_따라가지_않는다() {
+    use antler_lib::update::store::{store_verified, EXISTS};
+    let tmp = TmpDir::new();
+    let dir = tmp.0.join("updates");
+    fs::create_dir_all(&dir).unwrap();
+    let victim = tmp.0.join("victim.txt");
+    fs::write(&victim, b"SECRET").unwrap();
+    // 최종 이름이 (같은 내용을 가리키는) 링크·끊긴 링크여도 거부한다 — 링크 너머에 쓰지 않는다
+    std::os::unix::fs::symlink(&victim, dir.join("a.dmg")).unwrap();
+    std::os::unix::fs::symlink(tmp.0.join("nowhere"), dir.join("b.dmg")).unwrap();
+    assert_eq!(store_verified(&dir, "a.dmg", b"SECRET"), Err(EXISTS.to_string()));
+    assert_eq!(store_verified(&dir, "b.dmg", PAYLOAD), Err(EXISTS.to_string()));
+    // 임시 이름이 링크면 링크 자체를 지우고(대상은 건드리지 않는다) 새 파일을 만든다
+    std::os::unix::fs::symlink(&victim, dir.join("c.dmg.part")).unwrap();
+    assert!(store_verified(&dir, "c.dmg", PAYLOAD).is_ok());
+    assert_eq!(fs::read(&victim).unwrap(), b"SECRET");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(fs::metadata(dir.join("c.dmg")).unwrap().permissions().mode() & 0o777, 0o600);
+}
+
+#[test]
+fn 다시_읽기는_일반_파일만_상한_안에서_읽는다() {
+    use antler_lib::update::store::{read_stored, store_verified};
+    let tmp = TmpDir::new();
+    let dir = tmp.0.join("updates");
+    let path = store_verified(&dir, "a.deb", PAYLOAD).unwrap();
+    assert_eq!(read_stored(&path), Ok(PAYLOAD.to_vec()));
+    assert!(read_stored(&dir.join("none.deb")).is_err());
+    assert!(read_stored(&dir).is_err(), "폴더");
+    // 상한(300MB)을 넘으면 읽지 않고 거부한다(희소 파일 — 실제로 쓰지 않는다)
+    let big = dir.join("big.deb");
+    fs::File::create(&big).unwrap().set_len(300_000_001).unwrap();
+    assert_eq!(read_stored(&big), Err("설치 파일이 너무 큽니다".to_string()));
+}
+
 // ── 소스 검사 ────────────────────────────────────────────────────────────────
+
+#[test]
+fn 수동_경로는_설치_포트_앞에서_갈라진다() {
+    let host = code("src/update/host.rs");
+    // `Engine::install` 의 호출은 NSIS 경로 한 곳이고, 수동 경로(`reopen`)로 갈라지는 줄이 그 앞에 있다
+    assert_eq!(host.matches("engine.install(").count(), 1);
+    assert!(host.find("return self.reopen(m)").expect("수동 분기") < host.find("engine.install(").expect("설치 포트"));
+    // 수동 경로의 내려받기도 저장 전에 서명을 검증한다(검증 줄이 저장 호출보다 앞)
+    let dl = host.find("async fn download(").expect("download");
+    let body = &host[dl..];
+    assert!(body.find("self.engine.verify(").expect("검증") < body.find("self.deliver(").expect("저장"));
+    // 저장은 `store_verified` 한 곳, 다시 읽기는 `read_stored` 한 곳이다
+    assert_eq!(host.matches("store_verified(").count(), 1);
+    assert_eq!(host.matches("read_stored(").count(), 1);
+    // 파일을 만들고 쓰는 곳은 `store.rs` 뿐이다
+    for rel in ["src/update/host.rs", "src/update/service.rs", "src/update/logic.rs"] {
+        let c = code(rel);
+        for bad in ["std::fs", "fs::write", "File::create", "OpenOptions", "remove_file", "remove_dir"] {
+            assert!(!c.contains(bad), "{rel}: `{bad}`");
+        }
+    }
+}
 
 #[test]
 fn 건너뛴_버전을_쓰는_곳은_업데이트_호스트_한_곳이다() {
@@ -766,7 +1194,7 @@ fn capability_에_업데이트_플러그인_권한이_없고_설정에_플러그
     let host = code("src/update/host.rs");
     assert!(host.contains("UPDATE_PUBKEY.map(str::to_string)"), "엔진의 키도 같은 상수다");
     assert_eq!(host.matches("UPDATE_PUBKEY").count(), 2, "정의 하나·엔진 하나 (그 밖의 키 출처가 없다. 플러그인 설정은 lib.rs 가 같은 상수로 만든다)");
-    assert!(host.contains("enabled: bundle_is_nsis()"), "사용 여부는 번들 표식 하나");
+    assert!(host.contains("enabled: detected.is_some()") && host.contains("let detected = current_target();"), "사용 여부는 번들 표식(과 실행 파일 위치)으로만 정한다");
     assert_eq!(host.matches("std::env::var(").count(), 1, "환경 변수를 읽는 곳은 개발 장치(fake_kind) 하나뿐이다 — 키·사용 여부를 환경 변수로 바꾸지 않는다");
 }
 

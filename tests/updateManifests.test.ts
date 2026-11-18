@@ -43,6 +43,28 @@ describe('latest.json (Tauri 업데이터)', () => {
     expect(out).toBe(read('tests', 'fixtures', 'update', 'latest.json'))
   })
 
+  it('수동 경로(dmg·deb) 항목까지 담은 표본(latest-all.json)도 스크립트 출력과 바이트까지 같다 — Rust 시험이 대상마다 check_manifest_for 에 먹인다', () => {
+    const extras = M.MANUAL_ASSETS.map((a: { key: string; name: (v: string) => string }) => ({ key: a.key, fileName: a.name('2.0.0'), signature: SIG }))
+    const out = M.buildLatestJson({ version: '2.0.0', fileName: M.installerName('2.0.0'), signature: SIG, pubDate: DATE, extras })
+    expect(out).toBe(read('tests', 'fixtures', 'update', 'latest-all.json'))
+  })
+
+  it('수동 경로의 키·파일 이름이 앱(logic.rs)의 상수·규칙과 같다', () => {
+    const rs = read('src-tauri', 'src', 'update', 'logic.rs')
+    const keys = [...rs.matchAll(/pub const PLATFORM_KEY_(?:DMG_ARM64|DMG_X64|DEB_X64): &str = "([^"]+)";/g)].map((m) => m[1])
+    expect(keys).toEqual(M.MANUAL_ASSETS.map((a: { key: string }) => a.key))
+    // 앱의 기대 이름(Target::asset_name): Antler-<v>-<arm64|x64>.dmg · antler_<v>_amd64.deb
+    expect(rs).toContain('format!("Antler-{v}-{}.dmg", self.asset_arch)')
+    expect(rs).toContain('format!("antler_{v}_{}.deb", self.asset_arch)')
+    expect(M.MANUAL_ASSETS.map((a: { name: (v: string) => string }) => a.name('2.0.0'))).toEqual(['Antler-2.0.0-arm64.dmg', 'Antler-2.0.0-x64.dmg', 'antler_2.0.0_amd64.deb'])
+    // 워크플로의 "설치본 이름 정리"가 같은 이름으로 만든다
+    const wf = read('.github', 'workflows', 'tauri-package.yml')
+    expect(wf).toContain('out/Antler-${VERSION}-${{ matrix.arch }}.dmg')
+    expect(wf).toContain('out/antler_${VERSION}_${{ matrix.arch }}.deb')
+    // 이 이름들은 TS 수동 경로(pickAsset)의 이름 규칙이기도 하다
+    for (const a of M.MANUAL_ASSETS as { name: (v: string) => string }[]) expect(tsIsSafeFileName(a.name('2.0.0'))).toBe(true)
+  })
+
   it('url 은 이 저장소의 릴리스 자산 주소이고 TS 판정(isReleaseAssetUrl)도 통과한다', () => {
     for (const version of ['2.0.0', '2.0.0-rc.1', '10.20.30']) {
       const doc = JSON.parse(M.buildLatestJson({ version, fileName: M.installerName(version), signature: SIG, pubDate: DATE }))
@@ -162,7 +184,10 @@ describe('makeManifests (실물 대조 가드)', () => {
     const dir = installerDir('2.0.0', content)
     const r = M.makeManifests({ dir, version: '2.0.0', signatureText: `${SIG}\n`, migration: undefined, now: DATE })
     expect(Object.keys(r.files).sort()).toEqual(['latest.json', 'latest.yml'])
-    expect(r.warnings).toEqual([])
+    // 이 폴더에는 macOS·Linux 설치본이 없다 — 항목을 건너뛰었다고 경고한다(Windows 항목은 정상)
+    expect(r.warnings).toHaveLength(3)
+    expect(r.warnings.every((w: string) => w.includes('없어 latest.json 의'))).toBe(true)
+    expect(Object.keys(JSON.parse(r.files['latest.json']).platforms)).toEqual(['windows-x86_64-nsis', 'windows-x86_64'])
     expect(r.sha512).toBe(sha)
     expect(r.size).toBe(content.length)
     expect(r.files['latest.yml']).toContain(`sha512: ${sha}`)
@@ -176,6 +201,36 @@ describe('makeManifests (실물 대조 가드)', () => {
       expect(Object.keys(r.files)).toEqual(['latest.yml'])
       expect(r.warnings.join()).toContain('latest.json')
     }
+  })
+
+  it('설치본과 .sig 가 함께 있는 macOS·Linux 자산만 latest.json 에 넣고, 없거나 서명이 없으면 경고한다', () => {
+    const dir = installerDir('2.0.0', content)
+    const put = (name: string, text: string): void => writeFileSync(join(dir, name), text)
+    // dmg arm64: 설치본 + 서명 → 들어간다. dmg x64: 설치본만 → 경고. deb: 둘 다 없음 → 경고
+    put('Antler-2.0.0-arm64.dmg', 'dmg bytes')
+    put('Antler-2.0.0-arm64.dmg.sig', `${SIG}\n`)
+    put('Antler-2.0.0-x64.dmg', 'dmg bytes')
+    const r = M.makeManifests({ dir, version: '2.0.0', signatureText: SIG, now: DATE })
+    const doc = JSON.parse(r.files['latest.json'])
+    expect(Object.keys(doc.platforms)).toEqual(['windows-x86_64-nsis', 'windows-x86_64', 'darwin-aarch64-dmg'])
+    expect(doc.platforms['darwin-aarch64-dmg']).toEqual({ signature: SIG, url: `${M.DOWNLOAD_PREFIX}v2.0.0/Antler-2.0.0-arm64.dmg` })
+    expect(r.warnings.join('\n')).toContain('Antler-2.0.0-x64.dmg 의 서명(.sig)이 없어')
+    expect(r.warnings.join('\n')).toContain('antler_2.0.0_amd64.deb 이(가) 없어')
+    // latest.yml(Electron 이관용)은 Windows 설치본만 가리킨다
+    expect(r.files['latest.yml']).not.toContain('dmg')
+    // Windows 서명이 없어도 수동 경로 항목이 있으면 그것만으로 latest.json 을 만든다
+    const only = M.makeManifests({ dir, version: '2.0.0', signatureText: null, now: DATE })
+    expect(Object.keys(JSON.parse(only.files['latest.json']).platforms)).toEqual(['darwin-aarch64-dmg'])
+    // 서명 형식이 틀린 .sig 는 거부한다
+    put('Antler-2.0.0-x64.dmg.sig', 'not base64 !!')
+    expect(() => M.makeManifests({ dir, version: '2.0.0', signatureText: SIG, now: DATE })).toThrow(/서명 형식/)
+  })
+
+  it('수동 경로 서명이 하나도 없고 Windows 서명도 없으면 latest.json 을 만들지 않는다', () => {
+    const dir = installerDir('2.0.0', content)
+    const r = M.makeManifests({ dir, version: '2.0.0', signatureText: null, now: DATE })
+    expect('latest.json' in r.files).toBe(false)
+    expect(r.warnings.join('\n')).toContain('latest.json 을 만들지 않았습니다')
   })
 
   it('ELECTRON_MIGRATION 이 off·false·0·no(대소문자·공백 무시)면 latest.yml 을 만들지 않는다', () => {
