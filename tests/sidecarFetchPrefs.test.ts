@@ -7,9 +7,7 @@ import type { AppConfig } from '../src/shared/types'
 import { ConfigStore } from '../src/main/services/ConfigStore'
 import { DEFAULT_AUTO_FETCH_MINUTES, FetchService } from '../src/main/services/FetchService'
 import { RepoService } from '../src/main/services/RepoService'
-import { handleFetchApprove, type ApproveTarget } from '../src/sidecar/fetchApprove'
 import { fetchPrefsOf, FetchPrefsSender, type FetchPrefsMessage } from '../src/sidecar/fetchPrefs'
-import { FETCH_APPROVE_KINDS } from '../src/sidecar/protocol'
 
 const tmp = (): string => join(mkdtempSync(join(tmpdir(), 'antler-fetchprefs-')), 'antler.config.json')
 const FP_A = 'a'.repeat(64)
@@ -62,88 +60,20 @@ describe('사이드카 fetchPrefs', () => {
   })
 
   it('onChange 에서 미러 다음에, 시작 때는 ready 전에 보낸다(순서는 소스로 고정한다)', () => {
-    const src = readFileSync(join(SRC, 'sidecar', 'index.ts'), 'utf8')
+    const src = readFileSync(join(SRC, 'sidecar', 'legacy.ts'), 'utf8')
     expect(src).toMatch(/config\.onChange = \(c\) => \{\s*mirror\.push\(c\)\s*fetchPrefs\.push\(c\)\s*\}/)
     const start = src.indexOf('mirror.push(config.get())')
     expect(start).toBeGreaterThan(0)
-    expect(src.slice(start, src.indexOf("out({ t: 'ready' })"))).toContain('fetchPrefs.push(config.get())')
+    expect(src.slice(start, src.indexOf('let netConfig'))).toContain('fetchPrefs.push(config.get())')
     // 기존 미러 보내기는 그대로다(MirrorSender 를 건드리지 않았다)
     expect(src).toContain('const mirror = new MirrorSender(out)')
   })
 })
 
-describe('사이드카 fetchApprove', () => {
-  function recorder(known: string[]): { target: ApproveTarget; calls: [string, string, string][] } {
-    const calls: [string, string, string][] = []
-    return {
-      calls,
-      target: {
-        repo: (id) => (known.includes(id) ? { id } : undefined),
-        setFetchApproval: (id, fp) => void calls.push(['approval', id, String(fp)]),
-        setTrustedConfig: (id, fp) => void calls.push(['trusted', id, fp])
-      }
-    }
-  }
-
-  it('허용 목록의 kind·존재하는 저장소·소문자 hex 64자 지문만 저장한다', () => {
-    const { target, calls } = recorder(['a'])
-    expect([...FETCH_APPROVE_KINDS]).toEqual(['approval', 'trusted'])
-    expect(handleFetchApprove(target, { kind: 'approval', repoId: 'a', fingerprint: FP_A })).toBe(true)
-    expect(handleFetchApprove(target, { kind: 'trusted', repoId: 'a', fingerprint: FP_B })).toBe(true)
-    expect(calls).toEqual([
-      ['approval', 'a', FP_A],
-      ['trusted', 'a', FP_B]
-    ])
-  })
-
-  it('모르는 kind·없는 저장소·잘못된 지문·해제(null)·빈 메시지는 버린다', () => {
-    const { target, calls } = recorder(['a'])
-    const bad: object[] = [
-      { kind: 'constructor', repoId: 'a', fingerprint: FP_A },
-      { kind: 'toString', repoId: 'a', fingerprint: FP_A },
-      { kind: 'Approval', repoId: 'a', fingerprint: FP_A },
-      { kind: 5, repoId: 'a', fingerprint: FP_A },
-      { repoId: 'a', fingerprint: FP_A },
-      { kind: 'approval', repoId: 'ghost', fingerprint: FP_A },
-      { kind: 'approval', repoId: 5, fingerprint: FP_A },
-      { kind: 'approval', repoId: null, fingerprint: FP_A },
-      { kind: 'approval', repoId: 'a', fingerprint: null },
-      { kind: 'approval', repoId: 'a', fingerprint: '' },
-      { kind: 'approval', repoId: 'a', fingerprint: 'forged' },
-      { kind: 'approval', repoId: 'a', fingerprint: 'A'.repeat(64) },
-      { kind: 'approval', repoId: 'a', fingerprint: 'a'.repeat(63) },
-      { kind: 'approval', repoId: 'a', fingerprint: 'a'.repeat(65) },
-      { kind: 'approval', repoId: 'a', fingerprint: `${'a'.repeat(63)}\n` },
-      { kind: 'trusted', repoId: 'a', fingerprint: `${'a'.repeat(64)}\n` },
-      { kind: 'trusted', repoId: 'a', fingerprint: 'g'.repeat(64) },
-      {}
-    ]
-    for (const m of bad) expect(handleFetchApprove(target, m), JSON.stringify(m)).toBe(false)
-    expect(calls).toEqual([])
-  })
-
-  it('실제 ConfigStore 에 저장되고 fetchPrefs 로 되돌아간다', () => {
-    const sent: FetchPrefsMessage[] = []
-    const c = new ConfigStore(tmp())
-    const s = new FetchPrefsSender((m) => sent.push(m))
-    c.onChange = (cfg) => s.push(cfg)
-    s.push(c.get())
-    const r = c.addRepo({ sourceId: 'local', path: '/tmp/x', name: 'x' })
-    expect(handleFetchApprove(c, { kind: 'approval', repoId: r.id, fingerprint: FP_A })).toBe(true)
-    expect(c.fetchApproval(r.id)).toBe(FP_A)
-    expect(handleFetchApprove(c, { kind: 'trusted', repoId: r.id, fingerprint: FP_B })).toBe(true)
-    expect(c.trustedConfig(r.id)).toBe(FP_B)
-    expect(sent.at(-1)).toMatchObject({ approvals: { [r.id]: FP_A }, trusted: { [r.id]: FP_B } })
-    // 지워진 저장소에는 쓰지 않는다
-    c.removeRepo(r.id)
-    expect(handleFetchApprove(c, { kind: 'approval', repoId: r.id, fingerprint: FP_B })).toBe(false)
-    expect(c.fetchApproval(r.id)).toBeUndefined()
-  })
-
-  it('승인을 쓰는 길은 fetchApprove 하나다: renderer 의 채널로는 쓸 수 없고, 쓰는 코드는 Electron FetchService 와 이 핸들러뿐이다', () => {
+describe('승인 쓰기 길', () => {
+  it('승인을 쓰는 코드는 Electron 판 ConfigStore·FetchService 뿐이다: renderer 의 채널로는 쓸 수 없고 사이드카에는 쓰는 코드가 없다(Rust 는 fetch_host.rs 한 곳)', () => {
     // 채널 허용 목록에 승인·신뢰를 쓰는 채널이 없다
     for (const ch of IPC_CHANNELS) expect(ch, ch).not.toMatch(/approv|trust|fetchApprove/i)
-    // 사이드카의 req 처리는 IPC_CHANNELS 밖의 채널을 막는다 — fetchApprove 는 채널 이름이 아니라 최상위 t 다
     const writers: string[] = []
     const walk = (dir: string): void => {
       for (const name of readdirSync(dir)) {
@@ -153,13 +83,9 @@ describe('사이드카 fetchApprove', () => {
       }
     }
     walk(SRC)
-    expect(writers.sort()).toEqual(['main/services/ConfigStore.ts', 'main/services/FetchService.ts', 'sidecar/fetchApprove.ts'])
-    // 사이드카에서 fetchApprove 를 처리하는 곳은 onLine 의 최상위 t 분기 하나다
-    const index = readFileSync(join(SRC, 'sidecar', 'index.ts'), 'utf8')
-    expect(index.match(/msg\.t === 'fetchApprove'/g)).toHaveLength(1)
-    expect(index.match(/handleFetchApprove\(/g)).toHaveLength(1)
-    // req 처리(onRequest)와 호스트 응답은 승인 처리기에 닿지 않는다
-    expect(index.slice(index.indexOf('async function onRequest'), index.indexOf('function onLine'))).not.toMatch(/Approve/)
+    expect(writers.sort()).toEqual(['main/services/ConfigStore.ts', 'main/services/FetchService.ts'])
+    // 사이드카는 `fetchApprove` 줄을 받지 않는다(PR 10 — Rust 가 설정에 직접 쓴다)
+    expect(readFileSync(join(SRC, 'sidecar', 'index.ts'), 'utf8')).not.toMatch(/fetchApprove/)
   })
 })
 

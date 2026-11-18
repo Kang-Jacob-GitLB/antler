@@ -35,7 +35,7 @@ use antler_lib::github::ports::{GhRepoRef, RepoQuery};
 use antler_lib::github::service::{GitHubService, ServiceOptions};
 use antler_lib::mirror::{GhLink, MirrorRepo, RepoMirror, Resolved, Target};
 use antler_lib::net::redact::{git_basic_token, SecretString};
-use antler_lib::router::{rust_fetch_kinds, sidecar_fetch_kinds, Routed, Router};
+use antler_lib::router::{rust_fetch_kinds, Routed, Router};
 use antler_lib::secret::memory::MemoryStore;
 use antler_lib::secret::Vault;
 use futures_util::future::{BoxFuture, FutureExt};
@@ -685,11 +685,11 @@ async fn 네트워크_설정을_끝내_못_읽어도_5초_뒤에는_그_키_없�
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// 소유 판정: 사이드카 env 와 같은 술어
+// 소유 판정: 조회·fetch·감시가 같은 술어
 // ---------------------------------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn 소유_판정은_사이드카_env_와_일치하고_이중_fetch_도_무감시도_없다() {
+async fn 소유_판정은_종류_목록과_일치하고_이중_fetch_도_무감시도_없다() {
     let cache = Cache::new();
     let dir = cache.repo("octocat", "hello");
     let links = || HashMap::from([(G.to_string(), GhLink { owner: "octocat".into(), repo: "hello".into() })]);
@@ -711,27 +711,25 @@ async fn 소유_판정은_사이드카_env_와_일치하고_이중_fetch_도_무
         if with_exec {
             router.set_github_cache(token_exec(&cache, "file"));
         }
-        let env = sidecar_fetch_kinds(router.enabled(), router.ssh_active(), router.github_cache_active());
-        // 사이드카가 github 를 Rust 에 넘기는가(env 의 종류 목록) ⇔ Rust 가 맡는가(미러의 소유 판정) ⇔ 라우터의 조회 해석
-        let sidecar_yields = env.is_some_and(|k| k.split(',').any(|x| x == "github"));
+        // 종류 목록의 github(스위치가 켜졌을 때만) ⇔ Rust 가 맡는가(미러의 소유 판정) ⇔ 라우터의 조회 해석
+        let kinds = router.enabled().then(|| rust_fetch_kinds(router.ssh_active(), router.github_cache_active()));
+        let listed = kinds.is_some_and(|k| k.split(',').any(|x| x == "github"));
         let rust_owns = matches!(mirror.resolve_fetch(G), Resolved::Rust(Target::Github { .. }));
-        assert_eq!(rust_owns, sidecar_yields, "git={git_on} api={api_on} exec={with_exec} service={with_service}: env={env:?}");
+        assert_eq!(rust_owns, listed, "git={git_on} api={api_on} exec={with_exec} service={with_service}: kinds={kinds:?}");
         assert_eq!(rust_owns, matches!(mirror.resolve(G), Resolved::Rust(Target::Github { .. })), "조회 해석과 fetch 소유가 같은 스위치다");
         assert_eq!(rust_owns, git_on && api_on && with_exec && with_service);
-        // env 가 없으면(되돌리기) 사이드카가 전부 맡는다
+        // 되돌리기(스위치 꺼짐)면 사이드카가 전부 맡는다
         if !git_on {
-            assert_eq!(env, None);
+            assert!(!rust_owns);
         }
         // 라우팅: 소유하면 Rust(서비스가 없으면 오류), 아니면 사이드카
         let routed = router.route("git:fetch", &json!([G, true])).await;
         assert_eq!(is_sidecar(&routed), !rust_owns, "git:fetch git={git_on} api={api_on} exec={with_exec} service={with_service}");
         router.shutdown();
     }
-    // 종류 목록: 같은 입력이면 같은 문자열(사이드카가 읽는 값과 Rust 가 대조하는 값이 한 함수다)
+    // 종류 목록: 같은 입력이면 같은 문자열(미러의 소유 판정이 한 함수다)
     assert_eq!(rust_fetch_kinds(false, true), "local,wsl,github");
     assert_eq!(rust_fetch_kinds(true, true), "local,wsl,ssh,github");
-    assert_eq!(sidecar_fetch_kinds(true, false, true), Some("local,wsl,github"));
-    assert_eq!(sidecar_fetch_kinds(false, true, true), None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -917,14 +915,13 @@ fn 기본_브랜치는_설정에_직접_쓰고_저장소_소스_이름을_다시
 }
 
 #[test]
-fn 앱_배선은_github_실행기_뒤에_fetch_서비스를_만들고_같은_판정으로_사이드카_env_를_정한다() {
+fn 앱_배선은_github_실행기_뒤에_fetch_서비스를_만들고_사이드카에는_소유_여부만_넘긴다() {
     let lib = read_src("src/lib.rs");
     let cache = lib.find("router.set_github_cache(").expect("캐시 실행기 주입");
     let service = lib.find("router.set_fetch(").expect("fetch 서비스 주입");
-    let rust_github = lib.find("let rust_github = router.github_cache_active();").expect("사이드카 env 의 github 판정");
-    let kinds = lib.find("router::sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github)").expect("종류 목록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(cache < service && service < rust_github && rust_github < kinds && kinds < spawn);
+    assert!(cache < service && service < spawn);
+    assert!(!lib.contains("sidecar_fetch_kinds") && !lib.contains("rust_github"), "PR 10: 사이드카에 fetch 소유 종류를 알리지 않는다");
     // 실행기는 라우터가 받은 것의 복제를 fetch 서비스도 쓴다(진행 중 프로세스 표가 같다)
     assert!(lib.contains("router.set_github_cache(exec.clone());") && lib.contains("GitExecutor::Github(exec.clone())"));
     assert!(lib.contains(".with_github_cache("), "서비스에 캐시 기준 폴더를 준다");

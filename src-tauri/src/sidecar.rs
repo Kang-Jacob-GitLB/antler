@@ -14,7 +14,6 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::sync::oneshot;
 
 use crate::dialogs;
-use crate::git::log_service::NoteOp;
 use crate::mirror::RepoMirror;
 use crate::router::{in_runtime_of, Router};
 
@@ -25,6 +24,8 @@ pub struct Sidecar {
     pending: Pending,
     next_id: AtomicU64,
     child: Mutex<Child>,
+    /// Rust 가 설정을 소유하는 실행인가. 그러면 사이드카는 `update:*` 만 받고 창 포커스(`focus`)도 보내지 않는다(감시·자동 fetch 는 Rust 가 한다)
+    config_owned: bool,
 }
 
 fn error_env(msg: &str) -> Value {
@@ -32,12 +33,10 @@ fn error_env(msg: &str) -> Value {
 }
 
 impl Sidecar {
-    /// `mirror` 는 설정을 사이드카가 소유할 때(`config_owned` 가 거짓) 사이드카가 보내는 `repos` 메시지로 채워진다(라우터가 같은 것을 읽는다). Rust 가 설정을 소유하면 미러의 원천은 Rust 이고(`config::sync`) 사이드카가 보낸 줄은 버린다.
-    /// `fetch_kinds` 가 있으면 env `ANTLER_RUST_FETCH_KINDS` 로 넘겨 사이드카가 그 환경의 저장소를 fetch 하지 않게 한다(Rust 가 맡는다). 없으면 사이드카가 전부 맡는다.
-    /// `rust_api` 이면 env `ANTLER_RUST_API=1` 로 넘겨 사이드카가 `jira:*`·`gh:*`(`gh:repo` 제외)를 소유하지 않게 한다(Rust 가 처리한다. GitHub 토큰은 사이드카로 가지 않는다 — Phase 6b PR 9 부터 `ghToken` 줄도 없다). 아니면 부모 환경의 값도 지운다.
-    /// `rust_ssh` 이면 env `ANTLER_RUST_SSH=1` 로 넘겨 ssh 저장소의 git 채널(fetch 포함)을 Rust 가 처리함을 알린다(`Router::ssh_active` 와 같은 값 — `fetch_kinds` 의 ssh 포함 여부도 이 값이 정한다). 아니면 부모 환경의 값도 지운다.
-    /// `config_owned` 이면 env `ANTLER_RUST_CONFIG=1` 로 넘겨 사이드카가 설정 파일을 열지도 쓰지도 않고(읽기 전용 빈 설정) 고아 캐시도 정리하지 않게 한다 — **한 실행에서 설정 파일을 쓰는 쪽은 하나다**. 아니면 부모 환경의 값도 지운다.
-    pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror, fetch_kinds: Option<&str>, rust_api: bool, rust_ssh: bool, config_owned: bool) -> Result<Self, String> {
+    /// `mirror` 는 설정을 사이드카가 소유할 때(`config_owned` 가 거짓 — `ANTLER_RUST_GIT=0`) 사이드카가 보내는 `repos` 메시지로 채워진다(라우터가 같은 것을 읽는다). Rust 가 설정을 소유하면 미러의 원천은 Rust 이고(`config::sync`) 사이드카가 보낸 줄은 버린다.
+    /// `config_owned` 이면 env `ANTLER_RUST_CONFIG=1` 로 넘겨 사이드카가 `update:*` 7채널만 받고 그 밖의 서비스(설정·저장소·fetch·감시·GitHub·Jira)를 만들지 않게 한다 — **한 실행에서 설정 파일을 쓰는 쪽은 하나다**.
+    /// 아니면 부모 환경의 값도 지운다(`ANTLER_RUST_GIT=0` 되돌리기 — 사이드카가 전부 맡는다, 6c 까지). 사이드카에 넘기는 env 는 이것과 `ANTLER_USER_DATA` 둘뿐이다(`ANTLER_RUST_FETCH_KINDS`·`ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 PR 10 에서 없앴다).
+    pub fn spawn(app: &AppHandle, user_data: &Path, mirror: RepoMirror, config_owned: bool) -> Result<Self, String> {
         let node = std::env::var("ANTLER_NODE").unwrap_or_else(|_| "node".into());
         let script = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../out-tauri/sidecar/index.cjs"));
         // git 이 아니라 개발 전용 Node 사이드카를 띄운다 — git 실행기(src/git/exec)의 대상이 아니다
@@ -49,20 +48,6 @@ impl Sidecar {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // 부모 환경에 남아 있는 값이 되돌리기(없음)를 뒤집지 않게 항상 정한다
-        match fetch_kinds {
-            Some(kinds) => cmd.env("ANTLER_RUST_FETCH_KINDS", kinds),
-            None => cmd.env_remove("ANTLER_RUST_FETCH_KINDS"),
-        };
-        if rust_api {
-            cmd.env("ANTLER_RUST_API", "1");
-        } else {
-            cmd.env_remove("ANTLER_RUST_API");
-        }
-        if rust_ssh {
-            cmd.env("ANTLER_RUST_SSH", "1");
-        } else {
-            cmd.env_remove("ANTLER_RUST_SSH");
-        }
         if config_owned {
             cmd.env("ANTLER_RUST_CONFIG", "1");
         } else {
@@ -106,7 +91,7 @@ impl Sidecar {
             }
         });
 
-        Ok(Self { stdin, pending, next_id: AtomicU64::new(1), child: Mutex::new(child) })
+        Ok(Self { stdin, pending, next_id: AtomicU64::new(1), child: Mutex::new(child), config_owned })
     }
 
     fn write(&self, msg: &Value) -> Result<(), String> {
@@ -125,13 +110,11 @@ impl Sidecar {
         rx.await.map_err(|_| "사이드카 응답 대기가 끊겼습니다".to_string())
     }
 
-    /// Rust 가 처리한 `git:log` 가 사이드카의 RepoService 에 알릴 일을 보낸다(`{t:"note",op,repoId}` — protocol.ts 의 `NOTE_OPS`).
-    /// 이 줄은 Rust 만 만든다: renderer 의 값은 `req` 의 `args` 안에만 들어가고, 여기서는 미러가 아는 저장소 id 와 상수 op 만 쓴다
-    pub fn note(&self, op: NoteOp, repo_id: &str) {
-        let _ = self.write(&json!({ "t": "note", "op": op.as_str(), "repoId": repo_id }));
-    }
-
+    /// 창 포커스를 사이드카의 감시·fetch 에 알린다. Rust 가 설정을 소유하면(감시·자동 fetch 가 Rust 에 있다) 사이드카에는 받을 서비스가 없어 보내지 않는다
     pub fn set_focus(&self, focused: bool) {
+        if self.config_owned {
+            return;
+        }
         let _ = self.write(&json!({ "t": "focus", "focused": focused }));
     }
 
@@ -156,7 +139,7 @@ fn write_line(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {
 }
 
 /// Rust 가 설정을 소유하면(`ANTLER_RUST_CONFIG=1` 로 띄운 사이드카) 사이드카가 보내서는 안 되는 줄: 저장소 미러(`repos`)와 fetch 설정(`fetchPrefs`).
-/// 미러·fetch 설정의 원천은 Rust 의 설정(`config::sync`)이다 — 사이드카가 실수로 보내도 미러를 덮지 못하게 버린다. 설정을 사이드카가 소유하는 실행(`ANTLER_RUST_GIT=0`)에서는 미러만 받는다
+/// 사이드카는 이 모드에서 그 줄을 만들지 않는다 — 미러·fetch 설정의 원천은 Rust 의 설정(`config::sync`)이므로 실수로 와도 미러를 덮지 못하게 버린다. 설정을 사이드카가 소유하는 실행(`ANTLER_RUST_GIT=0`)에서는 미러만 받는다
 fn is_config_line(t: Option<&str>) -> bool {
     matches!(t, Some("repos" | "fetchPrefs"))
 }

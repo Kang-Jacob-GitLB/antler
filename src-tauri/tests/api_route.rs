@@ -86,12 +86,8 @@ fn api_채널은_ipc_채널의_jira_gh_채널에서_사이드카_몫을_뺀_것�
     for ch in API_CHANNELS {
         assert!(!RUST_CHANNELS.contains(ch));
     }
-    // 사이드카가 소유하지 않는 접두어와 예외가 같다
-    let owns = read_src("../src/sidecar/apiOwns.ts");
-    assert!(owns.contains("['jira:', 'gh:']"));
-    assert!(owns.contains("SIDECAR_KEPT_CHANNELS = ['gh:repo']"));
-    assert!(owns.contains("value === '1'"));
-    assert!(read_src("../src/sidecar/index.ts").contains("process.env['ANTLER_RUST_API']"));
+    // 사이드카 쪽 판정(`apiOwns.ts` 와 `ANTLER_RUST_API`)은 PR 10 에서 없앴다 — 소유하는 실행의 사이드카는 update:* 밖의 채널을 어떤 것도 받지 않는다(`tests/sidecar_scope.rs`)
+    assert!(!Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("src/sidecar/apiOwns.ts").exists());
 }
 
 #[test]
@@ -115,7 +111,7 @@ fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든�
     let lib = prod_code("src/lib.rs");
     let guard = lib.find("if let (true, Some(store)) = (router.api_enabled(), config_store.clone()) {").expect("스위치 분기");
     // 서비스·Vault·보관소를 만드는 호출은 이 분기 안(사이드카 기동 전)에만 있다
-    let end = lib.find("let fetch_kinds").expect("분기 끝");
+    let end = lib.find("router.claim_api()").expect("분기 끝");
     for needle in ["open_store(", "Vault::new(", "JiraService::new(", "GitHubService::new("] {
         assert_eq!(lib.matches(needle).count(), 1, "{needle} 는 한 번만");
         let at = lib.find(needle).unwrap();
@@ -131,14 +127,14 @@ fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든�
             assert!(!code.contains(banned), "{rel} 가 {banned} 를 부른다");
         }
     }
-    // 서비스가 실제로 만들어졌을 때만 사이드카에 알린다. 서비스는 사이드카 기동·라우터 등록보다 먼저다
+    // 서비스가 실제로 만들어졌을 때만 소유를 기록한다(`claim_api`). 서비스는 사이드카 기동·라우터 등록보다 먼저다
     let jira = lib.find("router.set_jira(").expect("서비스 주입");
     let github = lib.find("router.set_github(").expect("GitHub 서비스 주입");
     let api = lib.find("router.claim_api()").expect("사이드카 env 값(라우팅과 같은 api_active 판정)");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
     assert!(jira < api && github < api && api < manage && manage < spawn);
-    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh, config_owned)"));
+    assert!(lib.contains("mirror, config_owned)?"), "사이드카 기동 인자는 설정 소유 여부 하나다");
     // env 하나가 두 서비스를 함께 넘기므로 둘 다 만들어졌을 때만 둘 다 주입한다(하나만 되면 둘 다 사이드카가 처리한다)
     assert_eq!(lib.matches("router.set_jira(").count(), 1);
     assert_eq!(lib.matches("router.set_github(").count(), 1);
@@ -156,14 +152,13 @@ fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든�
 #[test]
 fn 사이드카_env_는_항상_직접_정한다() {
     let sidecar = prod_code("src/sidecar.rs");
-    assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_API\", \"1\")"));
     // 값이 없을 때 부모의 env 를 지운다(되돌리기가 뒤집히지 않게)
-    assert!(sidecar.contains("cmd.env_remove(\"ANTLER_RUST_API\")"));
-    // 사이드카에 env 로 가는 것은 이 다섯뿐이다(ANTLER_USER_DATA·FETCH_KINDS·API·SSH·CONFIG) — 토큰은 env 에도 stdin 줄에도 없다(Phase 6b PR 9 부터 `ghToken` 줄도 없다)
+    assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_CONFIG\", \"1\")") && sidecar.contains("cmd.env_remove(\"ANTLER_RUST_CONFIG\")"));
+    // 사이드카에 env 로 가는 것은 이 둘뿐이다(ANTLER_USER_DATA·CONFIG — PR 10 에서 FETCH_KINDS·API·SSH 를 없앴다) — 토큰은 env 에도 stdin 줄에도 없다
     let envs: Vec<&str> = sidecar.lines().filter(|l| l.contains("cmd.env(") || l.contains(".env(") || l.contains("env_remove(")).collect();
     for l in &envs {
         assert!(
-            ["ANTLER_USER_DATA", "ANTLER_RUST_FETCH_KINDS", "ANTLER_RUST_API", "ANTLER_RUST_SSH", "ANTLER_RUST_CONFIG"].iter().any(|n| l.contains(n)),
+            ["ANTLER_USER_DATA", "ANTLER_RUST_CONFIG"].iter().any(|n| l.contains(n)),
             "사이드카에 알 수 없는 env 를 넘긴다: {l}"
         );
     }
@@ -172,7 +167,7 @@ fn 사이드카_env_는_항상_직접_정한다() {
 
 #[test]
 fn 운영_코드에_시험_훅_호출이_없다() {
-    for rel in ["api_host.rs", "router.rs", "lib.rs", "sidecar.rs", "repoq.rs", "routed_repos.rs", "git/remotes.rs", "github/remote_url.rs", "github/local_time.rs"] {
+    for rel in ["api_host.rs", "router.rs", "lib.rs", "sidecar.rs", "routed_repos.rs", "git/remotes.rs", "github/remote_url.rs", "github/local_time.rs"] {
         let code = prod_code(&format!("src/{rel}"));
         for banned in ["_for_test", "insecure_loopback", "standing_in_for_keychain", "test-hooks"] {
             assert!(!code.contains(banned), "{rel} 에 {banned}");

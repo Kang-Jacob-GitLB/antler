@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget)·PR 3(external)·PR 4b(SFTP)·PR 5(앱 채널 4개)·PR 8(환경 채널)·PR 9(설정 소유 전환)·PR 10(사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만) 완료 — **Phase 6b 코드 완료**(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -1688,7 +1688,7 @@ PR 1 은 D1 의 가져오기 진입점 없이 코어만 뒀고, PR 9 가 진입�
 | 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | **완료(코드)** — 아래 "PR 7" |
 | 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | **완료(코드)** — 아래 "PR 8" |
 | 9 | **ConfigStore 소유 전환**: `config:*`·`repos:*`·`external:*`·`req:cancel` 응답, 미러·fetchPrefs·승인·repoq 내부화, Electron 설정 가져오기(D1) — 보안 리뷰 집중 | 있음 | 직렬(1·3·5·6·7·8 뒤) | **완료(코드)** — 아래 "PR 9(설정 소유 전환)" |
-| 10 | 사이드카 정리: Rust 소유 실행에서 `update:*` 밖 채널·메시지 제거(강제 시험) | 있음 | 직렬(9 뒤) | |
+| 10 | 사이드카 정리: Rust 소유 실행에서 `update:*` 밖 채널·메시지 제거(강제 시험) | 있음 | 직렬(9 뒤) | **완료(코드)** — 아래 "PR 10" |
 
 모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 이식 대응표는 새 파일 `tests/golden/repos/test-map.json`(6b 전용)이고 PR 10 에서 `N/A: PR n` 이 0개여야 한다.
 외부 열기(PR 3)의 대응표는 별도 파일 `tests/golden/external/test-map.json` 이다(PR 3 의 TS `it` 71개 전부를 Rust 시험에 대응시켜 `N/A` 가 없다). PR 10 의 `N/A: PR n` 검사는 repos 표만 본다.
@@ -2170,7 +2170,7 @@ GitHub 저장소의 경로는 정화가 이 앱의 캐시 경로로 다시 계�
 - `repos:add` 는 git 이 돌려준 최상위 경로를 `check_path` 로 한 번 더 본다(TS 는 추가 때만 보고 쓸 때마다 다시 보지 않는다 — Rust 미러는 쓸 때마다 본다). `external:open` 의 `path: null` 은 TS 와 같이 `잘못된 입력입니다` 다(Rust 의 opener 는 null 을 루트로 받으므로 처리기가 먼저 거른다).
 - 원격 전용 저장소 삭제는 한 프로세스(Rust)에서 **경로 잠금 안에서** 한다(TS 는 `removeGithubCache` 에 잠금이 없다). 승인 쓰기는 동기이고 fetch 서비스의 태스크에서 불린다(작은 파일 쓰기 — 블로킹 풀로 보내지 않았다). 잠금 안에서 레코드를 다시 읽어 같은 레코드(id·링크·경로)일 때만 폴더를 지우고 레코드 삭제까지 잠금 안에서 한다(같은 owner/repo 재추가가 끼어들어도 새 캐시를 지우지 않는다). 고아 정리·복구의 잠금 키는 `..`·중복 구분자를 정리한 정규형(`canonical_key`)이다. `external:open` 은 설정의 루트도 `check_path`(UNC·NT 네임스페이스·NUL)를 거친다. WSL 소스는 대소문자만 다른 기존 소스를 재사용한다.
 - 설정 쓰기 실패 문구는 Node 가 아니라 Rust `io::Error` 다. `config:setUi` 등 쓰기 채널의 처리는 블로킹 풀(`spawn_blocking`)에서 한다.
-- 라우터가 풀지 못하는 저장소(WSL 이 아닌 OS 의 WSL·홈을 모르는 PC 의 ssh·서비스가 없는 github)의 git 채널은 여전히 사이드카로 가지만 사이드카의 설정이 비어 있어 TS 의 "알 수 없는 저장소" 오류가 난다(PR 10 이 Rust 쪽 명시적 오류로 바꾼다).
+- 라우터가 풀지 못하는 저장소(WSL 이 아닌 OS 의 WSL·홈을 모르는 PC 의 ssh·서비스가 없는 github)의 git 채널은 PR 9 에서는 사이드카로 갔지만 사이드카의 설정이 비어 있어 "unknown repo" 오류가 났다 — **PR 10 이 Rust 쪽 명시적 오류로 바꿨다**(아래 "PR 10").
 
 **시험**: 새 바이너리 `tests/config_route.rs`(37개, `test-hooks`, `tauri.yml` 목록에 추가) — 채널 목록(`IPC_CHANNELS` 의 부분집합·다른 목록과 겹치지 않음·TS `configOwns.ts` 와 같음), **소유자가 없거나 `ANTLER_RUST_GIT=0` 이면 사이드카**·소유자가 있으면 11채널 모두 Rust(배열이 아닌 인자 포함),
 `config:get`·`setUi`(검증 문구·승인 위조 불가·UI 설정만 쓰면 미러 반영 없음), 추가(최상위 등록·응답 전 미러 반영·다시 추가하면 같은 항목·GIT 오류·입력 검증 표·WSL 미설치)·`addMany`(실패가 나머지를 막지 않음·500 상한·같은 환경), **SSH 승인 기억 하나**(`env:test`→`repos:add`→`addMany` 가 한 번만 묻고 거부는 기억하지 않음 — 127.0.0.1 닫힌 포트)·**루프백 SSH 서버로 추가하면 연결을 쥔 채 등록하고 등록한 뒤에도 연결이 남으며 삭제하면 닫힘**,
@@ -2194,8 +2194,55 @@ GitHub 저장소의 경로는 정화가 이 앱의 캐시 경로로 다시 계�
 **남은 위험**
 - 설정 쓰기가 fetch 서비스의 비동기 태스크에서 동기로 일어난다(승인·기본 브랜치): 백신·OneDrive 가 설정 파일을 잡으면 그 태스크가 재시도(최대 5회·30×(n+1)ms) 동안 막힌다. 쓰기 실패는 "다음에 다시 묻는다"/"다음 fetch 가 다시 알아낸다"로 끝낸다. 저장소 변경 중 `ConfigStore` 의 뮤텍스를 쥔 채 쓰기(rename 재시도 최대 약 300ms)를 하므로 그동안 `config:get` 등 설정을 읽는 다른 워커도 기다린다(UI 가 잠깐 멎을 수 있다).
 - 알림 안에서 `on_mirror_changed`·`apply_fetch_prefs` 가 동기로 돈다 — 두 알림이 겹쳐도 `ConfigSync` 의 잠금 하나가 순서를 지키지만, 그 안에서 라우터의 다른 잠금을 잡으므로 라우터 쪽이 `ConfigSync::push` 를 잠금을 쥔 채 부르면 안 된다(지금은 부르는 곳이 없다).
-- 홈을 모르는 PC 의 ssh 저장소·서비스를 만들지 못한 PC 의 github 저장소는 사이드카도 처리하지 못한다(위 "TS 와 다른 점" 마지막). **서비스를 만들지 못하면(키체인 오류 등) `jira:*`·`gh:*` 는 오류로 답한다** — 설정을 소유한 실행에서는 `gh:loginPat` 의 토큰 인자가 사이드카로 가지 않게 `api_unserved` 가 사이드카로 보내지 않는다(시험: `api_route.rs`). 사이드카의 `ghToken`·`repoq`·`fetchApprove`·`githubBranch` 수신 코드는 남아 있다(PR 10 이 지운다).
+- 홈을 모르는 PC 의 ssh 저장소·서비스를 만들지 못한 PC 의 github 저장소는 사이드카도 처리하지 못한다(위 "TS 와 다른 점" 마지막). **서비스를 만들지 못하면(키체인 오류 등) `jira:*`·`gh:*` 는 오류로 답한다** — 설정을 소유한 실행에서는 `gh:loginPat` 의 토큰 인자가 사이드카로 가지 않게 `api_unserved` 가 사이드카로 보내지 않는다(시험: `api_route.rs`). 사이드카의 `ghToken`·`repoq`·`fetchApprove`·`githubBranch` 수신 코드는 PR 10 이 지웠다.
 - 매핑된 드라이브 정책과 WSL 이 있는 PC 의 `repos:add`(레지스트리 읽기·`wsl.exe`)는 확인하지 못했다. 같은 새 SSH 호스트를 동시에 두 창이 입력하면 확인 창이 둘 뜰 수 있다(TS 와 같다).
+
+### PR 10 — 사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만 받는다(`router.rs` 관문·`src/sidecar/`, 앱에 연결한다)
+
+새 크레이트·IPC 채널 없음. **불변식: Rust 가 설정을 소유한 실행(`ANTLER_RUST_CONFIG=1`, 곧 `ANTLER_RUST_GIT≠0`)에서 사이드카로 가는 채널 집합 = `update:*` 7개(`UPDATE_CHANNELS`).** 앱 업데이트는 6c 에서 Rust 로 옮기므로 그때까지 사이드카가 `UpdateService` 하나를 쥔다.
+`ANTLER_RUST_GIT=0` 전체 되돌리기(C1)는 6c 까지 그대로 산다 — 그 실행은 사이드카가 모든 채널을 처리한다.
+
+| 파일 | 내용 |
+|---|---|
+| `src/router.rs` | **관문** `Router::route`: 안쪽 라우팅(`route_inner`, 비공개)이 `Routed::Sidecar` 를 돌려줘도 `config_owned()` 이고 채널이 `UPDATE_CHANNELS` 밖이면 `Routed::Done(오류)` 로 바꾼다 — 포트 없음·인자 모양 틀림·Rust 가 풀지 못한 저장소 모두. `sidecar_fetch_kinds` 는 없앴다(`rust_fetch_kinds` 는 미러의 소유 판정이 쓴다) |
+| `src/sidecar.rs` | `spawn(app, user_data, mirror, config_owned)`: 사이드카 env 는 `ANTLER_USER_DATA`·`ANTLER_RUST_CONFIG` 둘뿐이다(`ANTLER_RUST_FETCH_KINDS`·`ANTLER_RUST_API`·`ANTLER_RUST_SSH` 삭제 — Q2). `note` 줄 송신(`Sidecar::note`)과 `lib.rs` 의 `set_note_sink` 배선 삭제(`NoteSink`·`note_sink()` 는 Rust 의 `repo_state` 를 먹이므로 그대로). `focus` 는 소유 실행에서 보내지 않는다 |
+| `src/repoq.rs` | **삭제** — `SidecarRepos`·`QueryTransport`·`ghToken`·`repoq`·`repoqCancel` 줄. `QUERY_TIMEOUT` 은 `routed_repos.rs` 로 옮겼다 |
+| `src/mirror.rs` | `RepoMirror::kind_of`(오류 문구를 고르는 데만) |
+| `src/sidecar/index.ts` | 소유 실행은 `UpdateService` 만 조립하고 `registerUpdateIpc`(`updateIpc.ts`)로 7채널만 등록한다. 받는 메시지는 `req`·`focus`·`hostres`. `sidecarAccepts(ch, rustConfig)` 가 `update:*` 밖을 거부한다 |
+| `src/sidecar/legacy.ts` | 되돌리기(`ANTLER_RUST_GIT=0`) 전용 조립 — 이전 `index.ts` 의 서비스 조립을 그대로 옮겼다(`ConfigStore`·`RepoService`·`FetchService`·`RepoWatcher`·`GitHubService`·`JiraService`, 미러·fetch 설정 송신 포함). 6c 에서 사이드카와 함께 지운다 |
+| `src/sidecar/protocol.ts` | `ToSidecar` 는 `req`·`focus`·`hostres` 뿐(`note`·`fetchApprove`·`githubBranch`·`repoq`·`repoqCancel`·`ghToken` 과 `NOTE_OPS`·`FETCH_APPROVE_KINDS`·`REPOQ_OPS` 삭제) |
+| 삭제 | `src/sidecar/{ghToken,githubBranch,fetchApprove,note,repoQuery,apiOwns,fetchOwns}.ts`와 그 vitest 7개(`sidecar{GhToken,GithubBranch,Note,RepoQuery,ApiOwns,FetchOwns,WatchOwns}.test.ts`). `sidecarFetchPrefs.test.ts` 는 `fetchApprove` 시험을 "승인을 쓰는 코드는 ConfigStore·FetchService 뿐" 하나로 줄였다 |
+
+**`src/main` 은 건드리지 않았다**(Electron 이 쓴다): `ConfigStore` 의 `readOnly`·`RepoService.noteLog`·`RepoWatcher`/`FetchService` 의 `owns` 인자는 사이드카가 더는 쓰지 않는 죽은 갈래다 — 6c 에서 Electron 판과 함께 정리한다(`readOnly`·`owns` 시험은 그대로 돈다).
+
+**Rust 가 풀지 못한 저장소는 Rust 가 명시적으로 답한다**(관문의 `unserved_message` — 문구는 TS `RepoService` 의 것):
+미러에 없는 id → `unknown repo: <id>`(200자까지) · 미러에 있는 wsl(Windows 가 아닐 때) → `WSL 저장소는 Windows 에서만 열 수 있습니다` · github(서비스·캐시 실행기 없음) → `GitHub 원격 저장소를 쓸 수 없는 환경입니다` · ssh(풀 없음) → `SSH 를 사용할 수 없습니다`(환경 채널과 같다).
+모두 `code: "ERROR"`. 저장소 id 가 없거나 문자열이 아닌 호출은 `잘못된 입력입니다`, 어느 목록에도 없는 채널은 `알 수 없는 채널: <이름>`(사이드카의 문구와 같다).
+
+**시험**
+- 새 바이너리 `tests/sidecar_scope.rs`(7개, `test-hooks`, `tauri.yml` 목록에 추가) — **불변식 강제**: `UPDATE_CHANNELS` 가 `IPC_CHANNELS`(`tests/golden/exec/channels.json`)의 `update:` 채널과 정확히 같고 다른 목록과 겹치지 않음 ·
+  **설정 소유자만 달고 다른 포트는 없는 라우터**에 `IPC_CHANNELS` 전수와 허용 목록 밖 채널 8개를 인자 모양 8가지(정상·빈 배열·배열 아님·null·숫자·표식·객체)로 넣었을 때 `Routed::Sidecar` 가 되는 채널 집합 == `update:*` 7개 ·
+  `ANTLER_RUST_GIT=0` 라우터는 같은 표 전부가 사이드카(C1) · 풀지 못한 호출의 오류 문구 표(위) · 사이드카로 가는 길은 관문 하나(`route_inner` 비공개·`commands.rs` 의 `sidecar.request(` 하나·TS `RepoService.ts` 에 같은 문구) · 없앤 메시지·env 의 송수신 코드 부재(소스 검사).
+- vitest `sidecarConfigOwns.test.ts`(`sidecarAccepts`: `IPC_CHANNELS` 전수에서 소유 시 받는 것 == `update:*` 7개·허용 목록 밖 거부·Rust `UPDATE_CHANNELS` 와 같은 목록), `sidecarUpdateIpc.test.ts`(등록 채널 == 7개·인자 전달·봉투·`handlers.ts` 의 본문과 소스 대조).
+- 기존 시험 갱신: `api_route`·`fetch_route`·`github_fetch`·`github_route`·`ssh_route`·`config_route`·`watch_route` 의 사이드카 env·소유 판정 소스 검사를 새 모양으로.
+- **대응표**: `tests/golden/repos/test-map.json` 에 `N/A: PR n` 은 0개이고 `goldenConfig.test.ts` 가 `N/A: PR ` 로 시작하는 값을 **거부**한다(이전에는 PR 2~10 을 통과시켰다). repos 표에 `sidecar*.test.ts` 항목은 처음부터 없었다 — 삭제한 vitest 는 사이드카 메시지 처리기의 시험이라 이식 대상이 아니다.
+  net 표의 `launchpadQuery > pickGithubRemotes` 2개 사유는 "사이드카에 남는다(repoq)" 에서 Rust `github/remote_url.rs`(골든 `githubRemote`)로 고쳤다. update 표의 `N/A: PR 4` 는 6c 몫이다.
+
+**TS 와 다른 점**
+- 설정을 소유한 실행에서 Rust 가 풀지 못한 저장소의 오류는 TS 와 **문구는 같지만 종류별로 갈린다**: TS 는 미러 없이 설정에서 `unknown repo`·`createExecutor` 오류를 각각 낸다. Rust 는 같은 문구를 미러의 종류로 고른다. 인자 모양이 틀린 호출은 채널마다 TS 의 검증 문구를 따르지 않고 `잘못된 입력입니다` 하나다(TS 는 채널마다 `invalid …`·`잘못된 입력입니다` 가 섞여 있다).
+- `ANTLER_RUST_GIT=0` 실행의 사이드카는 이전과 같다(`legacy.ts` 로 옮겼을 뿐이다). 다만 `ANTLER_RUST_FETCH_KINDS` 를 더는 읽지 않는다 — 그 실행에서는 어차피 값이 없어 전부 맡던 것과 같다.
+- 사이드카의 `fetchPrefs` 송신(되돌리기 전용)은 남겼지만 Rust 는 그 줄을 어느 실행에서도 쓰지 않는다(`Some("fetchPrefs") => {}`). C1 이 남기라고 한 것이고 `mirrorOf`·`fetchPrefsOf` 는 골든 시험의 TS 기준 구현이라 지우지 않았다.
+
+**사람 확인(자동화 불가 — 이 PR 에서는 앱을 띄우지 않았다)**
+- 설정을 소유한 실행에서 업데이트 확인(설정 화면의 "업데이트 확인")이 이전처럼 동작하는지(`update:*` 가 사이드카에서 답한다), `ANTLER_ROUTE_LOG=1` 로 `update:*` 외 채널이 `-> sidecar` 로 찍히지 않는지.
+- 되돌리기: `ANTLER_RUST_GIT=0` 로 실행해 저장소 추가·그래프·fetch·GitHub 탭이 이전처럼 사이드카에서 도는지(`legacy.ts` 이동 확인), 사이드카 프로세스가 `ANTLER_RUST_CONFIG` 없이 뜨는지.
+- WSL 이 아닌 OS·홈 디렉터리를 모르는 PC·서비스를 만들지 못한 PC(키체인 오류)에서 해당 저장소를 열면 위 오류 문구가 보이는지(이 PC 에서는 재현하지 못했다).
+- Phase 6b 전체의 사람 확인 항목은 위 PR 별 목록 그대로다(저장소 추가·SFTP 탐색·GitHub 탭 추가→fetch→삭제·에디터/터미널/탐색기 열기·링크·클립보드·재시작 뒤 설정 유지·Electron 설정 가져오기·`ANTLER_RUST_GIT=0`).
+
+**남은 위험**
+- `legacy.ts` 는 사이드카의 이전 조립을 옮긴 것이라 `ANTLER_RUST_GIT=0` 의 동작은 시험이 아니라 코드 이동의 동일성에 기댄다(앱을 띄워 확인하지 않았다 — 위 사람 확인).
+- 소유 실행에서 `update:*` 가 사이드카의 `UpdateService` 에 남아 있어 사이드카(Node)가 아직 필요하다 — 6c 에서 Rust 로 옮기면 사이드카 자체와 `legacy.ts`·`ANTLER_RUST_GIT=0`·`src/main` 의 죽은 갈래가 함께 사라진다.
+- 관문이 `Routed::Sidecar` 를 오류로 바꾸므로, 앞으로 소유 실행에서 새 채널을 추가하면서 라우터에 처리 갈래를 빠뜨리면 사이드카 오류가 아니라 `알 수 없는 채널`/`잘못된 입력입니다` 가 난다(`sidecar_scope.rs` 의 `update_밖의_모든_ipc_채널은_rust_처리_목록_중_하나에_있다` 가 `IPC_CHANNELS` 전수로 잡는다 — 골든 `channels.json` 을 갱신하면 이 시험이 실패한다).
 
 ## 업데이터·패키징·Electron 사용자 이관(Phase 6c, `src-tauri/src/update/`)
 

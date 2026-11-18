@@ -175,6 +175,11 @@ impl RepoMirror {
         self.inner.read().unwrap_or_else(PoisonError::into_inner).branches.get(repo_id).cloned()
     }
 
+    /// 저장소의 소스 종류(`local`·`wsl`·`ssh`·`github`). 미러에 없으면 없다 — 라우터가 Rust 가 풀지 못한 호출의 오류 문구를 고르는 데만 쓴다
+    pub fn kind_of(&self, repo_id: &str) -> Option<String> {
+        self.inner.read().unwrap_or_else(PoisonError::into_inner).repos.get(repo_id).map(|r| r.kind.clone())
+    }
+
     /// 저장소 이름(사이드카가 `name` 을 보냈을 때만)
     pub fn name(&self, repo_id: &str) -> Option<String> {
         self.inner.read().unwrap_or_else(PoisonError::into_inner).names.get(repo_id).cloned()
@@ -238,7 +243,7 @@ impl RepoMirror {
     }
 
     /// fetch 를 Rust 서비스가 맡는 저장소만 거른 해석. **소스 종류(`rust_fetch_kinds`)가 먼저다** — 해석 결과(`Resolved::Rust`)가 아니라 종류로 소유를 정해야
-    /// 사이드카(`ANTLER_RUST_FETCH_KINDS`)와 같은 술어를 쓴다. 이 술어(ssh·github 는 각 스위치가 켜졌을 때만 포함)가 두 쪽에서 같으므로 이중 fetch 도 미소유도 없다.
+    /// 조회·감시와 같은 술어를 쓴다(ssh·github 는 각 스위치가 켜졌을 때만 포함).
     /// fetch·감시의 서비스·라우터·자동 예약은 모두 이 함수만 쓴다. 종류가 맡는 것이 아니면(꺼진 github·ssh) 검증보다 먼저 `Sidecar` 다 —
     /// 호스트가 잘못된 ssh 저장소의 fetch 는 켜져 있으면 Rust 가 `Invalid` 로, 꺼져 있으면 사이드카가 오류를 만든다
     pub fn resolve_fetch(&self, repo_id: &str) -> Resolved {

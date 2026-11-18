@@ -21,12 +21,10 @@ pub mod github;
 pub mod jira;
 pub mod mirror;
 pub mod net;
-// Rust → Node 질의(`repoq`)·토큰 사본(`ghToken`)의 메시지와 검증(Phase 4 PR 9). 통합 테스트(tests/repoq.rs)가 별도 크레이트라 pub 이다
-pub mod repoq;
 // 저장소 추가 흐름의 순수 로직(Phase 6b PR 4a). env_host(PR 8)가 연결한다. 통합 테스트(tests/ssh.rs)가 별도 크레이트라 pub 이다
 pub mod repos;
 pub mod router;
-// GitHub 서비스의 저장소 질의를 Rust 가 맡는 저장소는 라우터가, 나머지는 사이드카(repoq)가 답한다(Phase 6a PR 8)
+// GitHub 서비스의 저장소 질의를 Rust 가 맡는 저장소는 라우터가, 나머지는 설정을 소유한 Rust 가 답한다(Phase 6a PR 8·6b PR 9)
 pub mod routed_repos;
 // 토큰 보관(Phase 4 PR 4) — Jira(PR 6)·GitHub(PR 9) 서비스가 같은 Vault 를 쓴다
 pub mod secret;
@@ -199,13 +197,6 @@ pub fn run() {
             // 라우터와 사이드카가 같은 미러를 본다(Rust 가 설정이 바뀔 때 채우고(`ConfigSync`) 라우터가 읽는다. `ANTLER_RUST_GIT=0` 이면 사이드카가 채운다)
             let mirror = mirror::RepoMirror::default();
             let router = router::Router::from_env(mirror.clone());
-            // Rust 가 처리한 git:log 가 사이드카에 알리는 일(첫 페이지·이력 변경). 사이드카는 이 뒤에 managed 된다
-            let handle = app.handle().clone();
-            router.set_note_sink(std::sync::Arc::new(move |op, repo_id| {
-                if let Some(s) = handle.try_state::<sidecar::Sidecar>() {
-                    s.note(op, repo_id);
-                }
-            }));
             // Rust 가 맡는 저장소의 감시(Phase 6a PR 7b)가 ref 변화를 알리는 곳 — 사이드카의 `repo:changed` 와 같은 모양의 renderer 이벤트
             router.set_change_sink(fetch_host::change_sink(app.handle().clone()));
             // 설정이 필요 없는 앱 채널(Phase 6b PR 5)의 포트: 폴더 선택(dialogs.rs)·클립보드(플러그인)·링크 열기(open_https). 스위치가 꺼져 있으면 주입하지 않는다
@@ -216,7 +207,7 @@ pub fn run() {
             });
             // SSH 풀(Phase 5 PR 3). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — ssh 저장소는 사이드카가 전부 맡는다. 하위 스위치 ANTLER_RUST_SSH 는 은퇴했다(Phase 6b PR 9, 결정 D5).
             // 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(설정을 소유한 실행에서는 Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다).
-            // **fetch 서비스·사이드카 env 보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓰고, 사이드카 env 가 같은 판정(ssh_active)을 따른다
+            // **fetch 서비스보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓴다
             // 홈은 Node `os.homedir()`(libuv)와 같은 순서로 정한다 — 환경변수(Windows `USERPROFILE`·그 밖 `HOME`)가 있으면 그것, 없으면 Tauri 의 `home_dir`.
             // 그래야 사이드카와 Rust 가 같은 `~/.ssh` 를 읽는다
             let env_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|v| !v.is_empty()).map(PathBuf::from);
@@ -263,7 +254,7 @@ pub fn run() {
             }
             // Jira·GitHub 서비스(PR 6·9). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다(하위 스위치 ANTLER_RUST_API 는 은퇴했다).
             // 켜져 있으면 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결·로그인은 여기서 복원한다.
-            // 사이드카의 env(ANTLER_RUST_API) 하나가 두 서비스를 함께 넘기므로 **둘 다** 만들어졌을 때만 둘 다 주입한다. 하나라도 만들지 못하면(키체인 오류 등) Rust 가 설정을 소유하므로 jira:*·gh:* 는 오류로 답한다 — 사이드카는 설정·토큰을 모른다
+            // **둘 다** 만들어졌을 때만 둘 다 주입한다. 하나라도 만들지 못하면(키체인 오류 등) Rust 가 설정을 소유하므로 jira:*·gh:* 는 오류로 답한다 — 사이드카는 설정·토큰을 모른다
             // github 캐시 실행기의 복제(라우터가 받은 것과 같은 `LiveProcs` 를 본다) — 아래 fetch 서비스의 github 실행기가 된다. 라우터가 받지 않았으면(서비스 없음·스위치 꺼짐) 없다
             let mut github_exec: Option<GithubExecutor> = None;
             // 위 실행기가 읽는 네트워크 설정 칸(읽기 완료 신호를 fetch 서비스가 기다린다)
@@ -324,7 +315,7 @@ pub fn run() {
                 }
             }
             // fetch 서비스(local·wsl 저장소, 그리고 Rust 가 푸는 ssh·github). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다.
-            // **SSH 풀·GitHub 캐시 실행기보다 뒤다** — 실행기 공장이 둘을 쓰고, 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)가 같은 판정(`ssh_active`·`github_cache_active`)을 따른다
+            // **SSH 풀·GitHub 캐시 실행기보다 뒤다** — 실행기 공장이 둘을 쓰고, 미러의 fetch 소유 판정(`ssh_active`·`github_cache_active`)이 같은 값을 따른다
             if let (true, Some(store)) = (router.enabled(), config_store.clone()) {
                 let ssh_pool = router.ssh_pool();
                 let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone(), router.note_sink(), store);
@@ -364,12 +355,8 @@ pub fn run() {
                 }
                 router.set_fetch(std::sync::Arc::new(service));
             }
-            // 사이드카에 ssh 를 Rust 가 처리함을 알리는 값. 미러의 ssh 해석과 같은 판정(ssh_active) 하나다 — fetch 소유 종류(local,wsl[,ssh])도 이 값으로 정한다
-            let rust_ssh = router.ssh_active();
-            let rust_github = router.github_cache_active();
-            let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github);
-            // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 Rust 가 오류로 답한다)
-            let rust_api = router.claim_api();
+            // jira·gh 의 소유를 기록한다(두 서비스가 실제로 만들어졌을 때만 켜진다 — 만들지 못했으면 서비스 없는 채널은 Rust 가 오류로 답한다). 사이드카에 알릴 값이 아니다(PR 10)
+            router.claim_api();
             let config_owned = router.config_owned();
             app.manage(router);
             // 설정의 첫 반영(미러·fetch 설정): 라우터가 managed 된 뒤여야 한다(반영 뒤 할 일이 라우터를 찾는다 — 서비스는 위에서 주입했으므로 예약된 주기·승인이 바로 들어간다).
@@ -377,7 +364,7 @@ pub fn run() {
             if let (Some(sync), Some(store)) = (&config_sync, &config_store) {
                 sync.push(None, &store.get());
             }
-            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, fetch_kinds, rust_api, rust_ssh, config_owned)?);
+            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, config_owned)?);
             // 시작 때 한 번: 어떤 레코드도 가리키지 않는 원격 전용 저장소 캐시 폴더(삭제에 실패했거나 로드 때 버려진 레코드·중단된 추가)를 지우고, 폴더가 없는 레코드(Electron 설정 가져오기)의 빈 캐시를 다시 만든다.
             // 설정을 읽지 못한 채 시작했으면 지우지 않는다(`load_failed`). 앱 시작을 막지 않게 따로 돌린다
             if let Some(host) = config_host {

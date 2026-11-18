@@ -1,31 +1,14 @@
-// Tauri 용 개발 전용 Node 사이드카. src/main 의 서비스 조립(src/main/index.ts)을 electron 없이 재현하고,
-// registerIpc 를 그대로 재사용해 Rust 가 stdin 으로 넘기는 채널 호출을 처리한다. 프로토콜은 protocol.ts.
+// Tauri 용 개발 전용 Node 사이드카. Rust 가 stdin 으로 넘기는 채널 호출을 처리한다. 프로토콜은 protocol.ts.
+// Rust 가 설정을 소유하는 실행(env ANTLER_RUST_CONFIG=1 — Phase 6b PR 9 부터 기본)에서는 UpdateService 만 조립하고 `update:*` 7채널만 받는다(PR 10).
+// 되돌리기(ANTLER_RUST_GIT=0)에서는 src/main 의 서비스 조립(legacy.ts)이 모든 채널을 처리한다 — 6c 에서 사이드카와 함께 사라진다.
 import { createInterface } from 'node:readline'
 import { inspect } from 'node:util'
 import { join } from 'node:path'
-import { GitHubService } from '../main/github/service'
-import { createGhCli } from '../main/github/ghCli'
-import { AVATAR_CACHE_FILE } from '../main/github/avatars'
-import { TokenStore } from '../main/github/tokenStore'
-import { JiraService, JIRA_META_FILE, JIRA_TOKEN_FILE } from '../main/jira/service'
-import { registerIpc } from '../main/ipc/handlers'
-import { ConfigStore } from '../main/services/ConfigStore'
-import { FetchService } from '../main/services/FetchService'
-import { readNetworkConfig, type NetworkConfigEntry } from '../main/git/githubCache'
-import { RepoService } from '../main/services/RepoService'
-import { RepoWatcher } from '../main/services/RepoWatcher'
 import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
-import { rustOwnsApi, sidecarSkips } from './apiOwns'
-import { rustOwnsConfig, sidecarSkipsConfig } from './configOwns'
-import { handleFetchApprove } from './fetchApprove'
-import { handleGithubBranch } from './githubBranch'
-import { fetchOwner, parseRustFetchKinds } from './fetchOwns'
-import { FetchPrefsSender } from './fetchPrefs'
-import { GhTokenMirror, handleGhToken } from './ghToken'
-import { MirrorSender } from './mirror'
-import { handleNote } from './note'
-import { RepoQueryHandler } from './repoQuery'
+import { rustOwnsConfig, sidecarAccepts } from './configOwns'
+import { assembleLegacy } from './legacy'
+import { registerUpdateIpc } from './updateIpc'
 import { UNDEFINED_ARG, type FromSidecar, type ToSidecar } from './protocol'
 import { IPC_CHANNELS } from '@shared/ipc'
 
@@ -53,67 +36,11 @@ const out = (msg: FromSidecar): void => {
 bindHost(out)
 const emit = (name: string, payload: unknown): void => out({ t: 'evt', name, payload })
 
-// GitHub 원격 전용 저장소의 앱 캐시·빈 hooks 디렉터리(src/main/index.ts 와 같은 위치 규칙)
-const cacheDir = join(userData, 'remote-repos')
-const noHooksDir = join(userData, 'no-hooks')
 // Rust 가 설정 파일을 소유한다(env ANTLER_RUST_CONFIG=1 — Rust 는 라우터가 켜져 있을 때만 준다). **한 실행에서 설정 파일을 쓰는 쪽은 하나다**:
-// 소유하면 이 사이드카는 파일을 열지도 쓰지도 않고(읽기 전용 빈 설정 — 모든 변경자가 던진다), 미러·fetch 설정을 보내지 않으며, 고아 캐시도 정리하지 않는다.
-// 값이 없으면(ANTLER_RUST_GIT=0) 이 사이드카가 지금처럼 설정의 유일한 작성자다
+// 소유하면 이 사이드카는 설정·저장소·fetch·감시·GitHub·Jira 서비스를 만들지 않고 파일도 열지 않으며, update:* 밖의 채널은 거부한다.
+// 값이 없으면(ANTLER_RUST_GIT=0) legacy.ts 의 조립이 지금처럼 설정의 유일한 작성자다
 const rustConfig = rustOwnsConfig(process.env['ANTLER_RUST_CONFIG'])
-const config = new ConfigStore(join(userData, 'antler.config.json'), { cacheDir, readOnly: rustConfig })
-if (!rustConfig) {
-  // Rust 라우터가 쓰는 저장소 미러. 시작 때(ready 전) 한 번, 이후 목록이 바뀔 때마다 보낸다. update 안에서 동기로 불리므로
-  // 저장소를 바꾸는 호출의 res 줄보다 repos 줄이 먼저 나가 renderer 의 다음 호출은 새 미러를 본다
-  const mirror = new MirrorSender(out)
-  // fetch 설정(자동 주기·승인 지문)은 미러와 따로 보낸다. 반드시 미러 다음에(저장소가 사라진 설정을 승인 맵이 앞서가지 않게), 시작 때도 ready 전에
-  const fetchPrefs = new FetchPrefsSender(out)
-  config.onChange = (c) => {
-    mirror.push(c)
-    fetchPrefs.push(c)
-  }
-  mirror.push(config.get())
-  fetchPrefs.push(config.get())
-}
-// Rust 가 jira:*·gh:*(gh:repo 제외)를 소유한다(env ANTLER_RUST_API=1). 라우터가 가로채므로 그 채널은 여기까지 오지 않아야 한다 — 오면 처리하지 않는다
-const rustApi = rustOwnsApi(process.env['ANTLER_RUST_API'])
-// rustApi 일 때 GitHub 토큰은 Rust 가 stdin(`ghToken`)으로 보낸 메모리 사본이다. 이 사이드카의 GitHubService 는 로그인하지 않는다(gh:* 를 받지 않는다)
-const ghMirror = new GhTokenMirror()
-let netConfig: readonly NetworkConfigEntry[] = []
-const netReady = readNetworkConfig().then((c) => {
-  netConfig = c
-})
 
-const repos = new RepoService(config, { cacheDir, githubToken: () => (rustApi ? ghMirror.get() : gh.gitToken()), noHooksDir, netConfig: () => netConfig, netReady })
-// fetch 와 감시의 소유 판정은 **같은 술어 하나**다 — Rust 가 맡는 종류(env ANTLER_RUST_FETCH_KINDS, 없으면 사이드카가 전부)의 저장소는 사이드카가 fetch·자동 예약도 감시도 하지 않는다.
-// 둘을 따로 판정하면 이중 감시나 무감시 구간이 생긴다(src-tauri/src/router.rs 의 rust_fetch_kinds·RepoMirror::resolve_fetch 가 Rust 쪽 같은 술어)
-const ownsRepo = fetchOwner(() => config.get(), parseRustFetchKinds(process.env['ANTLER_RUST_FETCH_KINDS']))
-const watcher = new RepoWatcher(repos, (repoId) => emit('repo:changed', { repoId }), ownsRepo)
-const fetcher = new FetchService(
-  config,
-  repos,
-  (status) => emit('fetch:status', status),
-  (repoId) => emit('repo:changed', { repoId }),
-  noHooksDir,
-  ownsRepo
-)
-
-// 안전한 암호화 저장소가 없으므로 토큰은 메모리에만 둔다(디스크에 쓰지 않는다)
-const noSafeStorage = { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => '' }
-const gh: GitHubService = new GitHubService({
-  config,
-  repos,
-  store: new TokenStore(userData, noSafeStorage),
-  cli: createGhCli(),
-  onAuthChanged: () => fetcher.resumeGithubAuth(),
-  // Rust 가 GitHub 를 처리하면 아바타 캐시 파일도 Rust 의 것이다 — 이 서비스는 파일을 쓰지 않는다
-  ...(rustApi ? {} : { avatarCacheFile: join(userData, AVATAR_CACHE_FILE) })
-})
-// Rust 의 GitHub 서비스가 저장소 정보를 물으면(`repoq`) 여기서 답한다
-const repoQuery = new RepoQueryHandler(repos, config, (id, env) => out({ t: 'res', id, env }))
-const jira = new JiraService({
-  store: new TokenStore(userData, noSafeStorage, process.platform, { token: JIRA_TOKEN_FILE, meta: JIRA_META_FILE }),
-  allowInsecureLoopback: false
-})
 // 업데이트는 비활성(isPackaged=false, ANTLER_UPDATE_DEV 없음)
 const updates = new UpdateService({
   currentVersion: '0.0.0-tauri-poc',
@@ -128,10 +55,9 @@ const updates = new UpdateService({
   openPath: () => Promise.resolve('사이드카(PoC): openPath 미지원'),
   showItem: () => {}
 })
-registerIpc(config, repos, watcher, gh, jira, fetcher, updates)
+const legacy = rustConfig ? null : assembleLegacy(userData, out, emit, updates)
+if (rustConfig) registerUpdateIpc(updates)
 updates.start()
-// 고아 캐시 정리는 설정을 소유한 쪽이 한다 — 소유하지 않는 이 사이드카의 설정은 비어 있어 전부 고아로 보이므로 하면 안 된다(읽기 전용 설정은 loadFailed 라 이중으로 막힌다)
-if (!rustConfig) repos.cleanupGithubCache().catch((err) => console.error('원격 저장소 캐시 정리 실패:', err))
 
 // preload 의 허용 목록과 같은 검사. renderer 의 bridge 검사는 __TAURI__ 로 우회할 수 있으므로 여기서 다시 막는다
 const allowedChannels = new Set<string>(IPC_CHANNELS)
@@ -147,9 +73,12 @@ function decodeArgs(args: unknown[]): unknown[] {
 
 async function onRequest(id: number, ch: string, rawArgs: unknown[]): Promise<void> {
   const args = decodeArgs(rawArgs)
-  const owned = sidecarSkips(ch, rustApi) || sidecarSkipsConfig(ch, rustConfig)
-  const pending = allowedChannels.has(ch) && !owned ? invokeHandler(ch, args) : undefined
-  const env = pending ? await pending : { ok: false, error: owned ? `Rust 가 처리하는 채널입니다: ${ch}` : `알 수 없는 채널: ${ch}`, code: 'ERROR' }
+  const accepted = allowedChannels.has(ch) && sidecarAccepts(ch, rustConfig)
+  const pending = accepted ? invokeHandler(ch, args) : undefined
+  // Rust 라우터가 이미 막는다(update:* 밖은 오지 않는다) — 와도(방어) 처리하지 않는다
+  const env = pending
+    ? await pending
+    : { ok: false, error: allowedChannels.has(ch) ? `Rust 가 처리하는 채널입니다: ${ch}` : `알 수 없는 채널: ${ch}`, code: 'ERROR' }
   out({ t: 'res', id, env: env as Extract<FromSidecar, { t: 'res' }>['env'] })
 }
 
@@ -165,51 +94,17 @@ function onLine(line: string): void {
     void onRequest(msg.id, msg.ch, Array.isArray(msg.args) ? msg.args : []).catch((err) =>
       out({ t: 'res', id: msg.id, env: { ok: false, error: err instanceof Error ? err.message : String(err), code: 'ERROR' } })
     )
-  } else if (msg.t === 'note') {
-    handleNote(repos, msg)
-  } else if (msg.t === 'fetchApprove') {
-    // Rust 가 설정을 소유하면 승인은 Rust 가 직접 쓴다(이 줄을 보내지 않는다) — 와도 쓰지 않는다(설정은 읽기 전용이다)
-    if (rustConfig) return
-    // 승인을 쓰는 유일한 길. req(채널) 경로로는 오지 않는다 — Rust 의 fetch 서비스만 이 줄을 만든다
-    // 저장 실패(백신·OneDrive 가 설정 파일을 잡음, 디스크 가득 참)는 "다음에 다시 묻는다"로 끝낸다(Electron FetchService 와 같다).
-    // 감싸지 않으면 readline 처리기의 예외로 사이드카가 죽어 Rust 가 맡지 않은 모든 채널이 멈춘다(보안 리뷰)
-    try {
-      handleFetchApprove(config, msg)
-    } catch (err) {
-      console.error('fetch 승인 저장 실패:', err)
-    }
-  } else if (msg.t === 'githubBranch') {
-    if (rustConfig) return // 위와 같다 — Rust 가 레코드에 직접 쓴다
-    // Rust fetch 가 알아낸 원격 전용 저장소의 기본 브랜치 기록 부탁. 검증 뒤 기록하고, 실패는 로그만 남긴다(다음 fetch 에서 다시 알아낸다) — 던지면 readline 처리기가 죽는다
-    try {
-      handleGithubBranch(config, msg)
-    } catch (err) {
-      console.error('원격 저장소 기본 브랜치 기록 실패:', err)
-    }
-  } else if (msg.t === 'repoq') {
-    // Rust 의 GitHub 서비스가 묻는 저장소 정보. Rust 가 GitHub 를 처리할 때(ANTLER_RUST_API=1)만 온다 — 아니면 무시한다
-    if (rustApi) repoQuery.handle(msg)
-  } else if (msg.t === 'repoqCancel') {
-    if (rustApi) repoQuery.cancel(msg.id)
-  } else if (msg.t === 'ghToken') {
-    // 토큰의 메모리 사본. 값은 어디에도 적지 않는다(로그·오류 포함). 바뀌면 원격 전용 저장소의 인증 실패 정지를 푼다(TS 의 onAuthChanged)
-    if (rustApi) handleGhToken(ghMirror, msg, () => fetcher.resumeGithubAuth())
   } else if (msg.t === 'focus') {
-    // src/main/index.ts 의 win.on('focus'|'blur') 와 같다
-    watcher.setFocused(msg.focused)
-    if (msg.focused) fetcher.onFocus()
+    // src/main/index.ts 의 win.on('focus'|'blur') 와 같다. Rust 가 설정을 소유하면 오지 않는다(받을 서비스가 없다)
+    legacy?.setFocused(msg.focused)
   } else if (msg.t === 'hostres') {
     resolveHost(msg.id, msg.ok, msg.value)
   }
 }
 
 function shutdown(): void {
-  watcher.dispose()
-  fetcher.dispose()
-  gh.dispose()
-  jira.dispose()
   updates.dispose()
-  void repos.dispose().finally(() => process.exit(0))
+  void (legacy ? legacy.dispose() : Promise.resolve()).finally(() => process.exit(0))
 }
 
 const rl = createInterface({ input: process.stdin })
