@@ -191,6 +191,53 @@ fn write_json(v: &Json, out: &mut String) {
     }
 }
 
+/// `JSON.stringify(v, null, 2)` 와 같은 텍스트(설정 파일 형식). 위 [`stringify`] 와 달리 객체 키를 **JS 열거 순서**(정수형 키가 먼저)로 쓴다 —
+/// 같은 값을 `JSON.stringify` 하면 `{"b":1,"2":0}` 이 `{"2":0,"b":1}` 로 나오기 때문이다. 빈 배열·객체는 `[]`·`{}` 다
+pub fn stringify_pretty(v: &Json) -> String {
+    let mut out = String::new();
+    write_pretty(v, 0, &mut out);
+    out
+}
+
+fn write_indent(depth: usize, out: &mut String) {
+    out.push('\n');
+    for _ in 0..depth {
+        out.push_str("  ");
+    }
+}
+
+fn write_pretty(v: &Json, depth: usize, out: &mut String) {
+    match v {
+        Json::Arr(a) if !a.is_empty() => {
+            out.push('[');
+            for (i, x) in a.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_indent(depth + 1, out);
+                write_pretty(x, depth + 1, out);
+            }
+            write_indent(depth, out);
+            out.push(']');
+        }
+        Json::Obj(o) if !o.is_empty() => {
+            out.push('{');
+            for (i, (k, x)) in v.entries_js_order().into_iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_indent(depth + 1, out);
+                write_str(k, out);
+                out.push_str(": ");
+                write_pretty(x, depth + 1, out);
+            }
+            write_indent(depth, out);
+            out.push('}');
+        }
+        _ => write_json(v, out),
+    }
+}
+
 fn write_str(t: &str, out: &mut String) {
     out.push('"');
     for c in t.chars() {
