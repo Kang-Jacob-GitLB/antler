@@ -98,7 +98,7 @@
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
 Jira 토큰은 Rust 프로세스 밖(renderer·사이드카)으로 나가지 않는다 — 사이드카는 `ANTLER_RUST_API=1` 이면 `jira:`·`gh:`(`gh:repo` 제외)를 처리하지 않는다.
-GitHub 토큰은 renderer 로 가지 않고, 사이드카에 남는 원격 전용 저장소의 git fetch 인증용 **메모리 사본**만 사이드카 stdin(`ghToken`, `ANTLER_RUST_API=1` 일 때만)으로 간다 — env·인자·로그에는 싣지 않는다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
+GitHub 토큰은 renderer 로도 **사이드카로도 가지 않는다**(Phase 6b PR 9 부터 사이드카로 보내던 메모리 사본 `ghToken` 줄이 없다 — 원격 전용 저장소의 fetch·조회 인증은 Rust 의 캐시 실행기가 환경 변수로만 쓴다). 하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 은퇴했고 `ANTLER_RUST_GIT=0` 만 6c 까지 산다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
 리다이렉트를 따라가지 않으며, `jira:openExternal` 은 연결한 사이트의 https 주소만, `gh:openExternal` 은 `https://github.com` 의 주소만 연다. 자세한 것은 docs/tauri.md "PR 6"·"PR 9".
 
 **Tauri 판의 SSH**(`src-tauri/src/git/exec/ssh/`, `russh`): Electron 판(`ssh2` + 자체 설정 파서)과 같은 규칙을 Rust 로 옮겼다. 호스트 키는 known_hosts 로만 검증한다(TOFU 없음 — 모르는 호스트·키가 바뀐 호스트·폐기된 키는 거부하고
@@ -150,8 +150,8 @@ Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.r
 fetch 는 일반 저장소의 허용 목록을 타지 않는 **별도 갈래**다(`git/fetch/service/github.rs`): 레코드의 owner/repo 와 캐시 경로가 맞지 않으면 일반 흐름으로 가지 않고 차단하고, 설정이 앱이 만든 것과 **정확히 일치**하지 않으면(`include.path` 등 다른 키·remote 둘) 확인 없이 차단하며,
 fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=false`·remote `origin` 하나·고정 refspec·`--refmap=`)뿐이다. 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)와 Rust 의 소유 판정은 같은 함수·같은 플래그 하나라 이중 fetch·무감시가 없다.
 라우터는 GitHub 서비스(토큰의 출처)와 캐시 실행기가 주입됐고 스위치가 켜져 있을 때만 github 저장소를 푼다(`Router::set_github_cache`). 토큰은 Rust 안에서만 읽혀 실행기의 환경 변수로만 가고 어떤 응답·오류 봉투에도 실리지 않으며(시험 `tests/github_route.rs`),
-`repos:remove` 는 사이드카가 캐시 폴더를 지우기 전에 이 쪽의 fetch(멈추고 끝나기를 기다린다 — 최대 5초)·감시·진행 중 조회·활동 시그니처 계산을 끊고 로그 커서를 닫은 뒤, 그 저장소의 git 프로세스가 끝나기를(실행기가 센다, 최대 5초) 기다린다.
-보장은 "트리 종료를 요청했고 호출이 돌아왔다"까지이고 파일 핸들이 풀리는 짧은 틈은 사이드카의 삭제 재시도가 흡수한다. 정리를 시작한 id 에는 "삭제 중" 표식이 달려 새 조회가 폴더를 다시 쥐지 못한다(미러가 바뀌면 풀리고, 아니면 30초 뒤). 세 겹은 이렇다:
+`repos:remove` 는 캐시 폴더를 지우기 전에(PR 9 부터 폴더도 Rust 가 지운다 — 아래 "설정 소유") fetch(멈추고 끝나기를 기다린다 — 최대 5초)·감시·진행 중 조회·활동 시그니처 계산을 끊고 로그 커서를 닫은 뒤, 그 저장소의 git 프로세스가 끝나기를(실행기가 센다, 최대 5초) 기다린다.
+보장은 "트리 종료를 요청했고 호출이 돌아왔다"까지이고 파일 핸들이 풀리는 짧은 틈은 `remove_github_cache` 의 재시도(10회×100ms)가 흡수한다. 정리를 시작한 id 에는 "삭제 중" 표식이 달려 새 조회가 폴더를 다시 쥐지 못한다(미러가 바뀌면 풀리고, 아니면 30초 뒤). 세 겹은 이렇다:
 캐시 모양을 통과한 경로만 담는 `GithubCachePath` 타입이 환경·init·HEAD 쓰기의 입력이고, 환경(`github_env`)을 만드는 곳은 그 파일 한 곳(소스 검사로 강제)이며,
 캐시 밖 경로의 git 은 토큰도 읽지 않고 기본 환경(전송 금지)으로 돈다. `http.followRedirects=false` 는 `-c` 로도 명시한다(`-c` 는 환경의 설정을 이긴다). 일반 저장소의 fetch 허용 목록은 바뀌지 않는다.
 
@@ -159,3 +159,20 @@ fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=fal
 토큰 헤더가 환경에 실리는 유일한 경로라 허용 목록 쪽으로 정했다: 부모의 `GIT_SSL_NO_VERIFY`(빈 값이어도 TLS 검증을 끈다)·`GIT_TRACE*`/`GIT_CURL_VERBOSE`(`GIT_TRACE_REDACT=0` 와 함께 Authorization 기록)·`GIT_EXEC_PATH`·`GIT_ALTERNATE_OBJECT_DIRECTORIES`·`GIT_NAMESPACE`·`GIT_COMMON_DIR`·`GIT_OBJECT_DIRECTORY`·`GIT_INDEX_FILE`·`GIT_WORK_TREE`·`GIT_CONFIG*` 는 어느 하나도 이 실행기에 필요하지 않고,
 `GIT_COMMON_DIR` 를 물려받으면 `init_github_repo` 의 `git config --local` 이 사용자 저장소의 `.git/config` 를 덮어쓴다. 필요한 `GIT_*` 는 `github_env` 가 모두 직접 넣는다. 지우기는 덧씌우기보다 **먼저** 적용돼(`exec/process.rs` `launch`) 실행기가 넣은 `GIT_DIR`·`GIT_CONFIG_COUNT` 등은 살아남는다.
 토큰은 `run` 의 stdout·stderr·오류 문구와 `stream` 의 `finish` 오류 문구(message·stderr)에서 가린다(`config --list` 가 환경의 `extraheader` 를 보여 주기 때문이다). `stream` 의 stdout 은 파일 내용(blob)이라 가리지 않는다 — 설정을 드러내는 명령은 `run` 으로만 읽는다.
+
+## Tauri 판의 설정 소유(Phase 6b PR 9)
+
+**한 실행 동안 설정 파일(`antler.config.json`)을 쓰는 쪽은 하나다.** `ANTLER_RUST_GIT≠0` 이면 Rust(`src-tauri/src/config/`·`config_host.rs`)가 유일한 작성자이고, 사이드카는 `ANTLER_RUST_CONFIG=1` 로 떠서 파일을 열지도 쓰지도 않는다(읽기 전용 빈 설정 — 변경자가 던진다)·미러와 fetch 설정을 보내지 않는다·설정 소유 채널(`config:*`·`repos:*`·`external:*`·`req:cancel`)을 받지 않는다·**고아 캐시를 정리하지 않는다**(빈 설정이면 모든 캐시가 고아로 보인다).
+`ANTLER_RUST_GIT=0` 이면 Rust 는 파일을 열지 않고 사이드카가 쓴다(소유 술어는 시작 때 `router.enabled()` 하나 — 소스 검사가 `ConfigStore::open` 이 그 분기 안의 한 곳임을 강제한다). Rust 는 소유할 때 사이드카가 보낸 `repos`·`fetchPrefs` 줄을 버린다.
+- 쓰기: 임시 파일 → `sync_all` → rename 의 원자적 쓰기, 디스크에 먼저 쓰고 성공했을 때만 메모리를 바꾼다, JSON 깊이 상한(`MAX_DEPTH`)을 넘는 값은 저장하지 않는다, 손상된 파일은 덮어쓰기 전에 `.corrupt-*.bak` 로 보존하고 `load_failed` 면 캐시를 정리하지 않는다.
+- **renderer 입력은 모두 검증한다**(TS `handlers.ts` 와 같은 규칙 이상): 환경·경로·호스트(`check_env_input` — NT 네임스페이스·UNC(WSL 제외)·NUL·길이·`-` 시작 호스트·WSL 설치 목록 대조), 그룹 200자, `addMany` 500개·같은 환경, `addGithub` 200개·`validate_github_link`, `setUi` 검증기(`editorExePath`·`skippedUpdateVersion` 키 거부).
+  **`config:setUi` 로는 승인(`fetchApprovals`·`trustedConfigs`)을 위조할 수 없다** — 패치는 `ui` 아래로만 들어간다. 승인을 쓰는 곳은 fetch 서비스의 두 지점(수동 fetch 성공 뒤·"항상 허용" 뒤)이 부르는 `FetchHost::approve` 구현(`fetch_host.rs`) 한 곳이고 소스 검사가 강제한다(저장소 존재·소문자 hex 64 를 다시 확인).
+- 저장소를 추가할 때 git 이 돌려준 최상위 경로를 **다시 `check_path`**(UNC·NT 네임스페이스 거부)로 본다. 로컬 경로는 `git -C` 앞에 `fsguard::check_local_root` 로 링크가 원격으로 이어지는지 본다(NTLM 유출).
+- 설정에 없는 SSH 호스트의 확인 창 승인 기억은 `EnvHost` 하나다(`repos:add`·`env:test`·`env:listDir`·`repos:scan` 이 같은 것을 쓴다). 거부는 기억하지 않는다. 호스트 키는 `known_hosts` 로만(TOFU 없음).
+- 저장소 쓰기 예외(앱 캐시)의 **삭제**: 폴더를 지우는 입력은 `GithubCachePath` 뿐이고, 레코드는 지우기 전에 읽어 **링크의 owner/repo 와 캐시 경로가 맞을 때만**(`cache_path_matches_link`) 지운다 — 다른 저장소의 캐시를 가리키는 레코드가 그 폴더를 지우지 못한다. owner·저장소 폴더가 링크(정션 포함)면 따라가지도 지우지도 않는다.
+  순서는 fetch 정지·대기 → 감시 정지 → 조회·로그 커서·git 프로세스 드레인 → 폴더 삭제(경로 잠금 안) → 레코드 삭제. 고아 정리·추가도 같은 경로 잠금을 쓰고, 고아 정리는 모양이 맞고 링크가 아닌 폴더만 지운다.
+- 미러의 GitHub 링크·기본 브랜치는 `RepoMirror::apply_message`(`sanitize_github_link`·`is_safe_branch`)의 검증 경로로만 들어간다 — 설정에서 직접 만든 값도 같다.
+- `external:open`: 동작 허용 목록·저장소 id → **설정에서만** 루트·환경을 읽는다(renderer 는 경로를 정하지 못한다)·GitHub 소스 거부·`path` 는 문자열만(`null` 거부). 프로그램을 띄우는 곳은 `external/launch.rs` 한 곳이고 `lib.rs` 가 주입한다 — `config_host.rs` 는 `Command`·실행기를 직접 만들지 않는다(소스 검사).
+  에디터 실행 파일은 사용자가 고른 `.exe`/`.com` 만(`check_chosen_exe` — 절대 경로·UNC 거부·존재), `setUi` 로는 바꿀 수 없다.
+- **Electron 설정 가져오기(D1)**: Tauri 설정이 없을 때 한 번만, Electron 파일은 읽기만(고치지도 백업도 만들지 않는다). **명령을 실행할 수 있는 저장소 설정의 "항상 허용"(`trustedConfigs`)은 가져오지 않는다**(이관 뒤 한 번 다시 묻는다). 창 위치·GitHub 캐시 폴더·토큰(D2)도 가져오지 않는다.
+- **매핑된 네트워크 드라이브(`Z:\repo`)** 로 등록한 저장소는 Electron 판처럼 열린다 — 입력이 드라이브 문자 경로이고 대상의 canonical 이 그 드라이브 루트의 canonical 과 **같은 서버·공유 아래**일 때만(`restore_mapped_drive`). UNC 로 직접 등록한 경로·드라이브 안에서 다른 공유로 나가는 링크·`canonicalize` 앞의 링크 가드(원격 UNC 를 가리키는 링크는 따라가기 전에 거부)는 그대로 거부한다.
