@@ -10,6 +10,7 @@ mod dialogs;
 // 외부 도구로 열기(Phase 6b PR 3) — 순수 계획·실행기. 아직 앱에 연결하지 않는다(PR 9). 통합 테스트(tests/external.rs)가 별도 크레이트라 pub 이다
 pub mod external;
 mod fetch_host;
+pub mod fsguard;
 pub mod git;
 // Phase 4 의 순수 로직(PR 1)·응답 매퍼(PR 2)·HTTP 클라이언트(PR 3). Jira(PR 6)·GitHub(PR 9)는 api_host 가 부른다.
 // 통합 테스트(tests/net.rs)가 별도 크레이트라 pub 이다

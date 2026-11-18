@@ -86,7 +86,14 @@
   (대상에는 접속하지 않는다). 원격이면 거부, 로컬 대상은 그 경로도 같은 방식으로 이어서 확인하고, 링크 수가 합쳐 16 을 넘으면 거부한다. 판정은 **허용 목록**이다(차단 목록은 `GLOBALROOT` 같은 NT 장치 경로로 우회돼 폐기): 로컬은 드라이브 경로(`C:\`·`C:/`·`\\?\C:\`·`\??\C:\`)·상대 경로·단일 `/` 시작 경로·WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`)뿐이고,
   나머지(`\\…`·`//…`, 드라이브가 아닌 `\??\…`·`\\?\…`)는 전부 원격으로 본다. 중간 링크(`b -> a\x`, `a -> 원격`)도 구성 요소 단위로 a 에서 멈춘다.
   적용 지점: `assertInsideRoot`·`assertNoLinkEscape`(서브모듈 확인·WIP 열기 전), 저장소 스캔(`repoScan.ts` — 원격 대상 링크는 폴더·`.git` 어느 쪽이든 건너뛴다), 외부 열기(`opener.ts` `inspect`, 로컬만 — WSL 은 리눅스 쪽 링크라 Node 가 볼 수 없다).
-  Rust 판의 `repos/scan.rs` `is_remote_link_target` 은 같은 사례표 `tests/fixtures/repos/link-target.cases.json` 으로 TS 와 함께 시험한다. 한계: 확인과 사용 사이 경쟁(TOCTOU)은 막지 못한다. Rust 판 외부 열기의 같은 방어는 이 변경에 없다.
+  한계: 확인과 사용 사이 경쟁(TOCTOU)은 막지 못한다.
+  **Rust 판은 공용 모듈 `src-tauri/src/fsguard.rs` 한 곳에 둔다**(외부 열기·폴더 선택·폴더 찾기·환경 채널이 모두 이것을 쓰고, 소스 검사 `tests/external.rs` 가 다른 곳의 중복 구현을 막는다).
+  `is_remote_link_target` 은 **허용 목록**이다 — 로컬로 인정하는 것만 나열한다: 드라이브 문자 경로(`X:\`·`X:/`·`\\?\X:\`·`\??\X:\`)·상대 경로·WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`).
+  그 밖의 `\\…`·`//…`·`\??\…`·`\\?\…`·`\\.\…`(`GLOBALROOT\Device\Mup\…`·`Device\…`·`Volume{…}` 포함)는 전부 원격이다 — 예전에 `\??\`·`\\?\` 뒤가 `UNC\`·`Volume{` 이 아니면 로컬로 보던
+  차단 목록식 판정은 `\??\GLOBALROOT\Device\Mup\host\share` 로 SMB 접속을 열어 주었다. `links_stay_local` 은 경로의 **구성 요소마다** `symlink_metadata` 로 링크를 보고 대상만 판정한다
+  (`b -> a\x`, `a -> \\evil\share` 처럼 중간 구성 요소의 링크도 잡는다. 사슬 16 초과 거부). 적용 지점: 외부 열기 `realpath`, 폴더 선택 시작 위치, 폴더 찾기(`repos:scan`)의 하위 항목,
+  그리고 `repos:scan` 의 **루트**(local 종류, Windows) — `git -C <루트>` 와 `read_dir` 가 루트·중간 링크를 따라가기 전에 `check_local_root` 로 거른다("네트워크 공유 경로는 지원하지 않습니다(링크가 …)").
+  TS 사례표 `tests/fixtures/repos/link-target.cases.json` 은 `fsguard` 단위 시험이 TS 와 함께 읽고, GLOBALROOT·Mup 같은 Rust 쪽 추가 사례는 `fsguard.rs` 시험에 따로 있다(TS 수정 PR 과 맞춘 뒤 사례표로 옮긴다).
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).

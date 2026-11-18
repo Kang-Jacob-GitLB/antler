@@ -247,6 +247,12 @@ async fn scan_repos(host: &EnvHost, pool: Option<&Arc<SshPool>>, input: Option<&
             Err(e) => Err(e.message()),
         };
     }
+    // 고른 폴더(로컬)가 링크로 원격에 이어지면 `git -C`·`read_dir` 가 따라가는 순간 SMB 인증(NTLM)이 샌다 — 실행기를 만들기도 전에 구성 요소 단위로 확인한다.
+    // WSL 공유 경로(`\\wsl.localhost\…`)는 리눅스 쪽 링크라 Windows 가 따라가지 못하므로 local 종류만 본다
+    if cfg!(windows) && env.kind == "local" {
+        let root = path.clone();
+        blocking(move || crate::fsguard::check_local_root(&root, crate::fsguard::is_remote_link_target)).await??;
+    }
     let exec = (host.exec_for)(env.kind, env.target.as_deref());
     if probe(exec.run(&rel, &["rev-parse", "--show-toplevel"], &RunOpts::default()).await).map_err(|e| e.to_string())? {
         return Ok(to_json(RepoScanResult { path, is_repo: true, repos: Vec::new(), truncated: false }));

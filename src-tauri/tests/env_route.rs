@@ -383,6 +383,37 @@ async fn 로컬_찾기는_정션_사슬을_따라가_저장소를_찾는다() {
     assert_eq!(v["data"]["repos"][0]["path"], json!(win32_path::join(&[&root, "link1"])));
 }
 
+/// 고른 폴더(루트)가 링크 사슬(상한 16 초과)로 이어지면 실행기를 만들기도 전에 거부한다 — 원격 링크는 만들 수 없으므로 상한 초과로 루트 가드의 연결을 확인한다
+/// (원격 판정 자체의 구성 요소 단위 시험은 tests/fsguard.rs)
+#[cfg(windows)]
+#[tokio::test]
+async fn 로컬_찾기의_루트가_링크_사슬_상한을_넘으면_git_을_돌리기_전에_거부한다() {
+    let calls = Arc::new(Calls::default());
+    let r = router(true, Some(host(&calls, &[])));
+    let base = TempDir::new("rootchain");
+    let real = base.path().join("real");
+    fs::create_dir_all(real.join("repo")).unwrap();
+    git(&real.join("repo"), &["init", "-q"]);
+    let mut j = Junctions(Vec::new());
+    let mut prev = real.clone();
+    let mut links = Vec::new();
+    for i in 0..17 {
+        let link = base.path().join(format!("c{i}"));
+        j.make(&link, &prev);
+        links.push(link.clone());
+        prev = link;
+    }
+    // 홉 3 은 통과해 저장소를 찾는다(대조)
+    let ok = done(&r, "repos:scan", json!([{ "kind": "local", "path": links[2].to_string_lossy() }])).await;
+    assert_eq!(ok["ok"], true, "{ok}");
+    assert_eq!(repo_names(&ok), ["repo"]);
+    let after_ok = calls.execs.lock().unwrap().len();
+    // 홉 17 은 거부 — 실행기도 만들지 않는다
+    let v = done(&r, "repos:scan", json!([{ "kind": "local", "path": links[16].to_string_lossy() }])).await;
+    assert_eq!(v, err(antler_lib::fsguard::REMOTE_LINK_ROOT));
+    assert_eq!(calls.execs.lock().unwrap().len(), after_ok, "거부된 루트에서 git 실행기를 만들었다");
+}
+
 #[tokio::test]
 async fn 로컬_연결_테스트는_git_버전을_돌려준다() {
     let calls = Arc::new(Calls::default());
@@ -637,6 +668,9 @@ fn 환경_모듈은_프로세스를_띄우지_않고_known_hosts_에_쓰지_않�
     // 파일 시스템 접근은 로컬 찾기(scan_local_repos)와 `~/.ssh/config` 읽기(ssh_hosts_for_home) 뿐이다
     assert_eq!(code.matches("scan_local_repos(").count(), 1);
     assert_eq!(code.matches("load_ssh_config(").count(), 1);
+    // 고른 폴더(로컬)의 링크 확인은 실행기를 만들고 `git -C`(probe)를 돌리기 전이다. external 은 쓰지 않고 공용 `fsguard` 를 쓴다
+    assert_eq!(code.matches("fsguard::check_local_root(").count(), 1);
+    assert!(code.find("fsguard::check_local_root(").unwrap() < code.find("(host.exec_for)(env.kind").unwrap());
     // 확인 창은 한 곳에서만 부르고 승인은 응답이 참일 때만 기억한다
     assert_eq!(code.matches("confirm(&arg)").count(), 1);
     assert!(code.find("confirm(&arg)").unwrap() < code.find(".insert(host.to_string())").unwrap());
