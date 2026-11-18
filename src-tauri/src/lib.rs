@@ -31,7 +31,7 @@ pub mod secret;
 mod sidecar;
 mod single_instance;
 mod snap;
-// 업데이트 판정 로직(Phase 6c PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/update.rs)가 별도 크레이트라 pub 이다
+// 앱 업데이트: 판정 로직(Phase 6c PR 1)·상태 기계와 호스트(PR 4 — `update:*` 7채널을 Rust 가 처리한다). 통합 테스트(tests/update*.rs)가 별도 크레이트라 pub 이다
 pub mod update;
 // 저장소 감시의 앱 쪽 호스트(Phase 6a PR 7b) — 라우터가 만든다
 mod watch_host;
@@ -181,6 +181,11 @@ pub fn run() {
                 .build(),
         );
     }
+    // 업데이트 플러그인(Phase 6c PR 4): 서명 검증·설치에만 쓴다(`update::host`). 플러그인 설정은 tauri.conf.json 이 아니라 여기서 넣는다 — 믿는 공개 키가 `update::host::UPDATE_PUBKEY` 한 곳이어야 해서다.
+    // JS command 는 capability 에 권한을 주지 않아 renderer 가 부를 수 없다(`tests/update_security.rs` 가 강제한다)
+    let mut context = tauri::generate_context!();
+    context.config_mut().plugins.0.insert("updater".to_string(), update::host::updater_plugin_config(update::host::UPDATE_PUBKEY));
+    builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .invoke_handler(tauri::generate_handler![
             snap::show_snap_overlay,
@@ -355,6 +360,22 @@ pub fn run() {
                 }
                 router.set_fetch(std::sync::Arc::new(service));
             }
+            // 앱 업데이트(Phase 6c PR 4): 설정을 소유한 실행(스위치가 켜져 있다)에서 Rust 가 `update:*` 7채널을 처리한다. 만들지 못하면(TLS 초기화 실패) 주입하지 않고 사이드카가 맡는다(되돌리기).
+            // 설치 프로그램을 띄운 뒤 `Update::install` 이 `exit(0)` 으로 끝나 `RunEvent::Exit` 을 건너뛰므로, 그 직전에 같은 종료 정리를 한다
+            if let (true, Some(store)) = (router.enabled(), config_store.clone()) {
+                let exit_app = app.handle().clone();
+                let before_exit: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    exit_cleanup(&exit_app);
+                    exit_app.cleanup_before_exit();
+                });
+                match update::host::build_service(app.handle().clone(), store, before_exit) {
+                    Ok(service) => {
+                        router.set_update(Arc::new(service.clone()));
+                        service.start(tauri::async_runtime::handle().inner());
+                    }
+                    Err(e) => eprintln!("[update] 업데이트 서비스를 만들지 못했다({e}) — update:* 는 사이드카가 처리한다"),
+                }
+            }
             // jira·gh 의 소유를 기록한다(두 서비스가 실제로 만들어졌을 때만 켜진다 — 만들지 못했으면 서비스 없는 채널은 Rust 가 오류로 답한다). 사이드카에 알릴 값이 아니다(PR 10)
             router.claim_api();
             let config_owned = router.config_owned();
@@ -421,19 +442,24 @@ pub fn run() {
                 }
             }
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("Tauri 앱 빌드 실패")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                // 열려 있는 로그 커서(멈춘 git log)를 먼저 닫는다
-                if let Some(r) = app.try_state::<router::Router>() {
-                    r.shutdown();
-                }
-                // 폴백 taskkill 이 진행 중이면 기다린다(Job 으로 끝나는 보통의 경로에는 없다). 종료 때 CreateProcess 가 끊기면 정지된 고아가 남는다
-                git::exec::shutdown_kills(std::time::Duration::from_secs(2));
-                if let Some(s) = app.try_state::<sidecar::Sidecar>() {
-                    s.kill();
-                }
+                exit_cleanup(app);
             }
         });
+}
+
+/// 앱이 끝나기 전의 정리. `RunEvent::Exit` 와 업데이트 설치(`Update::install` 의 `on_before_exit` — 설치 프로그램을 띄우고 `exit(0)` 으로 끝나 `RunEvent::Exit` 을 건너뛴다)가 **같은 함수**를 부른다
+fn exit_cleanup(app: &tauri::AppHandle) {
+    // 열려 있는 로그 커서(멈춘 git log)를 먼저 닫는다
+    if let Some(r) = app.try_state::<router::Router>() {
+        r.shutdown();
+    }
+    // 폴백 taskkill 이 진행 중이면 기다린다(Job 으로 끝나는 보통의 경로에는 없다). 종료 때 CreateProcess 가 끊기면 정지된 고아가 남는다
+    git::exec::shutdown_kills(std::time::Duration::from_secs(2));
+    if let Some(s) = app.try_state::<sidecar::Sidecar>() {
+        s.kill();
+    }
 }

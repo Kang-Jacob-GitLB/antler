@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { UpdatePolicy, compareSemver, isAllowedDownloadUrl, isOfferable, isReleaseAssetUrl, isSafeFileName, parseDismiss, parseSemver, releaseNotesUrl, sanitizeError } from '../src/main/update/logic'
 import { fetchReleaseNotes } from '../src/main/update/releaseNotes'
 import { itKeys } from './fixtures/itTitles'
+import { runScenarios, type Scenario } from './fixtures/updateScenarios'
 import {
   ALLOWED_URLS,
   ASSET_URLS,
@@ -54,6 +55,8 @@ const HAND_WRITTEN: [string, string, string][] = [
 ]
 
 const cmp = (a: string, b: string): number | null => compareSemver(a, b)
+
+const SCENARIOS = (JSON.parse(readFileSync(new URL('./fixtures/update.scenarios.json', import.meta.url), 'utf8')) as { scenarios: Scenario[] }).scenarios
 
 // ── 릴리스 노트 모의 fetch ────────────────────────────────────────────
 
@@ -139,7 +142,9 @@ async function build(): Promise<Record<string, string>> {
     'dismiss.json': render({ cases: dismiss }),
     'sanitize.json': render({ cases: sanitize }),
     'manifest.json': render({ cases: manifest }),
-    'notes.json': render({ cases: notes })
+    'notes.json': render({ cases: notes }),
+    // 서비스 상태 순서(PR 4): 같은 입력(tests/fixtures/update.scenarios.json)을 Rust 서비스(src-tauri/tests/update.rs)도 돌려 이 출력과 비교한다
+    'scenarios.json': render({ scenarios: await runScenarios(SCENARIOS) })
   }
 }
 
@@ -148,6 +153,7 @@ async function build(): Promise<Record<string, string>> {
 /** 대응표 값의 `<파일>::<이름>` 이 가리키는 Rust 소스 */
 const RUST_SOURCES: Record<string, string> = {
   'update.rs': '../src-tauri/tests/update.rs',
+  'update_security.rs': '../src-tauri/tests/update_security.rs',
   'logic.rs': '../src-tauri/src/update/logic.rs',
   'config.rs': '../src-tauri/tests/config.rs'
 }

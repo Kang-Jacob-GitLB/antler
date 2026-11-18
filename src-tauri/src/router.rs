@@ -4,8 +4,9 @@
 //! 환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아닐 때. 그 밖에는 전부 사이드카가 지금까지처럼 처리한다
 //! (미러에 없는 id 의 오류 문구도 사이드카가 만든다). `ANTLER_RUST_GIT=0` 은 즉시 되돌리는 스위치다.
 //!
-//! **Rust 가 설정을 소유한 실행([`Router::config_owned`])에서 사이드카로 가는 채널은 [`UPDATE_CHANNELS`] 7개뿐이다**(Phase 6b PR 10): [`Router::route`] 의 관문이 그 밖의 채널이 `Routed::Sidecar` 가 되면
+//! **Rust 가 설정을 소유한 실행([`Router::config_owned`])에서 사이드카로 갈 수 있는 채널은 [`UPDATE_CHANNELS`] 7개뿐이다**(Phase 6b PR 10): [`Router::route`] 의 관문이 그 밖의 채널이 `Routed::Sidecar` 가 되면
 //! 사이드카로 보내지 않고 명시적 오류로 답한다(Rust 가 풀지 못한 저장소 — 사이드카는 설정을 모른다). 시험: `tests/sidecar_scope.rs`.
+//! 앱 업데이트 서비스([`Router::set_update`])가 주입돼 있으면(Phase 6c PR 4 — 스위치가 켜진 앱은 항상 주입한다) 그 7개도 Rust 가 처리해 **사이드카로 가는 채널이 없다**(`update::service`).
 //!
 //! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl(그리고 ssh·github 가 Rust 로 풀릴 때는 ssh·github) 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
 //! (Phase 6b PR 10 부터 설정을 소유한 실행의 사이드카는 `update:*` 밖의 서비스를 만들지 않아 fetch 를 하지 않는다 — env 로 알릴 일이 없다.)
@@ -90,6 +91,7 @@ use crate::git::signature::{refs_signature_digest, Signature};
 use crate::git::wip::{wip_file_diff, wip_status, WipDiffRequest};
 use crate::git::watcher::{DirWatch, PollTimes, RepoWatcher};
 use crate::mirror::{RepoMirror, Resolved, Target};
+use crate::update::service::{update_envelope, UpdateControl};
 use crate::watch_host::RouterWatchHost;
 
 /// 감시가 ref 변화를 알리는 곳(저장소 id). 앱은 renderer 의 `repo:changed` 이벤트로 보낸다. **감시 태스크(tokio 워커)에서 불리니** 막지 않는다
@@ -191,7 +193,8 @@ pub const API_CHANNELS: &[&str] = &[
 /// (`Router::gh_repo`), 캐시 실행기가 없는 github kind·미러에 없는 id·스위치가 꺼졌을 때는 사이드카의 `RepoService` 가 처리한다 — 그래서 사이드카는 이 채널을 계속 받는다.
 pub const API_SIDECAR_CHANNELS: &[&str] = &["gh:repo"];
 
-/// 설정을 소유한 실행([`Router::config_owned`])에서도 **사이드카가 받는** 유일한 채널: 앱 업데이트(`update:*` 7개, 6c 에서 Rust 로 옮긴다).
+/// 앱 업데이트 채널(`update:*` 7개, Phase 6c PR 4). 업데이트 서비스([`UpdateControl`])가 주입돼 있으면(스위치가 켜진 앱은 항상 주입한다) **Rust 가 처리하고 사이드카로 가지 않는다**.
+/// 서비스가 없을 때(`ANTLER_RUST_GIT=0` 되돌리기 — PR 5 에서 사이드카와 함께 사라진다)만 사이드카의 `UpdateService` 가 처리한다.
 /// `IPC_CHANNELS` 의 `update:` 접두 채널과 정확히 같아야 하고 `src/sidecar/configOwns.ts` 의 `SIDECAR_UPDATE_CHANNELS` 와도 같다(`tests/sidecar_scope.rs` 가 강제한다)
 pub const UPDATE_CHANNELS: &[&str] = &[
     "update:get",
@@ -626,6 +629,8 @@ pub struct Router {
     env: Mutex<Option<EnvHost>>,
     /// 설정 소유자(Phase 6b PR 9: 설정 파일의 유일한 작성자). 없거나 `ANTLER_RUST_GIT=0` 이면 [`CONFIG_CHANNELS`] 는 사이드카가 처리한다(그때는 사이드카가 파일을 쓴다)
     config: Mutex<Option<Arc<ConfigHost>>>,
+    /// 앱 업데이트 서비스(Phase 6c PR 4). 없거나 `ANTLER_RUST_GIT=0` 이면 [`UPDATE_CHANNELS`] 는 사이드카가 처리한다
+    update: Mutex<Option<Arc<dyn UpdateControl>>>,
     /// github 저장소별 조회 범위(저장소 id → 범위). 미러가 바뀌면 github 로 풀리지 않는 저장소 것을 치운다
     github_scopes: Mutex<HashMap<String, Arc<GithubScope>>>,
     /// "삭제 중"인 github 저장소(id → 만료 시각). `repos:remove` 가 정리를 시작한 뒤 사이드카가 레코드를 지우고 미러가 바뀌기 전까지, 그 id 의 새 조회가
@@ -660,6 +665,7 @@ impl Router {
             app: Mutex::default(),
             env: Mutex::default(),
             config: Mutex::default(),
+            update: Mutex::default(),
             github_scopes: Mutex::default(),
             github_removing: Mutex::default(),
             log,
@@ -779,6 +785,17 @@ impl Router {
 
     fn config_port(&self) -> Option<Arc<ConfigHost>> {
         self.config.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// 앱 업데이트 서비스를 주입한다(Phase 6c PR 4). 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 사이드카가 `update:*` 를 맡는다
+    pub fn set_update(&self, service: Arc<dyn UpdateControl>) {
+        if self.enabled {
+            *self.update.lock().unwrap_or_else(PoisonError::into_inner) = Some(service);
+        }
+    }
+
+    fn update_port(&self) -> Option<Arc<dyn UpdateControl>> {
+        self.update.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     /// Rust 가 설정 파일을 소유하는가(소유 술어 — 시작 때 `router.enabled()` 하나로 정해져 실행 중 바뀌지 않는다)
@@ -1043,6 +1060,10 @@ impl Router {
         if let Some(host) = self.github_port() {
             host.service.dispose();
         }
+        // 업데이트 서비스: 주기 확인을 멈추고 진행 중인 내려받기를 끊는다
+        if let Some(service) = self.update_port() {
+            service.dispose();
+        }
     }
 
     /// `req:cancel` 의 Rust 쪽 일: 요청 id 의 레지스트리·Jira·GitHub 서비스 요청을 끊는다(없는 id 는 무시). 소유자가 있으면 응답까지, 없으면 사이드카에도 전달된다
@@ -1178,6 +1199,16 @@ impl Router {
                 let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
                 let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
                 return Routed::Done(config_host::config_envelope(self, &host, channel, args).await);
+            }
+        }
+        // 앱 업데이트 채널(Phase 6c PR 4): 서비스가 주입돼 있으면 Rust 가 응답하고 사이드카에 닿지 않는다. 배열이 아닌 인자도 사이드카로 보내지 않고 빈 인자로 검증한다
+        if UPDATE_CHANNELS.contains(&channel) {
+            if let Some(service) = self.update_port().filter(|_| self.enabled) {
+                self.note(channel, "rust");
+                self.rust_handled.fetch_add(1, Ordering::Relaxed);
+                let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+                let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
+                return Routed::Done(update_envelope(&*service, channel, args).await);
             }
         }
         let Some(raw) = args.as_array() else { return Routed::Sidecar };

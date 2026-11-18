@@ -28,6 +28,9 @@ tauri-plugin-dialog = "2.8.4"
 tauri-plugin-window-state = "2.5.0"
 # 단일 인스턴스(src/single_instance.rs, Phase 6c PR 3). 2.5.5 는 tauri "2.12" 를 요구하는 최신 안정판. 새 크레이트 목록은 docs/tauri.md. 반드시 첫 플러그인으로 등록한다
 tauri-plugin-single-instance = "2.5.5"
+# 업데이트 서명 검증·설치(src/update/host.rs, Phase 6c PR 4). **`Updater::restore_update` → `Update::verify` → `install` 만 쓴다** — 매니페스트·설치본은 net::http 로 받고
+# (`check()`·`download()`·`configure_client` 는 쓰지 않는다: 리다이렉트 허용 목록·크기 상한이 net::http 한 곳에 있어야 한다). TLS 는 이미 쓰는 SChannel(native-tls) 이고 rustls·zip·system-proxy 는 끈다
+tauri-plugin-updater = { version = "2.14", default-features = false, features = ["native-tls"] }
 # fetch 가드의 위험 항목 지문(sha256) — Cargo.lock 에 전이 의존으로 이미 있는 판(0.10)
 sha2 = "0.10"
 # 해시된 known_hosts 항목(`|1|salt|hash`, HMAC-SHA1)의 검사(src/git/exec/ssh/known_hosts.rs). RustCrypto 0.10 계열이라 위 sha2 와 digest·crypto-common 이 같은 판이다
@@ -65,6 +68,8 @@ tokio = { version = "1", features = ["net", "test-util"] }
 native-tls = "0.2"
 # tests/ssh.rs 의 테스트 서버 키 생성(russh 의 예제와 같은 난수원). russh 가 이미 끌어오는 판이라 새 크레이트가 아니다
 rand = "0.10"
+# tests/update_security.rs 의 가짜 앱(`tauri::test::mock_app`) — 진짜 업데이트 플러그인의 서명 검증을 창 없이 돌린다. `test` 는 tauri 의 빈 기능 플래그라 새 크레이트가 아니다(시험 빌드에만 켜진다)
+tauri = { version = "2.12.5", features = ["test"] }
 
 [target.'cfg(windows)'.dependencies]
 # 스냅 레이아웃(Win+Z) 키 입력 — tauri 가 이미 쓰는 windows 0.62 와 같은 판
@@ -129,4 +134,9 @@ required-features = ["test-hooks"]
 # 사이드카 범위 불변식(Phase 6b PR 10): 설정 소유 실행에서 사이드카로 가는 채널은 update:* 7개뿐 — `ConfigStore::open_for_test` 가 test-hooks 뒤에 있다
 [[test]]
 name = "sidecar_scope"
+required-features = ["test-hooks"]
+
+# 앱 업데이트 보안 시험(Phase 6c PR 4): 루프백 서버·시험 키 서명·진짜 플러그인 검증. 시험용 HTTP 클라이언트 주입(`new_for_test`·`new_download_for_test`)이 test-hooks 뒤에 있다
+[[test]]
+name = "update_security"
 required-features = ["test-hooks"]

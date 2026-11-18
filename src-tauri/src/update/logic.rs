@@ -34,6 +34,8 @@ pub const MAX_API_BYTES: usize = 2_000_000;
 pub const MAX_NOTES_CHARS: usize = 100_000;
 /// 매니페스트 서명(minisign `.sig` 의 base64) 길이 상한. 실제는 수백 바이트다
 pub const MAX_SIGNATURE_LEN: usize = 16 * 1024;
+/// 설치본 상한(바이트). WebView2 는 부트스트래퍼라 설치본에 들어가지 않아 실제는 수십 MB 다 — 상한은 거대 응답이 메모리를 채우지 못하게 하는 방어다(PR 4)
+pub const MAX_INSTALLER_BYTES: usize = 300_000_000;
 /// Windows NSIS 설치본의 매니페스트 플랫폼 키와, 없을 때 쓰는 일반 키
 pub const PLATFORM_KEY_NSIS: &str = "windows-x86_64-nsis";
 pub const PLATFORM_KEY_GENERIC: &str = "windows-x86_64";
@@ -202,6 +204,11 @@ pub fn is_release_asset_url(raw: &str) -> bool {
         return false;
     }
     u.as_str().starts_with(RELEASE_DOWNLOAD_PREFIX) && u.as_str() == raw
+}
+
+/// 매니페스트(`latest.json`) 첫 요청으로 허용하는 주소: 정식 판의 고정 주소([`STABLE_MANIFEST_URL`])이거나, 이 저장소 릴리스 자산 중 `latest.json`(프리릴리스 판이 릴리스 목록에서 고른 태그)
+pub fn is_manifest_url(raw: &str) -> bool {
+    raw == STABLE_MANIFEST_URL || (is_release_asset_url(raw) && raw.ends_with("/latest.json"))
 }
 
 /// 릴리스 노트 페이지 URL. 태그는 v + 버전

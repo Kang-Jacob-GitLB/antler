@@ -1,0 +1,1495 @@
+{
+  "scenarios": [
+    {
+      "name": "정상: 수동 확인 → 내려받기(진행) → 설치",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 10
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 50
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 1
+      }
+    },
+    {
+      "name": "자동 확인 실패는 조용히, 수동 확인 실패는 오류로(URL·경로·토큰은 지워서)",
+      "sent": [
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "error",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "error": "net::ERR_INTERNET_DISCONNECTED https://github.com (경로)"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "error",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "error": "net::ERR_INTERNET_DISCONNECTED https://github.com (경로)"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 3,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "사용할 수 없는 빌드(번들 표식 없음)는 확인하지 않는다",
+      "sent": [
+        {
+          "status": "not-available",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "not-available",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "not-available",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "get",
+          "state": {
+            "status": "not-available",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 0,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "나중에: 자동 확인은 숨기고 수동 확인은 다시 보여 준다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "dismiss",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 3,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "건너뛰기: 설정에 저장하고 더 새 버전은 알린다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.1",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.1"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "dismiss",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.1",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.1"
+          }
+        }
+      ],
+      "skipped": "0.2.0",
+      "calls": {
+        "check": 3,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "이미 건너뛴 버전이 설정에 있으면 자동 확인이 숨기고 수동 확인은 보인다",
+      "sent": [
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": "0.2.0",
+      "calls": {
+        "check": 2,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "dismiss 는 지금 알리는 버전만 받는다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "dismiss",
+          "error": "현재 알림 중인 버전이 아닙니다"
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "dismiss",
+          "error": "현재 알림 중인 버전이 아닙니다"
+        },
+        {
+          "op": "dismiss",
+          "error": "현재 알림 중인 버전이 아닙니다"
+        },
+        {
+          "op": "dismiss",
+          "error": "잘못된 입력입니다"
+        },
+        {
+          "op": "dismiss",
+          "error": "잘못된 버전입니다"
+        },
+        {
+          "op": "dismiss",
+          "error": "잘못된 입력입니다"
+        },
+        {
+          "op": "get",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "dismiss",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": "0.2.0",
+      "calls": {
+        "check": 1,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "같은 버전·없음이면 not-available(수동) / idle(자동)",
+      "sent": [
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "not-available",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "not-available",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 2,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "제안할 수 없는 버전(낮은 버전·정식 사용자의 프리릴리스)은 알리지 않는다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "not-available",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "not-available",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "not-available",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "not-available",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 3,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "프리릴리스 사용자는 더 새 프리릴리스를 알린다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0-rc.1"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0-rc.1",
+          "version": "0.1.0-rc.2",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.1.0-rc.2"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0-rc.1",
+            "version": "0.1.0-rc.2",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.1.0-rc.2"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "받아 둔 업데이트가 있으면 다시 확인하지 않는다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 0
+      }
+    },
+    {
+      "name": "내려받기 취소는 available 로 되돌린다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "downloadStart"
+        },
+        {
+          "op": "cancel",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "downloadEnd",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "cancel",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 0
+      }
+    },
+    {
+      "name": "내려받기 오류 → error, 다시 시도 가능",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 30
+        },
+        {
+          "status": "error",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "error": "boom"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "error",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "error": "boom"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 2,
+        "install": 0
+      }
+    },
+    {
+      "name": "내려받기 오류 상태에서도 그 버전은 dismiss 할 수 있다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "error",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "error": "boom"
+        },
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "error",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "error": "boom"
+          }
+        },
+        {
+          "op": "dismiss",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 0
+      }
+    },
+    {
+      "name": "받는 중에는 dismiss 가 상태를 바꾸지 않고, 확인은 새로 시작하지 않는다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "downloadStart"
+        },
+        {
+          "op": "dismiss",
+          "error": "현재 알림 중인 버전이 아닙니다"
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "downloading",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "progress": 0
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloading",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "progress": 0
+          }
+        },
+        {
+          "op": "cancel",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "downloadEnd",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 0
+      }
+    },
+    {
+      "name": "확인 전에는 내려받을 것이 없고, 설치도 받아 둔 뒤에만 한다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "download",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 1
+      }
+    },
+    {
+      "name": "설치를 시작하지 못하면 error 로 알린다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "error",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "error": "설치 프로그램을 시작하지 못했습니다"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "error",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "error": "설치 프로그램을 시작하지 못했습니다"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 1,
+        "download": 1,
+        "install": 1
+      }
+    },
+    {
+      "name": "새 확인이 버전을 바꾸면 그 버전을 받는다",
+      "sent": [
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.2.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+        },
+        {
+          "status": "checking",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        },
+        {
+          "status": "available",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.3.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.3.0"
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.3.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.3.0",
+          "progress": 0
+        },
+        {
+          "status": "downloading",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.3.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.3.0",
+          "progress": 100
+        },
+        {
+          "status": "downloaded",
+          "mode": "auto",
+          "currentVersion": "0.1.0",
+          "version": "0.3.0",
+          "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.3.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "available",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.3.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.3.0"
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloaded",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.3.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.3.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 2,
+        "download": 1,
+        "install": 0
+      }
+    },
+    {
+      "name": "개발 장치: 가짜 상태는 확인·내려받기·설치를 막고 dismiss 는 idle",
+      "sent": [
+        {
+          "status": "idle",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "get",
+          "state": {
+            "status": "downloading",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "progress": 42
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "downloading",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "progress": 42
+          }
+        },
+        {
+          "op": "download",
+          "state": {
+            "status": "downloading",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "progress": 42
+          }
+        },
+        {
+          "op": "cancel",
+          "state": {
+            "status": "downloading",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "progress": 42
+          }
+        },
+        {
+          "op": "install",
+          "state": {
+            "status": "downloading",
+            "mode": "auto",
+            "currentVersion": "0.1.0",
+            "version": "0.2.0",
+            "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0",
+            "progress": 42
+          }
+        },
+        {
+          "op": "dismiss",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "dismiss",
+          "error": "잘못된 입력입니다"
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 0,
+        "download": 0,
+        "install": 0
+      }
+    },
+    {
+      "name": "개발 장치: 모르는 이름은 무시한다",
+      "sent": [
+        {
+          "status": "not-available",
+          "mode": "auto",
+          "currentVersion": "0.1.0"
+        }
+      ],
+      "results": [
+        {
+          "op": "get",
+          "state": {
+            "status": "idle",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        },
+        {
+          "op": "check",
+          "state": {
+            "status": "not-available",
+            "mode": "auto",
+            "currentVersion": "0.1.0"
+          }
+        }
+      ],
+      "skipped": null,
+      "calls": {
+        "check": 0,
+        "download": 0,
+        "install": 0
+      }
+    }
+  ]
+}
