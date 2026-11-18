@@ -80,6 +80,12 @@
   untracked(`diff --no-index`)는 index 를 읽지 않아 porcelain 그대로다. Rust 의 wip diff argv(`git/wip.rs`)도 같은 plumbing 인자·같은 staged 기준 결정을 쓴다(`docs/tauri.md` PR 6).
   전역 인자에도 `-c diff.submodule=short`·`-c submodule.recurse=false` 를 더했다(`GIT_GLOBAL_ARGS`, Rust `exec/common.rs`) — 어떤 호출이 porcelain diff 를 부르더라도 서브모듈 재귀가 켜지지 않는 방어 심층이다.
   작업 트리를 읽지 않는 호출(`blame`·`cat-file blob`·`ls-files`·`stash list`·`check-attr`·`ls-tree`)은 필터를 돌리지 않아 가드 대상이 아니다.
+- **원격 UNC 를 가리키는 링크는 따라가기 전에 거부한다**(`src/main/git/linkGuard.ts` `isRemoteLinkTarget`·`linksStayLocal`): 작업 트리 안의 심볼릭 링크·정션이 `\\host\share\…`·`//host/…`·`\\?\UNC\…`·`\??\UNC\…`·
+  WebDAV `\\host@SSL\DavWWWRoot\…`·장치 경로(`\\.\…`)·볼륨 GUID(`\\?\Volume{…}`, 보수적으로)를 가리키면, `realpath`·`stat` 처럼 링크를 따라가는 호출이 나가는 순간 Windows 가 SMB/WebDAV 인증을 시도해
+  NTLM 해시가 공격자 서버로 샌다 — 이후 "저장소 밖"이라 거부해도 이미 늦다. 그래서 **따라가기 전에** `linksStayLocal(path)` 가 경로를 루트부터 구성 요소 단위로 `lstat` 하며 링크마다 `readlink` 대상 문자열만 판정한다
+  (대상에는 접속하지 않는다). 원격이면 거부, 로컬 대상은 그 경로도 같은 방식으로 이어서 확인하고, 링크 수가 합쳐 16 을 넘으면 거부한다. `\\wsl.localhost\…`·`\\wsl$\…` 는 로컬이다.
+  적용 지점: `assertInsideRoot`·`assertNoLinkEscape`(서브모듈 확인·WIP 열기 전), 저장소 스캔(`repoScan.ts` — 원격 대상 링크는 폴더·`.git` 어느 쪽이든 건너뛴다), 외부 열기(`opener.ts` `inspect`, 로컬만 — WSL 은 리눅스 쪽 링크라 Node 가 볼 수 없다).
+  Rust 판의 `repos/scan.rs` `is_remote_link_target` 은 같은 사례표 `tests/fixtures/repos/link-target.cases.json` 으로 TS 와 함께 시험한다. 한계: 확인과 사용 사이 경쟁(TOCTOU)은 막지 못한다. Rust 판 외부 열기의 같은 방어는 이 변경에 없다.
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).

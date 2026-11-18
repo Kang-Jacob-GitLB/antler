@@ -4,6 +4,7 @@ import { BrowserWindow, clipboard, dialog, shell } from 'electron'
 import type { ExternalAction } from '@shared/types'
 import { ExternalOpener, checkChosenExe, type OpenerDeps } from '../external/opener'
 import { allowedLinkUrl } from '../external/link'
+import { linksStayLocal } from '../git/linkGuard'
 import type { Target } from '../external/plan'
 import type { ConfigStore } from '../services/ConfigStore'
 import type { IpcHandle } from './github'
@@ -16,7 +17,7 @@ const CLIPBOARD_MAX_CHARS = 1_000_000
 const realDeps = (): OpenerDeps => ({
   platform: process.platform,
   env: process.env,
-  fs: { realpathSync: (p) => realpathSync(p), statSync: (p) => statSync(p), lstatSync: (p) => lstatSync(p) },
+  fs: { realpathSync: (p) => realpathSync(p), statSync: (p) => statSync(p), lstatSync: (p) => lstatSync(p), linksStayLocal: (p) => linksStayLocal(p) },
   spawn: (file, args, opts) => spawn(file, args, opts),
   shell: { openPath: (p) => shell.openPath(p), showItemInFolder: (p) => shell.showItemInFolder(p) }
 })
