@@ -872,6 +872,14 @@ fn russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다() 
     }
 }
 
+#[test]
+fn 하위_시스템_요청은_connection_rs_에서_한_번만_sftp_로_한다() {
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/git/exec/ssh/connection.rs")).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with("//")).filter(|l| mentions(l, "request_subsystem(")).collect();
+    assert_eq!(lines.len(), 1, "request_subsystem( 출현: {lines:?}");
+    assert!(lines[0].contains("\"sftp\""), "하위 시스템 이름은 \"sftp\" 리터럴이어야 한다: {}", lines[0]);
+}
+
 /// 줄에 `api` 가 식별자 경계에서 시작하는가(핸들러 콜백 `server_channel_open_x11` 같은 이름은 `channel_open_x11` 호출로 보지 않는다)
 fn mentions(line: &str, api: &str) -> bool {
     line.match_indices(api).any(|(at, _)| !line[..at].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_'))
@@ -1598,6 +1606,21 @@ async fn sftp_목록은_2000개_상한과_앞_200개의_저장소_확인을_지�
     assert_eq!(tree.counts.stat.load(std::sync::atomic::Ordering::SeqCst), 200, "stat 은 확인 상한만큼만");
     // 확인하지 못한 폴더가 있으면 scan_from_listing 이 truncated 로 알린다
     assert!(antler_lib::repos::scan::scan_from_listing(&r).truncated);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_점_항목만_끝없이_보내는_서버는_오류로_끝나고_채널과_슬롯은_돌아온다() {
+    let mut t = work_tree();
+    t.dots_only = true;
+    let e = sftp_env(&Arc::new(t)).await;
+    let ex = e.ex();
+    let started = Instant::now();
+    let err = ex.list_dirs("~/work", None).await.unwrap_err();
+    assert!(matches!(err, SftpError::Failed(ref m) if m.contains("새 항목 없는")), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(5), "연속 2회에서 끝나야 한다: {:?}", started.elapsed());
+    wait_for("SFTP 채널 닫힘", || e.server.sftp_open() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
     ex.dispose();
 }
 

@@ -67,8 +67,18 @@ impl fmt::Display for SftpError {
 
 impl std::error::Error for SftpError {}
 
+/// 오류 문구가 담을 수 있는 글자 수 상한
+const MAX_MESSAGE_CHARS: usize = 300;
+
+/// 서버가 STATUS 로 보낸 문구(`error_message`)를 사람에게 보여 줘도 되게 정리한다 — 제어 문자(개행·ESC 등)와 방향·보이지 않는 서식 문자
+/// (U+200B–U+200F·U+2028–U+202E·U+2060–U+2069·U+061C·U+FEFF)를 지우고 [`MAX_MESSAGE_CHARS`] 자로 자른다. 오류 문구가 UI 로 가므로 화면을 속이는 문구를 막는다
+fn clean_message(s: &str) -> String {
+    let hidden = |c: char| matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{061C}' | '\u{FEFF}');
+    s.chars().filter(|c| !c.is_control() && !hidden(*c)).take(MAX_MESSAGE_CHARS).collect()
+}
+
 fn failed(e: impl fmt::Display) -> SftpError {
-    SftpError::Failed(e.to_string())
+    SftpError::Failed(clean_message(&e.to_string()))
 }
 
 /// `~`·`~/x`·빈 문자열을 SFTP 기준(시작 디렉터리 = 홈)으로 바꾼다(`toSftpPath`). 공백 제거는 JS `trim` 이다.
@@ -167,7 +177,7 @@ where
 }
 
 async fn run(session: &RawSftpSession, start: &str) -> Result<RemoteDirListing, SftpError> {
-    let version = session.init().await.map_err(|e| SftpError::Unavailable(e.to_string()))?;
+    let version = session.init().await.map_err(|e| SftpError::Unavailable(clean_message(&e.to_string())))?;
     if version.version != SFTP_VERSION {
         return Err(SftpError::Unavailable(format!("지원하지 않는 SFTP 버전 {}", version.version)));
     }
@@ -191,6 +201,8 @@ async fn run(session: &RawSftpSession, start: &str) -> Result<RemoteDirListing, 
 async fn read_entries(session: &RawSftpSession, base: &str) -> Result<Dump, SftpError> {
     let handle = session.opendir(base).await.map_err(failed)?.handle;
     let mut dump = Dump { entries: Vec::new(), capped: false, total: 0, is_repo: false };
+    // 센 항목이 하나도 없는 응답이 연속으로 온 횟수
+    let mut barren = 0;
     let outcome = loop {
         match session.readdir(handle.as_str()).await {
             Ok(batch) => {
@@ -198,6 +210,7 @@ async fn read_entries(session: &RawSftpSession, base: &str) -> Result<Dump, Sftp
                 if batch.files.is_empty() {
                     break Err(failed("서버가 빈 목록 응답을 보냈습니다"));
                 }
+                let before = dump.total;
                 for f in batch.files {
                     // ssh2 의 `readdir(경로)` 처럼 `.`·`..` 는 항목으로 세지 않는다(`truncated` 경계가 TS 와 같아야 한다)
                     if f.filename == "." || f.filename == ".." {
@@ -217,6 +230,11 @@ async fn read_entries(session: &RawSftpSession, base: &str) -> Result<Dump, Sftp
                 }
                 if dump.capped {
                     break Ok(());
+                }
+                // `.`·`..` 만 계속 보내는 서버도 빈 응답과 같게 본다(연속 2회)
+                barren = if dump.total == before { barren + 1 } else { 0 };
+                if barren >= 2 {
+                    break Err(failed("서버가 새 항목 없는 목록 응답을 되풀이했습니다"));
                 }
             }
             Err(ClientError::Status(s)) if s.status_code == StatusCode::Eof => break Ok(()),
@@ -304,6 +322,15 @@ mod tests {
         }
         assert!(usable_name(&"a".repeat(MAX_NAME_BYTES)));
         assert!(!usable_name(&"a".repeat(MAX_NAME_BYTES + 1)));
+    }
+
+    #[test]
+    fn 서버_문구는_제어_문자와_방향_서식_문자를_지우고_300자로_자른다() {
+        let dirty = "No such\nfile\x1b[31m\u{202E}evil\u{2066}x\u{2069}\u{200E}\u{200F}\u{202A}\u{202B}\u{202C}\u{202D}\u{2028}\u{feff}ok";
+        assert_eq!(clean_message(dirty), "No suchfile[31mevilxok");
+        assert_eq!(clean_message("권한 없음"), "권한 없음");
+        assert_eq!(clean_message(&"가".repeat(1000)).chars().count(), MAX_MESSAGE_CHARS);
+        assert_eq!(failed("a\u{202e}b\0").to_string(), "ab");
     }
 
     #[test]

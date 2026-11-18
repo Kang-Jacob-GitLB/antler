@@ -825,7 +825,8 @@ async fn sftp_job(live: Arc<Live>, path: String, limit: Duration, token: Cancell
 
 /// 나눈 채널을 닫는다(SFTP 용). close 를 보내는 동안 채널을 계속 비운다 — 서버가 계속 보내는 중이면 채널 큐가 차서 세션 루프가 멈추고, 그러면 close 요청도 처리되지 못한다(R1).
 /// **닫힘 확인을 기다리지 않는다**: russh 는 우리가 close 를 보낸 뒤에 오는 서버의 close 응답을 무시해(채널 장부에서 이미 지웠다) 읽기 쪽이 끝나지 않으므로 기다려도 `CLOSE_WAIT` 만 채운다.
-/// 같은 연결의 이후 채널 열기는 이 close 뒤에 순서대로 처리되므로 서버의 채널 수(`MaxSessions`)는 넘지 않는다. close 를 보낸 뒤 서버가 보내는 데이터는 russh 가 큐에 넣지 않고 버린다
+/// close 요청은 이 연결의 이후 요청보다 먼저 서버로 나가지만 **서버의 채널 해제는 비동기**다 — 이후 채널 열기가 서버의 해제보다 먼저 닿을 수 있어, 서버의 채널 수 상한(`MaxSessions`)을
+/// 넘지 않으려면 여유 슬롯(풀의 슬롯 수가 그 상한보다 작다)에 의존한다. close 를 보낸 뒤 서버가 보내는 데이터는 russh 가 큐에 넣지 않고 버린다
 async fn close_split(read: &mut ChannelReadHalf, write: &ChannelWriteHalf<Msg>) {
     let close = tokio::time::timeout(KILL_TIMEOUT, write.close());
     tokio::pin!(close);

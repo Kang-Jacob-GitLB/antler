@@ -40,6 +40,8 @@ pub struct FakeTree {
     pub realpath_override: Option<String>,
     /// 모든 목록에 덧붙는 날 항목(이름, 퍼미션 비트) — `/` 가 든 이름·너무 긴 이름 등
     pub extra_entries: Vec<(String, u32)>,
+    /// 모든 `readdir` 가 `.`·`..` 만 돌려준다(EOF 를 보내지 않는다 — 적대 서버)
+    pub dots_only: bool,
     /// 서버가 받은 요청 수(종류별)
     pub counts: Counts,
 }
@@ -74,7 +76,7 @@ fn parent(path: &str) -> String {
 
 impl FakeTree {
     pub fn new(home: &str) -> FakeTree {
-        let mut t = FakeTree { home: home.to_string(), nodes: BTreeMap::new(), realpath_override: None, extra_entries: Vec::new(), counts: Counts::default() };
+        let mut t = FakeTree { home: home.to_string(), nodes: BTreeMap::new(), realpath_override: None, extra_entries: Vec::new(), dots_only: false, counts: Counts::default() };
         t.nodes.insert("/".to_string(), Node::Dir);
         t.dir(home);
         t
@@ -204,6 +206,9 @@ impl Handler for FakeSftp {
     }
 
     async fn readdir(&mut self, id: u32, handle: String) -> Result<Name, StatusCode> {
+        if self.tree.dots_only {
+            return Ok(Name { id, files: vec![File::new(".", attrs_of(&Node::Dir)), File::new("..", attrs_of(&Node::Dir))] });
+        }
         let (entries, pos) = self.handles.get_mut(&handle).ok_or(StatusCode::Failure)?;
         if *pos >= entries.len() {
             return Err(StatusCode::Eof);

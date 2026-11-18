@@ -67,6 +67,11 @@ disallowed-methods = [
   { path = "russh::channels::ChannelWriteHalf::request_subsystem", reason = "하위 시스템 요청은 ssh/connection.rs 의 open_sftp(SFTP) 에서만 한다" },
   { path = "russh::channels::Channel::request_shell", reason = "대화형 셸을 요청하지 않는다" },
   { path = "russh::channels::Channel::set_env", reason = "원격 환경변수를 주입하지 않는다(build_remote_command 의 env 만)" },
+  # 핸들러 안에서 쓰는 `client::Session` 쪽 같은 API 도 막는다(Channel 만 막으면 이쪽으로 우회된다)
+  { path = "russh::client::Session::request_subsystem", reason = "하위 시스템 요청은 ssh/connection.rs 의 open_sftp(SFTP) 에서만 한다" },
+  { path = "russh::client::Session::exec", reason = "원격 명령 실행은 ssh/connection.rs 의 프로브·open_exec(run·stream 공용) 에서만 요청한다" },
+  { path = "russh::client::Session::request_shell", reason = "대화형 셸을 요청하지 않는다" },
+  { path = "russh::client::Session::set_env", reason = "원격 환경변수를 주입하지 않는다(build_remote_command 의 env 만)" },
   { path = "russh::channels::ChannelWriteHalf::exec", reason = "원격 명령 실행은 ssh/connection.rs 의 프로브·open_exec(run·stream 공용) 에서만 요청한다" },
   { path = "russh::channels::ChannelWriteHalf::request_shell", reason = "대화형 셸을 요청하지 않는다" },
   { path = "russh::channels::ChannelWriteHalf::set_env", reason = "원격 환경변수를 주입하지 않는다(build_remote_command 의 env 만)" },
