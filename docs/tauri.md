@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -327,7 +327,7 @@ fetch 는 이 앱이 저장소에 하는 유일한 쓰기라 가드(허용 목�
 
 `inspectConfig`(`config --list --show-scope --includes -z` → `--show-scope` 를 모르면 `ScopeWalk` 로 범위별 읽기 → `remote` / `remote get-url --all -- <n>`)와 `runFetch` 의 이식이다.
 git 은 `GitRunner` 트레이트로만 부른다(실제는 `GitExecutor`, 테스트는 옛 git 을 흉내 내는 래퍼를 끼운다 — 프로세스를 띄우는 길은 늘지 않는다).
-local·WSL 저장소만 다룬다. ssh·github fetch 와 `filter`·`FollowRedirects::False`·임의 env 는 이 API 에 없다(사이드카 몫).
+local·WSL·SSH 저장소만 다룬다. `filter`·`FollowRedirects::False`·임의 env 는 이 API(`run_fetch`)에 없다 — GitHub 원격 전용 저장소(앱 캐시)는 별도 진입점 `run_github_fetch` 가 닫힌 값으로만 받는다(Phase 6b PR 2, 아래 "설정·저장소 관리·GitHub 원격 전용").
 
 - **env 는 닫힌 타입으로만**: local 은 `GIT_ENV` 위에 덮어쓰고, WSL 은 `env K=V…` 순서를 JS `{...GIT_ENV, ...fetchEnv}` 와 같게(이미 있는 키는 제자리에서 값 교체, 새 키는 fetch 환경 순서로 뒤에) 만든다 —
   `tests/golden/exec/env.json` 의 `fetch` 가 TS `runFetch` 가 실제로 spawn 에 준 argv·환경(local)과 wsl.exe argv 를 담고 `tests/exec.rs` 가 비교한다.
@@ -1678,7 +1678,7 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 | PR | 내용 | 앱 연결 | 묶음·선행 | 상태 |
 |---|---|---|---|---|
 | 1 | ConfigStore 코어(`config/`): 모델·로드·정화·원자적 저장·검증기·변경 연산 + GitHub 링크 순수 함수 + TS↔Rust 설정 파일 바이트 골든 | 없음 | A | **완료** |
-| 2 | GitHub 캐시 실행 기반: `GithubEnv` 닫힌 타입·`GitExecutor::Github`·init·정확 일치 검사·HEAD 맞추기·fetch 의 github 모드·사용자 네트워크 설정 읽기 | 없음 | B(1 뒤) | |
+| 2 | GitHub 캐시 실행 기반: `GithubEnv` 닫힌 타입·`GitExecutor::Github`·init·정확 일치 검사·HEAD 맞추기·fetch 의 github 모드·사용자 네트워크 설정 읽기 | 없음 | B(1 뒤) | **완료** |
 | 3 | external 순수 로직·실행기(plan·opener·link, spawn 예외 지점 하나, 파일 관리자) | 없음 | A | **완료** |
 | 4a / 4b | 4a: WSL 목록(레지스트리 관문)·`resolve_env`·로컬 폴더 찾기·`SshPool` 임시 잡기. 4b: SFTP 폴더 목록(D4, `russh-sftp` 3.0.1 — 스파이크 go) | 없음 | A(4b 는 D4 뒤) | **4a·4b 완료** |
 | 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | **완료(코드)** — 아래 "PR 5" |
@@ -1740,6 +1740,42 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 **다음 PR 에 넘긴 것**: 앱 연결 전부(`config:*`·미러·fetchPrefs 의 원천을 바꾸는 것은 PR 9, 그동안 사이드카가 파일의 유일한 작성자), Electron 설정 가져오기(D1 결정 뒤), `set_window_state`(Tauri 는 window-state 플러그인이라 쓰지 않는다).
 
 **남은 위험**: JSON 직렬화 바이트 패리티가 실패 모드인데 골든 범위만큼만 보장한다(숫자 표기는 `js_number_string` 이 맡는다 — 골든의 숫자는 정수·소수 몇 개뿐). 백신 잠금 rename 의 오류 코드는 취약 가정이다.
+
+### PR 2 — GitHub 캐시 실행 기반(앱에 연결하지 않는다)
+
+저장소 쓰기 규칙의 **유일한 예외**(앱 캐시 `<userData>/remote-repos/<owner>/<repo>.git` 에 `blob:none` partial 로 받기)를 Rust 에 한 곳으로 가둔다. Electron·사이드카 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 새 크레이트 없음.
+
+| 파일 | 내용 |
+|---|---|
+| `src/git/github_cache.rs` | `GithubCachePath`(캐시 모양 `github_cache_slug` 를 통과한 경로만 담는 newtype — 환경·init·HEAD 쓰기는 이 타입만 받는다)·`github_env`(값과 **순서**가 TS `githubEnv` 와 같다. 별도의 `GithubEnv` 타입은 없다 — 환경을 만드는 곳이 이 파일 한 곳뿐임을 소스 검사가 강제하고, `Spec` 은 `exec` 밖에서 만들 수 없다. `GithubEnvOpts.allow_protocol` 은 게이트 없는 `Option` 이고 시험만 실행기의 `test-hooks` 진입점으로 채운다)·`expected_github_config`·`check_github_config`(허용 목록이 아니라 **기대값 정확 일치**)·`inspect_github_repo`(설정 + `remote` 가 origin 하나)·`init_github_repo`(`--template=`, 네트워크 없음)·`ensure_github_head`(레코드 → `origin/HEAD` → `ls-remote --symref`, `is_safe_branch` 통과한 이름만 HEAD 에 쓴다)·`pick_network_config`·`read_network_config` |
+| `src/git/exec/github.rs` | `GithubExecutor`(`GitExecutor::Github`, `kind()`=`"github"`). 로컬 git 을 띄우되 대상 경로가 캐시 모양일 때만 `github_env`, 아니면 `GIT_ENV` 그대로(전송 금지). `run`·`stream` **둘 다**(lazy fetch 는 log·diff 스트림에서도 필요하다). `RunOpts.fetch_env` 는 무시한다. 토큰은 호출마다 `TokenSource` 에서 읽고 `run` 결과의 stderr·오류 message 에서 가린다(`stream` 은 가리지 않는다 — `GitStream::finish` 의 오류를 envelope 로 내기 전에 가리는 것은 연결 PR 의 몫이다). 훅 디렉터리를 쓸 수 없으면 실행하지 않는다 |
+| `src/git/exec/{common,process,local}.rs` | `Spec` 에 `env_remove`·`cwd`(사용자 설정 읽기 전용 변형), `Debug` 는 환경 값을 찍지 않고 `Drop` 이 값을 0 으로 덮는다. `local.rs` 의 `read_user_config_list`(`git config --list --show-scope -z`, 임시 폴더, 10초·1MB, `GIT_CONFIG_*`·`GIT_DIR` 류 제거 — 이름은 대소문자 무시) |
+| `src/git/fetch/run.rs` | `run_github_fetch`·`GithubFetchOpts`·`FetchFilter::BlobNone`·`fetch_args_for`. `run_fetch`(일반)와 서로의 실행기로 부르면 Err 다 |
+| `Cargo.toml`·`tests/gitconfig_github`·`tests/ghcache/` | 시험 바이너리 둘(`required-features = ["test-hooks"]`), 적대적 전역 설정 픽스처, 공용 도구(임시 폴더·`raw`·`make_source`·가짜 실행기) |
+
+**설계 결정**
+- **환경은 실행기 종류에 묶는다.** `RunOpts` 에는 일반 env 가 여전히 없다. `GitExecutor::Github` 가 `run`·`stream` 에서 자기 환경을 붙이고, 일반 fetch 의 `FetchEnv` 는 이 실행기에서 무시된다. 환경 판정은 `GithubCachePath::new` 하나(`github_cache_slug`)다 — 캐시 밖 경로는 토큰도 읽지 않는다.
+- **일반 fetch 의 보안 모델은 그대로다**: 허용 목록(`ALLOWED_KEYS`)을 건드리지 않고, github 갈래는 그 대신 기대값 정확 일치를 쓴다. `run_github_fetch` 도 고정 refspec `+refs/heads/*:refs/remotes/origin/*`·`--refmap=`·`--`·모든 `-c` 는 `fetch` 앞이다. 모드가 정하는 것만 다르다: remote 는 `origin` 상수, `--filter=blob:none`(닫힌 enum), `http.followRedirects=false`(`-c` 는 환경의 설정을 이기므로 명시한다), 자격 증명 도우미 없음, `fetch_env` 없음.
+  계획의 `FetchMode::{Normal, Github}` 대신 **진입점을 둘로 나눴다**(`run_fetch` / `run_github_fetch`) — 기존 `FetchRunOpts` 리터럴(시험 11곳·서비스)을 건드리지 않고, 호출자가 모드와 실행기를 어긋나게 고를 길이 없다.
+- **토큰**: 환경 변수 `GIT_CONFIG_VALUE_n`(`http.https://github.com/.extraheader`)에만 있고 인자·디스크·로그에는 없다. `SecretString` 으로 받고(`Debug` 는 `***`), 환경 값은 `Spec` 이 버릴 때 0 으로 덮는다. 쓸 수 없는 토큰(공백·NUL·4096 초과)은 헤더에 넣지 않는다. 자식 프로세스의 환경 블록은 OS 가 복사하므로 그쪽은 0 으로 덮을 수 없다(TS 와 같다).
+- 시험 전용 주입(`*_for_test`·`with_protocol_for_test`: 원격 URL 출처·허용 프로토콜)은 `test-hooks` 뒤에 있고 프로덕션은 `https://github.com`·`https` 고정이다.
+
+**골든**: `tests/goldenGithub.test.ts` 가 **실제 TS** `checkGithubConfig`·`pickNetworkConfig`·`githubEnv`·`ensureGithubHead`·`initGithubRepo`·`inspectGithubRepo`·`runFetch` 를 돌려 `tests/golden/github/{config,network,env,head,init,fetch}.json` 을 만든다(`UPDATE_GOLDEN=1 npx vitest run tests/goldenGithub.test.ts`).
+env 는 `[키, 값]` 순서 목록이고(토큰은 가짜 값), 판정 함수는 사례·문제 목록, HEAD·init·검사·fetch 는 가짜 실행기에 남은 **argv 순서와 결과·던진 문구**다. `node:path` 는 win32 판이고 경로는 가상(`C:\golden\…`)이라 CI 의 8.3 짧은 이름이 끼어들 곳이 없다
+(`GIT_CONFIG_GLOBAL` 의 `NUL`/`/dev/null` 만 플랫폼 값이라 `<빈 설정>` 자리 표시로 적고 Rust 가 자기 값으로 푼다). 훅 폴더는 임시 경로라 비교 전에 골든의 `C:/golden/hooks` 로 바꾼다.
+
+**시험**: `tests/github_cache_exec.rs`(24개) — 골든 6개, 실제 git(`file:///` 소스만: init→검사→fetch→재검사·설정 변조 차단·HEAD 맞추기·이름 바뀜·lazy fetch(run·stream)·reftable·상위 저장소로 올라가지 않음), 환경이 캐시 경로에만 열림·`fetch_env` 무시·두 fetch 진입점 교차 거부·훅 디렉터리 불량 거부·토큰 가리기, 127.0.0.1 가짜 서버(리다이렉트를 따라가지 않음 — `-c http.followRedirects=initial` 대조군이 따라가는 것을 먼저 보인다 — 와 Authorization 이 다른 호스트로 가지 않음), 읽기 전용 pack 폴더 삭제, 소스 검사(`extraheader`·`GIT_NO_LAZY_FETCH=0`·`github_env(` 가 정해진 파일에만).
+`tests/github_cache_isolation.rs`(3개)는 **프로세스 전역 git 설정이 적대적인** 별도 바이너리다(`insteadOf` ssh·`safe.bareRepository=explicit`·`init.defaultRefFormat=reftable`·프록시·`sslVerify=false`·`GIT_DEFAULT_REF_FORMAT`·`GIT_CONFIG_COUNT`). 런타임 `set_var` 를 못 쓰므로 TS 의 `withEnv` 는 이렇게 옮겼다.
+대응표(`tests/golden/repos/test-map.json`)의 `N/A: PR 2` 36개 가운데 34개를 옮겼고 `commitDetail`·`compareCommits` 의 lenient 둘(`githubRemote > 실제 git … 커밋 상세…`)은 조회 경로를 연결하는 `N/A: PR 6` 으로 옮겼다.
+
+**TS 와 다른 점**
+- 사용자 설정을 읽을 때 지우는 환경 변수 이름을 **대소문자 무시**로 맞춘다(TS 의 정규식은 `Git_Config_Count` 를 놓친다 — 더 엄격한 쪽).
+- `init_github_repo` 는 기본 브랜치가 `is_safe_branch` 를 통과하지 않으면 거부한다(TS 는 호출자가 검증된 링크를 준다고 믿는다 — `GithubLink` 를 직접 만들 수 있는 Rust 쪽 방어).
+- 읽은 사용자 설정의 출력은 1MB 상한이다(TS `execFile` 의 기본 `maxBuffer` 와 같다). 읽지 못하면 빈 목록이다.
+- 환경 변수 `GIT_DEFAULT_REF_FORMAT=reftable` 을 init 에 주는 TS 시험은 **적대적 전역 설정 바이너리 전체의 환경**으로 옮겼고, 실행기 시험은 `--ref-format=reftable` 로 같은 단계를 직접 밟는다(`init_github_repo` 는 `git init` 을 고정 인자로 부른다).
+- 읽기 전용 pack(`git` 이 pack 을 읽기 전용으로 만든다)이 든 폴더는 `std::fs::remove_dir_all` 이 그대로 지운다(Windows, 시험으로 확인) — PR 9 의 삭제 구현이 속성을 풀 필요가 없다. 링크(정션) 폴더를 따라가지 않는지는 PR 9 가 시험한다.
+
+**연결 PR 에 넘기는 것**: `exec.kind() == "local"` 로 갈리는 곳(`refs_service.rs`·`wip.rs` — worktrees·WIP 의 local 판정)은 `"github"` 를 local 취급해야 하는지 PR 6 이 정한다(계획 §3.2: github 는 worktrees 를 비우고 WIP 는 빈 결과). `read_network_config` 의 결과를 앱 시작 때 한 번 읽어 `NetConfigSource` 에 주는 것과 `TokenSource`(= `GitHubService::git_token`)를 잇는 것도 PR 6·7 이다.
 
 ### PR 3 — 외부 열기 계획과 실행기(`src-tauri/src/external/`, 앱에 연결하지 않는다 — 연결은 PR 9)
 

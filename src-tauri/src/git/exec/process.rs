@@ -270,6 +270,12 @@ fn launch(spec: &Spec) -> Result<Launched, ExecError> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(false);
+    for name in &spec.env_remove {
+        cmd.env_remove(name);
+    }
+    if let Some(dir) = &spec.cwd {
+        cmd.current_dir(dir);
+    }
     // Job 은 spawn 전에 만든다(spawn 과 할당 사이에 다른 일을 끼우지 않는다 — 정지된 채 남는 창이다). 못 만들면 정지 없이 띄우고 taskkill 폴백
     #[cfg(windows)]
     let job = if JOBS_DISABLED.load(std::sync::atomic::Ordering::Relaxed) { None } else { super::job::Job::new().ok() };

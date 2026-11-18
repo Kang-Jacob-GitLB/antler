@@ -93,3 +93,12 @@ required-features = ["test-hooks"]
 [[test]]
 name = "config"
 required-features = ["test-hooks"]
+
+# GitHub 캐시 실행 기반(Phase 6b PR 2): 원격 URL·프로토콜 주입(`*_for_test`·`with_protocol_for_test`)이 test-hooks 뒤에 있다
+[[test]]
+name = "github_cache_exec"
+required-features = ["test-hooks"]
+
+[[test]]
+name = "github_cache_isolation"
+required-features = ["test-hooks"]

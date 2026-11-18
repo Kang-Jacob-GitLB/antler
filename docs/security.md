@@ -133,3 +133,7 @@ WSL 은 4초, SSH 는 30초 폴링만 한다(`.git` 을 직접 보지 않는다)
 물려주지 않는다(이름은 대소문자 무관 — Windows 환경 변수 규칙). 프록시·`GIT_SSL_CAINFO` 등 나머지 환경은 그대로 상속한다.
 일반 local·WSL·SSH git 은 토큰을 싣지 않으므로 이 거르기를 적용하지 않는다(사용자의 TLS·추적 설정은 사용자 선택이고, 자격 증명 도우미는 호스트가 정한다) — 표식을 `env` 에 넣는 실행만 거른다.
 시험: `tests/githubEnvScrub.test.ts`.
+
+Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`, 아직 앱에 연결하지 않음)은 같은 예외를 세 겹으로 가둔다:
+캐시 모양을 통과한 경로만 담는 `GithubCachePath` 타입이 환경·init·HEAD 쓰기의 입력이고, 환경(`github_env`)을 만드는 곳은 그 파일 한 곳(소스 검사로 강제)이며,
+캐시 밖 경로의 git 은 토큰도 읽지 않고 기본 환경(전송 금지)으로 돈다. `http.followRedirects=false` 는 `-c` 로도 명시한다(`-c` 는 환경의 설정을 이긴다). 일반 저장소의 fetch 허용 목록은 바뀌지 않는다.

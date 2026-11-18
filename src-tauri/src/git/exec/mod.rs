@@ -1,11 +1,14 @@
 //! `src/main/executors` 의 Rust 이식(Local·WSL·SSH). SSH 는 Phase 5 — 순수 로직(PR 1)·russh 실행기 `run`(PR 2a)·`stream`·`GitExecutor::Ssh`(PR 2b). 라우터가 `SshPool` 로 호출한다(PR 3).
 //!
 //! - [`GIT_GLOBAL_ARGS`]·[`GIT_ENV`] 는 `common.rs` 한 곳에만 있고 `RunOpts` 에는 일반 env 필드가 없다(fetch 가 덮어쓰는 값은 닫힌 [`FetchEnv`] 로만, `run` 에서만).
+//!   GitHub 원격 전용 저장소의 환경은 두 번째 닫힌 타입이다 — [`GitExecutor::Github`] 가 캐시 경로에서만 `git/github_cache.rs` 의 `github_env` 를 붙인다(Phase 6b PR 2).
 //! - git 을 띄우는 `Command::new` 는 `process.rs` 한 곳뿐이다(`src-tauri/clippy.toml` 의 disallowed-methods 가 강제한다). gh CLI 를 띄우는 `github/gh_cli.rs` 만 예외다.
 //! - [`ExecError`] 의 종류는 IPC envelope 의 code(GIT / ABORTED / ERROR)로 매핑된다.
 
 mod common;
 mod error;
+// GitHub 원격 전용 저장소 캐시 실행기(Phase 6b PR 2). 환경은 `git/github_cache.rs` 의 `github_env` 한 곳에서만 만든다
+mod github;
 // gh CLI 실행(github/gh_cli.rs)도 같은 Job Object 를 쓴다
 #[cfg(windows)]
 pub(crate) mod job;
@@ -22,7 +25,9 @@ use ssh::SshExecutor;
 
 pub use common::{build_git_args, merged_env, FetchEnv, RunOpts, RunResult, DEFAULT_MAX_BUFFER, GIT_ENV, GIT_GLOBAL_ARGS, MAX_STDERR};
 pub use error::ExecError;
+pub use github::{GithubExecutor, NetConfigSource, TokenSource};
 pub use local::LocalExecutor;
+pub(crate) use local::read_user_config_list;
 pub use process::{set_jobs_disabled, shutdown_kills, GitStream, ProcessStream};
 pub use wsl::{list_distros, DistroGate, DISTRO_RECHECK, list_distros_with, parse_lxss_query, parse_wsl_list, registered_distro_names, wsl_argv, wsl_argv_with, WslExecutor, WSL_LIST_ARGV, WSL_SPAWN_ENV};
 
@@ -33,6 +38,9 @@ pub enum GitExecutor {
     Local(LocalExecutor),
     Wsl(WslExecutor),
     Ssh(SshExecutor),
+    /// GitHub 원격 전용 저장소의 앱 캐시(로컬 git + 캐시 경로에서만 여는 github 환경). 종류는 `"github"` 다 — local 과 같게 다뤄야 하는 곳
+    /// (`kind() == "local"` 로 갈리는 조회·감시)은 연결 PR 이 github 도 함께 보게 고친다
+    Github(GithubExecutor),
 }
 
 impl GitExecutor {
@@ -41,6 +49,7 @@ impl GitExecutor {
             GitExecutor::Local(_) => "local",
             GitExecutor::Wsl(_) => "wsl",
             GitExecutor::Ssh(_) => "ssh",
+            GitExecutor::Github(_) => "github",
         }
     }
 
@@ -55,6 +64,7 @@ impl GitExecutor {
             GitExecutor::Local(e) => format!("local:{}", e.git_binary()),
             GitExecutor::Wsl(e) => format!("wsl:{}", e.distro()),
             GitExecutor::Ssh(e) => format!("ssh:{}", e.host_spec()),
+            GitExecutor::Github(e) => format!("github:{}", e.git_binary()),
         }
     }
 
@@ -63,6 +73,7 @@ impl GitExecutor {
             GitExecutor::Local(e) => e.run(repo_path, args, opts).await,
             GitExecutor::Wsl(e) => e.run(repo_path, args, opts).await,
             GitExecutor::Ssh(e) => e.run(repo_path, args, opts).await,
+            GitExecutor::Github(e) => e.run(repo_path, args, opts).await,
         }
     }
 
@@ -76,6 +87,10 @@ impl GitExecutor {
                 blocking_stream(move || e.stream(&repo, &args, &opts)).await
             }
             GitExecutor::Wsl(e) => {
+                let (e, repo, args, opts) = (e.clone(), repo_path.to_string(), to_strings(args), opts.clone());
+                blocking_stream(move || e.stream(&repo, &args, &opts)).await
+            }
+            GitExecutor::Github(e) => {
                 let (e, repo, args, opts) = (e.clone(), repo_path.to_string(), to_strings(args), opts.clone());
                 blocking_stream(move || e.stream(&repo, &args, &opts)).await
             }
