@@ -650,10 +650,18 @@ mod service {
 
         fn install(&self) -> Result<(), String> {
             let step = pick(&self.script["installs"], self.installs.fetch_add(1, Ordering::SeqCst), json!({ "ok": true }));
+            // 실제 설치는 설치 프로그램을 띄우는 동안 걸린다 — 겹친 호출이 끼어들 수 있게 한다
+            if let Some(ms) = step.get("delayMs").and_then(Value::as_u64) {
+                std::thread::sleep(Duration::from_millis(ms));
+            }
             match step.get("error") {
                 Some(e) => Err(s(e).to_string()),
                 None => Ok(()),
             }
+        }
+
+        fn cleanup_ran(&self) -> bool {
+            self.script["cleanup"].as_bool().unwrap_or(false)
         }
 
         fn release_notes(&self, version: &str) -> impl Future<Output = Result<ReleaseNotes, String>> + Send {
@@ -786,6 +794,39 @@ mod service {
         assert_eq!(v, json!({ "status": "available", "mode": "auto", "currentVersion": "0.1.0", "version": "0.2.0", "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0" }));
         let idle = state(&harness(&json!({}), "0.1.0", true, None, None).svc.get());
         assert_eq!(idle, json!({ "status": "idle", "mode": "auto", "currentVersion": "0.1.0" }));
+    }
+
+    #[tokio::test]
+    async fn 동시에_설치를_눌러도_설치는_한_번만_시작한다() {
+        let script = json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "delayMs": 150, "error": "x" }] });
+        let h = harness(&script, "0.1.0", true, None, None);
+        h.svc.check(true).await;
+        h.svc.download().await;
+        tokio::join!(h.svc.install(), h.svc.install());
+        assert_eq!(h.be.installs.load(Ordering::SeqCst), 1, "겹친 설치 호출은 백엔드를 한 번만 부른다");
+    }
+
+    #[tokio::test]
+    async fn 정리가_돈_뒤_설치가_실패하면_재시작을_안내하고_다시_설치하지_않는다() {
+        let script = json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "error": "설치 프로그램을 시작하지 못했습니다" }], "cleanup": true });
+        let h = harness(&script, "0.1.0", true, None, None);
+        h.svc.check(true).await;
+        h.svc.download().await;
+        h.svc.install().await;
+        let st = h.svc.get();
+        assert_eq!(format!("{:?}", st.status), "Error");
+        let msg = st.error.expect("오류 문구");
+        assert!(msg.contains("다시 실행하세요") && msg.contains("설치 프로그램을 시작하지 못했습니다"), "{msg}");
+        // 정리가 돌았으니 같은 세션에서 설치를 다시 시작하지 않는다(내려받기부터 다시 해도 설치 표식이 남는다)
+        h.svc.download().await;
+        h.svc.install().await;
+        assert_eq!(h.be.installs.load(Ordering::SeqCst), 1);
+        // 정리 전에 실패했다면(표식 없음) 앱은 멀쩡하므로 재시작 안내 없이 일반 오류다
+        let h2 = harness(&json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "error": "형식" }] }), "0.1.0", true, None, None);
+        h2.svc.check(true).await;
+        h2.svc.download().await;
+        h2.svc.install().await;
+        assert_eq!(h2.svc.get().error.as_deref(), Some("형식"));
     }
 
     #[tokio::test]

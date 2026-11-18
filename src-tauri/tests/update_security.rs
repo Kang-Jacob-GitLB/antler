@@ -483,14 +483,20 @@ async fn 키_없는_배포_빌드는_업데이트를_설치하지_못한다() {
     // 키가 들어오면 형식을 지킨다: minisign 공개 키 텍스트(두 줄 — 설명, `RW…` 56자)를 base64 한 겹으로 감싼 한 줄이고, 시험 키가 아니다
     if let Some(key) = UPDATE_PUBKEY {
         assert!(key.trim() == key && !key.contains('\n'), "한 줄이어야 한다");
+        // base64 겹이 달라도(줄바꿈·설명 줄만 다른 포장) 같은 키 본체를 못 쓰게 디코드한 키 본체(둘째 줄 `RW…`, 키 id 를 담는다)로 비교한다
         for test_key in [PUBKEY_A, PUBKEY_B] {
-            assert_ne!(key, test_key.trim(), "운영 키가 시험 키다");
+            assert_ne!(key_body(key), key_body(test_key), "운영 키가 시험 키다");
         }
         let decoded = decode_base64(key);
         let mut lines = decoded.lines();
         assert!(lines.next().is_some_and(|l| l.starts_with("untrusted comment: minisign public key")), "{decoded}");
         assert!(lines.next().is_some_and(|l| l.len() == 56 && l.starts_with("RW")), "{decoded}");
     }
+}
+
+/// base64 한 겹을 벗긴 minisign 공개 키 텍스트의 **키 본체**(둘째 줄 `RW…` — 알고리즘·키 id·공개 키). 첫 줄은 설명이라 키가 아니다
+fn key_body(b64: &str) -> String {
+    decode_base64(b64.trim()).lines().nth(1).unwrap_or_default().trim().to_string()
 }
 
 /// 표준 base64 해독(시험용 — 새 크레이트 없이)
@@ -826,8 +832,8 @@ fn 시험_키는_이름으로_운영_키와_구별되고_비밀_키는_저장소
     }
     // 시험 키는 운영 상수가 아니다
     if let Some(key) = UPDATE_PUBKEY {
-        assert!(![PUBKEY_A, PUBKEY_B].iter().any(|k| k.trim() == key));
+        assert!(![PUBKEY_A, PUBKEY_B].iter().any(|k| key_body(k) == key_body(key)));
     }
-    assert_ne!(PUBKEY_A.trim(), PUBKEY_B.trim());
+    assert_ne!(key_body(PUBKEY_A), key_body(PUBKEY_B));
     let _ = root();
 }

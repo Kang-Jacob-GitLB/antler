@@ -35,6 +35,7 @@ const MODE: &str = "auto";
 const RETRY_AFTER_CHECK: &str = "다시 확인한 뒤 시도하세요";
 const NOT_NOTIFIED: &str = "현재 알림 중인 버전이 아닙니다";
 const BAD_VERSION: &str = "잘못된 버전입니다";
+const RESTART_HINT: &str = "설치 프로그램을 시작하지 못했고 앱이 이미 정리되었습니다. 앱을 완전히 종료한 뒤 다시 실행하세요";
 const INSTALL_FAILED: &str = "설치를 시작하지 못했습니다";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -76,6 +77,10 @@ pub trait Backend: Send + Sync + 'static {
     fn install(&self) -> Result<(), String>;
     /// `version`(앞의 `v` 를 뗀 값)의 릴리스 노트
     fn release_notes(&self, version: &str) -> impl Future<Output = Result<ReleaseNotes, String>> + Send;
+    /// 방금 실패한 `install` 이 **되돌릴 수 없는 종료 정리를 이미 돌렸는가**(설치 프로그램을 띄우기 직전의 `on_before_exit`). 돌았으면 앱은 반쯤 정리된 상태라 재시작이 필요하다
+    fn cleanup_ran(&self) -> bool {
+        false
+    }
 }
 
 /// 건너뛴 버전을 설정에 쓰는 포트(검증 실패는 `Err` — `dismiss` 가 그대로 돌려준다)
@@ -101,6 +106,8 @@ struct St {
     state: UpdateState,
     policy: UpdatePolicy,
     busy: bool,
+    /// 설치가 시작됐다(한 번만 통과 — 동시 호출·정리 뒤 재시도를 막는다). 설치가 정리 전에 실패했을 때만 되돌린다
+    installing: bool,
     /// 마지막 확인이 돌려준 새 버전(내려받기가 이 버전만 받는다)
     pending_version: Option<String>,
     /// 진행 중인 내려받기의 취소 신호
@@ -176,6 +183,7 @@ impl<B: Backend> UpdateService<B> {
                 state: UpdateState { status: Status::Idle, mode: MODE, current_version: d.current_version.clone(), version: None, notes_url: None, progress: None, error: None },
                 policy: UpdatePolicy::new(),
                 busy: false,
+                installing: false,
                 pending_version: None,
                 cancel: None,
                 timers: Vec::new(),
@@ -350,10 +358,12 @@ impl<B: Backend> UpdateService<B> {
     pub async fn install(&self) {
         let c = &*self.0;
         {
-            let st = c.lock();
-            if c.fake.is_some() || st.state.status != Status::Downloaded {
+            let mut st = c.lock();
+            if c.fake.is_some() || st.state.status != Status::Downloaded || st.installing {
                 return;
             }
+            // 잠금 안에서 표식을 세워 동시에 온 두 번째 호출이 설치를 또 시작하지 못하게 한다
+            st.installing = true;
         }
         // 설치는 프로세스를 끝내는 동기 호출이다(설치 프로그램을 띄우고 `exit(0)`) — 런타임 스레드를 잡지 않게 따로 돈다
         let backend = c.backend.clone();
@@ -363,8 +373,13 @@ impl<B: Backend> UpdateService<B> {
             Ok(Err(e)) => sanitize_error(&e),
             Err(_) => INSTALL_FAILED.to_string(),
         };
+        // 종료 정리(git 프로세스 트리·사이드카·플러그인 잠금)가 이미 돌았으면 되돌릴 수 없다 — 다시 시도하지 못하게 표식을 남기고 앱을 다시 시작하라고 안내한다.
+        // (앱을 스스로 다시 시작하지는 않는다: 설치 프로그램이 뜨지 못한 이유를 모르는 채 재시작하면 같은 실패를 되풀이할 수 있다)
+        let cleaned = c.backend.cleanup_ran();
+        let error = if cleaned { format!("{RESTART_HINT} ({error})") } else { error };
         // 설치를 시작하지 못했다 — 받아 둔 상태에서 멈춰 있지 않게 오류로 알린다
         let mut st = c.lock();
+        st.installing = cleaned;
         let version = st.state.version.clone();
         let s = UpdateState { version, error: Some(error), ..c.base(Status::Error) };
         c.set(&mut st, s);

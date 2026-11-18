@@ -161,6 +161,10 @@ pub trait Engine: Send + Sync + 'static {
     fn verify(&self, offer: &ManifestOffer, bytes: &[u8]) -> Result<(), String>;
     /// 다시 검증한 뒤 설치한다. 성공하면 프로세스가 끝난다(돌아오지 않는다)
     fn install(&self, offer: &ManifestOffer, bytes: &[u8]) -> Result<(), String>;
+    /// `install` 이 되돌릴 수 없는 종료 정리를 이미 돌렸는가(돌린 뒤 실패하면 앱은 재시작이 필요하다)
+    fn cleanup_ran(&self) -> bool {
+        false
+    }
 }
 
 /// 플러그인(`tauri-plugin-updater`)을 쓰는 운영 구현. `before_exit` 는 설치 프로그램을 띄운 뒤 `exit(0)` 하기 직전에 돈다(`RunEvent::Exit` 을 건너뛰므로 git 프로세스 트리 정리 등을 여기서 한다)
@@ -168,12 +172,14 @@ pub struct PluginEngine<R: Runtime> {
     app: AppHandle<R>,
     pubkey: Option<String>,
     before_exit: Arc<dyn Fn() + Send + Sync>,
+    /// `before_exit` 가 불렸는가 — 설치 프로그램 실행이 실패해도 되돌릴 수 없는 정리는 이미 돌았다
+    cleaned: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl<R: Runtime> PluginEngine<R> {
     /// `pubkey` 는 운영에서는 [`UPDATE_PUBKEY`] 다(시험만 시험 키를 생성자 인자로 준다 — 환경 변수로 바꾸는 길은 없다)
     pub fn new(app: AppHandle<R>, pubkey: Option<String>, before_exit: Arc<dyn Fn() + Send + Sync>) -> Self {
-        Self { app, pubkey, before_exit }
+        Self { app, pubkey, before_exit, cleaned: Arc::default() }
     }
 
     /// 검사를 통과한 제안으로 `Update` 를 만든다. 매니페스트는 **우리가 다시 만든다** — 고른 플랫폼 키 하나만 담고 `target` 을 그 키로 고정해, 원문에 다른 항목이 섞여도 플러그인이 다른 것을 고를 수 없다.
@@ -182,7 +188,12 @@ impl<R: Runtime> PluginEngine<R> {
         const PREPARE_FAILED: &str = "업데이트를 준비하지 못했습니다";
         let key = self.pubkey.as_deref().ok_or_else(|| NO_KEY_MESSAGE.to_string())?;
         let endpoint = STABLE_MANIFEST_URL.parse().map_err(|_| PREPARE_FAILED.to_string())?;
-        let before_exit = self.before_exit.clone();
+        let (hook, cleaned) = (self.before_exit.clone(), self.cleaned.clone());
+        let before_exit = move || {
+            // 표식을 먼저 세운다 — 정리가 도중에 실패·중단돼도 "돌았다"로 본다
+            cleaned.store(true, std::sync::atomic::Ordering::SeqCst);
+            hook();
+        };
         let updater = self
             .app
             .updater_builder()
@@ -191,7 +202,7 @@ impl<R: Runtime> PluginEngine<R> {
             .pubkey(key)
             .target(offer.platform)
             .version_comparator(|current, release| is_offerable(&current.to_string(), &release.version.to_string()))
-            .on_before_exit(move || before_exit())
+            .on_before_exit(before_exit)
             .build()
             .map_err(|_| PREPARE_FAILED.to_string())?;
         let mut platforms = serde_json::Map::new();
@@ -233,6 +244,10 @@ impl<R: Runtime> Engine for PluginEngine<R> {
     fn install(&self, offer: &ManifestOffer, bytes: &[u8]) -> Result<(), String> {
         let update = self.restore(offer)?;
         update.install(bytes).map_err(|e| install_error_text(&e).to_string())
+    }
+
+    fn cleanup_ran(&self) -> bool {
+        self.cleaned.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -314,6 +329,10 @@ impl<E: Engine> Backend for HostBackend<E> {
             (s.offer.clone(), s.bytes.clone())
         };
         self.engine.install(&offer, &bytes)
+    }
+
+    fn cleanup_ran(&self) -> bool {
+        self.engine.cleanup_ran()
     }
 
     async fn release_notes(&self, version: &str) -> Result<ReleaseNotes, String> {
