@@ -405,7 +405,7 @@ async fn 오류_문구에서_토큰과_base64_를_가린다() {
     let e = env_with("file", Some("ghp_golden_fake_token"));
     e.init(None).await;
     // 환경의 헤더 값(`Authorization: Basic <base64>`)을 stderr 로 내고 실패한다
-    let r = e.exec.run(e.dir.as_str(), &["-c", "alias.e=!echo \"$GIT_CONFIG_VALUE_6 ghp_golden_fake_token\" >&2; exit 3", "e"], &RunOpts::default()).await.unwrap();
+    let r = e.exec.run(e.dir.as_str(), &["-c", "alias.e=!echo \"$GIT_CONFIG_VALUE_10 ghp_golden_fake_token\" >&2; exit 3", "e"], &RunOpts::default()).await.unwrap();
     assert_eq!(r.code, 3);
     assert!(r.stderr.contains("Authorization: Basic ***"), "{}", r.stderr);
     assert!(!r.stderr.contains("ghp_golden_fake_token") && !r.stderr.contains("Z2hwX2dvbGRlbl9mYWtlX3Rva2Vu"), "{}", r.stderr);
@@ -417,7 +417,7 @@ async fn stream_의_실패_문구와_run_의_stdout_에서도_토큰을_가린�
     e.init(None).await;
     let b64 = "Z2hwX2dvbGRlbl9mYWtlX3Rva2Vu";
     // stream: stdout 은 그대로 읽고, 실패하면 `finish` 의 오류 문구(message·stderr)가 가려진다
-    let alias = "alias.e=!echo \"$GIT_CONFIG_VALUE_6\" >&2; exit 3";
+    let alias = "alias.e=!echo \"$GIT_CONFIG_VALUE_10\" >&2; exit 3";
     let mut st = e.exec.stream(e.dir.as_str(), &["-c", alias, "e"], &RunOpts::default()).await.unwrap();
     let mut buf = Vec::new();
     tokio::io::AsyncReadExt::read_to_end(&mut st, &mut buf).await.unwrap();
