@@ -1,10 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { GhLaunchpadItem, JiraIssueSummary, Repo } from '../src/shared/types'
 import { MAX_LAUNCHPAD_PINS } from '../src/shared/launchpad'
-import { ConfigStore } from '../src/main/services/ConfigStore'
 import {
   emptyFilter,
   jiraEntries,
@@ -162,28 +158,5 @@ describe('범위', () => {
     expect(scopeRepos({ kind: 'group', name: 'Work' }, repos).map((r) => r.id)).toEqual(['r1', 'r2'])
     expect(scopeRepos({ kind: 'repo', id: 'r3' }, repos).map((r) => r.id)).toEqual(['r3'])
     expect(scopeKey({ kind: 'group', name: 'Work' })).toBe('group:Work')
-  })
-})
-
-describe('설정 저장 검증(ConfigStore.setUi)', () => {
-  let dir: string
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'antler-lp-'))
-  })
-  afterEach(() => rmSync(dir, { recursive: true, force: true }))
-
-  it('올바른 핀·스누즈는 저장하고 모양이 틀린 것은 거부한다', () => {
-    const store = new ConfigStore(join(dir, 'antler.config.json'))
-    const ok = store.setUi({ launchpadPins: ['acme/app#1', 'jira:ABC-7'], launchpadSnoozes: { 'acme/app#2': NOW } })
-    expect(ok.ui.launchpadPins).toEqual(['acme/app#1', 'jira:ABC-7'])
-    expect(new ConfigStore(join(dir, 'antler.config.json')).get().ui.launchpadSnoozes).toEqual({ 'acme/app#2': NOW })
-
-    expect(() => store.setUi({ launchpadPins: ['Acme/App#1'] })).toThrow('Launchpad')
-    expect(() => store.setUi({ launchpadPins: ['x'.repeat(300)] })).toThrow()
-    expect(() => store.setUi({ launchpadPins: Array.from({ length: MAX_LAUNCHPAD_PINS + 1 }, (_, i) => `a/b#${i + 1}`) })).toThrow()
-    expect(() => store.setUi({ launchpadSnoozes: { 'a/b#1': -1 } })).toThrow()
-    expect(() => store.setUi({ launchpadSnoozes: { 'a/b#1': 1.5 } })).toThrow()
-    expect(() => store.setUi({ launchpadSnoozes: { 'not a key': 5 } })).toThrow()
-    expect(() => store.setUi({ launchpadSnoozes: [] as unknown as Record<string, number> })).toThrow()
   })
 })

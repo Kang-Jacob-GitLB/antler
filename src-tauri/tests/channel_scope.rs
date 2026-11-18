@@ -257,11 +257,11 @@ fn 앱의_호출_경로는_라우터의_invoke_하나이고_사이드카_흔적�
     let commands = read_src("src/commands.rs");
     assert!(commands.contains("router.invoke(&channel, &args).await"));
     assert!(!commands.contains("Sidecar") && !commands.contains("sidecar"));
-    // 오류 문구의 출처: TS RepoService 의 문구를 그대로 옮겼다
-    let ts = read_src("../src/main/services/RepoService.ts");
-    for text in ["`unknown repo: ${repoId}`", "'GitHub 원격 저장소를 쓸 수 없는 환경입니다'", "'WSL 저장소는 Windows 에서만 열 수 있습니다'"] {
-        assert!(ts.contains(text), "RepoService.ts 에 {text} 가 없다");
+    // 오류 문구: Electron 판 RepoService 의 문구를 옮긴 것이다(그 TS 소스는 Phase 6c PR 7 에서 지워졌다 — 이제 문구의 원천은 이 Rust 소스다)
+    for text in ["unknown repo: ", "GitHub 원격 저장소를 쓸 수 없는 환경입니다"] {
+        assert!(router.contains(text), "router.rs 에 {text} 가 없다");
     }
+    assert!(read_src("src/external/plan.rs").contains("WSL 저장소는 Windows 에서만 열 수 있습니다"));
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {

@@ -1,18 +1,25 @@
 // Tauri 패키징의 업데이트 매니페스트 생성(scripts/make-update-manifests.mjs)과 Electron 정리 NSIS 훅(src-tauri/nsis/hooks.nsh)의 정적 검사.
 // 실제 설치·제거는 하지 않는다 — 훅의 동작은 리허설(R)에서 확인한다(docs/tauri.md "Phase 6c PR 2").
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { isReleaseAssetUrl, isSafeFileName as tsIsSafeFileName, metaFor, parseMetadata, RELEASE_DOWNLOAD_PREFIX } from '../src/main/update/logic'
 // @ts-expect-error — 순수 JS 스크립트(타입 선언 없음)
 import * as M from '../scripts/make-update-manifests.mjs'
 
+// Phase 6c PR 7(Electron 제거) 이전에는 이 파일이 electron-updater 의 파서(Provider.js)·app-builder-lib·src/main/update/logic.ts 를 직접 불러 대조했다.
+// 그 의존이 사라졌으므로 같은 대조를 **지우기 전에 한 번 실행해 결과를 동결**했다: latest.yml 표본 바이트(tests/fixtures/update/latest.yml)와 아래 기대값이다.
+// 동결 시점의 확인(electron-updater 6.8.9): 이 표본을 parseUpdateInfo 가 읽으면 files[0].url·path 가 파일 이름 그대로이고, resolveFiles 가 푼 주소가
+// RELEASE_DOWNLOAD_PREFIX + v2.0.0/Antler-Setup-2.0.0-x64.exe 였다. 무작위 해시 200개(+·/·숫자로 시작하는 것 포함)도 두 파서가 같은 값으로 되읽었다.
+// GUID 는 electron-builder 의 UUID v5(appId, ELECTRON_BUILDER_NS_UUID)로 계산한 값이다(아래).
+
 const root = join(__dirname, '..')
 const read = (...p: string[]): string => readFileSync(join(root, ...p), 'utf8')
-const req = createRequire(import.meta.url)
+const RELEASE_DOWNLOAD_PREFIX: string = M.DOWNLOAD_PREFIX
+const tsIsSafeFileName = (n: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$/.test(n) && !n.includes('..')
+/** 앱(logic.rs is_release_asset_url)의 모양: 이 저장소 releases/download/v<버전>/<안전한 파일 이름> */
+const isReleaseAssetUrl = (u: string): boolean => new RegExp(`^${RELEASE_DOWNLOAD_PREFIX.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}v[0-9A-Za-z.-]+/[A-Za-z0-9][A-Za-z0-9._-]{0,200}$`).test(u)
 
 const SIG = 'dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ=='
 const DATE = new Date('2026-11-18T00:00:00.000Z')
@@ -26,15 +33,6 @@ function installerDir(version: string, content: Buffer): string {
   tmps.push(dir)
   writeFileSync(join(dir, M.installerName(version)), content)
   return dir
-}
-
-/** electron-updater 자신의 파서·URL 조립(Provider.js). electron-updater 는 직접 의존이고 그 안의 builder-util-runtime 은 거기서 푼다 */
-function electronProvider(): {
-  parseUpdateInfo: (raw: string, channelFile: string, url: URL) => { version: string; files: { url: string; sha512?: string; size?: number }[]; path?: string; sha512?: string; releaseDate?: string; tag?: string }
-  resolveFiles: (info: unknown, base: URL, transform: (p: string) => string) => { url: URL; info: { url: string; sha512?: string } }[]
-} {
-  const main = req.resolve('electron-updater')
-  return req(join(dirname(main), 'providers', 'Provider.js'))
 }
 
 describe('latest.json (Tauri 업데이터)', () => {
@@ -103,9 +101,11 @@ describe('latest.json (Tauri 업데이터)', () => {
     expect(() => M.buildLatestJson({ ...ok, pubDate: 'not a date' })).toThrow()
   })
 
-  it('파일 이름 규칙이 TS(isSafeFileName)와 같다', () => {
-    for (const n of ['Antler-Setup-2.0.0-x64.exe', 'a', 'A_b.c-d', 'a b', '../x', 'x/y', 'a..b', '-a', '', 'é', 'a'.repeat(201), 'a'.repeat(202)]) {
-      expect(M.isSafeFileName(n), n).toBe(tsIsSafeFileName(n))
+  it('파일 이름 규칙이 앱(logic.rs is_safe_file_name)과 같다 — 동결한 표', () => {
+    const table: [string, boolean][] = [['Antler-Setup-2.0.0-x64.exe', true], ['a', true], ['A_b.c-d', true], ['a b', false], ['../x', false], ['x/y', false], ['a..b', false], ['-a', false], ['', false], ['é', false], ['a'.repeat(201), true], ['a'.repeat(202), false]]
+    for (const [n, ok] of table) {
+      expect(M.isSafeFileName(n), n).toBe(ok)
+      expect(tsIsSafeFileName(n), n).toBe(ok)
     }
   })
 })
@@ -120,52 +120,35 @@ describe('latest.yml (Electron 이관용)', () => {
     )
   })
 
-  it('url·path 는 파일 이름만이다(절대 URL 이면 electron-updater 가 경로를 깨뜨린다)', () => {
-    const yml = M.buildLatestYml(args)
-    const info = electronProvider().parseUpdateInfo(yml, 'latest.yml', new URL('https://github.com/x/latest.yml'))
-    expect(info.files).toHaveLength(1)
-    expect(info.files[0]!.url).toBe('Antler-Setup-2.0.0-x64.exe')
-    expect(info.path).toBe('Antler-Setup-2.0.0-x64.exe')
-    expect(tsIsSafeFileName(info.files[0]!.url)).toBe(true)
+  it('표본(tests/fixtures/update/latest.yml)이 스크립트 출력과 바이트까지 같다 — 동결 시점에 electron-updater 가 이 바이트를 읽는 것을 확인했다', () => {
+    expect(M.buildLatestYml(args)).toBe(read('tests', 'fixtures', 'update', 'latest.yml'))
+    // 동결 시점의 electron-updater 파서 결과: url·path 는 파일 이름 그대로(절대 URL 이면 GitHub 공급자가 경로를 깨뜨린다), 푼 주소는 latest.json 의 url 과 같다
+    const lines = read('tests', 'fixtures', 'update', 'latest.yml').split('\n')
+    expect(lines).toContain('  - url: Antler-Setup-2.0.0-x64.exe')
+    expect(lines).toContain('path: Antler-Setup-2.0.0-x64.exe')
+    expect(tsIsSafeFileName('Antler-Setup-2.0.0-x64.exe')).toBe(true)
   })
 
-  it('electron-updater 가 푼 다운로드 주소가 latest.json 의 url 과 같다(GitHub 공급자의 경로 규칙)', () => {
+  it('url·path 는 파일 이름만이다 — 주소가 아니라 `<파일 이름>` (GitHub 공급자가 /<소유자>/<저장소>/releases/download/<태그>/ 를 붙인다)', () => {
     for (const version of ['2.0.0', '2.0.0-rc.1']) {
       const fileName = M.installerName(version)
-      const yml = M.buildLatestYml({ ...args, version, fileName })
-      const { parseUpdateInfo, resolveFiles } = electronProvider()
-      const info = parseUpdateInfo(yml, 'latest.yml', new URL('https://github.com/x/latest.yml'))
-      expect(info.version).toBe(version)
-      info.tag = `v${version}`
-      // GitHubProvider.resolveFiles 와 같은 변환: /<소유자>/<저장소>/releases/download/<태그>/<파일>, 공백은 '-'
-      const files = resolveFiles(info, new URL('https://github.com'), (p) => `/${M.REPO}/releases/download/${info.tag}/${p.replace(/ /g, '-')}`)
+      const yml: string = M.buildLatestYml({ ...args, version, fileName })
+      expect(yml).toContain(`\n  - url: ${fileName}\n`)
+      expect(yml).toContain(`\npath: ${fileName}\n`)
+      expect(yml).not.toMatch(/https?:/)
+      // electron-updater 가 푼 주소 = 접두사 + v<버전>/<파일 이름> = latest.json 의 url (동결 시점에 resolveFiles 로 확인한 규칙)
       const json = JSON.parse(M.buildLatestJson({ version, fileName, signature: SIG, pubDate: DATE }))
-      expect(files[0]!.url.href).toBe(json.platforms['windows-x86_64-nsis'].url)
-      expect(isReleaseAssetUrl(files[0]!.url.href)).toBe(true)
-      expect(files[0]!.info.sha512).toBe(sha)
+      expect(json.platforms['windows-x86_64-nsis'].url).toBe(`${RELEASE_DOWNLOAD_PREFIX}v${version}/${fileName}`)
+      expect(isReleaseAssetUrl(json.platforms['windows-x86_64-nsis'].url)).toBe(true)
     }
   })
 
-  it('우리 쪽 파서(parseMetadata·metaFor)도 읽는다', () => {
-    const meta = parseMetadata(M.buildLatestYml(args))!
-    expect(meta.version).toBe('2.0.0')
-    const f = metaFor(meta, M.installerName('2.0.0'))!
-    expect(f.sha512).toBe(sha)
-    expect(f.size).toBe(123456)
-  })
-
-  it('어떤 해시 값이든 두 파서가 같은 값으로 되읽는다(+·/ 로 시작하는 base64 포함)', () => {
-    const { parseUpdateInfo } = electronProvider()
-    for (let i = 0; i < 200; i++) {
-      let digest = createHash('sha512').update(randomBytes(8)).digest('base64')
-      if (i === 0) digest = `+${digest.slice(1)}`
-      if (i === 1) digest = `/${digest.slice(1)}`
-      if (i === 2) digest = `1${digest.slice(1)}`
-      const yml = M.buildLatestYml({ ...args, sha512: digest })
-      const info = parseUpdateInfo(yml, 'latest.yml', new URL('https://github.com/x/latest.yml'))
-      expect(info.files[0]!.sha512).toBe(digest)
-      expect(info.sha512).toBe(digest)
-      expect(parseMetadata(yml)!.files[0]!.sha512).toBe(digest)
+  it('어떤 해시 값이든 같은 줄 모양으로 쓴다(+·/·숫자로 시작하는 base64 포함 — 동결 시점에 두 파서가 되읽었다)', () => {
+    for (const first of ['+', '/', '1', 'A']) {
+      const digest = `${first}${sha.slice(1)}`
+      const yml: string = M.buildLatestYml({ ...args, sha512: digest })
+      expect(yml.split('\n')).toContain(`    sha512: ${digest}`)
+      expect(yml.split('\n')).toContain(`sha512: ${digest}`)
     }
   })
 
@@ -273,17 +256,12 @@ describe('Electron 정리 NSIS 훅 (정적 검사)', () => {
   const hook = read('src-tauri', 'nsis', 'hooks.nsh').replace(/^﻿/, '')
   const code = hook.split('\n').filter((l) => !l.trimStart().startsWith(';')).join('\n')
 
-  it('GUID 가 electron-builder 가 appId(com.antler.app)로 계산하는 값과 같다', () => {
-    // electron-builder 의 의존인 app-builder-lib 을 electron-builder 쪽에서 푼다(pnpm 은 직접 의존이 아니면 루트에서 풀리지 않는다)
-    const abl = createRequire(req.resolve('electron-builder')).resolve('app-builder-lib')
-    const nsisTarget = readFileSync(join(dirname(abl), 'targets', 'nsis', 'NsisTarget.js'), 'utf8')
-    const ns = /ELECTRON_BUILDER_NS_UUID = [\w.]+\.UUID\.parse\("([0-9a-f-]{36})"\)/.exec(nsisTarget)?.[1]
-    expect(ns, 'NsisTarget.js 에서 네임스페이스를 읽지 못했다').toBeTruthy()
-    const { UUID } = createRequire(abl)('builder-util-runtime')
-    const appId = (JSON.parse(read('src-tauri', 'tauri.conf.json')) as { identifier: string }).identifier
-    expect(appId).toBe(/^appId:\s*(\S+)/m.exec(read('electron-builder.yml'))?.[1])
-    const guid = UUID.v5(appId, UUID.parse(ns)).toString()
-    expect(code).toContain(`!define ANTLER_ELECTRON_GUID "${guid}"`)
+  it('GUID 는 동결한 값이다 — electron-builder 가 appId(com.antler.app)로 계산하는 UUID v5 (Electron 제거 전에 builder-util-runtime 의 UUID.v5 로 대조했다)', () => {
+    // 이 GUID 는 현장에 설치된 Electron 판의 제거 키(HKCU …\Uninstall\<GUID>)다 — 바꾸면 이관 훅이 Electron 판을 찾지 못한다.
+    // appId 가 바뀌면(첫 공개 뒤에는 바꿀 수 없다 — docs/tauri.md) 이 값도 다시 계산해야 하지만, 이미 설치된 Electron 판의 키는 그대로다
+    const FROZEN_GUID = 'a0282e38-7d2f-5de0-a2ab-1ae175fbe58f'
+    expect((JSON.parse(read('src-tauri', 'tauri.conf.json')) as { identifier: string }).identifier).toBe('com.antler.app')
+    expect(code).toContain(`!define ANTLER_ELECTRON_GUID "${FROZEN_GUID}"`)
   })
 
   it('tauri.conf.json 이 이 훅을 NSIS 사용자별 설치로 건다', () => {

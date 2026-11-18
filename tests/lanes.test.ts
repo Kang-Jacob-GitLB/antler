@@ -1,10 +1,5 @@
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import type { Commit } from '../src/shared/types'
-import { parseLog } from '../src/main/git/parsers/log'
 import { LaneBuilder, mergedBranchName, SEG_BOTTOM, SEG_FULL, SEG_TOP, type GraphRow } from '../src/renderer/src/graph/lanes'
 
 const c = (hash: string, parents: string[], extra: Partial<Commit> = {}) => ({ hash, parents, refs: [], subject: hash, ...extra })
@@ -105,35 +100,4 @@ describe('LaneBuilder', () => {
     expect(rows.map((r) => r.lane)).toEqual([0, 1, 0, 1, 0])
     assertContinuous(rows)
   })
-})
-
-describe('LaneBuilder (실제 이력)', () => {
-  let root: string
-  beforeAll(() => {
-    root = mkdtempSync(join(tmpdir(), 'antler-lanes-'))
-  })
-  afterAll(() => rmSync(root, { recursive: true, force: true }))
-
-  it('fixture log 에서 선이 끊기지 않는다', () => {
-    const commits = parseLog(readFileSync(join(__dirname, 'fixtures', 'log.bin')))
-    assertContinuous(build(commits))
-  })
-
-  it('브랜치·merge 가 많은 3,000 커밋 이력에서 선이 끊기지 않고 폭이 제한된다', () => {
-    const repo = join(root, 'big')
-    execFileSync('node', [resolve(__dirname, '../scripts/make-big-repo.mjs'), repo, '3000'], { stdio: 'ignore' })
-    const out = execFileSync(
-      'git',
-      ['-C', repo, 'log', '-z', '--format=%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%D%x1f%s', '--decorate=full', '--date-order', '--branches', '--tags', 'HEAD'],
-      { maxBuffer: 1 << 28 }
-    )
-    const commits = parseLog(out)
-    expect(commits).toHaveLength(3000)
-    const b = new LaneBuilder()
-    const rows = commits.map((x) => b.add(x))
-    assertContinuous(rows)
-    // 노드 레인은 항상 그 행 폭 안에 있다
-    rows.forEach((r) => expect(r.lane).toBeLessThan(r.width))
-    expect(b.maxWidth).toBeLessThan(40)
-  }, 60_000)
 })

@@ -1,9 +1,10 @@
 // 배포 빌드 feature 가드(scripts/check-release-features.mjs)와 패키징 워크플로(.github/workflows/tauri-package.yml)의 정적 검사.
-// 워크플로는 이 PR 머지 전에는 실행할 수 없다(workflow_dispatch 는 기본 브랜치의 파일만 돈다) — 여기서는 "발행하지 않는다"는 불변식과 가드 연결만 본다.
+// 워크플로는 머지 전에는 실행할 수 없다(workflow_dispatch 는 기본 브랜치의 파일만 돈다) — 여기서는 "이 워크플로는 발행하지 않는다"는 불변식과 가드 연결만 본다.
+// 발행 경로(release.yml·nightly-release.yml)의 정적 검사는 tests/releaseWorkflow.test.ts.
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parseYaml } from './yamlLite'
 // @ts-expect-error — 순수 JS 스크립트(타입 선언 없음)
 import { FORBIDDEN, findForbidden } from '../scripts/check-release-features.mjs'
 
@@ -60,19 +61,31 @@ describe('tauri-package.yml', () => {
     expect(code).not.toMatch(/contents:\s*write|action-gh-release|gh release|git tag|git push|actions\/create-release/)
   })
 
-  it('수동 실행(workflow_dispatch)만 쓰고 release.yml 과 이어지지 않는다', () => {
+  it('수동 실행(workflow_dispatch)과 재사용 호출(workflow_call)만 쓰고, 부르는 곳은 release.yml 하나다', () => {
     expect(code).toMatch(/^on:\n {2}workflow_dispatch:/m)
-    expect(code).not.toMatch(/^ {2}(push|pull_request|workflow_call|schedule):/m)
+    expect(code).toMatch(/^ {2}workflow_call:/m)
+    expect(code).not.toMatch(/^ {2}(push|pull_request|schedule):/m)
     for (const f of readdirSync(join(root, '.github', 'workflows'))) {
       if (f === 'tauri-package.yml') continue
-      expect(read('.github', 'workflows', f), f).not.toContain('tauri-package')
+      // 부르는 곳(`uses:`)만 센다 — tauri.yml 의 변경 감지 목록처럼 이름을 적기만 하는 것은 호출이 아니다
+      const calls = /^\s*uses:\s*\.\/\.github\/workflows\/tauri-package\.yml\s*$/m.test(read('.github', 'workflows', f))
+      expect(calls, f).toBe(f === 'release.yml')
     }
+  })
+
+  it('재사용 호출은 계산한 커밋(inputs.sha)을 빌드한다 — 세 잡의 모든 checkout 이 ref 를 준다', () => {
+    const checkouts = Object.values(jobs).flatMap((j) => j.steps.filter((s) => s.uses?.startsWith('actions/checkout@')))
+    expect(checkouts).toHaveLength(3)
+    for (const s of checkouts) expect(s.with?.['ref']).toBe('${{ inputs.sha || github.sha }}')
+    const on = (parseYaml(wf) as { on: { workflow_call: { inputs: Record<string, { required?: boolean }> } } }).on
+    expect(Object.keys(on.workflow_call.inputs).sort()).toEqual(['sha', 'version'])
+    expect(on.workflow_call.inputs['sha']?.required).toBe(true)
+    expect(on.workflow_call.inputs['version']?.required).toBe(true)
   })
 
   type Step = { name?: string; uses?: string; run?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }
   type Job = { environment?: string; env?: Record<string, string>; needs?: string | string[]; steps: Step[] }
-  const yaml = createRequire(createRequire(import.meta.url).resolve('electron-builder'))('js-yaml') as { load(s: string): unknown }
-  const jobs = (yaml.load(wf) as { jobs: Record<string, Job> }).jobs
+  const jobs = (parseYaml(wf) as { jobs: Record<string, Job> }).jobs
   const job = (id: string): Job => {
     const j = jobs[id]
     if (!j) throw new Error(`잡이 없다: ${id}`)

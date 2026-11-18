@@ -1,0 +1,8 @@
+version: 2.0.0
+files:
+  - url: Antler-Setup-2.0.0-x64.exe
+    sha512: t3/i2G+8W9EW1qBz60R+dqdK3T+g0LgB+XU1ljJBvjzc4dvK7WA7ePAg0IRbLUv8iSzrKn0cjx2Yq8SBLvWvIQ==
+    size: 123456
+path: Antler-Setup-2.0.0-x64.exe
+sha512: t3/i2G+8W9EW1qBz60R+dqdK3T+g0LgB+XU1ljJBvjzc4dvK7WA7ePAg0IRbLUv8iSzrKn0cjx2Yq8SBLvWvIQ==
+releaseDate: '2026-11-18T00:00:00.000Z'
