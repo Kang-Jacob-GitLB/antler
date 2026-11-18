@@ -1945,7 +1945,7 @@ Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가
 |---|---|---|---|---|---|
 | 1 | `refactor:` | 업데이트 판정 순수 로직 Rust 이식 + TS↔Rust 골든: semver·`isOfferable`·URL 허용 목록·매니페스트 검사·정책·입력 검증·오류 정화·릴리스 노트 해석 | 없음 | A(지금) | **완료** — 아래 "PR 1" |
 | 2 | `ci:` | Tauri 패키징 워크플로(**발행 없음**): NSIS 설정·서명·`latest.json`·이관용 `latest.yml`·Electron 정리 NSIS 훅·배포 빌드 가드. 첫 단계는 go/no-go 스파이크 | 없음 | A(서명 키 결정 뒤) | |
-| 3 | `refactor:` | 단일 인스턴스(`tauri-plugin-single-instance` — 새 크레이트) | 있음 | A | |
+| 3 | `refactor:` | 단일 인스턴스(`tauri-plugin-single-instance` — 새 크레이트) | 있음 | A | **완료** — 아래 "PR 3" |
 | 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | |
 | 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | |
 | R | (PR 아님) | 리허설: PR 6 브랜치 머리에 `v2.0.0-rc.N` 태그로 프리릴리스를 발행해 사람이 이관·자기 업데이트를 확인 | — | 5 뒤, 6 머지 전 | |
@@ -1989,6 +1989,49 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 - **PR 4 연결 계약(보안 리뷰)**: 플러그인(`tauri-plugin-updater` 2.14.1)은 `bundle_type()` 이 NSIS 일 때만 `-nsis` 키를 보고, 표식이 없는 빌드는 `windows-x86_64` 만 본다 — 원문 매니페스트를 그대로 넘기면 `check_manifest` 가 검사한 항목과 플러그인이 설치할 항목이 다를 수 있다. 그래서 **검사를 통과한 `ManifestOffer` 로 고른 키 하나만 담은 JSON 을 다시 만들고** `target(offer.platform)` 으로 고정해 `restore_update` 에 넘긴다(그 경로는 `require_signed_version` 을 강제로 켠다; `check()` 경로를 쓰면 `requireSignedVersion = true` 필수). 중복 필드는 플러그인의 serde 가 오류로 막는다(fail-closed). 태그 결속은 매니페스트 생성 실수만 거르며, 옛 서명 설치본을 새 태그에 다시 올리는 롤백은 서명 안의 버전 결속(`require_signed_version`)만 막는다 — CI 는 버전을 기록하는 Tauri CLI 로 서명해야 한다.
 - 서명은 형식만 본다. 서명이 실제로 맞는지·**서명된 버전이 매니페스트 버전과 같은지**(옛 서명 바이트에 새 버전 번호를 붙이는 공격)는 PR 4 가 `Update::verify`(`requireSignedVersion`)로 막는다.
 - 리다이렉트 허용 판정(`is_allowed_download_url`)은 순수 함수만 있고, 5단·매 홉 확인은 PR 4 의 `net::http::Redirects::ReleaseAssets` 가 이 함수를 쓰게 만든다.
+
+### PR 3 — 단일 인스턴스(`src/single_instance.rs`, 사용자 결정 U7: 세 OS 함께)
+
+두 번째 실행은 기존 `main` 창을 앞으로 가져오고(최소화 해제·표시·포커스) 곧바로 종료한다. **Electron 판에는 이 동작이 없다**(`requestSingleInstanceLock`·`second-instance` 가 `src/main` 어디에도 없다 — 계획의 "둘 다 없다" 확인과 같다).
+그래서 "Electron 과 같은 동작"의 기준은 없고, 이 PR 이 Tauri 판에서 처음 생기는 동작이다.
+
+| 파일 | 내용 |
+|---|---|
+| `Cargo.toml` | `tauri-plugin-single-instance = "2.5.5"` |
+| `src/single_instance.rs` | `on_second_instance`(플러그인 콜백) → `bring_to_front`(`Foregroundable` 트레이트로 분리해 가짜 창으로 시험), `enabled`(잠금 조건) |
+| `src/lib.rs` | `run()` 의 **첫 번째** `.plugin(` 으로 등록 |
+| `tests/single_instance.rs` | 소스 검사: 등록 순서·`ANTLER_USER_DATA` 분기·인자 미사용·capability 불변 |
+
+**핵심 결정**
+- **버전**: 2.5.5 (crates.io 최신 안정판). 이 판의 `tauri` 의존이 `"2.12"`(기본 기능 끔)이라 앱의 tauri 2.12.5 와 맞는다. 2024 edition·rust-version 1.90 을 요구하지만 툴체인(1.100)이 넘는다. 선택 기능 `semver`·`deep-link` 는 쓰지 않는다(`semver` 는 버전이 다른 앱의 병행 실행을 허용하는 것인데, 설정 파일을 공유하므로 원치 않는다).
+- **등록 순서**: 다른 플러그인보다 먼저. 플러그인은 등록 순서대로 setup 되고 두 번째 실행은 나머지 설정이 돌기 전에 감지돼 종료해야 한다(플러그인 `Builder::build` 문서). 소스 검사가 강제한다.
+- **인자는 읽지 않는다**: 콜백의 `args`·`cwd` 는 `_` 로 버린다. Antler 는 명령줄 인자로 하는 일이 없고(파일 열기·딥링크 없음), 두 번째 실행의 인자는 같은 사용자의 다른 프로세스가 보낼 수 있어 신뢰하지 않는다. 인자 처리가 생기면 `single_instance.rs` 가 검증 지점이다.
+- **식별자를 userData 기준으로 나누지 않고, `ANTLER_USER_DATA` 가 있으면 등록하지 않는다**(계획의 window-state 선례 — 비어 있어도 같다). 이유: 플러그인의 잠금 이름은 `tauri.conf.json` 의 `identifier`(`com.antler.app`)에서 정해지고 플러그인 API 로는 Linux 의 D-Bus 이름만 바꿀 수 있어(Windows 뮤텍스·macOS 소켓은 못 바꾼다) userData 별로 나눌 수 없다.
+  등록하지 않으면 측정·`drive.mjs` 가 실사용 앱이 떠 있어도 돌고, 그 실행이 실사용 앱의 잠금을 선점하지도 않는다. 대가: 개발용 인스턴스끼리는 서로 막지 않는다(의도).
+- **창이 아직 없으면**(첫 인스턴스가 기동 중) 콜백은 아무것도 하지 않는다. 창은 `setup` 에서 만들어지고 처음부터 보이므로 `show()` 가 창을 앞당겨 보이는 일은 없다.
+- **capabilities 변경 없음**: 플러그인은 JS command 를 노출하지 않는다. 시험이 `single-instance` 권한이 capability 에 없음을 확인한다.
+
+**새 크레이트**(`cargo tree`·`Cargo.lock` diff 로 확인) — `Cargo.lock` 에는 **`tauri-plugin-single-instance` 1개만** 늘었고 전이 의존은 모두 이미 있던 판이다.
+
+| OS | 플러그인이 끌어오는 것 | 새로 빌드되는 것 |
+|---|---|---|
+| Windows | `windows-sys 0.61.2`(이미 트리에 있음), serde·serde_json·thiserror 2·tokio(`net`)·tracing | 플러그인 1개. 잠금은 이름 있는 뮤텍스(`<identifier>-sim`), 전달은 `WM_COPYDATA` 를 받는 숨은 창 |
+| macOS | 공통 의존만 | 플러그인 1개. 잠금은 `/tmp/<identifier>_si.sock` Unix 소켓(`tokio::net`) |
+| Linux | 공통 + `zbus 5.19.0` | 플러그인 1개. `zbus` 는 `tauri-plugin-opener` 가 이미 같은 판(5.19.0)으로 끌어오므로 **Linux 트리에도 새 크레이트는 없다**. 잠금은 D-Bus 세션 버스 이름 `com.antler.app.SingleInstance` |
+
+Linux 빌드 영향: 추가 시스템 라이브러리는 없다(`zbus` 는 순수 Rust). 세션 버스가 없거나 주소가 잘못된 환경(헤드리스·일부 컨테이너·`DBUS_SESSION_BUS_ADDRESS` 없는 SSH 세션)에서는 플러그인이 경고만 남기고 **잠금 없이 정상 기동**한다(fail-open). 이 환경에서는 단일 인스턴스가 보장되지 않는다.
+macOS·Linux 는 이 PR 에서 빌드하지 않았다(Windows 에서 `cargo build`·clippy 만) — 소스·`cargo tree --target` 로 확인한 것이다.
+
+**사람 확인**(앱 실행이 필요해 자동 시험이 없다)
+- 앱이 떠 있는 채로 같은 exe 를 다시 실행하면 새 창이 뜨지 않고 기존 창이 앞으로 온다. 창을 최소화해 둔 채로도 복원된다. 두 번째 프로세스가 남지 않는다.
+- 두 번째 실행에 인자(`antler.exe --foo C:\x`)를 줘도 아무 일도 달라지지 않는다.
+- `ANTLER_USER_DATA=<임시>` 로 띄운 실행이 실사용 앱이 떠 있어도 정상 기동한다(그리고 그 반대도).
+- 앱 종료 직후 다시 실행하면 막히지 않는다(잠금 해제). 창이 막 만들어지는 중 더블 클릭해도 첫 창만 남는다.
+
+**남은 위험**
+- 개발 중 `pnpm tauri dev` 로 띄운 인스턴스가 있으면(`ANTLER_USER_DATA` 없이) 설치본 실행이 그 창을 앞으로 가져오고 종료한다. 같은 identifier 를 쓰는 한 의도된 결과다.
+- 첫 인스턴스가 응답하지 않으면 Windows 의 두 번째 실행은 10초(플러그인 상수) 기다린 뒤 종료한다.
+- 업데이트 설치 후 재실행(PR 4 의 NSIS `/R`)이 옛 프로세스의 종료와 겹치면 새 프로세스가 옛 프로세스에 포커스만 주고 종료할 수 있다 — PR 4 가 종료 후 실행 순서(플러그인은 `cleanup_before_exit` 에서 잠금을 푼다)를 확인해야 한다.
 
 ## Phase 0 에서 확인한 것
 

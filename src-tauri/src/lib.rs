@@ -25,6 +25,7 @@ pub mod routed_repos;
 // 토큰 보관(Phase 4 PR 4) — Jira(PR 6)·GitHub(PR 9) 서비스가 같은 Vault 를 쓴다
 pub mod secret;
 mod sidecar;
+mod single_instance;
 mod snap;
 // 업데이트 판정 로직(Phase 6c PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/update.rs)가 별도 크레이트라 pub 이다
 pub mod update;
@@ -108,7 +109,13 @@ fn clipboard_port(app: tauri::AppHandle) -> app_host::ClipboardWrite {
 
 pub fn run() {
     commands::mark_start();
-    let mut builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // 단일 인스턴스 — **다른 플러그인보다 먼저** 등록한다(플러그인 문서: 두 번째 실행은 나머지 설정이 돌기 전에 감지돼 종료해야 한다).
+    // 두 번째 실행은 기존 창을 앞으로 가져오고 끝난다(single_instance.rs). ANTLER_USER_DATA 로 도는 측정·자동화 실행은 등록하지 않는다
+    if single_instance::enabled(std::env::var_os("ANTLER_USER_DATA").as_deref()) {
+        builder = builder.plugin(tauri_plugin_single_instance::init(single_instance::on_second_instance));
+    }
+    builder = builder
         .plugin(tauri_plugin_clipboard_manager::init())
         // 확인 창·폴더 선택은 Rust(dialogs.rs)에서만 띄운다. capability 에 dialog 권한이 없어 renderer 는 부를 수 없다
         .plugin(tauri_plugin_dialog::init());
