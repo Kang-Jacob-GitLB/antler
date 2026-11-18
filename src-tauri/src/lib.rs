@@ -1,6 +1,8 @@
 // jira:*·gh:* 채널 처리(Phase 4 PR 6·9). 통합 테스트(tests/channels.rs·api_route.rs)가 별도 크레이트라 pub 이다
 pub mod api_host;
 mod commands;
+// 설정 저장소 코어(Phase 6b PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/config.rs)가 별도 크레이트라 pub 이다
+pub mod config;
 mod dialogs;
 mod fetch_host;
 pub mod git;

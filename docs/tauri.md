@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -1660,9 +1660,84 @@ PR 1 의 방어(이름의 `=`·잘못된 UTF-8·U+FFFD·256개/24000자 상한·
 - 확인과 git 의 읽기 사이 경쟁(TOCTOU)은 막지 못한다(TS 와 같다). 정션이 순환하면(`mklink /J a .`) status 의 재귀가 길어지는 로컬 DoS 는 이 가드의 범위 밖이다.
 - `link_guard` 를 `spawn_blocking` 으로 부른다(실패·패닉은 모두 `invalid path` 로 기운다). 허용 목록은 저장소마다 집합 하나(5000 상한)를 메모리에 두고 저장소를 지우거나 종료하면 비운다.
 
-## 설정·저장소 관리·env·external·github 원격 전용(Phase 6b)
+## 설정·저장소 관리·GitHub 원격 전용(Phase 6b, `src-tauri/src/config/`·`git/github_link.rs`)
 
-6b 는 PR 11개로 나뉜다(계획은 PR 별 절에 적는다). 각 절은 독립이다.
+Rust 로 옮기는 것: 설정 파일(`antler.config.json`)의 읽기·쓰기 전부(ConfigStore), 저장소 추가·삭제·스캔·환경 검사(`repos:*`·`env:*`), 외부 열기(`external:*`)·대화상자·클립보드·링크(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`),
+GitHub 원격 전용(github kind) 저장소의 git 조회·fetch·감시·추가·삭제·고아 정리, `req:cancel`. 6a 계획의 사이드카 채널 28개에서 `update:*` 7개(6c)와 `gh:repo`(6a PR 8)를 뺀 **20개**를 덮는다.
+6b 가 끝나면 **사이드카가 받는 채널은 `update:*` 7개뿐**이다(PR 10 이 시험으로 강제 — 스위치가 켜진 라우터에 대해서). 전체 되돌리기 `ANTLER_RUST_GIT=0` 은 6c 에서 사이드카를 없앨 때까지 산다.
+
+**소유 전환의 경계(이 계획의 뼈대)**: 한 실행 동안 설정 파일을 쓰는 쪽은 하나다. 사이드카에서 실제로 불리는 변경 지점(`setUi`·`setEditorExePath`·`addRepo`·`updateRepo`·`removeRepo`·`setTrustedConfig`·`setFetchApproval`·`setGithubDefaultBranch`)을
+**PR 9 가 한 번에** Rust 로 넘긴다. 그 전(PR 1~8)에는 Rust 가 설정을 읽지도 쓰지도 않는다 — PR 1 의 코어는 시험에서만 쓴다. 소유 술어는 시작 때 한 번 `router.enabled()` 하나다.
+되돌릴 수 있는 길이 필요해 하위 스위치 `ANTLER_RUST_API=0`·`ANTLER_RUST_SSH=0` 은 PR 9 부터 은퇴한다(결정 D5).
+
+**사용자 결정 대기**(PR 9 의 범위에 걸린다): D1 Electron 설정 파일 가져오기(권고: Tauri 설정이 없을 때만, 읽기만, `trustedConfigs`·`window`·GitHub 캐시는 가져오지 않음) · D2 Electron 토큰은 옮기지 않고 다시 로그인 ·
+D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russh-sftp` 도입(PR 4b 스파이크가 go 일 때) · D5 하위 스위치 은퇴 · D6 `windows` 크레이트의 `Win32_System_Registry` 기능 추가(새 크레이트 아님).
+**PR 1 은 D1 의 가져오기 진입점 없이 코어만 둔다.**
+
+| PR | 내용 | 앱 연결 | 묶음·선행 | 상태 |
+|---|---|---|---|---|
+| 1 | ConfigStore 코어(`config/`): 모델·로드·정화·원자적 저장·검증기·변경 연산 + GitHub 링크 순수 함수 + TS↔Rust 설정 파일 바이트 골든 | 없음 | A | **완료** |
+| 2 | GitHub 캐시 실행 기반: `GithubEnv` 닫힌 타입·`GitExecutor::Github`·init·정확 일치 검사·HEAD 맞추기·fetch 의 github 모드·사용자 네트워크 설정 읽기 | 없음 | B(1 뒤) | |
+| 3 | external 순수 로직·실행기(plan·opener·link, spawn 예외 지점 하나, 파일 관리자) | 없음 | A | |
+| 4a / 4b | 4a: WSL 목록(레지스트리 관문)·`resolve_env`·로컬 폴더 찾기·`SshPool` 임시 잡기. 4b: SFTP 폴더 목록(D4) | 없음 | A(4b 는 D4 뒤) | **4a 완료**(4b 는 D4 뒤) |
+| 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | |
+| 6 | github kind 의 git **조회**를 Rust 로(미러에 `github` 링크·모든 git 채널의 github 분기·`repos:remove` 가로채기). 감시는 PR 7 | 있음 | 직렬(6a 7b·8, PR 2 뒤) | |
+| 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | |
+| 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | |
+| 9 | **ConfigStore 소유 전환**: `config:*`·`repos:*`·`external:*`·`req:cancel` 응답, 미러·fetchPrefs·승인·repoq 내부화, Electron 설정 가져오기(D1) — 보안 리뷰 집중 | 있음 | 직렬(1·3·5·6·7·8 뒤) | |
+| 10 | 사이드카 정리: Rust 소유 실행에서 `update:*` 밖 채널·메시지 제거(강제 시험) | 있음 | 직렬(9 뒤) | |
+
+모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 이식 대응표는 새 파일 `tests/golden/repos/test-map.json`(6b 전용)이고 PR 10 에서 `N/A: PR n` 이 0개여야 한다.
+대상 TS 테스트: configStore(8)·windowState(5)·githubRemote(72)는 PR 1 이 만들었고, 뒤 PR 이 externalOpener·externalPlan·externalReveal·externalClsid·sshRemoteDir·wslExecutor·wslPaths·sidecar*.test.ts 를 더한다.
+기존 표의 `N/A: 6b`(6a 표 26·193-206행, net 표 198-199행의 "ConfigStore 는 사이드카에 남아")는 해당 PR 이 바꾼다.
+
+### PR 1 — ConfigStore 코어 + GitHub 링크 순수 함수(앱에 연결하지 않는다)
+
+Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든이 기존 `ConfigStore`·`githubCache` 를 그대로 돌린다). 앱·라우터·`lib.rs` 연결은 `mod config;` 한 줄뿐이다.
+
+| 파일 | 내용 |
+|---|---|
+| `src/config/model.rs` | 설정은 구조체가 아니라 **순서 있는 `Json` 트리**다. TS 가 파일의 저장소·소스를 검증 없이 펼쳐(`{...r}`) 저장하므로 알 수 없는 키와 키 순서가 바이트에 남는다. `set`(JS `{...o, k: v}` — 있으면 제자리·없으면 끝)·`spread`(객체·배열·문자열 펼침)·`UNDEFINED`(값이 `undefined` 인 객체 자리: `removeRepo` 가 남기는 `lastRepoId` — 파일엔 쓰지 않고 이후 `setUi` 가 옛 자리를 채운다)·`source_for`·기본값 |
+| `src/config/load.rs` | 파일 해석·정화. **TS 가 던지는 모양만 손상**으로 본다(최상위 `null`·반복 못 하는 `repos`·`sources` 안의 `null`·`length` 가 참인 문자열/객체인 `sources`·BOM). 최상위가 숫자·문자열·배열이거나 `repos` 가 문자열이면 던지지 않고 기본값으로 시작한다(손상 아님). github 저장소는 링크를 다시 검증하고 경로를 캐시로 다시 계산하며 중복을 하나로 줄인다. `sanitize_window_state` |
+| `src/config/validate.rs` | `setUi` 검증기(Jira·Launchpad·저장소 목록·에디터·그룹·주기·client id). 정규식은 크레이트 없이 ASCII 로 직접 쓴다. **검사 순서가 TS 와 같다**(두 가지가 틀린 패치는 같은 문구) |
+| `src/config/save.rs` | `JSON.stringify(c, null, 2)` 바이트(`js_value::stringify_pretty`)·원자적 쓰기(`<file>.tmp` → `sync_all` → `rename`, 5회·30×(n+1)ms 재시도) |
+| `src/config/store.rs` | `ConfigStore`: `get`·`set_ui`·`set_editor_exe_path`·`set_skipped_update_version`·`add_repo`·`update_repo`·`remove_repo`·`set_github_default_branch`·`set_trusted_config`·`set_fetch_approval`. `Mutex` 안에서 읽기→수정→저장, 알림은 잠금을 놓은 뒤 세대 번호를 붙여 보낸다 |
+| `src/config/derive.rs` | `mirror_of`(미러 모양 — TS `sidecar/mirror.ts`)·`fetch_prefs_of`(fetch 설정 — TS `sidecar/fetchPrefs.ts`). PR 9 가 이 값을 미러·fetch 서비스에 직접 넘긴다 |
+| `src/git/github_link.rs` | `validate_github_link`·`sanitize_github_link`·`is_safe_branch`·`github_cache_path`·`github_cache_slug`·`cache_path_matches_link`·`github_remote_url`(TS `githubCache.ts` 23-117). 경로는 항상 win32 규칙(`ssh/win32_path.rs` 재사용) |
+| `src/net/js_value.rs` | `stringify_pretty` — 객체 키를 **JS 열거 순서**(정수형 키 먼저)로 쓴다. 기존 `stringify`(삽입 순서)는 그대로 |
+| `Cargo.toml` | `uuid`(v4 — 저장소 id). `Cargo.lock` 에 전이 의존으로 있던 판이라 새 크레이트·lock 변화는 antler 의존 목록에 `"uuid",` 한 줄뿐이다 |
+
+**골든**: `tests/fixtures/configCases.ts`(입력 표)를 `tests/goldenConfig.test.ts` 가 **실제 TS `ConfigStore`** 로 임시 파일에 돌려 `tests/golden/config/store.json`·`link.json` 을 만든다
+(`UPDATE_GOLDEN=1 npx vitest run tests/goldenConfig.test.ts`). 사례마다 입력(파일 내용·연산 순서)·로드한 설정·`loadFailed`·단계별 결과(던진 문구 포함)와 설정·알림 횟수·**최종 파일 바이트**·남은 파일 목록·미러·fetch 설정이 들어 있고,
+`src-tauri/tests/config.rs` 가 같은 입력으로 Rust 를 돌려 비교한다(골든을 **순서를 보존하는 `net::json::parse`** 로 읽는다 — `serde_json::Value` 는 키를 정렬해 바이트 비교가 의미 없어진다).
+- **결정적으로 만드는 법**: 저장소 id(무작위 UUID)는 vitest 가 `randomUUID` 를 순번(`id-1`…)으로 바꾸고 Rust 는 같은 순번을 주입한다(`open_for_test`, `test-hooks` 뒤). 손상 파일 백업 이름의 시각은 `Date` 를 고정해(`.corrupt-1700000000000.bak`) **이름까지** 비교한다.
+  github 캐시 기준 폴더는 가상 경로 `C:\golden\cache` 다 — ConfigStore 는 이 문자열로 계산만 하고 디스크에 닿지 않으므로 골든에 임시 폴더·CI 의 8.3 짧은 이름(`RUNNER~1`)이 끼어들 곳이 없다.
+- `node:path` 는 win32 판으로 바꾼다(Antler 는 Windows 용이고 Rust 도 항상 win32 규칙 — `pnpm test` 는 ubuntu 에서도 돈다). 설정 파일 경로는 `/` 로 직접 이어 붙여 만든다.
+- 사례: 손상·ENOENT·폴더·BOM·잘못된 UTF-8, `repos`·`sources`·`ui`·`window`·승인 맵의 모든 모양(null·숫자·문자열·배열 항목), 알 수 없는 키·키 순서·정수형 키 보존, github 링크 오류·중복·대소문자·소스 재구성,
+  `setUi` 검증기의 모든 상한 ±1(UTF-16 단위 경계는 astral 문자로도, JS trim 의 NBSP·U+FEFF·U+0085)·`in` 거부 키·병합 뒤 시각 검사·검사 순서·비객체 패치, 각 변경 연산(쓰지 않는 경우 포함), 링크 이름 경계(39·100자·`-`·끝 `.`·`con.git`·`.git` 접미)·캐시 경로 판정 45쌍(대소문자·UNC·`..`·접두 우회).
+  3천 개가 넘는 상한(`repoOrder` 5000/5001)은 골든이 부풀어 `validate.rs` 단위 시험이 맡는다.
+
+**TS 의 특이한 동작을 그대로 옮긴 곳**(골든 사례가 있다 — 고치지 않는다)
+- `setUi` 는 `checkVisibleGroups` 의 중복 제거 결과를 쓰지 않는다(중복이 저장된다). 빈 `visibleGroups` 삭제는 병합 뒤 값에 적용한다.
+- `removeRepo` 는 모르는 id 여도 쓰고 `fetchApprovals`·`trustedConfigs` 를 `{}` 로 남긴다. `setFetchApproval` 은 키를 맨 끝으로 옮기고 `setTrustedConfig` 는 제자리에서 바꾼다.
+- `updateRepo` 의 `TypeError`(`name: null`·숫자)는 `repos.map` 콜백 안이라 **id 가 맞는 저장소가 있을 때만** 난다. 던지는 곳이 V8 문구라 골든은 종류(`TypeError`)만 비교한다.
+- 파일의 `fetchApprovals`·`trustedConfigs` 는 참인 값이면 모양과 상관없이 그대로 보존한다.
+
+**TS 와 다른 점**
+- 짝 없는 서로게이트는 JSON 해석에서 U+FFFD 가 된다(`net/json.rs` 와 같다 — 다시 저장하면 TS 의 `"\ud83d"` 이스케이프와 바이트가 다르다). `__proto__` 키는 일반 키다. 문자열을 `ui` 로 펼치는 손상 파일의 BMP 밖 글자는 TS 가 코드 단위로 쪼갠다.
+- `github_cache_slug` 는 드라이브 절대·UNC 가 아닌 입력(`\foo`·상대 경로)을 `None` 으로 돌린다(TS 의 `resolve` 는 작업 디렉터리를 붙인다 — 캐시 기준 폴더와 레코드 경로는 항상 절대라 실제 차이는 없다). 대소문자 비교는 Rust `to_lowercase` 다(Node 도 `toLowerCase`).
+- 쓰기에 `sync_all` 을 더했고(전원 손실에도 빈 파일이 남지 않는다), rename 재시도 오류가 Windows `ERROR_ACCESS_DENIED`·`ERROR_SHARING_VIOLATION` 이다(TS 는 Node 가 옮긴 `EPERM`). 재시도 범위가 넓은 것은 보안 완화가 아니다. 이 매핑이 Node 와 정확히 같은지는 확인하지 못했다.
+- 변경 알림은 잠금을 놓은 뒤 `(세대, 설정)` 으로 간다(TS 는 동기). 알림이 패닉해도 저장된 변경은 성공이다(TS 는 `try/catch`).
+- 쓰기도 읽기와 같은 JSON 깊이 상한(`net/json.rs` 의 `MAX_DEPTH`=64)을 지킨다 — 넘는 `setUi` 값과 문서는 저장하지 않고 거부한다(TS 는 `JSON.parse` 무제한이라 받는다). 저장한 설정을 다음 실행의 로드가 손상으로 보고 초기화하는 일을 막으려는 것이다.
+- **PR 9 계약**: `ConfigStore::open(.., cache_dir)` 에는 반드시 `Some` 을 넘긴다(`None` 이면 github 저장소 path 를 캐시 폴더·링크로 다시 정하지 않는다).
+
+**시험**: 골든 2개(`store_골든이_ts_와_같다`·`link_골든이_ts_와_같다`)와 Rust 고유 동작(알림 순서·패닉·쓰기 실패 시 메모리 불변·8스레드 동시 쓰기·세대 번호·uuid v4 모양·재로드 바이트 안정) — `tests/config.rs`(`required-features = ["test-hooks"]`).
+`validate.rs`·`load.rs`·`save.rs`·`model.rs`·`github_link.rs` 단위 시험. 대응표(`tests/golden/repos/test-map.json`)는 configStore(8)·windowState(5)·githubRemote(72)를 덮고 `tests/goldenConfig.test.ts` 가 누락·가리키는 Rust 테스트를 강제한다.
+`windowState > restoreBounds` 4개는 `N/A: Tauri 는 window-state 플러그인이 창 위치를 복원한다`, github 캐시 실행·실제 git·RepoService 의 것은 `N/A: PR 2·6·7·8·9` 다.
+
+**다음 PR 에 넘긴 것**: 앱 연결 전부(`config:*`·미러·fetchPrefs 의 원천을 바꾸는 것은 PR 9, 그동안 사이드카가 파일의 유일한 작성자), Electron 설정 가져오기(D1 결정 뒤), `set_window_state`(Tauri 는 window-state 플러그인이라 쓰지 않는다).
+
+**남은 위험**: JSON 직렬화 바이트 패리티가 실패 모드인데 골든 범위만큼만 보장한다(숫자 표기는 `js_number_string` 이 맡는다 — 골든의 숫자는 정수·소수 몇 개뿐). 백신 잠금 rename 의 오류 코드는 취약 가정이다.
 
 ### PR 4a — WSL 목록·경로 해석·폴더 찾기·저장 전 SSH 연결(앱에 연결하지 않는다)
 
