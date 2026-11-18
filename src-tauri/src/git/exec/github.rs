@@ -26,6 +26,42 @@ pub type TokenSource = Arc<dyn Fn() -> Option<SecretString> + Send + Sync>;
 /// 사용자 설정에서 가져온 네트워크 키(`read_network_config` 의 결과). 읽는 쪽이 준비가 끝났는지를 정한다
 pub type NetConfigSource = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
+/// 사용자 git 설정의 네트워크 키를 담는 칸과 "읽기가 끝났다" 신호(TS `githubReady` 와 같은 뜻). 복제하면 같은 칸을 본다.
+/// 읽는 쪽이 [`set`](Self::set) 으로 채우면 준비가 끝난 것이고, fetch 가 [`wait_ready`](Self::wait_ready) 로 그때까지(상한 안에서) 기다린다
+#[derive(Clone)]
+pub struct NetConfig(Arc<NetConfigInner>);
+
+struct NetConfigInner {
+    value: Mutex<Vec<(String, String)>>,
+    ready: tokio::sync::watch::Sender<bool>,
+}
+
+impl Default for NetConfig {
+    fn default() -> Self {
+        NetConfig(Arc::new(NetConfigInner { value: Mutex::new(Vec::new()), ready: tokio::sync::watch::Sender::new(false) }))
+    }
+}
+
+impl NetConfig {
+    /// 읽은 값을 채우고 준비가 끝났음을 알린다(읽지 못해 빈 목록이어도 끝난 것이다)
+    pub fn set(&self, value: Vec<(String, String)>) {
+        *self.0.value.lock().unwrap_or_else(PoisonError::into_inner) = value;
+        self.0.ready.send_replace(true);
+    }
+
+    /// 지금 값(아직 못 읽었으면 빈 목록)
+    pub fn get(&self) -> Vec<(String, String)> {
+        self.0.value.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// 준비가 끝났거나 `limit` 이 지날 때까지 기다린다. 끝났으면 true
+    pub async fn wait_ready(&self, limit: std::time::Duration) -> bool {
+        let mut rx = self.0.ready.subscribe();
+        let done = tokio::time::timeout(limit, rx.wait_for(|ready| *ready)).await.is_ok_and(|r| r.is_ok());
+        done
+    }
+}
+
 /// 저장소 경로별로 진행 중인 git 프로세스 수(복제하면 같은 표를 본다). `repos:remove` 가 "그 저장소의 git 이 모두 끝났다"를 확인하는 데 쓴다 —
 /// 요청 단위의 수(라우터의 범위 가드)는 취소와 함께 곧바로 사라져 프로세스가 정리되기 전을 말해 주지 못한다
 #[derive(Clone, Default)]

@@ -25,7 +25,7 @@ use ssh::SshExecutor;
 
 pub use common::{build_git_args, merged_env, FetchEnv, RunOpts, RunResult, DEFAULT_MAX_BUFFER, GIT_ENV, GIT_GLOBAL_ARGS, MAX_STDERR};
 pub use error::ExecError;
-pub use github::{GithubExecutor, NetConfigSource, TokenSource};
+pub use github::{GithubExecutor, NetConfig, NetConfigSource, TokenSource};
 pub use local::LocalExecutor;
 pub(crate) use local::read_user_config_list;
 pub use process::{set_jobs_disabled, shutdown_kills, GitStream, ProcessStream};

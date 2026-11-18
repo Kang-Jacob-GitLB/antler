@@ -909,11 +909,13 @@ impl Router {
     fn set_watch(&self, active: Option<&str>) {
         // 삭제 중인 github 저장소(`repos:remove` 가 정리를 시작했다)는 다시 감시하지 않는다 — 캐시 폴더를 지우기 전에 핸들을 다시 쥐지 않게
         let removing = |id: &str| self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).get(id).is_some_and(|until| *until > Instant::now());
+        // "삭제 중" 확인과 `resolve_fetch` 를 `watch_target` 잠금 **안**에서 한다 — `release_github_repo` 가 같은 잠금 안에서 감시를 멈추므로,
+        // 확인과 감시 시작 사이에 표식이 서고 정지가 끝나는 틈이 없다. 잠금 순서는 watch_target → github_removing(짧게) 이고 반대로 쥐는 곳은 없다
+        let mut current = self.watch_target.lock().unwrap_or_else(PoisonError::into_inner);
         let next = active.filter(|id| !removing(id)).and_then(|id| match self.mirror.resolve_fetch(id) {
             Resolved::Rust(target) => Some((id.to_string(), target)),
             _ => None,
         });
-        let mut current = self.watch_target.lock().unwrap_or_else(PoisonError::into_inner);
         match &next {
             Some((id, target)) => {
                 if current.as_ref().is_some_and(|(cur_id, cur)| cur_id == id && cur != target) {

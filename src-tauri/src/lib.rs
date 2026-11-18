@@ -201,6 +201,8 @@ pub fn run() {
             let mut gh_service: Option<github::service::GitHubService> = None;
             // github 캐시 실행기의 복제(라우터가 받은 것과 같은 `LiveProcs` 를 본다) — 아래 fetch 서비스의 github 실행기가 된다. 라우터가 받지 않았으면(서비스 없음·스위치 꺼짐) 없다
             let mut github_exec: Option<GithubExecutor> = None;
+            // 위 실행기가 읽는 네트워크 설정 칸(읽기 완료 신호를 fetch 서비스가 기다린다)
+            let mut github_net: Option<git::exec::NetConfig> = None;
             if router.api_enabled() {
                 let vault = std::sync::Arc::new(secret::Vault::new(secret::open_store(std::env::var_os("ANTLER_USER_DATA").as_deref())));
                 let jira = jira::service::JiraService::new(vault.clone());
@@ -219,18 +221,19 @@ pub fn run() {
                         // 사용자 git 설정의 네트워크 키(프록시·인증서)는 앱 시작 때 한 번 읽는다 — 읽는 동안·읽지 못하면 빈 목록이다(TS 의 `netConfig` 와 같다).
                         // fetch·감시도 같은 스위치로 Rust 가 맡는다(PR 7 — `rust_fetch_kinds` 의 github). 서비스가 없거나 스위치가 꺼져 있으면 주입이 무시되고 github 는 사이드카가 전부 처리한다
                         if router.enabled() {
-                            let net_config: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> = std::sync::Arc::default();
-                            let (slot, token_svc) = (net_config.clone(), gh.clone());
+                            // 읽기가 끝나면 신호가 선다 — fetch 서비스가 첫 fetch 앞에서 그것을 기다린다(TS `githubReady`, 상한 5초)
+                            let net_config = git::exec::NetConfig::default();
+                            let (slot, reader, token_svc) = (net_config.clone(), net_config.clone(), gh.clone());
                             tauri::async_runtime::spawn(async move {
-                                let read = git::github_cache::read_network_config("git").await;
-                                *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = read;
+                                slot.set(git::github_cache::read_network_config("git").await);
                             });
+                            github_net = Some(net_config);
                             let exec = GithubExecutor::new(
                                 "git",
                                 user_data.join("remote-repos").to_string_lossy().into_owned(),
                                 user_data.join("no-hooks").to_string_lossy().into_owned(),
                                 std::sync::Arc::new(move || token_svc.git_token()),
-                                std::sync::Arc::new(move || net_config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()),
+                                std::sync::Arc::new(move || reader.get()),
                             );
                             router.set_github_cache(exec.clone());
                             github_exec = router.github_cache_active().then_some(exec);
@@ -293,6 +296,9 @@ pub fn run() {
                 let mut service = FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir));
                 if github_exec.is_some() {
                     service = service.with_github_cache(user_data.join("remote-repos").to_string_lossy().into_owned());
+                    if let Some(net) = github_net.clone() {
+                        service = service.with_github_net_ready(net);
+                    }
                 }
                 router.set_fetch(std::sync::Arc::new(service));
             }

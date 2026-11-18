@@ -18,11 +18,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use antler_lib::api_host::GithubHost;
-use antler_lib::git::exec::{ExecError, GitExecutor, GithubExecutor, LocalExecutor, RunOpts, RunResult};
+use antler_lib::git::exec::{ExecError, GitExecutor, GithubExecutor, LocalExecutor, NetConfig, RunOpts, RunResult};
 use antler_lib::git::fetch::confirm_text::ConfirmBox;
 use antler_lib::git::fetch::guard::classify_failure;
 use antler_lib::git::fetch::run::GitRunner;
@@ -570,6 +571,120 @@ async fn 제한은_큐_슬롯을_얻은_뒤부터_잰다() {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// 실행 직전 재검사·네트워크 설정 대기: 가짜 실행기(명령 기록)
+// ---------------------------------------------------------------------------------------------------------------------
+
+struct ProbeInner {
+    /// fetch 가 돈 뒤의 `config` 를 앱이 만든 모양이 아니게 돌려준다(검사 뒤 설정이 바뀐 상황)
+    tamper_after_fetch: bool,
+    net: Option<NetConfig>,
+    fetched: AtomicBool,
+    commands: Mutex<Vec<String>>,
+    /// fetch 가 돌 때 실행기가 읽은 네트워크 설정(fetch 가 돌지 않았으면 `None`)
+    net_at_fetch: Mutex<Option<Vec<(String, String)>>>,
+}
+
+#[derive(Clone)]
+struct Probe(Arc<ProbeInner>);
+
+impl Probe {
+    fn commands(&self) -> Vec<String> {
+        self.0.commands.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+}
+
+impl GitRunner for Probe {
+    fn kind(&self) -> &'static str {
+        "github"
+    }
+
+    fn run(&self, repo_path: &str, args: &[String], _opts: &RunOpts) -> impl Future<Output = Result<RunResult, ExecError>> + Send {
+        let inner = &self.0;
+        inner.commands.lock().unwrap_or_else(PoisonError::into_inner).push(args.join(" "));
+        let ok = |stdout: String| RunResult { stdout: stdout.into_bytes(), stderr: String::new(), code: 0 };
+        let result = if args.iter().any(|a| a == "fetch") {
+            inner.fetched.store(true, Ordering::SeqCst);
+            *inner.net_at_fetch.lock().unwrap_or_else(PoisonError::into_inner) = Some(inner.net.as_ref().map(NetConfig::get).unwrap_or_default());
+            ok(String::new())
+        } else if args.first().map(String::as_str) == Some("config") {
+            let url = if inner.tamper_after_fetch && inner.fetched.load(Ordering::SeqCst) { "https://evil.example/x.git".to_string() } else { url_of(repo_path) };
+            ok(expected_github_config(&url).iter().map(|(k, v)| format!("local\0{k}\n{v}\0")).collect())
+        } else if args.first().map(String::as_str) == Some("remote") {
+            ok("origin\n".to_string())
+        } else if args.contains(&"--count=1".to_string()) {
+            ok("refs/remotes/origin/main\n".to_string())
+        } else {
+            ok(String::new())
+        };
+        async move { Ok(result) }
+    }
+}
+
+fn probe_rig(tamper_after_fetch: bool, net: Option<NetConfig>) -> (Cache, FetchService<Host, Probe>, Probe) {
+    let cache = Cache::new();
+    let dir = cache.repo("octocat", "repo0");
+    let mirror = RepoMirror::default();
+    let links = HashMap::from([(G.to_string(), GhLink { owner: "octocat".into(), repo: "repo0".into() })]);
+    assert!(mirror.apply_with_links(1, vec![github_record(G, dir.as_str())], links));
+    mirror.set_github(true);
+    let probe = Probe(Arc::new(ProbeInner { tamper_after_fetch, net: net.clone(), fetched: AtomicBool::new(false), commands: Mutex::default(), net_at_fetch: Mutex::default() }));
+    let runner = probe.clone();
+    let mut svc = FetchService::new(Host::default(), mirror, move |_: &Target| Arc::new(runner.clone()), Some(cache.hooks.clone())).with_github_cache(cache.cache_dir.clone());
+    if let Some(net) = net {
+        svc = svc.with_github_net_ready(net);
+    }
+    (cache, svc, probe)
+}
+
+#[tokio::test]
+async fn 실행_직전_재검사가_통과하면_head_를_맞추고_어긋나면_맞추지_않고_차단한다() {
+    let touches_head = |p: &Probe| p.commands().iter().any(|c| c.contains("refs/remotes/origin/HEAD") || c.contains("ls-remote"));
+    // 설정이 그대로면 HEAD 맞추기까지 간다
+    let (_cache, svc, probe) = probe_rig(false, None);
+    let status = svc.fetch(G, true).await;
+    assert!(status.blocked.is_none() && status.error.is_none(), "{status:?}");
+    assert!(touches_head(&probe), "재검사가 통과하면 HEAD 를 맞춘다: {:?}", probe.commands());
+
+    // fetch 뒤 설정이 어긋나면: HEAD 맞추기(ls-remote 포함)를 하지 않고 차단 상태가 된다
+    let (_cache, svc, probe) = probe_rig(true, None);
+    let status = svc.fetch(G, true).await;
+    assert!(status.blocked.as_ref().is_some_and(|b| !b.confirmable), "{status:?}");
+    assert!(!touches_head(&probe), "재검사가 실패했는데 HEAD 를 맞췄다: {:?}", probe.commands());
+    // 시그니처는 검사보다 앞이고, 검사(`config`)와 fetch 사이에는 다른 git 호출이 없다
+    let cmds = probe.commands();
+    let at = cmds.iter().position(|c| c.split(' ').any(|a| a == "fetch")).expect("fetch");
+    assert!(cmds[at - 1].contains("remote"), "검사 직후에 fetch 가 붙는다: {cmds:?}");
+}
+
+#[tokio::test]
+async fn 첫_fetch_는_네트워크_설정_읽기가_끝나기를_기다렸다가_채워진_값을_쓴다() {
+    let net = NetConfig::default();
+    let (_cache, svc, probe) = probe_rig(false, Some(net.clone()));
+    let running = tokio::spawn({
+        let svc = svc.clone();
+        async move { svc.fetch(G, true).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(probe.0.net_at_fetch.lock().unwrap_or_else(PoisonError::into_inner).is_none(), "설정을 읽기 전에 fetch 가 돌았다");
+    net.set(vec![("http.proxy".to_string(), "http://proxy.example:8080".to_string())]);
+    let status = running.await.expect("join");
+    assert!(status.error.is_none() && status.blocked.is_none(), "{status:?}");
+    let seen = probe.0.net_at_fetch.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    assert_eq!(seen, Some(vec![("http.proxy".to_string(), "http://proxy.example:8080".to_string())]));
+}
+
+#[tokio::test(start_paused = true)]
+async fn 네트워크_설정을_끝내_못_읽어도_5초_뒤에는_그_키_없이_fetch_한다() {
+    let net = NetConfig::default();
+    let (_cache, svc, probe) = probe_rig(false, Some(net));
+    let started = tokio::time::Instant::now();
+    let status = svc.fetch(G, true).await;
+    assert!(status.error.is_none(), "{status:?}");
+    assert!(started.elapsed() >= Duration::from_secs(5) && started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    assert_eq!(probe.0.net_at_fetch.lock().unwrap_or_else(PoisonError::into_inner).clone(), Some(Vec::new()));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // 소유 판정: 사이드카 env 와 같은 술어
 // ---------------------------------------------------------------------------------------------------------------------
 
@@ -773,9 +888,15 @@ fn 원격_url_출처_주입은_test_hooks_뒤에만_있고_프로덕션은_https
     let github = read_src("src/git/fetch/service/github.rs");
     let at = github.find("pub fn with_github_origin_for_test").expect("시험용 주입");
     assert!(github[..at].trim_end().ends_with("#[must_use]") && github[..at].contains("#[cfg(feature = \"test-hooks\")]"), "시험용 주입은 test-hooks 뒤여야 한다");
-    // `origin` 필드를 정하는 곳: 프로덕션 생성은 None, 주입은 위 한 곳
+    // `origin` 필드 자체가 test-hooks 뒤에만 있다(배포 빌드의 구조체에는 없다): 선언·생성은 cfg 줄 바로 아래이고, 읽는 곳은 cfg 가 갈린 두 함수뿐이다
+    let cfg = "#[cfg(feature = \"test-hooks\")]\n";
+    assert_eq!(github.matches("origin: Option<String>,").count(), 1);
+    assert!(github.contains(&format!("    {cfg}    origin: Option<String>,")), "필드 선언은 cfg 아래");
     assert_eq!(github.matches("origin: None").count(), 1);
-    assert_eq!(github.matches("g.origin = Some(").count(), 1);
+    assert!(github.contains(&format!("            {cfg}            origin: None,")), "생성도 cfg 아래");
+    assert_eq!(github.matches("g.origin").count(), 2, "읽기 하나·주입 하나");
+    assert!(github.contains(&format!("    {cfg}    fn github_origin(&self) -> Option<&str> {{\n        self.github.as_ref().and_then(|g| g.origin.as_deref())")));
+    assert!(github.contains("    #[cfg(not(feature = \"test-hooks\"))]\n    fn github_origin(&self) -> Option<&str> {\n        None\n    }"), "배포 빌드는 출처가 없다");
     // 앱 코드(lib.rs·router.rs)는 이 주입을 부르지 않는다(기존 시험의 `_for_test` 금지가 이미 건다)
     for rel in ["src/lib.rs", "src/router.rs", "src/fetch_host.rs", "src/watch_host.rs"] {
         assert!(!prod_code(rel).contains("with_github_origin_for_test"), "{rel}");
@@ -813,4 +934,20 @@ fn 앱_배선은_github_실행기_뒤에_fetch_서비스를_만들고_같은_판
     let release = &router[router.find("async fn release_github_repo").expect("release")..];
     let (wait, unwatch, scope) = (release.find("forget_and_wait(").unwrap(), release.find("unwatch_if(").unwrap(), release.find("scope.cancel.cancel()").unwrap());
     assert!(wait < unwatch && unwatch < scope, "fetch 멈춤 → 감시 멈춤 → 조회 정리 순서");
+    // 감시 시작(`set_watch`)의 "삭제 중" 확인·`resolve_fetch` 는 `watch_target` 잠금 안이다(정지와 시작 사이의 틈이 없다)
+    let set_watch = &router[router.find("fn set_watch(").expect("set_watch")..];
+    let set_watch = &set_watch[..set_watch.find("fn sync_watch(").expect("다음 함수")];
+    let (lock, check, resolve) = (set_watch.find("self.watch_target.lock()").unwrap(), set_watch.find("active.filter(|id| !removing(id))").unwrap(), set_watch.find("resolve_fetch(").unwrap());
+    assert!(lock < check && lock < resolve, "삭제 중 확인과 resolve_fetch 는 watch_target 잠금 뒤");
+    // github fetch: 설정 대기 → 시그니처 → 정확 일치 검사 → fetch 가 붙어 있고, HEAD 맞추기 앞에 재검사가 있다
+    let task = prod_code("src/git/fetch/service/github.rs");
+    let (ready, sig, inspect, fetch, recheck, head) = (
+        task.find("wait_ready(").unwrap(),
+        task.find("let before = refs_signature(").unwrap(),
+        task.find("inspect_github_repo_at(r, &dir").unwrap(),
+        task.find("run_github_fetch(r, &dir").unwrap(),
+        task.rfind("inspect_github_repo_at(r, &dir").unwrap(),
+        task.find("ensure_github_head(r").unwrap(),
+    );
+    assert!(ready < sig && sig < inspect && inspect < fetch && fetch < recheck && recheck < head, "github fetch 의 순서");
 }
