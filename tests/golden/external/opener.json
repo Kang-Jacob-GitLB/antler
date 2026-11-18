@@ -1,0 +1,3289 @@
+{
+  "scenarios": [
+    {
+      "name": "리눅스 로컬: 에디터는 폴더와 파일을 절대 경로로",
+      "platform": "linux",
+      "files": [
+        "/home/u/repo/a.txt",
+        "/home/u/repo/-rf",
+        "/usr/bin/code",
+        "/usr/bin/x-terminal-emulator"
+      ],
+      "dirs": [
+        "/home/u/repo",
+        "/home/u/repo/src",
+        "/etc"
+      ],
+      "links": {},
+      "env": {
+        "PATH": "/usr/bin"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "rel": "-rf",
+          "ui": {},
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/code",
+                  "args": [
+                    "/home/u/repo",
+                    "/home/u/repo/-rf"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "vscode"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/code",
+                  "args": [
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "rel": "src/gone.txt",
+          "ui": {},
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/code",
+                  "args": [
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "rel": "src",
+          "ui": {
+            "editor": "cursor"
+          },
+          "out": {
+            "err": "Cursor 를 찾을 수 없습니다. 설정에서 다른 에디터를 고르세요"
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: 파일 관리자",
+      "platform": "linux",
+      "files": [
+        "/home/u/repo/a.txt",
+        "/home/u/repo/-rf",
+        "/usr/bin/code",
+        "/usr/bin/x-terminal-emulator"
+      ],
+      "dirs": [
+        "/home/u/repo",
+        "/home/u/repo/src",
+        "/etc"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/home/u/repo"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "a.txt",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/home/u/repo/a.txt"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "src/gone/x.txt",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/home/u/repo/src"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "src",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/home/u/repo/src"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: 존재하는 파일이 상위인 없는 경로",
+      "platform": "linux",
+      "files": [
+        "/home/u/repo/a.txt",
+        "/home/u/repo/-rf",
+        "/usr/bin/code",
+        "/usr/bin/x-terminal-emulator",
+        "/home/u/repo/evil.exe"
+      ],
+      "dirs": [
+        "/home/u/repo",
+        "/home/u/repo/src",
+        "/etc"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "evil.exe/x",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/home/u/repo"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "evil.exe",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/home/u/repo/evil.exe"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "evil.exe/x",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/x-terminal-emulator",
+                  "args": [],
+                  "cwd": "/home/u/repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "evil.exe",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/x-terminal-emulator",
+                  "args": [],
+                  "cwd": "/home/u/repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: 터미널",
+      "platform": "linux",
+      "files": [
+        "/home/u/repo/a.txt",
+        "/home/u/repo/-rf",
+        "/usr/bin/code",
+        "/usr/bin/x-terminal-emulator"
+      ],
+      "dirs": [
+        "/home/u/repo",
+        "/home/u/repo/src",
+        "/etc"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "a.txt",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/x-terminal-emulator",
+                  "args": [],
+                  "cwd": "/home/u/repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "src",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/x-terminal-emulator",
+                  "args": [],
+                  "cwd": "/home/u/repo/src"
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/x-terminal-emulator",
+                  "args": [],
+                  "cwd": "/home/u/repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: 상대 경로 거부",
+      "platform": "linux",
+      "files": [
+        "/home/u/repo/a.txt",
+        "/home/u/repo/-rf",
+        "/usr/bin/code",
+        "/usr/bin/x-terminal-emulator"
+      ],
+      "dirs": [
+        "/home/u/repo",
+        "/home/u/repo/src",
+        "/etc"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "../x",
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "src/../../etc",
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "/etc/passwd",
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "a\u0000b",
+          "out": {
+            "err": "잘못된 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "C:/x",
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": 42,
+          "out": {
+            "err": "잘못된 경로입니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: 밖을 가리키는 링크",
+      "platform": "linux",
+      "files": [
+        "/home/u/repo/a.txt",
+        "/home/u/repo/-rf",
+        "/usr/bin/code",
+        "/usr/bin/x-terminal-emulator"
+      ],
+      "dirs": [
+        "/home/u/repo",
+        "/home/u/repo/src",
+        "/etc"
+      ],
+      "links": {
+        "/home/u/repo/evil": "/etc"
+      },
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "evil",
+          "out": {
+            "err": "저장소 밖을 가리키는 경로입니다(심볼릭 링크)"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "evil",
+          "out": {
+            "err": "저장소 밖을 가리키는 경로입니다(심볼릭 링크)"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "rel": "evil",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "/opt/ide"
+          },
+          "out": {
+            "err": "저장소 밖을 가리키는 경로입니다(심볼릭 링크)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: 저장소 루트를 찾을 수 없음",
+      "platform": "linux",
+      "files": [],
+      "dirs": [],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "out": {
+            "err": "저장소 폴더를 찾을 수 없습니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: 에디터 실행 파일",
+      "platform": "linux",
+      "files": [
+        "/opt/idea/bin/idea.sh",
+        "/home/u/repo/a.txt",
+        "bin/code",
+        "./code",
+        "/usr/bin/code"
+      ],
+      "dirs": [
+        "/home/u/repo"
+      ],
+      "links": {},
+      "env": {
+        "PATH": ".:bin:/usr/bin"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "rel": "a.txt",
+          "ui": {},
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/code",
+                  "args": [
+                    "/home/u/repo",
+                    "/home/u/repo/a.txt"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "jetbrains"
+          },
+          "out": {
+            "err": "에디터 실행 파일을 먼저 고르세요(설정)"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "/opt/idea/bin/idea.sh"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/opt/idea/bin/idea.sh",
+                  "args": [
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "/opt/gone"
+          },
+          "out": {
+            "err": "실행 파일을 찾을 수 없습니다. 설정에서 다시 선택하세요"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "idea.sh"
+          },
+          "out": {
+            "err": "로컬 폴더의 실행 파일만 고를 수 있습니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "리눅스 로컬: VS Code·Cursor 를 찾지 못함",
+      "platform": "linux",
+      "files": [],
+      "dirs": [
+        "/home/u/repo"
+      ],
+      "links": {},
+      "env": {
+        "PATH": "/usr/bin"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "VS Code 를 찾을 수 없습니다. 설정에서 다른 에디터를 고르세요"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "cursor"
+          },
+          "out": {
+            "err": "Cursor 를 찾을 수 없습니다. 설정에서 다른 에디터를 고르세요"
+          }
+        }
+      ]
+    },
+    {
+      "name": "macOS: 번들 디렉터리",
+      "platform": "darwin",
+      "files": [],
+      "dirs": [
+        "/System/Applications/Utilities/Terminal.app",
+        "/home/u/repo",
+        "/home/u/repo/X.app",
+        "/home/u/repo/X.app/Contents"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "X.app",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/home/u/repo/X.app"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "X.app/gone",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/home/u/repo/X.app"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "X.app/Contents",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/open",
+                  "args": [
+                    "-a",
+                    "/System/Applications/Utilities/Terminal.app",
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/home/u/repo"
+          },
+          "action": "terminal",
+          "rel": "X.app",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/open",
+                  "args": [
+                    "-a",
+                    "/System/Applications/Utilities/Terminal.app",
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "macOS: realpath 기준 번들 판정",
+      "platform": "darwin",
+      "files": [
+        "/Users/u/repo/a.txt"
+      ],
+      "dirs": [
+        "/System/Applications/Utilities/Terminal.app",
+        "/Users/u/repo",
+        "/Users/u/repo/src",
+        "/Users/u/repo/Evil.app",
+        "/Users/u/repo/Evil.app/Contents",
+        "/Users/u/repo/P.xcodeproj",
+        "/Users/u/repo/plain"
+      ],
+      "links": {
+        "/Users/u/repo/innocent": "/Users/u/repo/Evil.app",
+        "/Users/u/repo/innocent/Contents": "/Users/u/repo/Evil.app/Contents",
+        "/Users/u/repo/plainlink": "/Users/u/repo/plain"
+      },
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "innocent",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/Users/u/repo/Evil.app"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "terminal",
+          "rel": "innocent",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/open",
+                  "args": [
+                    "-a",
+                    "/System/Applications/Utilities/Terminal.app",
+                    "/Users/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "terminal",
+          "rel": "innocent/Contents",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/open",
+                  "args": [
+                    "-a",
+                    "/System/Applications/Utilities/Terminal.app",
+                    "/Users/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "P.xcodeproj",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/Users/u/repo/P.xcodeproj"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "plain",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/Users/u/repo/plain"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "plainlink",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/Users/u/repo/plain"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "src/gone/x",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/Users/u/repo/src"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "Evil.app/gone",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/Users/u/repo/Evil.app"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "fileManager",
+          "rel": "a.txt",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/Users/u/repo/a.txt"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "terminal",
+          "rel": "src",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/open",
+                  "args": [
+                    "-a",
+                    "/System/Applications/Utilities/Terminal.app",
+                    "/Users/u/repo/src"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "macOS: 저장소 루트가 tool.app",
+      "platform": "darwin",
+      "files": [],
+      "dirs": [
+        "/System/Applications/Utilities/Terminal.app",
+        "/Users/u/tool.app",
+        "/Users/u/tool.app/src"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/tool.app"
+          },
+          "action": "fileManager",
+          "rel": "src",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/Users/u/tool.app/src"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/tool.app"
+          },
+          "action": "terminal",
+          "rel": "src",
+          "out": {
+            "err": "이 저장소 경로에는 번들일 수 있는 폴더(이름에 .)가 있어 터미널을 열 수 없습니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "macOS: Terminal.app 이 없으면 거부",
+      "platform": "darwin",
+      "files": [],
+      "dirs": [
+        "/Users/u/repo"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "terminal",
+          "out": {
+            "err": "Terminal.app 을 찾을 수 없습니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "macOS: /Applications/Utilities 의 Terminal.app",
+      "platform": "darwin",
+      "files": [],
+      "dirs": [
+        "/Applications/Utilities/Terminal.app",
+        "/Users/u/repo"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/Users/u/repo"
+          },
+          "action": "terminal",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/open",
+                  "args": [
+                    "-a",
+                    "/Applications/Utilities/Terminal.app",
+                    "/Users/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "정션·링크도 realpath 가 폴더일 때만 openPath",
+      "platform": "linux",
+      "files": [
+        "/r/evil.exe"
+      ],
+      "dirs": [
+        "/r",
+        "/r/d"
+      ],
+      "links": {
+        "/r/junction": "/r/d",
+        "/r/lnk": "/r/evil.exe"
+      },
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "/r"
+          },
+          "action": "fileManager",
+          "rel": "junction",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "/r/d"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "/r"
+          },
+          "action": "fileManager",
+          "rel": "lnk",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "/r/evil.exe"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: VS Code 는 Code.exe",
+      "platform": "win32",
+      "files": [
+        "C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+        "C:\\work\\repo\\-x.txt"
+      ],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "rel": "-x.txt",
+          "ui": {},
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+                  "args": [
+                    "C:\\work\\repo",
+                    "C:\\work\\repo\\-x.txt"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "vscode"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+                  "args": [
+                    "C:\\work\\repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 에디터 설치 위치 탐색",
+      "platform": "win32",
+      "files": [
+        "C:\\PF86\\Microsoft VS Code\\Code.exe",
+        "C:\\L\\Programs\\cursor\\Cursor.exe"
+      ],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\L",
+        "ProgramFiles": "C:\\PF",
+        "ProgramFiles(x86)": "C:\\PF86"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "vscode"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\PF86\\Microsoft VS Code\\Code.exe",
+                  "args": [
+                    "C:\\work\\repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "cursor"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\L\\Programs\\cursor\\Cursor.exe",
+                  "args": [
+                    "C:\\work\\repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: Program Files 의 Cursor",
+      "platform": "win32",
+      "files": [
+        "C:\\PF\\cursor\\Cursor.exe"
+      ],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "ProgramFiles": "C:\\PF"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "cursor"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\PF\\cursor\\Cursor.exe",
+                  "args": [
+                    "C:\\work\\repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 사용자 지정 에디터는 .exe/.com 만",
+      "platform": "win32",
+      "files": [
+        "C:\\a\\idea64.exe",
+        "C:\\a\\run.cmd",
+        "C:\\a\\run.bat",
+        "C:\\a\\x.COM",
+        "\\\\srv\\s\\a.exe"
+      ],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "C:\\a\\idea64.exe"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\a\\idea64.exe",
+                  "args": [
+                    "C:\\work\\repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "C:\\a\\run.cmd"
+          },
+          "out": {
+            "err": ".exe 파일만 고를 수 있습니다(.cmd·.bat 은 안전하게 실행할 수 없습니다)"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "C:\\a\\run.bat"
+          },
+          "out": {
+            "err": ".exe 파일만 고를 수 있습니다(.cmd·.bat 은 안전하게 실행할 수 없습니다)"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "C:\\a\\x.COM"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\a\\x.COM",
+                  "args": [
+                    "C:\\work\\repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "\\\\srv\\s\\a.exe"
+          },
+          "out": {
+            "err": "로컬 폴더의 실행 파일만 고를 수 있습니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "idea64.exe"
+          },
+          "out": {
+            "err": "로컬 폴더의 실행 파일만 고를 수 있습니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "C:\\a\\none.exe"
+          },
+          "out": {
+            "err": "실행 파일을 찾을 수 없습니다. 설정에서 다시 선택하세요"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 터미널 wt 가 있을 때",
+      "platform": "win32",
+      "files": [
+        "C:\\L\\Microsoft\\WindowsApps\\wt.exe"
+      ],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\L"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\L\\Microsoft\\WindowsApps\\wt.exe",
+                  "args": [
+                    "-d",
+                    "C:\\work\\repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 터미널 wt 가 없을 때",
+      "platform": "win32",
+      "files": [],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Windows\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "C:\\Windows\\System32\\cmd.exe"
+                  ],
+                  "cwd": "C:\\work\\repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 비정상 LOCALAPPDATA·SystemRoot 는 쓰지 않는다",
+      "platform": "win32",
+      "files": [
+        "C:\\a;b\\Microsoft\\WindowsApps\\wt.exe"
+      ],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\a;b",
+        "SystemRoot": "C:\\a\"b"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Windows\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "C:\\Windows\\System32\\cmd.exe"
+                  ],
+                  "cwd": "C:\\work\\repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 정상 SystemRoot",
+      "platform": "win32",
+      "files": [],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "SystemRoot": "D:\\WINNT"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "D:\\WINNT\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "D:\\WINNT\\System32\\cmd.exe"
+                  ],
+                  "cwd": "C:\\work\\repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 역슬래시·드라이브가 든 상대 경로는 거부",
+      "platform": "win32",
+      "files": [],
+      "dirs": [
+        "C:\\work\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "rel": "..\\x",
+          "out": {
+            "err": "잘못된 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "rel": "C:/x",
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "rel": "a:b",
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows 로컬: 네트워크 공유 루트는 거부",
+      "platform": "win32",
+      "files": [],
+      "dirs": [
+        "\\\\srv\\share\\repo"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "\\\\srv\\share\\repo"
+          },
+          "action": "fileManager",
+          "out": {
+            "err": "네트워크 공유 경로는 지원하지 않습니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows: name.{CLSID} 폴더",
+      "platform": "win32",
+      "files": [],
+      "dirs": [
+        "C:\\work\\repo",
+        "C:\\work\\repo\\src",
+        "C:\\work\\repo\\fs.{0AFACED1-E828-11D1-9187-B532F1E9575D}",
+        "C:\\work\\repo\\fs.{0AFACED1-E828-11D1-9187-B532F1E9575D}\\sub"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "fileManager",
+          "rel": "src",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "C:\\work\\repo\\src"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "fileManager",
+          "rel": "fs.{0AFACED1-E828-11D1-9187-B532F1E9575D}/sub",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "C:\\work\\repo\\fs.{0AFACED1-E828-11D1-9187-B532F1E9575D}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "rel": "fs.{0AFACED1-E828-11D1-9187-B532F1E9575D}/sub",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Windows\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "C:\\Windows\\System32\\cmd.exe"
+                  ],
+                  "cwd": "C:\\work\\repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\repo"
+          },
+          "action": "terminal",
+          "rel": "fs.{0AFACED1-E828-11D1-9187-B532F1E9575D}",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Windows\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "C:\\Windows\\System32\\cmd.exe"
+                  ],
+                  "cwd": "C:\\work\\repo"
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Windows: 저장소 루트 자체가 name.{CLSID}",
+      "platform": "win32",
+      "files": [],
+      "dirs": [
+        "C:\\work\\x.{0AFACED1-E828-11D1-9187-B532F1E9575D}",
+        "C:\\work\\x.{0AFACED1-E828-11D1-9187-B532F1E9575D}\\src"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\x.{0AFACED1-E828-11D1-9187-B532F1E9575D}"
+          },
+          "action": "terminal",
+          "rel": "src",
+          "out": {
+            "err": "이 저장소 경로에는 폴더 바로 가기로 해석되는 이름(.{GUID})이 있어 터미널을 열 수 없습니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "local",
+            "root": "C:\\work\\x.{0AFACED1-E828-11D1-9187-B532F1E9575D}"
+          },
+          "action": "fileManager",
+          "rel": "src",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "C:\\work\\x.{0AFACED1-E828-11D1-9187-B532F1E9575D}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "WSL: VS Code·파일 관리자·터미널",
+      "platform": "win32",
+      "files": [
+        "C:\\L\\Programs\\Microsoft VS Code\\Code.exe",
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\a.txt"
+      ],
+      "dirs": [
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\L"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "editor",
+          "rel": "a.txt",
+          "ui": {},
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\L\\Programs\\Microsoft VS Code\\Code.exe",
+                  "args": [
+                    "--remote",
+                    "wsl+Ubuntu",
+                    "/home/u/repo",
+                    "/home/u/repo/a.txt"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "fileManager",
+          "rel": "a.txt",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\a.txt"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "fileManager",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "openPath",
+                  "path": "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "terminal",
+          "rel": "a.txt",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Windows\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "C:\\Windows\\System32\\wsl.exe",
+                    "-d",
+                    "Ubuntu",
+                    "--cd",
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "terminal",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Windows\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "C:\\Windows\\System32\\wsl.exe",
+                    "-d",
+                    "Ubuntu",
+                    "--cd",
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "WSL: 이상한 배포판은 UNC 를 만들기 전에 거부",
+      "platform": "win32",
+      "files": [
+        "C:\\L\\Programs\\Microsoft VS Code\\Code.exe",
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\a.txt"
+      ],
+      "dirs": [
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo"
+      ],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\L"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "..\\evil"
+          },
+          "action": "fileManager",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "..\\evil"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "..\\evil"
+          },
+          "action": "terminal",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "a b"
+          },
+          "action": "fileManager",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "a b"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "a b"
+          },
+          "action": "terminal",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "--exec"
+          },
+          "action": "fileManager",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "--exec"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "--exec"
+          },
+          "action": "terminal",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": ""
+          },
+          "action": "fileManager",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": ""
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": ""
+          },
+          "action": "terminal",
+          "ui": {},
+          "out": {
+            "err": "잘못된 WSL 배포판 이름입니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "WSL: 링크가 저장소 밖을 가리키면 거부",
+      "platform": "win32",
+      "files": [
+        "C:\\L\\Programs\\Microsoft VS Code\\Code.exe",
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\a.txt"
+      ],
+      "dirs": [
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo",
+        "\\\\wsl.localhost\\Ubuntu\\etc"
+      ],
+      "links": {
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\evil": "\\\\wsl.localhost\\Ubuntu\\etc"
+      },
+      "env": {
+        "LOCALAPPDATA": "C:\\L"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "editor",
+          "rel": "evil",
+          "ui": {},
+          "out": {
+            "err": "저장소 밖을 가리키는 경로입니다(심볼릭 링크)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "WSL: 배포판이 꺼져 있으면 어휘 검사만으로 진행",
+      "platform": "win32",
+      "files": [
+        "C:\\L\\Programs\\Microsoft VS Code\\Code.exe"
+      ],
+      "dirs": [],
+      "links": {},
+      "env": {
+        "LOCALAPPDATA": "C:\\L"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "editor",
+          "rel": "a.txt",
+          "ui": {},
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\L\\Programs\\Microsoft VS Code\\Code.exe",
+                  "args": [
+                    "--remote",
+                    "wsl+Ubuntu",
+                    "/home/u/repo",
+                    "/home/u/repo/a.txt"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "editor",
+          "rel": "../x",
+          "ui": {},
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "fileManager",
+          "rel": "a.txt",
+          "out": {
+            "ok": {
+              "spawned": [],
+              "shown": [
+                {
+                  "type": "showItem",
+                  "path": "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\a.txt"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "terminal",
+          "rel": "a.txt",
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\Windows\\System32\\cmd.exe",
+                  "args": [
+                    "/d",
+                    "/c",
+                    "start",
+                    "",
+                    "C:\\Windows\\System32\\wsl.exe",
+                    "-d",
+                    "Ubuntu",
+                    "--cd",
+                    "/home/u/repo"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "WSL: 사용자 지정 에디터는 UNC 경로",
+      "platform": "win32",
+      "files": [
+        "C:\\ide\\idea64.exe",
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\a.txt"
+      ],
+      "dirs": [
+        "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "editor",
+          "rel": "a.txt",
+          "ui": {
+            "editor": "jetbrains",
+            "editorExePath": "C:\\ide\\idea64.exe"
+          },
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "C:\\ide\\idea64.exe",
+                  "args": [
+                    "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo",
+                    "\\\\wsl.localhost\\Ubuntu\\home\\u\\repo\\a.txt"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "WSL: 리눅스에서는 열 수 없다",
+      "platform": "linux",
+      "files": [],
+      "dirs": [
+        "/home/u/repo"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "fileManager",
+          "out": {
+            "err": "WSL 저장소는 Windows 에서만 열 수 있습니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "WSL 저장소는 Windows 에서만 열 수 있습니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "wsl",
+            "root": "/home/u/repo",
+            "distro": "Ubuntu"
+          },
+          "action": "terminal",
+          "out": {
+            "err": "WSL 저장소는 Windows 에서만 열 수 있습니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "SSH: VS Code 만. 파일 관리자·터미널·다른 에디터는 거부",
+      "platform": "linux",
+      "files": [
+        "/usr/bin/code"
+      ],
+      "dirs": [],
+      "links": {},
+      "env": {
+        "PATH": "/usr/bin"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "devbox"
+          },
+          "action": "editor",
+          "rel": "a/b.txt",
+          "ui": {},
+          "out": {
+            "ok": {
+              "spawned": [
+                {
+                  "file": "/usr/bin/code",
+                  "args": [
+                    "--remote",
+                    "ssh-remote+devbox",
+                    "/srv/repo",
+                    "/srv/repo/a/b.txt"
+                  ]
+                }
+              ],
+              "shown": []
+            }
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "devbox"
+          },
+          "action": "fileManager",
+          "out": {
+            "err": "SSH 저장소는 파일 관리자로 열 수 없습니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "devbox"
+          },
+          "action": "terminal",
+          "out": {
+            "err": "SSH 저장소는 터미널로 열 수 없습니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "devbox"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "custom",
+            "editorExePath": "/opt/ide"
+          },
+          "out": {
+            "err": "실행 파일을 찾을 수 없습니다. 설정에서 다시 선택하세요"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "devbox"
+          },
+          "action": "editor",
+          "rel": "../x",
+          "ui": {},
+          "out": {
+            "err": "저장소 밖의 경로입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "devbox"
+          },
+          "action": "editor",
+          "ui": {
+            "editor": "cursor"
+          },
+          "out": {
+            "err": "Cursor 를 찾을 수 없습니다. 설정에서 다른 에디터를 고르세요"
+          }
+        }
+      ]
+    },
+    {
+      "name": "SSH: 이상한 호스트",
+      "platform": "linux",
+      "files": [
+        "/usr/bin/code"
+      ],
+      "dirs": [],
+      "links": {},
+      "env": {
+        "PATH": "/usr/bin"
+      },
+      "steps": [
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "-oProxyCommand=x"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 SSH 호스트입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "h;rm"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 SSH 호스트입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": "a b"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 SSH 호스트입니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "/srv/repo",
+            "host": ""
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "잘못된 SSH 호스트입니다"
+          }
+        }
+      ]
+    },
+    {
+      "name": "루트가 절대 경로가 아니다",
+      "platform": "linux",
+      "files": [],
+      "dirs": [
+        "repo"
+      ],
+      "links": {},
+      "env": {},
+      "steps": [
+        {
+          "target": {
+            "kind": "local",
+            "root": "repo"
+          },
+          "action": "fileManager",
+          "out": {
+            "err": "저장소 경로가 절대 경로가 아닙니다"
+          }
+        },
+        {
+          "target": {
+            "kind": "ssh",
+            "root": "~/repo",
+            "host": "h"
+          },
+          "action": "editor",
+          "ui": {},
+          "out": {
+            "err": "저장소 경로가 절대 경로가 아닙니다"
+          }
+        }
+      ]
+    }
+  ],
+  "find": [
+    {
+      "name": "Windows 알려진 설치 위치",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "C:\\L",
+        "ProgramFiles": "C:\\PF"
+      },
+      "files": [
+        "C:\\PF\\Microsoft VS Code\\Code.exe",
+        "C:\\L\\Programs\\cursor\\Cursor.exe"
+      ],
+      "out": {
+        "vscode": "C:\\PF\\Microsoft VS Code\\Code.exe",
+        "cursor": "C:\\L\\Programs\\cursor\\Cursor.exe"
+      }
+    },
+    {
+      "name": "Windows 없음",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "C:\\L",
+        "ProgramFiles": "C:\\PF"
+      },
+      "out": {
+        "vscode": null,
+        "cursor": null
+      }
+    },
+    {
+      "name": "Windows 환경변수 없음",
+      "platform": "win32",
+      "files": [
+        "C:\\PF\\Microsoft VS Code\\Code.exe"
+      ],
+      "out": {
+        "vscode": null,
+        "cursor": null
+      }
+    },
+    {
+      "name": "Windows LOCALAPPDATA 우선",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "C:\\L",
+        "ProgramFiles": "C:\\PF"
+      },
+      "files": [
+        "C:\\PF\\Microsoft VS Code\\Code.exe",
+        "C:\\L\\Programs\\Microsoft VS Code\\Code.exe"
+      ],
+      "out": {
+        "vscode": "C:\\L\\Programs\\Microsoft VS Code\\Code.exe",
+        "cursor": null
+      }
+    },
+    {
+      "name": "상대 PATH 항목은 쓰지 않는다",
+      "platform": "linux",
+      "env": {
+        "PATH": ".:bin:/usr/bin"
+      },
+      "files": [
+        "bin/code",
+        "./code",
+        "/usr/bin/code"
+      ],
+      "out": {
+        "vscode": "/usr/bin/code",
+        "cursor": null
+      }
+    },
+    {
+      "name": "PATH 에 없으면 고정 위치",
+      "platform": "linux",
+      "env": {
+        "PATH": "/opt/x"
+      },
+      "files": [
+        "/usr/local/bin/code",
+        "/snap/bin/cursor"
+      ],
+      "out": {
+        "vscode": "/usr/local/bin/code",
+        "cursor": "/snap/bin/cursor"
+      }
+    },
+    {
+      "name": "PATH 가 없다",
+      "platform": "linux",
+      "files": [
+        "/usr/bin/cursor"
+      ],
+      "out": {
+        "vscode": null,
+        "cursor": "/usr/bin/cursor"
+      }
+    },
+    {
+      "name": "리눅스 없음",
+      "platform": "linux",
+      "env": {
+        "PATH": "/usr/bin"
+      },
+      "out": {
+        "vscode": null,
+        "cursor": null
+      }
+    },
+    {
+      "name": "macOS",
+      "platform": "darwin",
+      "files": [
+        "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
+      ],
+      "out": {
+        "vscode": "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        "cursor": "/Applications/Cursor.app/Contents/Resources/app/bin/cursor"
+      }
+    },
+    {
+      "name": "macOS 없음",
+      "platform": "darwin",
+      "out": {
+        "vscode": null,
+        "cursor": null
+      }
+    }
+  ],
+  "chosen": [
+    {
+      "name": "리눅스 절대 경로",
+      "p": "/opt/x",
+      "platform": "linux",
+      "out": {
+        "ok": "/opt/x"
+      }
+    },
+    {
+      "name": "상대 경로",
+      "p": "x",
+      "platform": "linux",
+      "out": {
+        "err": "로컬 폴더의 실행 파일만 고를 수 있습니다"
+      }
+    },
+    {
+      "name": ".cmd",
+      "p": "C:\\a\\run.cmd",
+      "platform": "win32",
+      "out": {
+        "err": ".exe 파일만 고를 수 있습니다(.cmd·.bat 은 안전하게 실행할 수 없습니다)"
+      }
+    },
+    {
+      "name": ".bat",
+      "p": "C:\\a\\run.bat",
+      "platform": "win32",
+      "out": {
+        "err": ".exe 파일만 고를 수 있습니다(.cmd·.bat 은 안전하게 실행할 수 없습니다)"
+      }
+    },
+    {
+      "name": "UNC",
+      "p": "\\\\srv\\s\\a.exe",
+      "platform": "win32",
+      "out": {
+        "err": "로컬 폴더의 실행 파일만 고를 수 있습니다"
+      }
+    },
+    {
+      "name": "슬래시 UNC",
+      "p": "//srv/s/a.exe",
+      "platform": "win32",
+      "out": {
+        "err": "로컬 폴더의 실행 파일만 고를 수 있습니다"
+      }
+    },
+    {
+      "name": ".exe",
+      "p": "C:\\a\\idea64.exe",
+      "platform": "win32",
+      "out": {
+        "ok": "C:\\a\\idea64.exe"
+      }
+    },
+    {
+      "name": ".EXE 대문자",
+      "p": "C:\\a\\Idea64.EXE",
+      "platform": "win32",
+      "out": {
+        "ok": "C:\\a\\Idea64.EXE"
+      }
+    },
+    {
+      "name": ".com",
+      "p": "C:\\a\\x.com",
+      "platform": "win32",
+      "out": {
+        "ok": "C:\\a\\x.com"
+      }
+    },
+    {
+      "name": ".exe 뒤 공백",
+      "p": "C:\\a\\x.exe ",
+      "platform": "win32",
+      "out": {
+        "err": ".exe 파일만 고를 수 있습니다(.cmd·.bat 은 안전하게 실행할 수 없습니다)"
+      }
+    },
+    {
+      "name": "드라이브 없는 절대",
+      "p": "\\a\\x.exe",
+      "platform": "win32",
+      "out": {
+        "ok": "\\a\\x.exe"
+      }
+    },
+    {
+      "name": "드라이브 상대",
+      "p": "C:a\\x.exe",
+      "platform": "win32",
+      "out": {
+        "err": "로컬 폴더의 실행 파일만 고를 수 있습니다"
+      }
+    },
+    {
+      "name": "NUL",
+      "p": "/a\u0000b",
+      "platform": "linux",
+      "out": {
+        "err": "잘못된 실행 파일 경로입니다"
+      }
+    },
+    {
+      "name": "빈 문자열",
+      "p": "",
+      "platform": "linux",
+      "out": {
+        "err": "잘못된 실행 파일 경로입니다"
+      }
+    },
+    {
+      "name": "4096 단위(통과)",
+      "p": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "platform": "linux",
+      "out": {
+        "ok": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "4097 단위(거부)",
+      "p": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "platform": "linux",
+      "out": {
+        "err": "잘못된 실행 파일 경로입니다"
+      }
+    },
+    {
+      "name": "존재 확인 통과",
+      "p": "/opt/x",
+      "platform": "linux",
+      "files": [
+        "/opt/x"
+      ],
+      "out": {
+        "ok": "/opt/x"
+      }
+    },
+    {
+      "name": "존재 확인 실패",
+      "p": "/opt/x",
+      "platform": "linux",
+      "files": [],
+      "out": {
+        "err": "실행 파일을 찾을 수 없습니다. 설정에서 다시 선택하세요"
+      }
+    },
+    {
+      "name": "존재 확인(폴더는 실패)",
+      "p": "/opt",
+      "platform": "linux",
+      "files": [
+        "/opt/x"
+      ],
+      "out": {
+        "err": "실행 파일을 찾을 수 없습니다. 설정에서 다시 선택하세요"
+      }
+    }
+  ],
+  "tools": [
+    {
+      "name": "SystemRoot 정상",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "D:\\WINNT"
+      },
+      "out": {
+        "systemRoot": "D:\\WINNT",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": ""
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"Windows\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "Windows"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"\\\\\\\\evil\\\\share\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "\\\\evil\\share"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"C:\\\\a;b\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:\\a;b"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"C:\\\\a\\\"b\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:\\a\"b"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"..\\\\x\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "..\\x"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"/etc\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "/etc"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"C:\\\\a?b\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:\\a?b"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"C:\\\\a*b\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:\\a*b"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"C:\\\\a<b\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:\\a<b"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"C:\\\\a|b\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:\\a|b"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 이상 \"C:/x\"",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:/x"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 없음",
+      "platform": "win32",
+      "env": {},
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "SystemRoot 에 & 는 통과(TS 와 같다)",
+      "platform": "win32",
+      "env": {
+        "SystemRoot": "C:\\Win&dows"
+      },
+      "out": {
+        "systemRoot": "C:\\Win&dows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "wt 없음",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "C:\\Users\\u\\AppData\\Local"
+      },
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "wt 있음(lstat)",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "C:\\L"
+      },
+      "lstatAlways": true,
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": "C:\\L\\Microsoft\\WindowsApps\\wt.exe",
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "LOCALAPPDATA 이상 relative",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "relative"
+      },
+      "lstatAlways": true,
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "LOCALAPPDATA 이상 \\\\evil\\share",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "\\\\evil\\share"
+      },
+      "lstatAlways": true,
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "LOCALAPPDATA 이상 C:\\a;b",
+      "platform": "win32",
+      "env": {
+        "LOCALAPPDATA": "C:\\a;b"
+      },
+      "lstatAlways": true,
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "LOCALAPPDATA 없음",
+      "platform": "win32",
+      "lstatAlways": true,
+      "out": {
+        "systemRoot": "C:\\Windows",
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "macOS 시스템 위치 우선",
+      "platform": "darwin",
+      "dirs": [
+        "/System/Applications/Utilities/Terminal.app",
+        "/Applications/Utilities/Terminal.app"
+      ],
+      "out": {
+        "systemRoot": null,
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": "/System/Applications/Utilities/Terminal.app"
+      }
+    },
+    {
+      "name": "macOS /Applications/Utilities",
+      "platform": "darwin",
+      "dirs": [
+        "/Applications/Utilities/Terminal.app"
+      ],
+      "out": {
+        "systemRoot": null,
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": "/Applications/Utilities/Terminal.app"
+      }
+    },
+    {
+      "name": "macOS 없음",
+      "platform": "darwin",
+      "dirs": [],
+      "out": {
+        "systemRoot": null,
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "macOS 파일은 쓰지 않는다",
+      "platform": "darwin",
+      "files": [
+        "/System/Applications/Utilities/Terminal.app"
+      ],
+      "out": {
+        "systemRoot": null,
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "리눅스 PATH 의 절대 항목",
+      "platform": "linux",
+      "env": {
+        "PATH": ".:rel:/opt/bin"
+      },
+      "files": [
+        "/opt/bin/x-terminal-emulator",
+        "rel/x-terminal-emulator"
+      ],
+      "out": {
+        "systemRoot": null,
+        "wt": null,
+        "linuxTerminal": "/opt/bin/x-terminal-emulator",
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "리눅스 상대 PATH 만",
+      "platform": "linux",
+      "env": {
+        "PATH": ".:rel"
+      },
+      "files": [],
+      "out": {
+        "systemRoot": null,
+        "wt": null,
+        "linuxTerminal": null,
+        "macTerminal": null
+      }
+    },
+    {
+      "name": "리눅스 /usr/bin 고정",
+      "platform": "linux",
+      "env": {
+        "PATH": "/opt/x"
+      },
+      "files": [
+        "/usr/bin/x-terminal-emulator"
+      ],
+      "out": {
+        "systemRoot": null,
+        "wt": null,
+        "linuxTerminal": "/usr/bin/x-terminal-emulator",
+        "macTerminal": null
+      }
+    }
+  ],
+  "resolve": [
+    {
+      "name": "JetBrains 는 파일을 먼저 고른다",
+      "editor": "jetbrains",
+      "ui": {},
+      "platform": "linux",
+      "files": [
+        "/opt/idea/bin/idea.sh"
+      ],
+      "out": {
+        "err": "에디터 실행 파일을 먼저 고르세요(설정)"
+      }
+    },
+    {
+      "name": "사용자 지정 파일",
+      "editor": "custom",
+      "ui": {
+        "editorExePath": "/opt/idea/bin/idea.sh"
+      },
+      "platform": "linux",
+      "files": [
+        "/opt/idea/bin/idea.sh"
+      ],
+      "out": {
+        "ok": "/opt/idea/bin/idea.sh"
+      }
+    },
+    {
+      "name": "사용자 지정 파일이 없다",
+      "editor": "custom",
+      "ui": {
+        "editorExePath": "/opt/gone"
+      },
+      "platform": "linux",
+      "files": [
+        "/opt/idea/bin/idea.sh"
+      ],
+      "out": {
+        "err": "실행 파일을 찾을 수 없습니다. 설정에서 다시 선택하세요"
+      }
+    },
+    {
+      "name": "사용자 지정 빈 경로",
+      "editor": "custom",
+      "ui": {
+        "editorExePath": ""
+      },
+      "platform": "linux",
+      "files": [],
+      "out": {
+        "err": "에디터 실행 파일을 먼저 고르세요(설정)"
+      }
+    }
+  ]
+}

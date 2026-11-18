@@ -1678,7 +1678,7 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 |---|---|---|---|---|
 | 1 | ConfigStore 코어(`config/`): 모델·로드·정화·원자적 저장·검증기·변경 연산 + GitHub 링크 순수 함수 + TS↔Rust 설정 파일 바이트 골든 | 없음 | A | **완료** |
 | 2 | GitHub 캐시 실행 기반: `GithubEnv` 닫힌 타입·`GitExecutor::Github`·init·정확 일치 검사·HEAD 맞추기·fetch 의 github 모드·사용자 네트워크 설정 읽기 | 없음 | B(1 뒤) | |
-| 3 | external 순수 로직·실행기(plan·opener·link, spawn 예외 지점 하나, 파일 관리자) | 없음 | A | |
+| 3 | external 순수 로직·실행기(plan·opener·link, spawn 예외 지점 하나, 파일 관리자) | 없음 | A | **완료** |
 | 4a / 4b | 4a: WSL 목록(레지스트리 관문)·`resolve_env`·로컬 폴더 찾기·`SshPool` 임시 잡기. 4b: SFTP 폴더 목록(D4) | 없음 | A(4b 는 D4 뒤) | **4a 완료**(4b 는 D4 뒤) |
 | 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | |
 | 6 | github kind 의 git **조회**를 Rust 로(미러에 `github` 링크·모든 git 채널의 github 분기·`repos:remove` 가로채기). 감시는 PR 7 | 있음 | 직렬(6a 7b·8, PR 2 뒤) | |
@@ -1688,6 +1688,7 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 | 10 | 사이드카 정리: Rust 소유 실행에서 `update:*` 밖 채널·메시지 제거(강제 시험) | 있음 | 직렬(9 뒤) | |
 
 모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 이식 대응표는 새 파일 `tests/golden/repos/test-map.json`(6b 전용)이고 PR 10 에서 `N/A: PR n` 이 0개여야 한다.
+외부 열기(PR 3)의 대응표는 별도 파일 `tests/golden/external/test-map.json` 이다(PR 3 의 TS `it` 71개 전부를 Rust 시험에 대응시켜 `N/A` 가 없다). PR 10 의 `N/A: PR n` 검사는 repos 표만 본다.
 대상 TS 테스트: configStore(8)·windowState(5)·githubRemote(72)는 PR 1 이 만들었고, 뒤 PR 이 externalOpener·externalPlan·externalReveal·externalClsid·sshRemoteDir·wslExecutor·wslPaths·sidecar*.test.ts 를 더한다.
 기존 표의 `N/A: 6b`(6a 표 26·193-206행, net 표 198-199행의 "ConfigStore 는 사이드카에 남아")는 해당 PR 이 바꾼다.
 
@@ -1738,6 +1739,32 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 **다음 PR 에 넘긴 것**: 앱 연결 전부(`config:*`·미러·fetchPrefs 의 원천을 바꾸는 것은 PR 9, 그동안 사이드카가 파일의 유일한 작성자), Electron 설정 가져오기(D1 결정 뒤), `set_window_state`(Tauri 는 window-state 플러그인이라 쓰지 않는다).
 
 **남은 위험**: JSON 직렬화 바이트 패리티가 실패 모드인데 골든 범위만큼만 보장한다(숫자 표기는 `js_number_string` 이 맡는다 — 골든의 숫자는 정수·소수 몇 개뿐). 백신 잠금 rename 의 오류 코드는 취약 가정이다.
+
+### PR 3 — 외부 열기 계획과 실행기(`src-tauri/src/external/`, 앱에 연결하지 않는다 — 연결은 PR 9)
+
+`external:open` 의 판정과 실행을 Rust 로 옮겼다(새 크레이트 없음, `Cargo.toml` 변경 없음). `lib.rs` 에는 `pub mod external;` 한 줄뿐이고 **Electron·사이드카 동작은 그대로**다(소스 검사가 `external::` 을 쓰는 곳이 없음을 강제한다).
+- **`plan.rs`**(순수, `plan.ts` 1:1): `rel_segments`·`absolute_target`·`check_real_containment`·`assert_safe_name`(배포판 `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`·호스트 `…{0,199}` 에 `@:` 허용)·`build_editor_launch`·`build_terminal_launch`·`has_dot_component`·`clsid_component`·`build_reveal_plan`. 정규식 크레이트가 없어 손으로 풀었고(모두 ASCII 부류), 길이 상한(4096)은 JS `length` 와 같은 **UTF-16 단위**다. 플랫폼(`Platform::{Win32, Darwin, Linux}`)은 cfg 가 아니라 **인자**라 리눅스·맥 사례도 Windows 에서 시험한다.
+- **`paths.rs`**: `path.posix` 전부와 `path.win32.relative`(Node `lib/path.js` 이식 — `git::exec::ssh::win32_path` 에 없던 것). 그 파일은 건드리지 않았다. 절대 경로만 받고, 상대 경로는 `None`(= 저장소 밖으로 취급)이다. Node 는 cwd 를 쓰지만 cwd 에 기대면 판정이 저장소가 정한 경로에 흔들린다.
+- **`opener.rs`**: `ExternalOpener`·`find_editor_exe`·`check_chosen_exe`·`resolve_editor_exe`·`terminal_tools`. 파일 시스템·환경변수·프로세스 실행·파일 관리자는 모두 **`OpenerDeps` 트레이트로 주입**한다. 실행기는 **판단이 끝난 `LaunchRequest`(file·args·cwd·지울 환경변수)** 를 받아 그대로 실행할 뿐이라 시험의 가짜는 argv 만 기록한다.
+- **`launch.rs`**: `SystemDeps`(운영 구현). **에디터·터미널 프로세스를 띄우고 opener 플러그인(`open_path`·`reveal_item_in_dir`)을 부르는 유일한 곳**이다. 분리 프로세스(Windows `DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP`, Node `detached` 와 같다)·셸 없음(`.args()` 만, `raw_arg` 금지)·stdio 없음·`ELECTRON_RUN_AS_NODE` 제거. `Command::new` 는 한 번뿐이고 `#[allow(clippy::disallowed_methods)]` 와 이유를 단다. 소스 검사(`tests/external.rs`)가 `src/external/` 의 다른 파일에서 `Command::new`·`std::process`·`tauri_plugin_opener`·`raw_arg` 가 쓰이지 않음, plan·opener·paths·link 가 `std::fs`·`std::env` 를 직접 읽지 않음을 강제한다.
+- **`link.rs`**: `allowed_link_url`(https·사용자 정보 없음·4096 UTF-16 단위). 해석은 `net::url_rules::parse_url`(TS 보다 IDN 이 엄격 — 그 문서의 알려진 차이). 연결(`code:openLink`)은 PR 5.
+- **realpath 정규화**: Windows 의 `canonicalize` 는 `\\?\C:\x`·`\\?\UNC\…` 접두를 붙인다. `normalize_canonical`(순수)이 이를 벗기고, **벗긴 결과가 WSL 공유가 아닌 UNC 이거나 `\\?\`·`\\.\` 의 다른 모양(볼륨 GUID·장치 경로)이면 거부**한다(= 없는 경로). 임의의 SMB 공유가 열 대상이 되거나 NTLM 이 새지 않게 한다. 운영 `realpath` 가 이것을 거친다. **다만 이것은 결과를 거를 뿐이다** — `canonicalize` 가 링크를 따라가는 순간 SMB/WebDAV 인증(NTLM)이 이미 나간다(저장소 안의 `docs/x -> //attacker/share/x`·`\\host@SSL\DavWWWRoot\…` 를 "열기" 하면 해시가 샌다). 그래서 Windows 의 운영 `realpath` 는 `canonicalize` **전에** `launch.rs::links_stay_local` 로 경로의 구성 요소마다 `symlink_metadata` 로 링크(심볼릭 링크·정션)인지 보고 `read_link` 대상을 순수 판정 `opener.rs::is_remote_link_target`(`\\host\…`·`//host/…`·`\\?\UNC\…`·정션의 `\??\UNC\…`·`\\.\`·볼륨 GUID 는 원격, WSL 공유는 허용)에 건다. 원격이면 따라가지 않고 없는 경로(None)로 취급하며, 상대·로컬 대상은 이어서 확인한다(링크 사슬, 상한 16 — 순환 포함 넘으면 거부). 읽을 수 없는 링크도 거부한다. 시험: 판정 함수 표(`opener.rs`)와 로컬 대상 링크 사슬·순환·상한(`tests/external.rs`, 링크를 만들 권한이 없으면 건너뜀 — 원격 대상 링크는 실제로 만들지 않았다). **TS 판에도 같은 문제가 있다(별도 fix 예정).**
+- **WSL**: 배포판 이름은 UNC 를 만들기 전에 `assert_safe_name` 으로 검증한다. `wsl.exe` 는 `%SystemRoot%\System32\wsl.exe` 절대 경로이고 `-d <distro> --cd <path>` 인자 배열로만 넘긴다(`start ""` 의 빈 창 제목 인자 유지 — 시험이 단언한다). 배포판이 꺼져 UNC 를 풀 수 없으면 어휘 검사만 하되 폴더로 취급하지 않는다(openPath 안 함).
+
+**골든·시험**: TS `tests/fixtures/externalCases.ts` → `tests/goldenExternal.test.ts`(실제 TS plan·opener 로 생성) → `tests/golden/external/{plan,opener,link}.json` → `src-tauri/tests/external.rs`(`--test external`, `tauri.yml` 목록에 추가). plan 은 순수 함수 8개의 표(상대 경로·절대 경로·실경로 포함·에디터·터미널·점 구성 요소·CLSID·파일 관리자 계획), opener 는 가짜 fs·env 로 도는 시나리오(리눅스·macOS·Windows·WSL·SSH, 단계마다 오류 문구와 실행·표시 기록)와 에디터 탐색·선택 파일 검사·터미널 도구, link 는 주소 사례다. 오류 문구까지 TS 와 같아야 통과한다. TS `it` 71개(externalPlan 26·externalOpener 26·externalReveal 14·externalClsid 5)는 `tests/golden/external/test-map.json` 이 Rust 시험에 대응시키고 vitest 가 누락을 강제한다. 단위 시험은 `paths.rs`(Node 값)·`plan.rs`(이름 경계·CLSID·cmd 메타문자)·`opener.rs`(`\\?\` 접두 사례)·`link.rs`. **시험은 어떤 프로그램도 띄우지 않는다**(`SystemDeps` 는 임시 폴더에 대한 `realpath`·`stat` 만 시험한다).
+
+**TS 와 다른 점**
+- **추가 방어**: `cmd /c start …` 로 넘기는 프로그램 경로(`%SystemRoot%` 에서 온다)에 `& | < > ^ % "`·제어 문자가 있으면 거부한다. TS 의 `WIN_DRIVE_DIR_RE` 는 `& ^ %` 를 거르지 않아 cmd 가 명령줄에서 해석할 수 있었다. wt 를 쓰면 cmd 를 거치지 않으므로 영향이 없다. 정상 경로(`C:\Windows`)는 같은 결과다(`plan.rs` 시험).
+- `rel` 은 `serde_json::Value` 다(채널 입력): 없음·`null` 은 루트, 문자열이 아닌 값은 오류. TS 는 `undefined` 만 없음이고 `null` 은 오류인데, 채널 처리기가 `typeof path !== 'string'` 을 먼저 거르므로 같은 입력은 PR 9 의 처리기가 거른다.
+- `win32.relative` 의 소문자 비교는 글자 하나씩이다(JS `toLowerCase` 는 길이가 바뀌는 글자가 있다). 입력이 절대 경로가 아니면 `None`(Node 는 cwd).
+- `inspect` 의 상위 탐색 루프는 더 올라갈 곳이 없으면(`dirname` 이 같은 값) 멈춘다(TS 는 이론상 끝나지 않을 수 있다).
+- **매핑된 네트워크 드라이브(`Z:\repo`)** 로 등록된 저장소: Node `realpathSync` 는 드라이브 문자를 유지하지만 Rust `canonicalize` 는 `\\?\UNC\서버\공유\…` 를 돌려줄 가능성이 높고, 그러면 `normalize_canonical` 이 WSL 이 아닌 UNC 로 보아 거부한다(TS 에서 열리던 저장소가 "저장소 폴더를 찾을 수 없습니다"가 된다). 계획 §5 의 지시(WSL 이 아닌 UNC 는 거부)를 따른 것이고 **실제 PC 에서 확인하지 못했다**(네트워크 접근 금지). 사용자 결정이 필요하면 PR 9 전에 정한다. **매핑된 네트워크 드라이브 저장소는 열리지 않음 — PR 9 에서 정책 결정.**
+- 파일 관리자 호출 실패(`show_item`)도 오류로 올라온다(`파일 관리자를 열지 못했습니다: …`). TS `showItemInFolder` 는 void 라 조용히 넘어갔다.
+- 동기 API 다(`open` 은 블로킹 — 호출자가 `spawn_blocking`). TS 의 `spawn`/`error` 이벤트 대기는 없다: Rust `spawn()` 의 오류가 곧 실행 실패다(`실행하지 못했습니다: …`).
+
+**PR 9 가 이어받을 것**: `external:open` 처리(동작 허용 목록·저장소 id → 설정에서 루트·환경 조회·github 소스 거부·`SystemDeps` 연결), `external:pickEditorExe`(`dialogs::pick_path` + `check_chosen_exe` + 설정 저장), `Target`·`EditorPrefs` 를 설정에서 채우기. 파일 관리자는 `OpenerDeps::open_path`·`show_item`(opener 플러그인) 구현이 이미 있다 — 지금 Tauri 판은 미지원이다(`electronShim`).
+
+**남은 위험·사람 확인**: 실제 VS Code·Windows Terminal·탐색기·`wsl.exe` 를 띄워 보지 않았다(시험 금지). 확인할 것은 (1) `cmd /d /c start "" …` 가 새 콘솔을 띄우고 창 제목이 비지 않는지(Rust 인용이 Node/libuv 와 같다고 본다 — 취약), (2) WSL 저장소의 `reveal_item_in_dir`·`open_path`(플러그인 2.7.3 은 `dunce::simplified` 로 접두를 단순화하고 존재만 확인하므로 `\\wsl.localhost\…` 는 그대로 `SHOpenFolderAndSelectItems` 로 간다고 소스에서 읽었다 — 실제 동작은 미확인), (3) `wt.exe` 앱 실행 별칭이 `symlink_metadata` 로 보이는지(개발 PC 에서 `cargo test --test external -- --ignored` 로 확인했다 — 보인다. 메타데이터만 읽고 파일을 열지 않는다), (4) 분리 플래그로 띄운 에디터가 앱 종료 뒤에도 사는지. macOS·Linux 분기는 순수 함수와 시나리오(골든)로만 확인했고 실행은 Windows 에서도 하지 않았다(6c).
 
 ### PR 4a — WSL 목록·경로 해석·폴더 찾기·저장 전 SSH 연결(앱에 연결하지 않는다)
 
