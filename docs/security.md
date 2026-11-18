@@ -97,6 +97,8 @@ GitHub 토큰은 renderer 로 가지 않고, 사이드카에 남는 원격 전�
 ssh CLI 로 직접 수락하라고 안내한다. ProxyJump 는 홉마다 검증). `ProxyCommand`·`ProxyCommand` 가 걸리는 `Match` 는 설정을 읽는 단계에서 거부한다. 연결 뒤 원격 셸이 POSIX 인지 확인하는 명령(`echo 'an''tler'`)이 통과해야 사용자 값이 든 명령을 보낸다(Windows `cmd` 서버는 거부).
 인증은 ssh-agent 와 암호 없는 키 파일뿐이다(password·keyboard-interactive·known_hosts 쓰기·포트 포워딩 API 는 소스 검사가 허용된 파일 밖의 사용을 막는다). **서버가 먼저 여는 채널은 종류를 가리지 않고 모두 거부한다**(agent·X11·forwarded-tcpip·direct 등 7종).
 원격으로 가는 명령은 `build_remote_command`(모든 인자를 작은따옴표로 인용, 환경은 `GIT_ENV` 와 닫힌 `FetchEnv` 뿐) 하나로만 만든다 — 임의 명령을 보낼 길이 없다.
+**SFTP 폴더 목록**(저장소 추가 창의 원격 폴더 탐색, `ssh/sftp.rs`): 채널의 `sftp` 하위 시스템으로 `realpath`·`opendir`·`readdir`·`stat`·`close` 만 보내 읽기만 하고, **셸 명령을 보내지 않는다**. 하위 시스템 요청은 `connection.rs` 의 한 곳에서만 하고(clippy `disallowed-methods` + 소스 검사),
+쓰기 계열 SFTP 요청은 부르지 않는다. 서버가 주는 값은 믿지 않는다 — 패킷 256KiB·읽는 항목 20,000개·이름 1024바이트 상한, `/`·NUL 이 든 이름은 건너뛰고, `realpath` 결과는 절대 경로·NUL 없음·4096 이하여야 한다. 시간 제한(전체 30초)이 있고 읽지 않는 채널로 세션이 멈추지 않게 채널은 항상 비운다. 서버가 여는 채널 거부는 그대로다.
 **ssh 저장소의 fetch**: 위 fetch 규칙(refspec 고정·`--refmap=`·허용 목록·훅 차단·원격 계정의 사용자 `core.sshCommand` 또는 `BatchMode` 기본)이 원격에서도 그대로이고, 훅 경로는 `/dev/null` 이다. 이 PC 의 `GIT_SSH_COMMAND`·`GIT_SSH` 는 원격으로 가지 않는다.
 SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패)는 문구가 아니라 오류 종류로 network(백오프)로 분류한다 — 호스트 키 불일치가 "인증 일시 정지"로 오분류되지 않는다. 원격 git 이 낸 인증 오류는 문구로 auth 다.
 호스트가 미러에서 빠지면 연결과 fetch 서비스의 실행기를 함께 닫는다. 연결 확인 창은 저장소를 **추가할 때만** 뜨고(사이드카 몫), fetch 중에는 원격 설정의 위험 항목에 대한 확인 창(local·WSL 과 같은 것)만 뜬다. 자세한 것은 docs/tauri.md "SSH(Phase 5)".

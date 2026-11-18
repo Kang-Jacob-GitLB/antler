@@ -47,6 +47,8 @@ russh = { version = "0.65.2", default-features = false, features = ["ring", "rsa
 # default-features 를 끄면 macOS 백엔드(`macos_fsevent`)가 빠진다. macOS 는 `macos_fsevent`(기본)나 `macos_kqueue` 중 하나가 있어야 RecommendedWatcher 가 정해진다(notify lib.rs 의 cfg) —
 # 지금은 macOS 빌드를 하지 않으며(Phase 6c) 그때 `macos_fsevent` 를 켠다
 notify = { version = "8.2.2", default-features = false }
+# SFTP 폴더 목록(src/git/exec/ssh/sftp.rs, Phase 6b PR 4b, 결정 D4). 클라이언트는 AsyncRead+AsyncWrite 스트림만 받는다(russh 에 의존하지 않는다 — russh 0.65.2 채널과 맞물리는지는 tests/ssh.rs 의 시험이 확인한다)
+russh-sftp = "3.0.1"
 
 # 설정 저장소(src/config)의 저장소 id — TS 의 `randomUUID()` 와 같은 v4. Cargo.lock 에 전이 의존으로 이미 있는 판(1.29)이고 난수원(getrandom)도 이미 있다
 uuid = { version = "1", default-features = false, features = ["v4"] }

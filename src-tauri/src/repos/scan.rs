@@ -39,16 +39,16 @@ pub struct RepoScanResult {
 }
 
 /// TS `RemoteDirListing` 의 하위 폴더 항목. `is_repo` 가 `None` 이면 확인하지 않은 것이다
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDirEntry {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_repo: Option<bool>,
 }
 
-/// TS `RemoteDirListing`(SFTP 폴더 목록 — PR 4b 가 만든다)
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// TS `RemoteDirListing`(SFTP 폴더 목록 — `git/exec/ssh/sftp.rs` 가 만든다)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDirListing {
     pub path: String,
@@ -239,7 +239,7 @@ fn sort_keys(s: &str) -> Vec<SortKey> {
 }
 
 /// `a.localeCompare(b)` 의 근사(모듈 문서)
-fn locale_compare(a: &str, b: &str) -> Ordering {
+pub(crate) fn locale_compare(a: &str, b: &str) -> Ordering {
     sort_keys(a).cmp(&sort_keys(b)).then_with(|| {
         // 1차가 같을 때만: 처음 다른 대소문자는 소문자가 앞
         for (x, y) in a.chars().zip(b.chars()) {

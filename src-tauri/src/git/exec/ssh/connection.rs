@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use russh::client::{self, ChannelOpenHandle, Handle, Msg, Session};
 use russh::keys::{Algorithm, EcdsaCurve, HashAlg, PublicKeyOrCertificate};
-use russh::{Channel, ChannelMsg, ChannelOpenFailure, Preferred, Sig};
+use russh::{Channel, ChannelMsg, ChannelOpenFailure, ChannelReadHalf, ChannelWriteHalf, Preferred, Sig};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -25,10 +26,12 @@ use tokio_util::sync::CancellationToken;
 use super::auth::{self, AgentSetting};
 use super::config::{load_ssh_config, resolve_host, Ctx, RealFs, ResolvedHost};
 use super::known_hosts::{known_host_key_algorithms, read_known_hosts, verify_host_key_text};
+use super::sftp::{self, SftpError};
 use super::stream::{End, Event, SshStream, EVENT_COST, STREAM_AHEAD_LIMIT};
 use crate::git::exec::common::{to_strings, RunOpts, RunResult, DEFAULT_MAX_BUFFER, MAX_STDERR};
 use crate::git::exec::error::ExecError;
 use crate::git::parsers::js_trim;
+use crate::repos::scan::RemoteDirListing;
 
 /// 원격 로그인 셸 확인용 고정 명령. 원격 명령은 POSIX 작은따옴표로 인용하는데, 로그인 셸이 cmd.exe·PowerShell 이면 작은따옴표가 인용이 아니라서
 /// 경로 안의 `&`·`|` 등이 명령으로 해석될 수 있다. 사용자 값이 든 명령을 보내기 전에 연결마다 한 번 확인한다:
@@ -43,6 +46,9 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
 const KILL_TIMEOUT: Duration = Duration::from_secs(2);
 /// KILL 뒤 서버가 채널을 닫기를 기다리는 시간(그 뒤에야 슬롯을 돌려준다)
 const CLOSE_WAIT: Duration = Duration::from_secs(3);
+/// SFTP 다리(채널 ↔ 클라이언트 스트림)의 한 번 복사 크기와 스트림 완충 크기
+const SFTP_CHUNK: usize = 32 * 1024;
+const SFTP_PIPE: usize = 64 * 1024;
 /// 연결 실패를 이 시간 동안 다음 호출과 공유한다(잠금을 얻은 직후 이보다 최근 실패가 있으면 다시 맺지 않고 그 오류로 돌려준다)
 const FAILURE_SHARE: Duration = Duration::from_secs(5);
 /// 한 연결에서 sshd `MaxSessions`(기본 10)보다 안쪽으로 유지할 동시 채널 수
@@ -59,11 +65,19 @@ pub struct Timeouts {
     pub idle: Duration,
     /// 원격 셸 확인 제한
     pub probe: Duration,
+    /// 원격 폴더 목록(SFTP) 한 번의 전체 제한(SFTP 하위 시스템이 시작된 뒤부터 결과가 날 때까지 — 채널 열기·하위 시스템 응답은 15초 제한이 따로 있다)
+    pub sftp: Duration,
 }
 
 impl Default for Timeouts {
     fn default() -> Self {
-        Timeouts { ready: Duration::from_secs(15), keepalive: Duration::from_secs(15), idle: Duration::from_secs(5 * 60), probe: Duration::from_secs(10) }
+        Timeouts {
+            ready: Duration::from_secs(15),
+            keepalive: Duration::from_secs(15),
+            idle: Duration::from_secs(5 * 60),
+            probe: Duration::from_secs(10),
+            sftp: Duration::from_secs(30),
+        }
     }
 }
 
@@ -632,32 +646,7 @@ async fn drain_until_closed(ch: &mut Channel<Msg>) {
 /// `stop`·`user` 가 취소되면 시작을 멈추고 `Aborted` 를 돌려준다 — 서버가 열기에 느리게 답해도 슬롯을 최대 `OPEN_TIMEOUT` 동안 쥐지 않는다.
 /// 채널 열기 대기를 버릴 때는 future 를 그냥 버리지 않고, 뒤늦게 열린 채널을 닫는 정리 태스크로 넘긴다(서버에 채널이 남지 않게)
 async fn open_exec(live: &Arc<Live>, command: &str, stop: &CancellationToken, user: &Option<CancellationToken>) -> Result<Channel<Msg>, ExecError> {
-    let mut opening = {
-        let live = live.clone();
-        tokio::spawn(async move { tokio::time::timeout(OPEN_TIMEOUT, live.last().channel_open_session()).await })
-    };
-    let joined = tokio::select! {
-        biased;
-        () = stop.cancelled() => None,
-        () = cancelled(user) => None,
-        r = &mut opening => Some(r),
-    };
-    let Some(joined) = joined else {
-        // 열기는 `OPEN_TIMEOUT` 안에 끝나므로 정리 태스크도 그 안에 끝난다
-        tokio::spawn(async move {
-            if let Ok(Ok(Ok(mut ch))) = opening.await {
-                kill_channel(&ch).await;
-                drain_until_closed(&mut ch).await;
-            }
-        });
-        return Err(ExecError::Aborted);
-    };
-    let mut ch = match joined {
-        Ok(Ok(Ok(ch))) => ch,
-        Ok(Ok(Err(e))) => return Err(other(format!("원격 명령을 시작하지 못했습니다: {e}"))),
-        Ok(Err(_)) => return Err(other("원격 명령을 시작하지 못했습니다: 시간 초과")),
-        Err(_) => return Err(other("SSH 실행 작업이 중단되었습니다")),
-    };
+    let mut ch = open_session(live, stop, user, "원격 명령을 시작하지 못했습니다").await?;
     // 원격 명령 실행은 이 파일(프로브·open_exec)에서만 요청한다(clippy.toml)
     #[allow(clippy::disallowed_methods)]
     let sent = tokio::select! {
@@ -679,6 +668,177 @@ async fn open_exec(live: &Arc<Live>, command: &str, stop: &CancellationToken, us
     kill_channel(&ch).await;
     drain_until_closed(&mut ch).await;
     Err(other(format!("원격 명령을 시작하지 못했습니다: {start_error}")))
+}
+
+/// 세션 채널을 연다(`open_exec` 와 SFTP 가 같이 쓴다). 열기는 `OPEN_TIMEOUT` 안에 끝나야 하고, `stop`·`user` 가 취소되면 `Aborted` 다.
+/// 열기 대기를 버릴 때는 future 를 그냥 버리지 않고 뒤늦게 열린 채널을 닫는 정리 태스크로 넘긴다. `fail` 은 열기 실패 문구의 앞부분이다
+async fn open_session(live: &Arc<Live>, stop: &CancellationToken, user: &Option<CancellationToken>, fail: &str) -> Result<Channel<Msg>, ExecError> {
+    let mut opening = {
+        let live = live.clone();
+        tokio::spawn(async move { tokio::time::timeout(OPEN_TIMEOUT, live.last().channel_open_session()).await })
+    };
+    let joined = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        () = cancelled(user) => None,
+        r = &mut opening => Some(r),
+    };
+    let Some(joined) = joined else {
+        // 열기는 `OPEN_TIMEOUT` 안에 끝나므로 정리 태스크도 그 안에 끝난다
+        tokio::spawn(async move {
+            if let Ok(Ok(Ok(mut ch))) = opening.await {
+                kill_channel(&ch).await;
+                drain_until_closed(&mut ch).await;
+            }
+        });
+        return Err(ExecError::Aborted);
+    };
+    match joined {
+        Ok(Ok(Ok(ch))) => Ok(ch),
+        Ok(Ok(Err(e))) => Err(other(format!("{fail}: {e}"))),
+        Ok(Err(_)) => Err(other(format!("{fail}: 시간 초과"))),
+        Err(_) => Err(other("SSH 실행 작업이 중단되었습니다")),
+    }
+}
+
+/// SFTP 하위 시스템을 시작한 채널. **SFTP 하위 시스템 요청은 이 함수 한 곳에서만 보낸다**(clippy.toml). 서버가 거부하거나 응답이 없으면
+/// 채널을 정리한 뒤 `Unavailable`(이 서버는 SFTP 를 막았다)로 돌려준다 — 호출자가 경로 직접 입력 안내로 이어 간다
+async fn open_sftp(live: &Arc<Live>, stop: &CancellationToken, user: &Option<CancellationToken>) -> Result<Channel<Msg>, SftpError> {
+    let mut ch = open_session(live, stop, user, "SFTP 채널을 열지 못했습니다").await.map_err(|e| match e {
+        ExecError::Aborted => SftpError::Aborted,
+        e => SftpError::Failed(e.to_string()),
+    })?;
+    #[allow(clippy::disallowed_methods)]
+    let sent = tokio::select! {
+        biased;
+        () = stop.cancelled() => None,
+        () = cancelled(user) => None,
+        r = tokio::time::timeout(OPEN_TIMEOUT, async {
+            ch.request_subsystem(true, "sftp").await?;
+            // 요청 응답(성공·실패)을 기다린다. 그 사이 다른 메시지(창 조정 등)는 건너뛴다
+            loop {
+                match ch.wait().await {
+                    Some(ChannelMsg::Success) => return Ok::<bool, russh::Error>(true),
+                    Some(ChannelMsg::Failure | ChannelMsg::Close) | None => return Ok(false),
+                    Some(_) => {}
+                }
+            }
+        }) => Some(r),
+    };
+    let why = match sent {
+        Some(Ok(Ok(true))) => return Ok(ch),
+        None => None,
+        Some(Ok(Ok(false))) => Some("서버가 SFTP 요청을 거부했습니다".to_string()),
+        Some(Ok(Err(e))) => Some(e.to_string()),
+        Some(Err(_)) => Some("시간 초과".to_string()),
+    };
+    let (mut read, write) = ch.split();
+    close_split(&mut read, &write).await;
+    Err(why.map_or(SftpError::Aborted, SftpError::Unavailable))
+}
+
+/// 채널과 SFTP 클라이언트 쪽 스트림(`far`) 사이로 바이트를 옮긴다. **채널은 항상 비워진다** — 클라이언트가 읽지 않거나 이미 끝났어도 서버가 보낸 데이터를
+/// 계속 받아야 같은 연결의 다른 채널(`run`·`stream`)이 멈추지 않는다(R1: russh 는 채널마다 유한한 큐로 넘겨 읽지 않는 채널이 세션 루프를 멈춘다).
+/// 그래서 읽기(채널 → 스트림)와 쓰기(스트림 → 채널)를 따로 돌리고, 쓰기가 원격 윈도우에 막혀도 읽기는 멈추지 않는다.
+/// 클라이언트가 먼저 끝나(오류·EOF) 스트림이 닫혀도 읽기는 `stop` 이나 채널 닫힘까지 계속 비운다(버린다). 끝나는 조건은 채널 닫힘·`stop` 취소뿐이다.
+/// 채널을 닫고 닫힘을 확인하는 것은 호출자 몫이다
+async fn sftp_bridge(read: &mut ChannelReadHalf, write: &ChannelWriteHalf<Msg>, far: DuplexStream, stop: &CancellationToken, gone: &CancellationToken) {
+    let (mut from_stream, mut to_stream) = tokio::io::split(far);
+    let inbound = async {
+        let mut sink_open = true;
+        loop {
+            let msg = tokio::select! {
+                biased;
+                () = stop.cancelled() => return,
+                m = read.wait() => m,
+            };
+            match msg {
+                Some(ChannelMsg::Data { data }) if sink_open => {
+                    let sent = tokio::select! {
+                        biased;
+                        () = stop.cancelled() => return,
+                        r = to_stream.write_all(&data) => r,
+                    };
+                    // 클라이언트가 이미 끝났다 — 이후 데이터는 버리되 채널은 계속 비운다
+                    sink_open = sent.is_ok();
+                }
+                Some(ChannelMsg::Eof | ChannelMsg::Close) | None => {
+                    let _ = to_stream.shutdown().await;
+                    return;
+                }
+                Some(_) => {}
+            }
+        }
+    };
+    let outbound = async {
+        let mut buf = vec![0u8; SFTP_CHUNK];
+        loop {
+            let n = tokio::select! {
+                biased;
+                () = stop.cancelled() => return,
+                n = from_stream.read(&mut buf) => n,
+            };
+            // 클라이언트 쪽이 끝났다(세션이 오류로 끝나 스트림이 버려졌다) — 기다리는 요청이 제 시간 제한까지 매달리지 않게 알린다
+            let Ok(n @ 1..) = n else {
+                gone.cancel();
+                return;
+            };
+            let sent = tokio::select! {
+                biased;
+                () = stop.cancelled() => return,
+                r = write.data(&buf[..n]) => r,
+            };
+            if sent.is_err() {
+                return;
+            }
+        }
+    };
+    // 스트림 쪽이 먼저 끝나도(outbound 종료) 채널 읽기(inbound)는 계속 돈다 — 위 문서
+    tokio::join!(inbound, outbound);
+}
+
+/// SFTP 작업 하나(채널 열기 → 폴더 목록 → 정리). **슬롯은 이 함수가 끝난 뒤(채널 닫힘 확인 뒤)** 호출자가 돌려준다
+async fn sftp_job(live: Arc<Live>, path: String, limit: Duration, token: CancellationToken, user: Option<CancellationToken>) -> Result<RemoteDirListing, SftpError> {
+    let ch = open_sftp(&live, &token, &user).await?;
+    let (mut read, write) = ch.split();
+    let (near, far) = tokio::io::duplex(SFTP_PIPE);
+    let stop = token.child_token();
+    let gone = CancellationToken::new();
+    let bridge = sftp_bridge(&mut read, &write, far, &stop, &gone);
+    let work = async {
+        let r = tokio::select! {
+            biased;
+            () = token.cancelled() => Err(SftpError::Aborted),
+            () = cancelled(&user) => Err(SftpError::Aborted),
+            r = tokio::time::timeout(limit, sftp::list_dirs(near, &path)) => r.unwrap_or_else(|_| Err(SftpError::Failed(format!("원격 폴더 목록이 {}초 안에 끝나지 않았습니다", limit.as_secs())))),
+            // 결과보다 뒤에 둔다 — 정상 종료로 세션이 닫히는 순간의 EOF 는 결과가 이긴다
+            () = gone.cancelled() => Err(SftpError::Failed("서버가 SFTP 응답을 끝냈거나 올바르지 않은 응답을 보내 목록을 읽지 못했습니다".to_string())),
+        };
+        // 결과가 났다 — 다리를 멈춘다(`near` 는 위 future 와 함께 버려졌다)
+        stop.cancel();
+        r
+    };
+    let ((), result) = tokio::join!(bridge, work);
+    close_split(&mut read, &write).await;
+    result
+}
+
+/// 나눈 채널을 닫는다(SFTP 용). close 를 보내는 동안 채널을 계속 비운다 — 서버가 계속 보내는 중이면 채널 큐가 차서 세션 루프가 멈추고, 그러면 close 요청도 처리되지 못한다(R1).
+/// **닫힘 확인을 기다리지 않는다**: russh 는 우리가 close 를 보낸 뒤에 오는 서버의 close 응답을 무시해(채널 장부에서 이미 지웠다) 읽기 쪽이 끝나지 않으므로 기다려도 `CLOSE_WAIT` 만 채운다.
+/// 같은 연결의 이후 채널 열기는 이 close 뒤에 순서대로 처리되므로 서버의 채널 수(`MaxSessions`)는 넘지 않는다. close 를 보낸 뒤 서버가 보내는 데이터는 russh 가 큐에 넣지 않고 버린다
+async fn close_split(read: &mut ChannelReadHalf, write: &ChannelWriteHalf<Msg>) {
+    let close = tokio::time::timeout(KILL_TIMEOUT, write.close());
+    tokio::pin!(close);
+    loop {
+        tokio::select! {
+            _ = &mut close => return,
+            m = read.wait() => {
+                if m.is_none() {
+                    return;
+                }
+            }
+        }
+    }
 }
 
 enum Outcome {
@@ -1018,6 +1178,45 @@ impl Connection {
             Ok(Ok(())) => Ok(SshStream::new(rx, queued, opts.cancel.clone(), to_strings(git_args), guard)),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(other("SSH 실행 작업이 중단되었습니다")),
+        }
+    }
+
+    /// 원격 폴더 목록(SFTP). `run` 과 같은 연결·채널 슬롯 하나를 쓴다(그 연결에서 셸 확인을 이미 마쳤다). 경로는 연결 전에 검사한다.
+    /// 호출자가 취소하거나 future 를 버리면 채널을 닫고(닫힘 확인 뒤) 슬롯을 돌려준다. 전체 시간 제한은 `Timeouts::sftp`
+    pub(super) async fn list_dirs(&self, path: &str, cancel: Option<&CancellationToken>) -> Result<RemoteDirListing, SftpError> {
+        sftp::to_sftp_path(path)?;
+        let cancel = cancel.cloned();
+        if cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+            return Err(SftpError::Aborted);
+        }
+        let inner = &self.inner;
+        let Some(slot) = (tokio::select! {
+            biased;
+            _ = cancelled(&cancel) => None,
+            s = inner.acquire() => Some(s),
+        }) else {
+            return Err(SftpError::Aborted);
+        };
+        let slot = slot.map_err(|e| SftpError::Failed(e.to_string()))?;
+        let live = tokio::select! {
+            biased;
+            _ = cancelled(&cancel) => return Err(SftpError::Aborted),
+            l = inner.live() => l.map_err(|e| SftpError::Failed(e.to_string()))?,
+        };
+        let token = CancellationToken::new();
+        // 이 future 가 어떤 경로로든 끝나거나 버려지면 태스크에 취소를 알린다(이미 끝났다면 무해하다)
+        let _guard = token.clone().drop_guard();
+        let (tx, rx) = oneshot::channel();
+        let (path, limit, user) = (path.to_string(), inner.opts.timeouts.sftp, cancel.clone());
+        tokio::spawn(async move {
+            let r = sftp_job(live, path, limit, token, user).await;
+            let _ = tx.send(r);
+            drop(slot);
+        });
+        tokio::select! {
+            biased;
+            _ = cancelled(&cancel) => Err(SftpError::Aborted),
+            r = rx => r.unwrap_or_else(|_| Err(SftpError::Failed("SSH 실행 작업이 중단되었습니다".to_string()))),
         }
     }
 

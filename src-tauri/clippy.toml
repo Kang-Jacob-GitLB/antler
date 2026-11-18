@@ -62,6 +62,9 @@ disallowed-methods = [
   { path = "russh::client::Session::send_global_request", reason = "전역 요청(포워딩 등)을 직접 보내지 않는다" },
   # 채널 요청: 원격 명령은 exec 한 곳(connection.rs 의 프로브·open_exec(run·stream 공용))에서만 보낸다. 셸·환경변수 주입은 쓰지 않는다
   { path = "russh::channels::Channel::exec", reason = "원격 명령 실행은 ssh/connection.rs 의 프로브·open_exec(run·stream 공용) 에서만 요청한다" },
+  # SFTP 하위 시스템은 connection.rs 의 open_sftp 한 곳에서만 요청한다(폴더 목록 — 읽기 전용). 다른 하위 시스템은 요청하지 않는다
+  { path = "russh::channels::Channel::request_subsystem", reason = "하위 시스템 요청은 ssh/connection.rs 의 open_sftp(SFTP) 에서만 한다" },
+  { path = "russh::channels::ChannelWriteHalf::request_subsystem", reason = "하위 시스템 요청은 ssh/connection.rs 의 open_sftp(SFTP) 에서만 한다" },
   { path = "russh::channels::Channel::request_shell", reason = "대화형 셸을 요청하지 않는다" },
   { path = "russh::channels::Channel::set_env", reason = "원격 환경변수를 주입하지 않는다(build_remote_command 의 env 만)" },
   { path = "russh::channels::ChannelWriteHalf::exec", reason = "원격 명령 실행은 ssh/connection.rs 의 프로브·open_exec(run·stream 공용) 에서만 요청한다" },

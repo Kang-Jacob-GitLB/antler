@@ -3,8 +3,10 @@
 //! 원격 명령은 `build_remote_command`(PR 1)의 결과만 보낸다 — 이 모듈 밖에서 임의 명령을 보낼 길이 없다.
 
 use super::connection::{Connection, SshOptions};
+use super::sftp::SftpError;
 use super::stream::SshStream;
 use super::quote::build_remote_command;
+use crate::repos::scan::RemoteDirListing;
 use crate::git::exec::common::{RunOpts, RunResult};
 use crate::git::exec::error::ExecError;
 
@@ -44,6 +46,12 @@ impl SshExecutor {
         let command = build_remote_command(repo_path, args, None).map_err(|e| ExecError::Other { message: e.to_string() })?;
         let git_args: Vec<String> = args.iter().map(|a| a.as_ref().to_string()).collect();
         self.conn.stream(command, &git_args, opts).await
+    }
+
+    /// 원격 폴더 목록(저장소 추가 창의 폴더 탐색, SFTP — 셸 명령 없음). 같은 연결·채널 슬롯을 쓴다. 폴더(숨김 제외)만 이름순으로, 앞 200개는 저장소 여부까지.
+    /// 서버가 SFTP 를 막았으면 [`SftpError::Unavailable`]. 취소하거나 future 를 버리면 채널을 닫고 슬롯을 돌려준다
+    pub async fn list_dirs(&self, path: &str, cancel: Option<&tokio_util::sync::CancellationToken>) -> Result<RemoteDirListing, SftpError> {
+        self.conn.list_dirs(path, cancel).await
     }
 
     /// 선읽기 상한을 바꾼다(시험 전용)
