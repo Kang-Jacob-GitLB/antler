@@ -993,7 +993,7 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 
 **남은 위험(3)**
 - **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널·감시가 넘어오면 줄어든다. 사이드카의 `gh:repo`·repoq 의 git 조회(`remotes`·`pushedShas`)는 **6a PR 8 이 Rust 로 옮겼다**(아래 "PR 8"). 사라지는 것은 6a 가 끝났을 때다 — 이 PR 8 만으로는 아니다:
-  `wipStatus`·`wipDiff`(PR 6)·RepoWatcher(PR 7b)와 저장소 **추가 흐름**의 사이드카 git(`repos:add`·`scan`·`env:test`·`env:listDir` — 6b)가 남아 있는 동안은 Rust 가 맡은 저장소에도 사이드카가 연결을 연다.
+  RepoWatcher(PR 7b)와 저장소 **추가 흐름**의 사이드카 git(`repos:add`·`scan`·`env:test`·`env:listDir` — 6b)가 남아 있는 동안은 Rust 가 맡은 저장소에도 사이드카가 연결을 연다.
 - **정리 경합.** 미러 변경 직전에 해석을 마친 요청이 정리(`sync_ssh_hosts`) 뒤에 `runtime()` 으로 들어오면 지운 호스트가 풀에 다시 생긴다. 다음 미러 변경이나 유휴 5분(연결 해제) 뒤에 정리되며 기능 영향은 없다.
 - `file_diff` 상한 초과(위)·실제 sshd 에서의 라우팅은 확인하지 않았다(루프백 서버만).
 - 검증 중 `cargo test` 가 한 번 `fetch_service` 의 `git clone file://…`(시험 준비용 git)에서 15분 넘게 멈춘 적이 있다 — 1회 관측, 원인은 확인하지 못했고 그 바이너리를 단독으로 다시 돌리면 통과했다(PR 3 의 코드는 그 바이너리에서 `MirrorRepo` 리터럴 한 줄만 바뀌었다).
