@@ -2980,6 +2980,173 @@ async fn 악성_저장소의_filter_는_ssh_에서도_작업_트리_채널이_�
     wip_filter_scenarios(&Mode::ssh().await).await;
 }
 
+// ── 작업 트리 diff 는 plumbing 이다(`tests/wipPlumbing.test.ts` 와 같은 세 건 + 출력) ──────────────
+
+/// 표지를 남기는 셸 명령 본문(`echo x >> '<표지>'`). 표지는 임시 디렉터리 안에만 쓴다
+fn marker_cmd(marker: &Path) -> String {
+    format!("echo x >> '{}'", marker.to_string_lossy().replace('\\', "/"))
+}
+
+fn commit_all(dir: &Path) {
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "init"]] {
+        assert!(refs_git(dir).args(&args).status().unwrap().success());
+    }
+}
+
+/// A. 빈 이름 filter 드라이버(`[filter ""]` + `* filter=`)는 가드가 덮지 못해 거부한다
+async fn wip_plumbing_empty_filter(mode: &Mode, tmp: &Path) {
+    let dir = import_at(tmp.join("a"), "empty");
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    commit_all(&dir);
+    let marker = tmp.join("MARK-a");
+    // `git config` 는 빈 서브섹션을 못 쓰는 경우가 있어 파일에 직접 쓴다
+    {
+        use std::io::Write as _;
+        let mut cfg = fs::OpenOptions::new().append(true).open(dir.join(".git").join("config")).unwrap();
+        write!(cfg, "[filter \"\"]\n\tclean = \"sh -c \\\"{}; cat\\\" --\"\n", marker_cmd(&marker)).unwrap();
+        fs::create_dir_all(dir.join(".git").join("info")).unwrap();
+        let mut attrs = fs::OpenOptions::new().create(true).append(true).open(dir.join(".git").join("info").join("attributes")).unwrap();
+        attrs.write_all(b"* filter=\n").unwrap();
+    }
+    dirty(&dir.join("a.txt"), "jello\n", 5);
+    let _ = raw_git(&dir).args(["status", "--porcelain"]).output().unwrap();
+    assert!(marker.exists(), "대조군: 날 git status 가 빈 이름 드라이버의 명령을 실행하지 않았다 — 시험이 의미가 없다");
+    fs::remove_file(&marker).unwrap();
+    dirty(&dir.join("a.txt"), "hellp\n", 10);
+    let router = mode.router(&[("a", dir.as_path())]);
+    let st = wip_status_of(&router, "a").await;
+    assert_eq!((st["ok"].clone(), st["code"].clone(), st["error"].clone()), (json!(false), json!("GIT"), json!(antler_lib::git::wip::UNSAFE_FILTER_MSG)), "{st}");
+    for area in ["unstaged", "staged"] {
+        let d = wip_diff_of(&router, "a", json!({ "area": area, "path": "a.txt" })).await;
+        assert_eq!((d["ok"].clone(), d["error"].clone()), (json!(false), json!(antler_lib::git::wip::UNSAFE_FILTER_MSG)), "{area}: {d}");
+    }
+    assert!(!marker.exists(), "빈 이름 드라이버의 명령이 실행됐다");
+}
+
+/// B. 상위 저장소 `diff.submodule=diff` + 인덱스에는 파일·작업 트리에는 중첩 저장소 → porcelain diff 는 자식 git diff 를 띄워 그 저장소의 `diff.external` 을 실행한다
+async fn wip_plumbing_submodule_external(mode: &Mode, tmp: &Path) {
+    let dir = import_at(tmp.join("b"), "empty");
+    fs::write(dir.join("sub"), "file\n").unwrap();
+    commit_all(&dir);
+    // 인덱스에는 파일 `sub`, 작업 트리에는 중첩 저장소(타입 변경)
+    fs::remove_file(dir.join("sub")).unwrap();
+    let sub = import_at(dir.join("sub"), "empty");
+    fs::write(sub.join("f.txt"), "a\n").unwrap();
+    commit_all(&sub);
+    fs::write(sub.join("f.txt"), "b\n").unwrap();
+    let marker = tmp.join("MARK-b");
+    assert!(raw_git(&sub).args(["config", "diff.external", &format!("sh -c \"{}\" --", marker_cmd(&marker))]).status().unwrap().success());
+    assert!(raw_git(&dir).args(["config", "diff.submodule", "diff"]).status().unwrap().success());
+    // 대조군: 예전 porcelain 호출은 중첩 저장소의 diff.external 을 실행한다
+    let _ = raw_git(&dir).args(["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3", "--no-renames", "--", "sub"]).output().unwrap();
+    assert!(marker.exists(), "대조군: porcelain git diff 가 중첩 저장소의 diff.external 을 실행하지 않았다 — 시험이 의미가 없다");
+    fs::remove_file(&marker).unwrap();
+    let router = mode.router(&[("b", dir.as_path())]);
+    // status 는 이 경로를 `.T` 로 보고하므로 UI 에서 diff 를 요청할 수 있다
+    let st = wip_status_of(&router, "b").await;
+    assert!(st["data"]["unstaged"].as_array().unwrap().iter().any(|f| f["path"] == "sub"), "{st}");
+    let d = wip_diff_of(&router, "b", json!({ "area": "unstaged", "path": "sub" })).await;
+    assert_eq!(d["ok"], true, "{d}");
+    assert!(!marker.exists(), "wipDiff(unstaged) 가 중첩 저장소의 diff.external 을 실행했다");
+}
+
+/// C. porcelain `git diff` 는 stat 만 바뀐 파일이 있으면 index 를 써서 갱신하고 post-index-change 훅을 실행한다(`GIT_OPTIONAL_LOCKS=0` 이어도)
+async fn wip_plumbing_index_write(mode: &Mode, tmp: &Path) {
+    let dir = import_at(tmp.join("c"), "empty");
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    fs::write(dir.join("b.txt"), "one\n").unwrap();
+    commit_all(&dir);
+    let marker = tmp.join("MARK-c");
+    let hook = dir.join(".git").join("hooks").join("post-index-change");
+    fs::create_dir_all(hook.parent().unwrap()).unwrap();
+    fs::write(&hook, format!("#!/bin/sh\n{}\n", marker_cmd(&marker))).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        // 리눅스는 실행 비트가 없으면 훅을 건너뛴다(대조군이 재현되지 않는다)
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let index = dir.join(".git").join("index");
+    // 대조군: stat 만 바뀐 파일(내용·크기 그대로, mtime 만 이동)이 있으면 porcelain diff 가 index 를 쓰고 훅을 실행한다
+    dirty(&dir.join("a.txt"), "hello\n", 5);
+    let before = fs::read(&index).unwrap();
+    let _ = raw_git(&dir).env("GIT_OPTIONAL_LOCKS", "0").args(["diff", "--no-color", "--", "a.txt"]).output().unwrap();
+    assert!(marker.exists(), "대조군: porcelain git diff 가 post-index-change 훅을 실행하지 않았다 — 시험이 의미가 없다");
+    assert_ne!(fs::read(&index).unwrap(), before, "대조군: porcelain git diff 가 index 를 갱신하지 않았다");
+    fs::remove_file(&marker).unwrap();
+    // 대조군이 index 를 갱신했으니 다시 stat 만 바뀐 상태로 만든다
+    dirty(&dir.join("a.txt"), "hello\n", 9);
+    let before = fs::read(&index).unwrap();
+    let router = mode.router(&[("c", dir.as_path())]);
+    let d = wip_diff_of(&router, "c", json!({ "area": "unstaged", "path": "a.txt" })).await;
+    assert_eq!(d["ok"], true, "{d}");
+    // 내용이 같은 파일은 UI 에서 빈 diff 로 보인다(hunk 없음)
+    assert_eq!((d["data"]["hunks"].clone(), d["data"]["binary"].clone()), (json!([]), json!(false)), "{d}");
+    assert_eq!(wip_diff_of(&router, "c", json!({ "area": "staged", "path": "a.txt" })).await["ok"], true);
+    assert!(!marker.exists(), "wipDiff 가 post-index-change 훅을 실행했다");
+    assert_eq!(fs::read(&index).unwrap(), before, "wipDiff 가 index 를 갱신했다");
+    // wipStatus 도 같다
+    dirty(&dir.join("b.txt"), "one\n", 12);
+    let before = fs::read(&index).unwrap();
+    assert_eq!(wip_status_of(&router, "c").await["ok"], true);
+    assert!(!marker.exists(), "wipStatus 가 post-index-change 훅을 실행했다");
+    assert_eq!(fs::read(&index).unwrap(), before, "wipStatus 가 index 를 갱신했다");
+}
+
+/// 출력: 커밋 없는 저장소(SHA-1·SHA-256)의 staged 는 빈 트리와 비교하고, 이름 변경(-M)이 따라간다
+async fn wip_plumbing_output(mode: &Mode, tmp: &Path) {
+    for (name, extra) in [("unborn", None), ("unborn256", Some("--object-format=sha256"))] {
+        let dir = tmp.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        let mut init = refs_git(&dir);
+        init.args(["init", "-q", "-b", "main"]);
+        init.args(extra);
+        // 이 git 이 sha256 을 지원하지 않으면 건너뛴다
+        if !init.status().unwrap().success() {
+            assert!(extra.is_some(), "git init");
+            continue;
+        }
+        fs::write(dir.join("n.txt"), "a\nb\n").unwrap();
+        assert!(refs_git(&dir).args(["add", "n.txt"]).status().unwrap().success());
+        let router = mode.router(&[(name, dir.as_path())]);
+        let d = wip_diff_of(&router, name, json!({ "area": "staged", "path": "n.txt" })).await;
+        assert_eq!(d["ok"], true, "{name}: {d}");
+        assert!(d["data"]["meta"].as_array().unwrap().iter().any(|m| m == "new file mode 100644"), "{name}: {d}");
+        let kinds: Vec<&Value> = d["data"]["hunks"][0]["lines"].as_array().unwrap().iter().map(|l| &l["t"]).collect();
+        assert_eq!(kinds, [&json!("+"), &json!("+")], "{name}: {d}");
+    }
+    let dir = import_at(tmp.join("out"), "empty");
+    fs::write(dir.join("old name.txt"), "x\ny\nz\nw\n").unwrap();
+    commit_all(&dir);
+    assert!(refs_git(&dir).args(["mv", "old name.txt", "new name.txt"]).status().unwrap().success());
+    fs::write(dir.join("new name.txt"), "x\ny\nZ\nw\n").unwrap();
+    assert!(refs_git(&dir).args(["add", "-A"]).status().unwrap().success());
+    let router = mode.router(&[("out", dir.as_path())]);
+    let d = wip_diff_of(&router, "out", json!({ "area": "staged", "path": "new name.txt", "oldPath": "old name.txt" })).await;
+    assert_eq!(d["ok"], true, "{d}");
+    assert!(d["data"]["meta"].as_array().unwrap().iter().any(|m| m.as_str().is_some_and(|s| s.starts_with("rename from "))), "{d}");
+    assert!(d["data"]["hunks"][0]["lines"].as_array().unwrap().iter().any(|l| l["t"] == "+" && l["text"] == "Z"), "{d}");
+}
+
+async fn wip_plumbing_scenarios(mode: &Mode) {
+    let tmp = TempDir::new("wipplumbing");
+    Box::pin(wip_plumbing_empty_filter(mode, &tmp.0)).await;
+    Box::pin(wip_plumbing_submodule_external(mode, &tmp.0)).await;
+    Box::pin(wip_plumbing_index_write(mode, &tmp.0)).await;
+    Box::pin(wip_plumbing_output(mode, &tmp.0)).await;
+    mode.finish();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 작업_트리_diff_는_plumbing_이라_index_를_쓰지_않고_서브모듈_diff_명령을_실행하지_않는다() {
+    wip_plumbing_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 작업_트리_diff_는_ssh_에서도_plumbing_이다() {
+    wip_plumbing_scenarios(&Mode::ssh().await).await;
+}
+
 /// 드라이버가 하나도 없으면(`git config` 종료 코드 1) 가드는 비어 있다(TS `filterOverrides` 의 "키가 없으면 빈 목록")
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn 필터_드라이버가_없으면_가드는_비어_있다() {
@@ -3454,7 +3621,7 @@ fn c_인자는_wip_밖에서_만들지_않고_작업_트리_읽기는_가드를_
     let wip = fs::read_to_string(src.join("git/wip.rs")).unwrap().replace("\r\n", "\n");
     let body = wip.split("\n#[cfg(test)]\nmod ").next().unwrap();
     assert!(body.contains("pub fn wip_status_args(guard: &FilterGuard)"), "wip_status_args 는 가드를 필수 인자로 받아야 한다");
-    assert!(body.contains("pub fn wip_diff_args(guard: &FilterGuard, req: &WipDiffRequest)"), "wip_diff_args 는 가드를 필수 인자로 받아야 한다");
+    assert!(body.contains("pub fn wip_diff_args(guard: &FilterGuard, req: &WipDiffRequest, staged_base: &str)"), "wip_diff_args 는 가드를 필수 인자로 받아야 한다");
     assert_eq!(body.matches("WIP_STATUS_ARGS").count(), 2, "status 인자 상수는 import 하나와 wip_status_args 한 곳에서만 쓴다");
     assert_eq!(body.matches("\"--no-index\"").count(), 1, "--no-index 인자는 wip_diff_args 한 곳에만 있다");
     assert_eq!(body.matches("\"--cached\"").count(), 1);
@@ -3462,7 +3629,7 @@ fn c_인자는_wip_밖에서_만들지_않고_작업_트리_읽기는_가드를_
     // git 을 부르는 읽기(pump)는 두 곳이고, 각각 filter_overrides 로 만든 가드를 만든 argv 로만 부른다
     assert_eq!(body.matches("pump(exec,").count(), 2);
     assert_eq!(body.matches("&wip_status_args(&guard)").count(), 1);
-    assert_eq!(body.matches("&wip_diff_args(&guard, req)").count(), 1);
+    assert_eq!(body.matches("&wip_diff_args(&guard, req, &base)").count(), 1);
     assert_eq!(body.matches("filter_overrides(exec, repo_path, opts).await?").count(), 2, "status·diff 모두 가드를 조회한다");
     // 가드 조회가 diff 의 git 호출보다 앞선다
     let diff_fn = body.split("pub async fn wip_file_diff").nth(1).expect("wip_file_diff");

@@ -288,22 +288,58 @@ pub fn wip_status_args(guard: &FilterGuard) -> Vec<String> {
     guarded(guard, WIP_STATUS_ARGS.iter().map(|s| (*s).to_string()))
 }
 
-/// `git diff` 인자(TS `wipFileDiff` 와 바이트까지 같다). 가드는 필수 인자이고 **모든 영역에** 붙는다(`--no-index` 도 필터를 돈다). 경로(renderer 값)는 항상 `--` 뒤다.
-/// staged 는 `--cached -M -- [old] path`, unstaged 는 `--no-renames -- path`, untracked 는 `--no-index -- /dev/null path`(`/dev/null` 은 git 이 모든 OS 에서 직접 해석한다)
-pub fn wip_diff_args(guard: &FilterGuard, req: &WipDiffRequest) -> Vec<String> {
-    let mut rest: Vec<String> = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3"].iter().map(|s| (*s).to_string()).collect();
+/// staged·unstaged diff 의 공통 인자(TS `PLUMBING_DIFF_ARGS`). porcelain `git diff` 가 아니라 plumbing 을 쓰는 이유는 `src/main/git/wip.ts`·docs/security.md:
+/// porcelain 은 stat 만 바뀐 파일이 있으면 index 를 써서 갱신하고 `post-index-change` 훅을 실행하며, `diff.submodule=diff` 면 서브모듈 안에서 저장소의 `diff.external` 을 실행한다.
+const PLUMBING_DIFF_ARGS: [&str; 7] = ["-p", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "--submodule=short", "-U3"];
+
+/// 빈 트리 해시(SHA-1·SHA-256 저장소)
+const EMPTY_TREES: [&str; 2] = ["4b825dc642cb6eb9a060e54bf8d69288fbee4904", "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"];
+
+/// `git diff` 계열 인자(TS `wipFileDiff` 와 바이트까지 같다). 가드는 필수 인자이고 **모든 영역에** 붙는다(`--no-index` 도 필터를 돈다). 경로(renderer 값)는 항상 `--` 뒤다.
+/// staged 는 `diff-index <공통> --cached -M <staged_base> -- [old] path`, unstaged 는 `diff-files <공통> --no-renames -- path`,
+/// untracked 는 porcelain `diff --no-color --no-ext-diff --no-textconv -U3 --no-index -- /dev/null path`(index 를 읽지 않는다. `/dev/null` 은 git 이 모든 OS 에서 직접 해석한다).
+/// `staged_base` 는 staged 에서만 쓴다([`staged_base`]가 정한 `HEAD` 또는 빈 트리 해시).
+pub fn wip_diff_args(guard: &FilterGuard, req: &WipDiffRequest, staged_base: &str) -> Vec<String> {
+    let strs = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<String>>();
+    let mut rest: Vec<String> = Vec::new();
     match req.area {
         WipArea::Staged => {
-            rest.extend(["--cached".to_string(), "-M".to_string(), "--".to_string()]);
+            rest.push("diff-index".to_string());
+            rest.extend(strs(&PLUMBING_DIFF_ARGS));
+            rest.extend(strs(&["--cached", "-M"]));
+            rest.push(staged_base.to_string());
+            rest.push("--".to_string());
             if let Some(old) = req.old_path.as_ref().filter(|old| **old != req.path) {
                 rest.push(old.clone());
             }
             rest.push(req.path.clone());
         }
-        WipArea::Unstaged => rest.extend(["--no-renames".to_string(), "--".to_string(), req.path.clone()]),
-        WipArea::Untracked => rest.extend(["--no-index".to_string(), "--".to_string(), "/dev/null".to_string(), req.path.clone()]),
+        WipArea::Unstaged => {
+            rest.push("diff-files".to_string());
+            rest.extend(strs(&PLUMBING_DIFF_ARGS));
+            rest.extend(strs(&["--no-renames", "--"]));
+            rest.push(req.path.clone());
+        }
+        WipArea::Untracked => {
+            rest.extend(strs(&["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3", "--no-index", "--", "/dev/null"]));
+            rest.push(req.path.clone());
+        }
     }
     guarded(guard, rest)
+}
+
+/// staged diff 의 비교 기준(TS `stagedBase`). 커밋이 있으면 `HEAD`, 없는 저장소(unborn)면 빈 트리 해시다 — porcelain `diff --cached` 는 후자를 알아서 했지만
+/// `diff-index` 는 트리를 요구한다. 해시 알고리즘(SHA-1·SHA-256)은 저장소가 아는 쪽을 고른다. 둘 다 없으면 TS 와 같은 오류(code 1).
+async fn staged_base(exec: &GitExecutor, repo_path: &str, opts: &RunOpts) -> Result<String, ExecError> {
+    if exec.run(repo_path, &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], opts).await?.code == 0 {
+        return Ok("HEAD".to_string());
+    }
+    for t in EMPTY_TREES {
+        if exec.run(repo_path, &["rev-parse".to_string(), "--verify".to_string(), "--quiet".to_string(), format!("{t}^{{tree}}")], opts).await?.code == 0 {
+            return Ok(t.to_string());
+        }
+    }
+    Err(ExecError::Git { message: "빈 트리를 찾을 수 없습니다".to_string(), code: 1, stderr: String::new(), args: vec!["rev-parse".to_string()] })
 }
 
 /// stdout 을 청크로 읽어 `feed` 에 넘긴다. `feed` 가 `false` 를 주면 스트림을 버려 git 을 끊고(종료 코드를 보지 않는다) 끝낸다. EOF 까지 읽었으면 종료 코드를 확인한다.
@@ -345,7 +381,7 @@ pub async fn wip_status(exec: &GitExecutor, repo_path: &str, opts: &RunOpts, unt
 
 /// 작업 트리 파일 하나의 diff(TS `wipFileDiff`). `req` 는 [`WipDiffRequest::parse`] 를 통과한 값이다. 순서가 TS 와 같다(오류 code 가 달라지므로 바꾸지 않는다):
 /// 추적 안 되는 폴더(중첩 저장소)는 git 없이 빈 diff → 로컬 실행기면 정션·symlink 확인(`link_guard`: untracked 는 마지막 구성 요소가 링크여도 거부, unstaged 는 추적 중인 링크 파일만 허용; 실패는 `invalid path`, code ERROR) →
-/// 필터 가드(실패는 GIT) → diff 스트림. 링크 확인에는 git 의 `-C` 와 같은 문자열을 넘긴다(`\\?\` 접두를 붙이지 않는다 — 비교는 `link_guard` 안에서 canonicalize 한다).
+/// 필터 가드(실패는 GIT) → staged 의 비교 기준(`staged_base`) → diff 스트림. 링크 확인에는 git 의 `-C` 와 같은 문자열을 넘긴다(`\\?\` 접두를 붙이지 않는다 — 비교는 `link_guard` 안에서 canonicalize 한다).
 /// 상한은 `file_diff` 와 같다(일반 8MB, full 64MB + 줄 수 상한). untracked 의 종료 코드 1 은 **읽은 바이트가 있을 때만** 정상이다
 pub async fn wip_file_diff(exec: &GitExecutor, repo_path: &str, req: &WipDiffRequest, opts: &RunOpts) -> Result<FileDiff, ExecError> {
     let parse_opts = if req.full {
@@ -365,8 +401,9 @@ pub async fn wip_file_diff(exec: &GitExecutor, repo_path: &str, req: &WipDiffReq
         }
     }
     let guard = filter_overrides(exec, repo_path, opts).await?;
+    let base = if req.area == WipArea::Staged { staged_base(exec, repo_path, opts).await? } else { String::new() };
     let mut produced = false;
-    let result = pump(exec, repo_path, &wip_diff_args(&guard, req), opts, "diff", |c| {
+    let result = pump(exec, repo_path, &wip_diff_args(&guard, req, &base), opts, "diff", |c| {
         produced |= !c.is_empty();
         // 상한을 넘기고 줄 수 세기도 끝났으면 git 을 끊는다
         parser.push(c)
@@ -658,17 +695,29 @@ mod tests {
         let g = guard(&[("filter.evil.clean", "x"), ("filter.lfs.clean", "git-lfs clean -- %f")]).unwrap();
         let mut head = driver_args("evil");
         head.extend(driver_args("lfs"));
-        let common = ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3"];
-        let want = |tail: &[&str]| head.iter().cloned().chain(strs(&common)).chain(strs(tail)).collect::<Vec<_>>();
-        assert_eq!(wip_diff_args(&g, &req(WipArea::Staged, "new name.ts", Some("old name.ts"))), want(&["--cached", "-M", "--", "old name.ts", "new name.ts"]));
+        let plumbing = ["-p", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "--submodule=short", "-U3"];
+        let want = |cmd: &str, mid: &[&str], tail: &[&str]| head.iter().cloned().chain(strs(&[cmd])).chain(strs(&plumbing)).chain(strs(mid)).chain(strs(tail)).collect::<Vec<_>>();
+        let staged = |r: &WipDiffRequest, base: &str| wip_diff_args(&g, r, base);
+        assert_eq!(
+            staged(&req(WipArea::Staged, "new name.ts", Some("old name.ts")), "HEAD"),
+            want("diff-index", &["--cached", "-M", "HEAD"], &["--", "old name.ts", "new name.ts"])
+        );
         // oldPath 가 같거나 없으면 경로 하나
-        assert_eq!(wip_diff_args(&g, &req(WipArea::Staged, "a.txt", Some("a.txt"))), want(&["--cached", "-M", "--", "a.txt"]));
-        assert_eq!(wip_diff_args(&g, &req(WipArea::Staged, "a.txt", None)), want(&["--cached", "-M", "--", "a.txt"]));
-        // unstaged 는 oldPath 를 쓰지 않는다
-        assert_eq!(wip_diff_args(&g, &req(WipArea::Unstaged, "a.txt", Some("b.txt"))), want(&["--no-renames", "--", "a.txt"]));
-        assert_eq!(wip_diff_args(&g, &req(WipArea::Untracked, "u 파일.txt", None)), want(&["--no-index", "--", "/dev/null", "u 파일.txt"]));
+        assert_eq!(staged(&req(WipArea::Staged, "a.txt", Some("a.txt")), "HEAD"), want("diff-index", &["--cached", "-M", "HEAD"], &["--", "a.txt"]));
+        assert_eq!(staged(&req(WipArea::Staged, "a.txt", None), "HEAD"), want("diff-index", &["--cached", "-M", "HEAD"], &["--", "a.txt"]));
+        // 커밋 없는 저장소는 빈 트리 해시가 기준이다
+        assert_eq!(staged(&req(WipArea::Staged, "a.txt", None), EMPTY_TREES[0]), want("diff-index", &["--cached", "-M", EMPTY_TREES[0]], &["--", "a.txt"]));
+        // unstaged 는 oldPath·기준을 쓰지 않는다
+        assert_eq!(staged(&req(WipArea::Unstaged, "a.txt", Some("b.txt")), "HEAD"), want("diff-files", &["--no-renames"], &["--", "a.txt"]));
+        // untracked 는 index 를 읽지 않는 porcelain `--no-index` 그대로다
+        let untracked = head.iter().cloned().chain(strs(&["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3", "--no-index", "--", "/dev/null", "u 파일.txt"])).collect::<Vec<_>>();
+        assert_eq!(staged(&req(WipArea::Untracked, "u 파일.txt", None), "HEAD"), untracked);
         // 가드가 비어 있어도 같은 모양이다. 옵션처럼 보이는 경로는 `--` 뒤에 그대로 있다
-        assert_eq!(wip_diff_args(&FilterGuard::none(), &req(WipArea::Unstaged, "--output=x", None)), strs(&["diff", "--no-color", "--no-ext-diff", "--no-textconv", "-U3", "--no-renames", "--", "--output=x"]));
+        assert_eq!(
+            wip_diff_args(&FilterGuard::none(), &req(WipArea::Unstaged, "--output=x", None), ""),
+            strs(&["diff-files", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "--submodule=short", "-U3", "--no-renames", "--", "--output=x"])
+        );
+        assert_eq!(EMPTY_TREES, ["4b825dc642cb6eb9a060e54bf8d69288fbee4904", "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"]);
     }
 
     #[test]
