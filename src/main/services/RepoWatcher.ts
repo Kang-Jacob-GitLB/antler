@@ -1,6 +1,21 @@
-import { existsSync, watch, type FSWatcher } from 'node:fs'
+import { lstatSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
+import { hasRegisteredWslDistroCached } from '../executors/WslExecutor'
 import type { RepoService } from './RepoService'
+
+/**
+ * 감시해도 되는 git 디렉터리인가 — 링크를 따라가지 않고(lstat) 본다. 악성 저장소의 `.git` 이 gitdir 로 UNC 경로나 심볼릭 링크를 가리키면
+ * stat 만으로도 SMB 접속이 일어난다. 네트워크 경로(`\\`·`//`)·NT 네임스페이스(`\??\UNC\…`)·디렉터리 자체가 링크인 경우·`HEAD` 가 링크이거나 파일이 아닌 경우는 거부한다
+ */
+export function isWatchableGitDir(dir: string): boolean {
+  if (/^[\\/]{2}/.test(dir) || /[\\/]\?\?[\\/]/.test(dir)) return false
+  try {
+    if (!lstatSync(dir).isDirectory()) return false
+    return lstatSync(join(dir, 'HEAD')).isFile()
+  } catch {
+    return false
+  }
+}
 
 /** 원격 환경 폴링 주기(ms). 창이 포커스를 잃으면 FOCUS_SLOWDOWN 배로 늦춘다 */
 const POLL_MS = { wsl: 4_000, ssh: 30_000 } as const
@@ -45,8 +60,15 @@ export class RepoWatcher {
   constructor(
     private readonly repos: RepoService,
     private readonly onChange: (repoId: string) => void,
-    private readonly owns: (repoId: string) => boolean = () => true
+    private readonly owns: (repoId: string) => boolean = () => true,
+    /** WSL 배포판이 등록돼 있는가(시험이 갈아 끼운다). 없으면 WSL 저장소의 폴링이 wsl.exe 를 부르지 않는다 — 스텁이 "WSL 설치" 창을 띄운다 */
+    private readonly wslRegistered: () => Promise<boolean> = hasRegisteredWslDistroCached
   ) {}
+
+  /** 시그니처를 계산해도 되는가 — WSL 저장소는 등록된 배포판이 있을 때만(1분 단위로 다시 본다) */
+  private async canCheck(repoId: string): Promise<boolean> {
+    return this.repos.repoKind(repoId) !== 'wsl' || (await this.wslRegistered())
+  }
 
   /** 지금 감시 중인 저장소 */
   get current(): string | null {
@@ -68,7 +90,7 @@ export class RepoWatcher {
       await this.repos.afterFirstPage(repoId)
       if (gen !== this.generation) return
       // signal 이 없는 호출은 제한 시간이 있는 공유 계산이다 — 멈춘 원격이어도 baselining 이 영영 남지 않는다
-      this.lastSig = await this.repos.signature(repoId).catch(() => null)
+      this.lastSig = (await this.canCheck(repoId)) ? await this.repos.signature(repoId).catch(() => null) : null
       if (gen !== this.generation) return
     } finally {
       // 다른 저장소로 바뀌어 중단된 경우에는 새 감시의 상태를 건드리지 않는다
@@ -97,7 +119,7 @@ export class RepoWatcher {
     for (const dir of dirs) {
       // .git 파일의 gitdir/commondir 은 저장소가 정한다 — 악성 저장소가 홈 전체나 네트워크 경로를 가리키면
       // 재귀 감시가 이벤트 폭주(DoS)가 되므로, 실제 git 디렉터리(HEAD 가 있는 곳)이고 네트워크 경로가 아닐 때만 감시한다
-      if (/^[\\/]{2}/.test(dir) || !existsSync(join(dir, 'HEAD'))) continue
+      if (!isWatchableGitDir(dir)) continue
       try {
         const w = watch(dir, { recursive: true }, (_event, file) => {
           // 객체 파일은 fetch·gc 때 대량으로 바뀐다 — ref 가 함께 바뀌므로 그쪽 이벤트로 충분하다
@@ -152,6 +174,7 @@ export class RepoWatcher {
     this.checkingGen = gen
     this.lastCheck = Date.now()
     try {
+      if (!(await this.canCheck(repoId)) || gen !== this.generation) return
       const sig = await this.repos.signature(repoId, AbortSignal.timeout(CHECK_TIMEOUT_MS))
       if (gen !== this.generation) return
       if (this.lastSig !== null && sig !== this.lastSig) this.onChange(repoId)

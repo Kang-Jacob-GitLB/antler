@@ -1836,7 +1836,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 파일 감시·소켓 시험은 고정 `sleep` 없이 **조건 + 20초 상한**으로 기다린다. 부정은 "다음 양성 이벤트 뒤의 정확한 알림 수"로 본다.
 
 **TS 와 다른 점**
-- **notify 핸들 닫기가 완전히 동기가 아니다.** notify 의 `Drop` 은 스레드에 정지만 알리고 돌아온다(join 하지 않는다). 핸들 `Drop` 은 notify 스레드가 이벤트 핸들러를 놓을 때까지 **최대 1.5초**(`CLOSE_WAIT`) 기다려 보통은 돌아올 때 OS 핸들·스레드가 닫혀 있게 하지만, 7a 의 "돌아오기 전에 이미 닫힌다"는 문자 그대로는 보장하지 않는다.
+- **notify 핸들 닫기가 완전히 동기가 아니다.** notify 의 `Drop` 은 스레드에 정지만 알리고 돌아온다(join 하지 않는다). 핸들 `Drop` 은 **닫기 요청을 즉시** 하고, 완료(notify 스레드가 이벤트 핸들러를 놓는 때)를 기다리는 것은 tokio 런타임 밖이거나 앱 종료 중(`RepoWatcher::dispose` → `DirWatch::begin_shutdown`)일 때뿐이다(최대 `CLOSE_WAIT` 1.5초). 런타임 안에서는 기다리지 않는다 — 보안 리뷰: 최대 1.5초 대기가 사이드카 리더 스레드와 `watch_target` 잠금 안(`router.rs` `set_watch`·`sync_watch`)에서 돌아 다른 요청을 막았다. 그래서 7a 시험의 "`watch(None)` 반환 전에 핸들이 닫힌다" 계약은 **"닫기 요청은 즉시, 완료는 비동기"** 로 고쳤다(가짜 핸들은 여전히 반환 전에 버려진다. 실제 핸들은 `live()` 가 곧 0 이 된다 — 시험은 조건으로 기다린다).
   호출 스레드(tokio 워커)는 그만큼까지 막힐 수 있다(보통 몇 ms). 디렉터리를 **여는 중에**(blocking 풀에서 등록하는 동안) 정지하면 그 핸들은 곧 버려진다 — 살아 있는 수(`NotifyDirs::live`)가 잠깐 남을 수 있어 시험은 0 이 될 때까지 기다린다. 지운 뒤 폴더를 삭제하는 것은 github 캐시뿐이고 그것은 사이드카 몫이라 무해하다.
 - 접근 이벤트를 버린다(Node `fs.watch` 는 inotify 의 열기·닫기를 알리지 않는다). 이벤트 세부(Windows ReadDirectoryChangesW vs `fs.watch`)는 다르지만 판정은 시그니처로만 하므로 결과는 같다.
 - SSH 폴링 시험은 포커스 신호·짧은 주기 주입을 쓴다(멈춘 시계는 실제 소켓 대기 중 자동 전진으로 제한 시간을 헛발화시켜 쓰지 않았다). 30초 기본 주기 자체는 7a 의 멈춘 시계 시험이 덮는다.
@@ -1848,11 +1848,16 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 - 네트워크 드라이브(매핑된 `Z:` 등)에 있는 로컬 저장소: `has_head`·감시 등록이 blocking 풀이라 UI 가 멈추지 않는지(UNC 경로는 감시하지 않는다).
 
 **남은 위험**
-- **디렉터리를 여는 동안의 정지·종료**: 위(살아 있는 수가 잠깐 남는다). 앱 종료(`RunEvent::Exit`)는 `shutdown` 이 `dispose` 로 핸들을 닫지만, notify 스레드가 1.5초 안에 끝나지 않으면 기다리지 않고 돌아온다(프로세스가 끝나며 정리된다).
+- **디렉터리를 여는 동안의 정지·종료**: 위(살아 있는 수가 잠깐 남는다). 앱 종료(`RunEvent::Exit`)는 `shutdown` 이 `dispose` 로 핸들을 닫고(이때만 런타임 안에서도 동기로 기다린다), notify 스레드가 1.5초 안에 끝나지 않으면 기다리지 않고 돌아온다(프로세스가 끝나며 정리된다).
 - 매핑된 네트워크 드라이브에서 notify 가 이벤트를 놓치면 60초 안전망 폴링이 잡는다(TS 와 같다).
 - 감시하지 않는 저장소(비활성)의 `known_signature` 는 알림 없이 낡을 수 있고 activity 가 그것을 재사용한다(TS 와 같다). 활성 저장소는 감시가 갱신한다.
 - 파일 감시 시험은 CI 러너의 부하에 약할 수 있다(상한 20초). 다른 빌드가 도는 PC 에서 `channels.rs` 72개를 `--test-threads` 없이 돌리면(20분 걸렸다) 7개가 실패했다(SSH 시나리오 ERROR·활동 ABORTED·fetch 승인 불일치). `--test-threads=2` 로 그 7개를 다시 돌리면 모두 통과했다 — 부하 탓으로 보지만 origin/main 에서의 대조는 하지 않았다.
-- 감시 방어(UNC·`HEAD` 없는 디렉터리 거부, `objects/` 무시)는 `docs/security.md` 의 "저장소 감시" 에 적었다.
+- 감시 방어(UNC·NT 네임스페이스·링크·`HEAD` 없는 디렉터리 거부, `objects/` 무시)는 `docs/security.md` 의 "저장소 감시" 에 적었다.
+
+**보안 리뷰 후속(LOW 4건 + WSL 폴링)** — 같은 PR 에 포함했다.
+- **감시 게이트가 링크·NT 경로를 따라가지 않는다.** `has_head` 는 `symlink_metadata`(디렉터리 자체가 실제 디렉터리, `HEAD` 가 실제 파일)로 본다 — `exists` 는 링크를 따라가 UNC 를 가리키는 링크면 stat 이 SMB 접속을 일으킨다. 거부 경로는 `is_unc` 에 NT 네임스페이스(`\??\UNC\…`, `fetch::guard::has_nt_namespace`)를 더한 `is_remote_path` 이고 stat **전에** 거른다. notify 는 `follow_symlinks(false)` 로 만든다. **Electron 동작도 같이 바꿨다**: `RepoWatcher.ts` 의 `isWatchableGitDir`(`lstatSync` · NT 접두 정규식 · 디렉터리 링크 거부). 시험 `tests/repoWatcherGate.test.ts`.
+- **`local_git_dirs` 에 취소와 20초 제한.** `DirWatch` 가 아니라 `WatchHost::local_git_dirs(repo_id, cancel)` 가 취소 신호를 받고, 감시가 `CHECK_TIMEOUT` 안에 끝나지 않으면 신호를 취소해 git 을 죽인다(감시 없이 안전망 폴링만 남는다). 저장소를 바꾸면 같은 신호가 취소된다.
+- **WSL 배포판 등록 관문(Electron 판 버그 수정 포함 — PR 설명에 적는다).** WSL 저장소가 활성이면 4초마다 `wsl.exe` 를 불렀는데 등록 확인이 없어, WSL 을 지운 PC 에서 system32 의 스텁이 "WSL 설치" 창을 띄운 일이 실제로 있었다. Rust: `exec::DistroGate`(레지스트리 `registered_distro_names` 의 기억된 답 — `docker-desktop*` 은 사용자 배포판이 아니다, 다시 읽기 `DISTRO_RECHECK` 1분, Windows 가 아니면 막지 않는다)를 `Runtimes::get` 의 WSL 분기에 둬 감시 폴링·`signature` 가 모두 지난다(등록이 없으면 실행기를 내주지 않아 `wsl.exe` 호출 0). **한계**: fetch 서비스의 실행기 생성(`lib.rs` `make_runner`)은 `Result` 를 돌려주지 않아 이번에 관문을 달지 않았다. TS: `hasRegisteredWslDistro` 의 1분 캐시판(`hasRegisteredWslDistroCached`·`cachedProbe`)을 `RepoWatcher`(기준·확인)와 `WslExecutor`(`run`·`stream`)가 쓴다 — 시험이 주입한다(`RepoWatcher` 4번째·`WslExecutor` 2번째 인자).
 
 ## Phase 0 에서 확인한 것
 

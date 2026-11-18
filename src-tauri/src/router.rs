@@ -50,7 +50,7 @@ use crate::git::code_browse::{
 };
 use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, SSH_LIMIT, WSL_LIMIT};
 use crate::git::exec::ssh::SshPool;
-use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, RunOpts, WslExecutor};
+use crate::git::exec::{DistroGate, ExecError, GitExecutor, LocalExecutor, RunOpts, WslExecutor};
 use crate::git::fetch::service::{FetchControl, FetchPrefs};
 use crate::git::fs_watch::NotifyDirs;
 use crate::git::file_channels::{
@@ -434,11 +434,18 @@ pub(crate) struct Runtimes {
     sources: Arc<Mutex<HashMap<String, Arc<SourceRuntime>>>>,
     /// 주입된 SSH 풀(스위치가 꺼져 있으면 없다)
     pool: Arc<Mutex<Option<Arc<SshPool>>>>,
+    /// WSL 배포판 등록 관문 — 등록된 배포판이 없으면 WSL 실행기를 내주지 않는다(`wsl.exe` 스텁이 "WSL 설치" 창을 띄운다)
+    wsl_gate: Arc<DistroGate>,
 }
 
 impl Runtimes {
-    fn new(mirror: RepoMirror) -> Self {
-        Runtimes { mirror, sources: Arc::default(), pool: Arc::default() }
+    pub(crate) fn new(mirror: RepoMirror) -> Self {
+        Self::with_wsl_gate(mirror, DistroGate::system())
+    }
+
+    /// 시험이 레지스트리 대신 가짜 프로브를 준다
+    pub(crate) fn with_wsl_gate(mirror: RepoMirror, gate: DistroGate) -> Self {
+        Runtimes { mirror, sources: Arc::default(), pool: Arc::default(), wsl_gate: Arc::new(gate) }
     }
 
     fn ssh_pool(&self) -> Option<Arc<SshPool>> {
@@ -447,6 +454,10 @@ impl Runtimes {
 
     /// 소스의 실행기·큐. ssh 는 호스트마다 하나이고 실행기는 풀에서 온다(풀이 없으면 — 미러가 ssh 를 풀지 않으므로 오지 않는 길 — 오류)
     pub(crate) fn get(&self, target: &Target) -> Result<Arc<SourceRuntime>, ExecError> {
+        // 기억해 둔 실행기가 있어도 먼저 본다 — 배포판이 지워진 뒤에도 폴링이 `wsl.exe` 를 부르지 않게
+        if matches!(target, Target::Wsl { .. }) && !self.wsl_gate.is_registered() {
+            return Err(ExecError::Other { message: "WSL 배포판이 등록돼 있지 않습니다".to_string() });
+        }
         let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
         let key = target.source_key();
         if let Some(rt) = sources.get(&key) {

@@ -7,11 +7,13 @@
 //!   확인이 확인을 부르는 고리를 막는다. 쓰기 자체는 `Modify`·`Create` 로도 오므로 놓치지 않는다. Windows 백엔드는 접근 이벤트를 내지 않는다)과 오류
 //!   (TS 는 `w.on('error', () => {})` — 디렉터리가 사라지면 안전망 폴링이 처리한다). 넘침(rescan 표시)은 무엇이 바뀌었는지 모르므로 확인한다.
 //! - **막지 않기**: `has_head`(stat)·감시 등록(notify 가 등록 확인을 기다린다)은 blocking 풀에서 돌린다 — 느린 네트워크 드라이브가 tokio 워커를 붙잡지 않는다.
-//! - **닫기**: notify 의 `Drop` 은 스레드에 정지만 알리고 돌아온다(join 하지 않는다). 핸들 `Drop` 은 notify 스레드가 이벤트 핸들러를 놓을 때까지(= 스레드가 끝나기 직전) [`CLOSE_WAIT`] 까지만 기다려
-//!   돌아올 때 OS 핸들·스레드가 거의 항상 닫히게 한다(7a 의 정지 계약). 상한 안에 끝나지 않으면 기다리지 않고 돌아오고 [`NotifyDirs::live`] 가 그 사실을 보여 준다.
+//! - **닫기**: notify 의 `Drop` 은 스레드에 정지만 알리고 돌아온다(join 하지 않는다). 핸들 `Drop` 은 **닫기 요청을 즉시** 하고, 완료(notify 스레드가 이벤트 핸들러를 놓는 때)는
+//!   tokio 런타임 밖이거나 종료 중([`NotifyDirs`] 의 `begin_shutdown`)일 때만 [`CLOSE_WAIT`] 까지 기다린다. 런타임 안에서는 기다리지 않는다 — 사이드카 리더 스레드·`watch_target` 잠금 안에서 최대 1.5초를 붙잡지 않게.
+//!   스레드가 곧 끝난다는 것은 [`NotifyDirs::live`] 가 보여 준다.
+//! - **링크·네트워크**: `has_head` 는 링크를 따라가지 않는다(`symlink_metadata` — 디렉터리 자체와 `HEAD` 가 실제 디렉터리·파일일 때만). notify 도 감시 안의 링크를 따라가지 않는다(`follow_symlinks(false)`).
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -68,11 +70,19 @@ impl Drop for Life {
 struct NotifyHandle {
     watcher: Option<RecommendedWatcher>,
     done: Arc<(Mutex<bool>, Condvar)>,
+    /// 앱 종료가 시작됐다(`DirWatch::begin_shutdown`) — 이때만은 런타임 안에서도 기다린다
+    shutdown: Arc<AtomicBool>,
 }
 
 impl Drop for NotifyHandle {
     fn drop(&mut self) {
+        // 닫기 요청은 즉시 — notify 가 스레드에 정지를 알리고 돌아온다
         drop(self.watcher.take());
+        // 완료를 기다리는 것은 종료 중이거나 tokio 런타임 밖일 때뿐이다. 런타임 안(사이드카 리더 스레드·`watch_target` 잠금 안·태스크)에서는
+        // 최대 1.5초를 붙잡아 다른 요청을 막으므로 기다리지 않는다 — 스레드는 곧 끝나고 `NotifyDirs::live` 가 그 사실을 보여 준다
+        if !self.shutdown.load(Ordering::SeqCst) && tokio::runtime::Handle::try_current().is_ok() {
+            return;
+        }
         let (flag, cv) = &*self.done;
         let guard = flag.lock().unwrap_or_else(PoisonError::into_inner);
         // 시간 초과여도 기다림을 접는다(스레드가 멈췄어도 정지를 부른 쪽이 붙잡히지 않는다)
@@ -81,29 +91,40 @@ impl Drop for NotifyHandle {
 }
 
 /// `root` 를 재귀로 감시한다(blocking 풀에서 부른다)
-fn open(root: PathBuf, sink: EventSink, live: &Arc<AtomicUsize>) -> Result<WatchHandle, String> {
+fn open(root: PathBuf, sink: EventSink, live: &Arc<AtomicUsize>, shutdown: &Arc<AtomicBool>) -> Result<WatchHandle, String> {
     let life = Life::new(live);
     let done = life.done.clone();
     let base = root.clone();
     // `life` 는 이벤트 핸들러가 쥔다 — 핸들러를 쥔 notify 스레드가 끝나면 함께 사라진다(등록에 실패해 핸들러가 버려져도 같다)
-    let watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
-        let _alive = &life;
-        for e in translate(&base, res) {
-            sink(e);
-        }
-    })
+    // 링크를 따라가지 않는다(기본값은 따라간다) — 감시 디렉터리 안의 링크가 밖(네트워크 경로 포함)으로 이어져 접속·이벤트 폭주를 일으키지 않게
+    let watcher = RecommendedWatcher::new(
+        move |res: notify::Result<Event>| {
+            let _alive = &life;
+            for e in translate(&base, res) {
+                sink(e);
+            }
+        },
+        notify::Config::default().with_follow_symlinks(false),
+    )
     .map_err(|e| e.to_string())?;
-    let mut handle = NotifyHandle { watcher: Some(watcher), done };
+    let mut handle = NotifyHandle { watcher: Some(watcher), done, shutdown: shutdown.clone() };
     if let Some(w) = handle.watcher.as_mut() {
         w.watch(&root, RecursiveMode::Recursive).map_err(|e| e.to_string())?;
     }
     Ok(Box::new(handle))
 }
 
+/// 링크를 따라가지 않고(`symlink_metadata`) 디렉터리 자체가 실제 디렉터리이고 `HEAD` 가 실제 파일인가. 링크는 어느 쪽이든 거부한다 —
+/// `exists`·`metadata` 는 링크를 따라가므로 UNC 를 가리키는 링크면 stat 이 SMB 접속을 일으킨다
+fn is_real_git_dir(dir: &Path) -> bool {
+    std::fs::symlink_metadata(dir).is_ok_and(|m| m.file_type().is_dir()) && std::fs::symlink_metadata(dir.join("HEAD")).is_ok_and(|m| m.file_type().is_file())
+}
+
 /// notify 로 구현한 [`DirWatch`]. 복제하면 같은 살아 있는 수를 본다(라우터가 하나를 쥐고 시험이 같은 값을 읽는다)
 #[derive(Clone, Default)]
 pub struct NotifyDirs {
     live: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl NotifyDirs {
@@ -119,13 +140,17 @@ impl NotifyDirs {
 
 impl DirWatch for NotifyDirs {
     fn has_head(&self, dir: &str) -> BoxFuture<'static, bool> {
-        let head = Path::new(dir).join("HEAD");
-        async move { tokio::task::spawn_blocking(move || head.exists()).await.unwrap_or(false) }.boxed()
+        let dir = PathBuf::from(dir);
+        async move { tokio::task::spawn_blocking(move || is_real_git_dir(&dir)).await.unwrap_or(false) }.boxed()
     }
 
     fn watch(&self, dir: &str, sink: EventSink) -> BoxFuture<'static, Result<WatchHandle, String>> {
-        let (root, live) = (PathBuf::from(dir), self.live.clone());
-        async move { tokio::task::spawn_blocking(move || open(root, sink, &live)).await.map_err(|e| e.to_string())? }.boxed()
+        let (root, live, shutdown) = (PathBuf::from(dir), self.live.clone(), self.shutdown.clone());
+        async move { tokio::task::spawn_blocking(move || open(root, sink, &live, &shutdown)).await.map_err(|e| e.to_string())? }.boxed()
+    }
+
+    fn begin_shutdown(&self) {
+        self.shutdown.store(true, Ordering::SeqCst);
     }
 }
 
@@ -235,7 +260,7 @@ mod tests {
         assert!(got.iter().filter(|e| rel(e).starts_with("objects/")).all(|e| !e.should_kick()), "objects/ 이벤트는 확인을 부르면 안 된다: {got:?}");
         assert!(got.iter().all(|e| !rel(e).contains(&tmp.s().replace('\\', "/"))), "절대 경로가 새면 안 된다: {got:?}");
         drop(handle);
-        assert_eq!(dirs.live(), 0, "핸들을 닫으면 notify 스레드가 끝난다");
+        assert!(live_reaches(&dirs, 0).await, "핸들을 닫으면 notify 스레드가 곧 끝난다");
         // 닫은 뒤의 변화는 오지 않는다
         while rx.try_recv().is_ok() {}
         fs::write(tmp.0.join("refs").join("heads").join("after"), "0000\n").unwrap();
@@ -251,7 +276,7 @@ mod tests {
         assert!(!dirs.has_head(&tmp.0.join("none").to_string_lossy()).await);
         let (sink, _rx) = collector();
         assert!(dirs.watch(&tmp.0.join("none").to_string_lossy(), sink).await.is_err());
-        assert_eq!(dirs.live(), 0);
+        assert!(live_reaches(&dirs, 0).await);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -265,6 +290,83 @@ mod tests {
         }
         assert_eq!(dirs.live(), 8);
         drop(handles);
+        assert!(live_reaches(&dirs, 0).await, "런타임 안에서 닫으면 기다리지 않지만 스레드는 곧 끝난다");
+    }
+
+    /// 런타임 밖에서 닫으면 notify 스레드가 끝날 때까지 기다린다(돌아온 즉시 0)
+    #[test]
+    fn 런타임_밖에서_닫으면_스레드_종료까지_기다린다() {
+        let tmp = Tmp::new();
+        let dirs = NotifyDirs::new();
+        let (sink, _rx) = collector();
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let handle = rt.block_on(dirs.watch(&tmp.s(), sink)).expect("감시 등록");
+        assert_eq!(dirs.live(), 1);
+        drop(handle);
         assert_eq!(dirs.live(), 0);
+    }
+
+    /// 종료가 시작되면 런타임 안에서도 끝날 때까지 기다린다(`RepoWatcher::dispose` 가 알린다)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn 종료가_시작되면_런타임_안에서도_스레드_종료까지_기다린다() {
+        let tmp = Tmp::new();
+        let dirs = NotifyDirs::new();
+        let (sink, _rx) = collector();
+        let handle = dirs.watch(&tmp.s(), sink).await.expect("감시 등록");
+        dirs.begin_shutdown();
+        drop(handle);
+        assert_eq!(dirs.live(), 0);
+    }
+
+    /// 링크는 따라가지 않는다 — 디렉터리 자체가 링크이거나 `HEAD` 가 링크면 거부한다(심볼릭 링크를 못 만드는 환경은 건너뛴다)
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn 링크인_디렉터리와_head_는_거부한다() {
+        let tmp = Tmp::new();
+        let dirs = NotifyDirs::new();
+        assert!(dirs.has_head(&tmp.s()).await);
+        // HEAD 가 디렉터리면 파일이 아니다
+        let other = Tmp::new();
+        fs::remove_file(other.0.join("HEAD")).unwrap();
+        fs::create_dir(other.0.join("HEAD")).unwrap();
+        assert!(!dirs.has_head(&other.s()).await);
+        // HEAD 가 링크
+        let linked = Tmp::new();
+        fs::remove_file(linked.0.join("HEAD")).unwrap();
+        if make_link(&tmp.0.join("HEAD"), &linked.0.join("HEAD"), false) {
+            assert!(!dirs.has_head(&linked.s()).await, "HEAD 링크는 따라가지 않는다");
+        }
+        // 디렉터리 자체가 링크
+        let link = std::env::temp_dir().join(format!("antler-fswatch-link-{}", std::process::id()));
+        if make_link(&tmp.0, &link, true) {
+            assert!(!dirs.has_head(&link.to_string_lossy()).await, "디렉터리 링크는 따라가지 않는다");
+            let _ = fs::remove_dir(&link);
+        }
+    }
+
+    #[cfg(unix)]
+    fn make_link(target: &Path, link: &Path, _dir: bool) -> bool {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+
+    /// Windows: 파일은 심볼릭 링크(권한이 없으면 실패 → 건너뜀), 디렉터리는 심볼릭 링크 시도
+    #[cfg(windows)]
+    fn make_link(target: &Path, link: &Path, dir: bool) -> bool {
+        if dir {
+            std::os::windows::fs::symlink_dir(target, link).is_ok()
+        } else {
+            std::os::windows::fs::symlink_file(target, link).is_ok()
+        }
+    }
+
+    /// 살아 있는 notify 스레드 수가 `n` 이 되기를 기다린다(상한 5초)
+    async fn live_reaches(dirs: &NotifyDirs, n: usize) -> bool {
+        let until = Instant::now() + Duration::from_secs(5);
+        while dirs.live() != n {
+            if Instant::now() >= until {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        true
     }
 }

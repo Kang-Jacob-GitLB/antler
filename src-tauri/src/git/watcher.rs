@@ -106,10 +106,13 @@ pub type WatchHandle = Box<dyn Send>;
 /// 디렉터리 이벤트원. `fs_watch::NotifyDirs`(notify)가 구현하고 시험은 가짜로 갈아 끼운다.
 /// 두 메서드는 future 다 — 파일 시스템을 만지므로(느린 네트워크 드라이브 stat·감시 등록의 확인 대기) 구현이 blocking 풀에서 돌려 tokio 워커를 막지 않는다
 pub trait DirWatch: Send + Sync + 'static {
-    /// `dir` 이 실제 git 디렉터리인가(`HEAD` 가 있는가)
+    /// `dir` 이 실제 git 디렉터리인가 — **링크를 따라가지 않고** 디렉터리 자체와 `HEAD` 가 링크가 아닌 실제 디렉터리·파일일 때만 `true`
+    /// (악성 저장소가 UNC 심볼릭 링크를 가리키면 stat 만으로도 SMB 접속이 일어난다)
     fn has_head(&self, dir: &str) -> BoxFuture<'static, bool>;
     /// `dir` 을 재귀로 감시한다. 이벤트마다 `sink` 를 부른다. 재귀 감시를 못 하는 파일 시스템이면 `Err` — 안전망 폴링에 맡긴다
     fn watch(&self, dir: &str, sink: EventSink) -> BoxFuture<'static, Result<WatchHandle, String>>;
+    /// 앱 종료가 시작됐다 — 이후 핸들을 닫을 때는 OS 핸들·스레드가 끝날 때까지 **동기로** 기다린다(종료 직전에 스레드를 남기지 않는다). 기본은 아무것도 하지 않는다
+    fn begin_shutdown(&self) {}
 }
 
 /// 안전망·원격 폴링 주기(포커스 중). 기본은 TS 와 같은 상수이고, 시험만 짧게 준다([`RepoWatcher::with_poll`])
@@ -144,8 +147,8 @@ pub trait WatchHost: Send + Sync + 'static {
     fn after_first_page(&self, repo_id: &str) -> BoxFuture<'static, ()>;
     /// ref 시그니처. 취소 신호가 없는 호출(기준 계산)은 제한 시간이 있는 공유 계산이어야 한다 — 멈춘 원격이어도 기준 계산이 영영 남지 않게
     fn signature(&self, repo_id: &str, cancel: Option<CancellationToken>) -> BoxFuture<'static, Result<Signature, SigError>>;
-    /// `git rev-parse --path-format=absolute --git-dir --git-common-dir` 의 디렉터리들. 실패하면 `None`
-    fn local_git_dirs(&self, repo_id: &str) -> BoxFuture<'static, Option<Vec<String>>>;
+    /// `git rev-parse --path-format=absolute --git-dir --git-common-dir` 의 디렉터리들. 실패하면 `None`. `cancel` 이 취소되면 git 을 죽인다(감시가 제한 시간을 걸고 취소한다)
+    fn local_git_dirs(&self, repo_id: &str, cancel: CancellationToken) -> BoxFuture<'static, Option<Vec<String>>>;
     /// 시그니처가 바뀌었다
     fn on_change(&self, repo_id: &str);
 }
@@ -156,14 +159,20 @@ pub fn is_unc(dir: &str) -> bool {
     b.len() >= 2 && matches!(b[0], b'/' | b'\\') && matches!(b[1], b'/' | b'\\')
 }
 
+/// 감시하지 않을 경로인가 — UNC 에 더해 NT 네임스페이스(`\??\UNC\host\share`)도 네트워크로 이어진다.
+/// 어느 쪽이든 `has_head` 의 stat 이 SMB 접속을 일으키므로 **stat 하기 전에** 거른다
+pub fn is_remote_path(dir: &str) -> bool {
+    is_unc(dir) || crate::git::fetch::guard::has_nt_namespace(dir)
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// 활성 저장소 하나를 감시한다. **복제되지 않는 소유자**다 — 공유가 필요하면 `Arc` 로 감싼다. 버리면(`dispose` 를 부르지 않아도) 감시가 멈춘다.
 ///
-/// 정지 계약: [`watch`](Self::watch)(`None`·다른 저장소)·[`unwatch_if`](Self::unwatch_if)·`Drop` 이 돌아올 때 이전 저장소의 **맡겨진** 디렉터리 감시 핸들은 닫혀 있다
-/// (TS `stop()` 의 `w.close()`). 실제 notify 핸들(`fs_watch`)은 notify 가 스레드에 정지만 알리고 돌아오므로 `Drop` 이 스레드 종료를 최대 `CLOSE_WAIT`(1.5초)까지 기다릴 뿐 보장하지는 않고,
+/// 정지 계약: [`watch`](Self::watch)(`None`·다른 저장소)·[`unwatch_if`](Self::unwatch_if)·`Drop` 이 돌아올 때 이전 저장소의 **맡겨진** 디렉터리 감시 핸들은 **닫기 요청이 끝나 있다**(핸들을 이 스레드에서 바로 버린다 — TS `stop()` 의 `w.close()`). 실제 notify 핸들(`fs_watch`)은 요청만 즉시 하고 notify 스레드의 종료(완료)는 비동기다 —
+/// 런타임 안에서는 기다리지 않아(사이드카 리더 스레드·`watch_target` 잠금을 최대 1.5초 붙잡지 않는다) 그 사이 `NotifyDirs::live` 가 잠깐 남는다. 앱 종료([`dispose`](Self::dispose))만 끝날 때까지 기다린다.
 /// 디렉터리를 **여는 중**(blocking 풀에서 등록하는 동안)에 정지하면 그 핸들은 곧 버려진다 — 호출처가 바로 폴더를 지워도 되는 보장으로 쓰지 않는다(github 캐시 삭제는 사이드카 몫이다). 또 멀티스레드 런타임에서는
 /// 정지 직전에 끝난 확인의 `on_change` 가 드물게 정지 뒤에 한 번 늦게 올 수 있다 — 받는 쪽(renderer)이 activeRepoId 로 거른다
 pub struct RepoWatcher {
@@ -339,7 +348,9 @@ impl RepoWatcher {
         }
     }
 
+    /// 앱 종료. 디렉터리 핸들을 **끝날 때까지 기다려** 닫는다([`DirWatch::begin_shutdown`]) — 평소의 정지는 닫기를 요청만 하고 기다리지 않는다
     pub fn dispose(&self) {
+        self.inner.dirs.begin_shutdown();
         self.watch(None);
     }
 }
@@ -386,9 +397,14 @@ impl Inner {
     /// `.git` 디렉터리들에 감시를 건다. 악성 저장소의 `.git` 파일이 gitdir/commondir 로 홈 전체나 네트워크 경로를 가리키면
     /// 재귀 감시가 이벤트 폭주(DoS)가 되므로, 실제 git 디렉터리(`HEAD` 가 있는 곳)이고 네트워크 경로가 아닐 때만 건다
     async fn watch_dirs(&self, repo_id: &str, events: &Arc<Events>, ctl: &Ctl, cancel: &CancellationToken) {
-        let Some(dirs) = self.host.local_git_dirs(repo_id).await else { return };
+        // 멈춘 git 이 감시 시작을 붙잡지 않게 제한 시간을 걸고, 넘기면 git 에 취소를 보낸다(확인과 같다)
+        let token = cancel.child_token();
+        let Ok(Some(dirs)) = timeout(CHECK_TIMEOUT, self.host.local_git_dirs(repo_id, token.clone())).await else {
+            token.cancel();
+            return;
+        };
         for dir in dirs {
-            if is_unc(&dir) || !self.dirs.has_head(&dir).await {
+            if is_remote_path(&dir) || !self.dirs.has_head(&dir).await {
                 continue;
             }
             let events = events.clone();
@@ -537,6 +553,10 @@ mod tests {
         fail_baseline: AtomicBool,
         gate: Mutex<Option<Arc<Notify>>>,
         git_dirs: Mutex<Option<Vec<String>>>,
+        /// `local_git_dirs` 가 끝나지 않는다(멈춘 git)
+        hang_dirs: AtomicBool,
+        /// `local_git_dirs` 가 받은 취소 신호
+        dir_tokens: Mutex<Vec<CancellationToken>>,
         /// (t0 기준 시각, 취소 신호가 있는가)
         calls: Mutex<Vec<(Duration, bool)>>,
         tokens: Mutex<Vec<CancellationToken>>,
@@ -597,9 +617,17 @@ mod tests {
             }
             .boxed()
         }
-        fn local_git_dirs(&self, _: &str) -> BoxFuture<'static, Option<Vec<String>>> {
+        fn local_git_dirs(&self, _: &str, cancel: CancellationToken) -> BoxFuture<'static, Option<Vec<String>>> {
+            lock(&self.dir_tokens).push(cancel);
             let dirs = lock(&self.git_dirs).clone();
-            async move { dirs }.boxed()
+            let hang = self.hang_dirs.load(Ordering::SeqCst);
+            async move {
+                if hang {
+                    pending::<()>().await;
+                }
+                dirs
+            }
+            .boxed()
         }
         fn on_change(&self, repo_id: &str) {
             lock(&self.changes).push((repo_id.to_string(), self.since()));
@@ -630,6 +658,8 @@ mod tests {
                 fail_baseline: AtomicBool::new(false),
                 gate: Mutex::new(None),
                 git_dirs: Mutex::new(Some(vec!["/r/.git".to_string()])),
+                hang_dirs: AtomicBool::new(false),
+                dir_tokens: Mutex::default(),
                 calls: Mutex::default(),
                 tokens: Mutex::default(),
                 changes: Mutex::default(),
@@ -1063,7 +1093,17 @@ mod tests {
     async fn unc_경로와_head_가_없는_디렉터리는_감시하지_않는다() {
         let fx = Fx::new(Some(WatchKind::Local));
         *lock(&fx.host.git_dirs) = Some(
-            ["\\\\server\\share\\.git", "//host/x/.git", "C:\\repo\\.git", "C:\\nohead", "/home/x/.git"].map(String::from).to_vec(),
+            [
+                "\\\\server\\share\\.git",
+                "//host/x/.git",
+                "\\??\\UNC\\server\\share\\.git",
+                "//??/UNC/server/share/.git",
+                "C:\\repo\\.git",
+                "C:\\nohead",
+                "/home/x/.git",
+            ]
+            .map(String::from)
+            .to_vec(),
         );
         lock(&fx.dirs.no_head).push("C:\\nohead".to_string());
         fx.w.watch(Some("r"));
@@ -1073,6 +1113,46 @@ mod tests {
         lock(&fx.dirs.sinks)[1].1(WatchEvent::at("refs/heads/x"));
         fx.at(401).await;
         assert_eq!(fx.host.checks().len(), 1);
+    }
+
+    #[test]
+    fn 네트워크_경로_판정은_unc_와_nt_네임스페이스를_거부한다() {
+        for (d, remote) in [
+            ("\\\\server\\share", true),
+            ("//host/x", true),
+            ("\\??\\UNC\\server\\share", true),
+            ("//??/UNC/server/share", true),
+            ("C:\\x\\??\\y", true),
+            ("C:\\repo\\.git", false),
+            ("/home/x/.git", false),
+            ("", false),
+        ] {
+            assert_eq!(is_remote_path(d), remote, "{d:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn 멈춘_git_디렉터리_조회는_20초에_취소되고_안전망_폴링만_남는다() {
+        let fx = Fx::new(Some(WatchKind::Local));
+        fx.host.hang_dirs.store(true, Ordering::SeqCst);
+        fx.w.watch(Some("r"));
+        fx.at(19_000).await;
+        assert!(!lock(&fx.host.dir_tokens)[0].is_cancelled(), "제한 시간 전에는 취소하지 않는다");
+        fx.at(20_001).await;
+        settle().await;
+        assert!(lock(&fx.host.dir_tokens)[0].is_cancelled(), "제한 시간이 지나면 git 에 취소를 보낸다");
+        assert!(fx.dirs.watched().is_empty());
+        // 감시 루프는 계속 돈다 — 제한 시간이 지난 뒤 60초에 안전망 폴링
+        fx.at(80_001).await;
+        assert_eq!(fx.host.checks().len(), 1);
+        // 저장소를 바꾸면(취소) 조회 중인 신호도 취소된다
+        let fx2 = Fx::new(Some(WatchKind::Local));
+        fx2.host.hang_dirs.store(true, Ordering::SeqCst);
+        fx2.w.watch(Some("r"));
+        settle().await;
+        fx2.w.watch(None);
+        settle().await;
+        assert!(lock(&fx2.host.dir_tokens)[0].is_cancelled());
     }
 
     #[tokio::test(start_paused = true)]

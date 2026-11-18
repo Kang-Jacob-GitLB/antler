@@ -87,7 +87,7 @@ impl WatchHost for RouterWatchHost {
         }
     }
 
-    fn local_git_dirs(&self, repo_id: &str) -> BoxFuture<'static, Option<Vec<String>>> {
+    fn local_git_dirs(&self, repo_id: &str, cancel: CancellationToken) -> BoxFuture<'static, Option<Vec<String>>> {
         let target = match self.mirror.resolve_fetch(repo_id) {
             Resolved::Rust(t @ Target::Local { .. }) => t,
             _ => return async { None }.boxed(),
@@ -97,9 +97,9 @@ impl WatchHost for RouterWatchHost {
         async move {
             // 큐의 결과 타입이 JSON 이라 출력은 문자열로 싣는다. 종료 코드가 0 이 아니면 `Null`(= 모름)
             let out = queue
-                .run(None, None, move || async move {
+                .run(None, Some(cancel.clone()), move || async move {
                     let args = ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"];
-                    let r = exec.run(&path, &args, &RunOpts::default()).await?;
+                    let r = exec.run(&path, &args, &RunOpts::with_cancel(cancel)).await?;
                     Ok::<_, ExecError>(Arc::new(if r.code == 0 { Value::String(String::from_utf8_lossy(&r.stdout).into_owned()) } else { Value::Null }))
                 })
                 .await
@@ -120,6 +120,25 @@ impl WatchHost for RouterWatchHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 등록된_배포판이_없으면_wsl_실행기를_내주지_않는다_로컬은_영향이_없다() {
+        use crate::git::exec::DistroGate;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let registered = Arc::new(AtomicBool::new(false));
+        let r = registered.clone();
+        // 간격 0 — 호출마다 다시 읽는다(관문의 기억은 wsl.rs 시험이 본다)
+        let runtimes = Runtimes::with_wsl_gate(RepoMirror::default(), DistroGate::new(move || r.load(Ordering::SeqCst), std::time::Duration::ZERO));
+        let wsl = Target::Wsl { distro: "Ubuntu".into(), path: "/home/me/repo".into() };
+        let err = runtimes.get(&wsl).err().expect("등록이 없으면 wsl.exe 를 부를 실행기를 만들지 않는다");
+        assert!(err.to_string().contains("등록"), "{err}");
+        assert!(runtimes.get(&Target::Local { path: "C:/r".into() }).is_ok());
+        // 설치된 뒤에는 만들어지고, 지워지면 기억해 둔 실행기도 막는다
+        registered.store(true, Ordering::SeqCst);
+        assert!(runtimes.get(&wsl).is_ok());
+        registered.store(false, Ordering::SeqCst);
+        assert!(runtimes.get(&wsl).is_err());
+    }
 
     #[test]
     fn git_디렉터리_목록은_줄마다_다듬고_빈_줄과_중복을_뺀다() {
