@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 7a(감시 상태 기계) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -1102,7 +1102,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 | 4 | `search`·`activity` | 있음 | **완료** |
 | 5 | `repoExtras`·`lfsPaths` | 있음 | **완료(코드)** — 작업 트리 `--no-index` 읽기는 #121 의 `FilterGuard` 로 필터를 무력화한다(아래 "필터 실행 차단") |
 | 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | |
-| 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | |
+| 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | 7a **완료** |
 | 8 | `gh:repo`·repoq 의 git 조회 | 있음 | |
 
 모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 마지막 PR 에서 이식 대응표의 `N/A: PR n` 이 0개여야 한다.
@@ -1484,6 +1484,28 @@ TS 하네스는 `git` 단계 뒤에 `svc.noteLog('logStale', id)` 를 부른다 
 - `wipDiff` untracked 의 가드는 PR 6 의 몫이다(`filter_overrides` 는 준비돼 있다).
 - `lfsPaths` 의 `--source` 폴백은 실제 옛 git(2.40 미만)으로 돌려 본 적이 없다 — 판정 함수만 단위 시험했다(TS 도 같다).
 - 골든이 TS 와 같다는 것은 시나리오(`repoExtras` 19단계·`lfsPaths` 41단계)의 범위만큼만 보장한다. 이름에 NUL 아닌 비 UTF-8 바이트가 든 `.gitattributes` 경로는 `U+FFFD` 로 바뀐 이름으로 `cat-file` 이 실패해 그 파일만 건너뛴다(TS 와 같다 — 시험하지 않았다).
+
+### PR 7a — 감시 상태 기계(앱에 연결하지 않는다)
+
+`src-tauri/src/git/watcher.rs`(새, 새 크레이트 없음). TS `RepoWatcher.ts` 의 상태 전이를 순수 로직으로 옮겼고, **사이드카 감시는 그대로**다(Rust 감시자는 아무도 만들지 않는다).
+- **주입점**: `DirWatch`(이벤트원 — `has_head`·`watch(dir, sink)`; 7b 가 notify 로 구현)와 `WatchHost`(저장소 종류·첫 페이지 문·시그니처·git 디렉터리·`on_change`; 7b 가 `RepoState`·`GitRunner` 로 구현). 시계는 `tokio::time` 이라 시험이 `start_paused` 로 멈춘다(fetch 서비스와 같다 — 별도 시계 트레이트는 두지 않았다).
+- **상태 기계**: 저장소마다 태스크 하나가 기준 시그니처(첫 페이지 문 뒤)→ 디렉터리 감시 → `select!`(이벤트 깨움·디바운스 마감·포커스 확인·안전망 폴링·진행 중 확인)을 돈다. `Timing::kick` 이 TS `kick` 의 1:1 이다(디바운스 400ms·확인 사이 2초·2초 넘게 기다린 확인은 더 미루지 않음).
+  확인은 한 번에 하나(진행 중이면 건너뜀)·20초 제한(넘으면 git 에 취소)·기준을 못 잡았으면 첫 확인은 기억만·바뀌었을 때만 `on_change`. 폴링은 로컬·github 60초, WSL 4초, SSH 30초이고 포커스를 잃은 채 **거는** 타이머만 4배다.
+- **이벤트 필터**: 경로(감시 디렉터리 기준 상대, `\`→`/`)가 `objects/` 로 시작하면 버리고, 경로를 모르거나 rescan 표시면 확인한다. UNC(`^[\\/]{2}`)·`HEAD` 없는 디렉터리는 감시하지 않는다(악성 `.git` 파일의 DoS 방어).
+- **스레드 경계**: 이벤트 콜백은 `AtomicBool`+`Notify` 로 합칠 뿐 쌓지 않는다(10만 이벤트 → 확인 1회). 저장소를 바꾸면 태스크를 취소해 이전 확인의 결과가 버려지고 git 에도 취소가 간다. `Signature::for_test`(`cfg(test)`)만 `signature.rs` 에 더했다.
+
+**시험**(`watcher.rs` 단위 24개, 가짜 `DirWatch`·`WatchHost`·멈춘 시계): 상수·종류별 주기, 이벤트 필터 표, UNC 판정, 디바운스(399ms 전엔 없고 401ms 에 확인)·알림 여부(시그니처가 같으면 확인만 하고 알리지 않음)·최소 간격(2400ms)·끊이지 않는 이벤트(2200ms 에 확인)·10만 이벤트,
+WSL(4초→포커스 잃으면 16초)·SSH(30초)·로컬 60초 폴링, 포커스 얻으면 즉시 확인·진행 중이면 건너뜀·기준 중 포커스 무시·첫 페이지 문 전에는 폴링도 걸지 않음, 기준 실패 뒤 첫 확인은 기억만, 확인 실패 뒤 재시도, 20초 제한과 취소, 저장소 전환 중 늦게 끝난 확인 무시·핸들 닫힘, 멈춤·dispose, UNC·HEAD 없음 거부, git 디렉터리 조회 실패·종류 모름.
+`test-map.json` 의 `repoWatcher` 항목은 실제 git·파일 변화를 쓰는 `it` 하나뿐이라 **그대로 `N/A: PR 7b`** 다(그 `it` 의 상태 전이 부분은 위 시험이 덮고, 실제 git·notify 는 7b 가 옮긴다).
+
+**TS 와 다른 점**
+- `watch` 가 동기다(기준 계산은 태스크). 이벤트는 합쳐서 처리한다 — 같은 순간의 이벤트는 TS 에서도 같은 결과다. 이벤트 사이 간격이 있으면 깨어나는 즉시 처리하므로 TS 와 같다.
+- 기준을 잡은 뒤 디렉터리를 여는 동안(`git rev-parse` 한 번) 받은 포커스는 감시 루프가 시작된 뒤에 확인한다(TS 는 바로).
+- 알려진 TS 동작을 그대로 옮겼다: **확인이 진행 중일 때 온 이벤트의 확인은 건너뛰고 다시 부르지 않는다**(그 사이 바뀐 ref 는 다음 이벤트·폴링에서 잡는다).
+
+**7b 로 넘긴 것**: notify 어댑터(`DirWatch` 구현·`has_head` 의 실제 파일 검사), `WatchHost` 구현(`RepoState` 의 `after_first_page`·`shared_signature`/`compute_signature`, 확인마다 `known_signature` 갱신), 라우터·`lib.rs` 포커스 배선(`router::in_runtime_of`), 사이드카 `owns`(소유 전환은 한 PR), `repo:changed` 이벤트 싱크, activity 의 시그니처 재사용 켜기, 실제 git·SSH 루프백 시험, 종료 뒤 notify 스레드 0.
+
+**남은 위험**: 확인 건너뜀(위)이 TS 와 같아 변화를 한 주기 늦게 알 수 있다. 상태 기계 시험은 가짜 이벤트원이라 notify 의 실제 이벤트 모양(rename·rescan 표시)은 7b 에서 처음 확인된다.
 
 ## Phase 0 에서 확인한 것
 
