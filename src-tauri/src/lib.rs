@@ -195,39 +195,14 @@ pub fn run() {
             // 저장소 추가 창의 환경 채널(Phase 6b PR 8)의 포트: WSL 목록(레지스트리 관문 뒤의 `list_distros` — `wsl.exe` 를 직접 부르지 않는다)·`~/.ssh/config` 별칭(홈을 모르면 빈 목록)·
             // 설정에 없는 SSH 호스트의 확인 창(dialogs.rs)·local/wsl 실행기. ssh 연결은 위의 풀이 맡는다(풀이 없으면 ssh 종류는 사이드카가 처리한다). 스위치가 꺼져 있으면 주입하지 않는다
             router.set_env(env_host_port(app.handle().clone(), home.map(|h| h.to_string_lossy().into_owned())));
-            // fetch 서비스(local·wsl 저장소). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다
-            if router.enabled() {
-                let ssh_pool = router.ssh_pool();
-                let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone(), router.note_sink());
-                let no_hooks_dir = user_data.join("no-hooks").to_string_lossy().into_owned();
-                let runner_mirror = mirror.clone();
-                let make_runner = move |target: &Target| match target {
-                    Target::Local { .. } => std::sync::Arc::new(GitExecutor::Local(LocalExecutor::default())),
-                    Target::Wsl { distro, .. } => std::sync::Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))),
-                    // ssh fetch(Phase 5 PR 4): 라우터와 같은 풀의 실행기(호스트당 연결 하나·채널 6개 한도 공유)를 쓴다. 풀이 닫은 실행기는 서비스가 `is_closed` 로 알아보고 새로 받는다.
-                    // 호스트가 아직 미러에 있는지는 **풀 잠금 안에서** 다시 본다(`get_if`) — 서비스의 확인은 라우터와 다른 잠금이라, 그 사이 정리된 호스트를 닫히지 않은 채 풀에 다시 넣지 않게
-                    Target::Ssh { host, .. } => std::sync::Arc::new(GitExecutor::Ssh(
-                        ssh_pool.as_ref().and_then(|pool| pool.get_if(host, || runner_mirror.ssh_hosts().contains(host))).unwrap_or_else(|| {
-                            // 풀이 없거나(오지 않는 길) 호스트가 방금 빠졌다 — 어떤 설정 파일도 읽지 않게 닫힌 실행기를 준다(모든 호출이 거부되고, 서비스는 다음 resolve 에서 버린다)
-                            let closed = SshPool::for_home("").get(host);
-                            closed.dispose();
-                            closed
-                        }),
-                    )),
-                    // github 의 fetch 소유는 PR 7 까지 사이드카다 — `resolve_fetch` 가 종류 목록(`rust_fetch_kinds`)에 없는 github 를 풀지 않으므로 오지 않는 길이다.
-                    // 와도 일반 fetch 의 허용 목록·환경으로 앱 캐시를 fetch 하는 일이 없게 닫힌 실행기(모든 호출 거부)를 준다
-                    Target::Github { .. } => std::sync::Arc::new(GitExecutor::Ssh({
-                        let closed = SshPool::for_home("").get("github");
-                        closed.dispose();
-                        closed
-                    })),
-                };
-                router.set_fetch(std::sync::Arc::new(FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir))));
-            }
             // Jira·GitHub 서비스(PR 6·9). 스위치가 꺼져 있으면(ANTLER_RUST_API=0·ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다.
             // 켜져 있으면 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결·로그인은 여기서 복원한다.
             // 사이드카의 env(ANTLER_RUST_API) 하나가 두 서비스를 함께 넘기므로 **둘 다** 만들어졌을 때만 둘 다 주입한다(하나만 되면 사이드카가 둘 다 처리한다)
             let mut gh_service: Option<github::service::GitHubService> = None;
+            // github 캐시 실행기의 복제(라우터가 받은 것과 같은 `LiveProcs` 를 본다) — 아래 fetch 서비스의 github 실행기가 된다. 라우터가 받지 않았으면(서비스 없음·스위치 꺼짐) 없다
+            let mut github_exec: Option<GithubExecutor> = None;
+            // 위 실행기가 읽는 네트워크 설정 칸(읽기 완료 신호를 fetch 서비스가 기다린다)
+            let mut github_net: Option<git::exec::NetConfig> = None;
             if router.api_enabled() {
                 let vault = std::sync::Arc::new(secret::Vault::new(secret::open_store(std::env::var_os("ANTLER_USER_DATA").as_deref())));
                 let jira = jira::service::JiraService::new(vault.clone());
@@ -244,27 +219,34 @@ pub fn run() {
                         router.set_github(api_host::GithubHost { service: gh.clone(), opener: std::sync::Arc::new(open_https) });
                         // GitHub 원격 전용 저장소의 조회(Phase 6b PR 6): 토큰은 이 서비스의 것이 호출 때마다 읽혀 실행기의 환경 변수로만 간다(로그인·로그아웃이 바로 반영된다).
                         // 사용자 git 설정의 네트워크 키(프록시·인증서)는 앱 시작 때 한 번 읽는다 — 읽는 동안·읽지 못하면 빈 목록이다(TS 의 `netConfig` 와 같다).
-                        // fetch·감시는 PR 7 전까지 사이드카가 맡는다. 서비스가 없거나 스위치가 꺼져 있으면 주입이 무시되고 github 는 사이드카가 전부 처리한다
+                        // fetch·감시도 같은 스위치로 Rust 가 맡는다(PR 7 — `rust_fetch_kinds` 의 github). 서비스가 없거나 스위치가 꺼져 있으면 주입이 무시되고 github 는 사이드카가 전부 처리한다
                         if router.enabled() {
-                            let net_config: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> = std::sync::Arc::default();
-                            let (slot, token_svc) = (net_config.clone(), gh.clone());
+                            // 읽기가 끝나면 신호가 선다 — fetch 서비스가 첫 fetch 앞에서 그것을 기다린다(TS `githubReady`, 상한 5초)
+                            let net_config = git::exec::NetConfig::default();
+                            let (slot, reader, token_svc) = (net_config.clone(), net_config.clone(), gh.clone());
                             tauri::async_runtime::spawn(async move {
-                                let read = git::github_cache::read_network_config("git").await;
-                                *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = read;
+                                slot.set(git::github_cache::read_network_config("git").await);
                             });
-                            router.set_github_cache(GithubExecutor::new(
+                            github_net = Some(net_config);
+                            let exec = GithubExecutor::new(
                                 "git",
                                 user_data.join("remote-repos").to_string_lossy().into_owned(),
                                 user_data.join("no-hooks").to_string_lossy().into_owned(),
                                 std::sync::Arc::new(move || token_svc.git_token()),
-                                std::sync::Arc::new(move || net_config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()),
-                            ));
+                                std::sync::Arc::new(move || reader.get()),
+                            );
+                            router.set_github_cache(exec.clone());
+                            github_exec = router.github_cache_active().then_some(exec);
                         }
-                        // 토큰이 바뀌면(로그인·로그아웃·폐기) 사이드카의 메모리 사본을 갱신한다. 서비스가 자기 자신을 쥐는 고리라 앱이 끝날 때까지 산다
+                        // 토큰이 바뀌면(로그인·로그아웃·폐기) 사이드카의 메모리 사본을 갱신하고, 인증 문제로 멈춘 원격 전용 저장소의 fetch 를 다시 연다(TS `onAuthChanged` → `resumeGithubAuth`).
+                        // 서비스가 자기 자신을 쥐는 고리라 앱이 끝날 때까지 산다. 서비스가 어느 스레드에서 부르는지 모르므로 앱 런타임에 들어가서 라우터를 부른다
                         let (handle, svc) = (app.handle().clone(), gh.clone());
                         gh.set_on_auth_changed(move || {
                             if let Some(s) = handle.try_state::<sidecar::Sidecar>() {
                                 s.push_gh_token(|| svc.git_token());
+                            }
+                            if let Some(r) = handle.try_state::<router::Router>() {
+                                router::in_runtime_of(tauri::async_runtime::handle().inner(), || r.github_auth_changed());
                             }
                         });
                         gh_service = Some(gh);
@@ -279,9 +261,51 @@ pub fn run() {
                     }
                 }
             }
+            // fetch 서비스(local·wsl 저장소, 그리고 Rust 가 푸는 ssh·github). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다.
+            // **SSH 풀·GitHub 캐시 실행기보다 뒤다** — 실행기 공장이 둘을 쓰고, 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)가 같은 판정(`ssh_active`·`github_cache_active`)을 따른다
+            if router.enabled() {
+                let ssh_pool = router.ssh_pool();
+                let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone(), router.note_sink());
+                let no_hooks_dir = user_data.join("no-hooks").to_string_lossy().into_owned();
+                let runner_mirror = mirror.clone();
+                let github_runner = github_exec.clone();
+                let make_runner = move |target: &Target| match target {
+                    Target::Local { .. } => std::sync::Arc::new(GitExecutor::Local(LocalExecutor::default())),
+                    Target::Wsl { distro, .. } => std::sync::Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))),
+                    // ssh fetch(Phase 5 PR 4): 라우터와 같은 풀의 실행기(호스트당 연결 하나·채널 6개 한도 공유)를 쓴다. 풀이 닫은 실행기는 서비스가 `is_closed` 로 알아보고 새로 받는다.
+                    // 호스트가 아직 미러에 있는지는 **풀 잠금 안에서** 다시 본다(`get_if`) — 서비스의 확인은 라우터와 다른 잠금이라, 그 사이 정리된 호스트를 닫히지 않은 채 풀에 다시 넣지 않게
+                    Target::Ssh { host, .. } => std::sync::Arc::new(GitExecutor::Ssh(
+                        ssh_pool.as_ref().and_then(|pool| pool.get_if(host, || runner_mirror.ssh_hosts().contains(host))).unwrap_or_else(|| {
+                            // 풀이 없거나(오지 않는 길) 호스트가 방금 빠졌다 — 어떤 설정 파일도 읽지 않게 닫힌 실행기를 준다(모든 호출이 거부되고, 서비스는 다음 resolve 에서 버린다)
+                            let closed = SshPool::for_home("").get(host);
+                            closed.dispose();
+                            closed
+                        }),
+                    )),
+                    // github fetch(Phase 6b PR 7): **라우터가 받은 것과 같은 캐시 실행기**(복제 — 진행 중 프로세스 표가 같다. `repos:remove` 가 fetch 프로세스도 기다릴 수 있다).
+                    // 실행기가 없으면(`resolve_fetch` 가 github 를 풀지 않으므로 오지 않는 길) 일반 fetch 의 허용 목록·환경으로 앱 캐시를 받는 일이 없게 닫힌 실행기(모든 호출 거부)를 준다
+                    Target::Github { .. } => match &github_runner {
+                        Some(exec) => std::sync::Arc::new(GitExecutor::Github(exec.clone())),
+                        None => std::sync::Arc::new(GitExecutor::Ssh({
+                            let closed = SshPool::for_home("").get("github");
+                            closed.dispose();
+                            closed
+                        })),
+                    },
+                };
+                let mut service = FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir));
+                if github_exec.is_some() {
+                    service = service.with_github_cache(user_data.join("remote-repos").to_string_lossy().into_owned());
+                    if let Some(net) = github_net.clone() {
+                        service = service.with_github_net_ready(net);
+                    }
+                }
+                router.set_fetch(std::sync::Arc::new(service));
+            }
             // 사이드카에 ssh 를 Rust 가 처리함을 알리는 값. 미러의 ssh 해석과 같은 판정(ssh_active) 하나다 — fetch 소유 종류(local,wsl[,ssh])도 이 값으로 정한다
             let rust_ssh = router.ssh_active();
-            let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh);
+            let rust_github = router.github_cache_active();
+            let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github);
             // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
             let rust_api = router.claim_api();
             app.manage(router);

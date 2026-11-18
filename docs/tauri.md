@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -2019,7 +2019,7 @@ SFTP 채널 닫기 순서가 실제 sshd 의 `MaxSessions` 에 걸릴 수 있다
 
 ### PR 6 — GitHub 원격 전용 저장소의 git 조회를 Rust 가 처리한다(`mirror.rs`·`router.rs`, 앱에 연결한다)
 
-**범위**: github kind 저장소의 **조회**(`git:commit`·`log`·`compare`·`fileDiff`·`fileHistory`·`blame`·`resolveRev`·`tree`·`blob`·`onRemote`·`refs`·`refsDetails`·`search`·`activity`·`repoExtras`·`lfsPaths`·`wipStatus`·`wipDiff`·`gh:repo` 와 GitHub 서비스의 `gh_remotes`·`pushed_shas`)과
+**범위(PR 7 이 fetch·감시도 넘겼다 — 아래)**: github kind 저장소의 **조회**(`git:commit`·`log`·`compare`·`fileDiff`·`fileHistory`·`blame`·`resolveRev`·`tree`·`blob`·`onRemote`·`refs`·`refsDetails`·`search`·`activity`·`repoExtras`·`lfsPaths`·`wipStatus`·`wipDiff`·`gh:repo` 와 GitHub 서비스의 `gh_remotes`·`pushed_shas`)과
 `repos:remove` 의 Rust 쪽 정리. **fetch·감시는 사이드카에 그대로 둔다**(계획 §13 C2 — `rust_fetch_kinds` 에 github 를 넣으면 PR 7 전에 아무도 fetch 하지 않는다. PR 7 이 같은 술어 하나로 함께 넘긴다). 새 크레이트 없음.
 
 | 파일 | 내용 |
@@ -2030,7 +2030,7 @@ SFTP 채널 닫기 순서가 실제 sshd 의 `MaxSessions` 에 걸릴 수 있다
 | `git/log_service.rs` | `close_repo`(한 저장소의 커서·앵커를 앵커 없이 닫는다) |
 | `git/github_cache.rs` | `remove_github_cache(&GithubCachePath)` — TS `removeCacheDir` 이식(`<기준>/<owner>/<repo>.git` 모양 타입만 받는다·owner/저장소 폴더가 링크(정션 포함)면 `Ok(false)`·10회×100ms 재시도·빈 owner 폴더 정리). **앱에는 연결하지 않았다**(아래 "repos:remove") |
 | `lib.rs` | GitHub 서비스 주입 직후 `set_github_cache(GithubExecutor::new("git", <userData>/remote-repos, <userData>/no-hooks, 토큰=서비스 `git_token()`, 네트워크 설정=앱 시작 때 한 번 `read_network_config`))`. 사이드카를 띄우기 전이다. fetch 서비스의 실행기 공장에 `Target::Github` 갈래(오지 않는 길 — 닫힌 실행기, 일반 실행기를 주지 않는다) |
-| `src/sidecar/mirror.ts`·`protocol.ts` | 미러에 `github?:{owner,repo}`(기본 브랜치는 싣지 않는다 — 바뀌어도 미러가 바뀌지 않게). Rust `config::derive::mirror_of` 도 같은 모양(설정 골든 `tests/golden/config/store.json` 의 미러 절 재생성) |
+| `src/sidecar/mirror.ts`·`protocol.ts` | 미러에 `github?:{owner,repo}`(기본 브랜치는 PR 6 에서는 싣지 않았다 — **PR 7 이 `defaultBranch` 를 더해 이 결정을 뒤집었다**, 아래). Rust `config::derive::mirror_of` 도 같은 모양(설정 골든 `tests/golden/config/store.json` 의 미러 절 재생성) |
 
 **소유 술어(일관성)**: 조회 = `RepoMirror::resolve` 의 `github` 스위치(스위치 `ANTLER_RUST_GIT`·GitHub 서비스(`ANTLER_RUST_API`)·캐시 실행기가 모두 있어야 켜진다), fetch·감시 = `resolve_fetch`(종류 목록 `local,wsl[,ssh]`) — 이 둘이 서로 다른 것이 의도다. 스위치가 하나라도 꺼지면 github 는 지금처럼 사이드카가 전부 맡는다
 (`ANTLER_RUST_API=0` 이면 사이드카가 자기 토큰으로 조회한다). `repos:watch` 는 github 를 Rust 가 감시하지 않는다(`set_watch` 가 `resolve_fetch` 를 보고 이전 감시를 멈춘다) — 다만 첫 페이지 문(`arm`)은 `resolve` 를 보므로 Rust 가 푸는 github 저장소도 닫는다(Rust 의 로그가 열어 준다).
@@ -2049,7 +2049,7 @@ activity 가 ref 변경(알림 없음)을 반영·**토큰 비노출**(23개 호
 대응표(`tests/golden/repos/test-map.json`): `N/A: PR 6` 4개를 `github_route.rs::…` 로 옮겼다(`goldenConfig.test.ts` 의 소스 목록에 `github_route.rs` 를 더했다). **TS 쪽 골든 하네스는 만들지 않았다** — 같은 저장소의 local 결과와 비교하는 방식으로 대신했다(TS `RepoService` 는 같은 코드를 실행기만 바꿔 타므로 local 결과가 곧 TS 기준이다).
 
 **PR 9 계약**: `config/derive.rs` 의 `mirror_of`(42-46행)와 `mirror.rs` 의 `apply_with_links`(119행 — 시험·설정 쪽이 쓴다)는 링크의 owner/repo 를 `sanitize_github_link` 없이 읽는다. 지금은 사이드카가 검증한 값만 `apply_message` 를 거쳐 들어오므로 안전하지만,
-PR 9 가 설정에서 미러를 직접 만들 때는 **반드시 `sanitize_github_link`(또는 `apply_message` 의 같은 경로)를 거쳐** 링크를 넣는다 — 건너뛰면 검증되지 않은 owner/repo 가 `gh:repo`·GitHub 서비스 질의로 간다.
+PR 9 가 설정에서 미러를 직접 만들 때는 **반드시 `sanitize_github_link`(또는 `apply_message` 의 같은 경로)를 거쳐** 링크를 넣는다 — 건너뛰면 검증되지 않은 owner/repo 가 `gh:repo`·GitHub 서비스 질의로 간다. **기본 브랜치도 같다**(PR 7): `RepoMirror::apply_with_branches`·`apply_message` 만 `is_safe_branch`(와 유효한 링크)를 적용한다 — `config::derive::mirror_of` 가 만든 `defaultBranch` 를 그 두 길 밖으로 `ref` 이름에 넘기지 않는다.
 
 **TS 와 다른 점**
 - 라우터가 github 저장소의 모든 조회를 하나의 취소 범위로 묶어 `repos:remove` 가 끊는다(TS 는 한 프로세스라 `retire` 로 커서만 닫고 진행 중 조회는 `rmSync` 재시도에 맡겼다).
@@ -2067,6 +2067,54 @@ PR 9 가 설정에서 미러를 직접 만들 때는 **반드시 `sanitize_githu
 - 공유 시그니처 계산(`RepoState::shared_signature`)은 별도 태스크라 `repos:remove` 의 범위에 들지 않는다 — 그 순간 `for-each-ref` 가 돌고 있으면 최대 20초 폴더를 쥘 수 있다(사이드카의 삭제는 재시도 1초 뒤 포기하고 고아 정리가 다음 시작에 지운다).
 - 삭제 요청과 미러 갱신 사이(사이드카가 레코드를 지우기 전)에 들어오는 새 조회는 새 범위를 받아 폴더를 다시 쥘 수 있다(TS 도 같은 틈이 있다).
 - 토큰은 환경 변수(`GIT_CONFIG_VALUE_n`)로만 간다. 자식 프로세스의 환경 블록은 OS 가 복사하므로 0 으로 덮지 못한다(PR 2 와 같다). 네트워크 설정(프록시·인증서)은 앱 시작 때 비동기로 한 번 읽어 그동안의 lazy fetch 는 그 키 없이 간다(TS 도 같다).
+
+### PR 7 — GitHub 원격 전용 저장소의 fetch 와 감시를 Rust 가 맡는다(`git/fetch/service/github.rs`·`router.rs`, 앱에 연결한다 — 보안 리뷰 집중)
+
+**범위**: github kind 저장소의 fetch(수동·자동·선택 즉시·포커스)·HEAD 맞추기·감시와, `repos:remove` 의 **기다리는 forget**. 캐시 폴더 삭제·추가·고아 정리는 설정 소유(PR 9)까지 사이드카다. 새 크레이트 없음. **TLS 고정(#143)은 main 에 아직 없다** — PR 2 의 `github_env` 를 그대로 쓰고, #143 이 들어오면 그 변경이 이 갈래에도 그대로 적용된다(환경을 만드는 곳이 `github_env` 한 곳이다).
+
+| 파일 | 내용 |
+|---|---|
+| `router.rs` | `rust_fetch_kinds(ssh_active, github_active)`·`sidecar_fetch_kinds(router_enabled, ssh_active, github_active)` — github 는 **조회와 같은 플래그**(`Router::github_cache_active` = 스위치·GitHub 서비스·캐시 실행기)일 때만 `local,wsl[,ssh],github` 에 든다. `repos:remove` 가로채기(`release_github_repo`)가 **표식 → fetch forget-and-wait(최대 5초) → 감시 정지(`watch_target` 과 함께) → 조회 범위 정리 → 프로세스 드레인** 순으로 한다. `github_removing` 표식은 `repos:watch`(`set_watch`)도 거른다. `activity` 가 github 저장소의 기억한 시그니처를 쓴다(PR 6 의 예외 제거 — fetch·감시가 알림을 준다). `Router::github_auth_changed` |
+| `mirror.rs` | `resolve_fetch` 가 `rust_fetch_kinds(ssh, github)` 를 부른다 — 사이드카 env 와 같은 함수·같은 입력. `RepoMirror::github_branch(id)`: 레코드의 기본 브랜치(`is_safe_branch` 를 통과한 것만, 링크가 유효할 때만). **`Target` 에는 넣지 않는다** — 첫 fetch 가 브랜치를 기록해 미러가 바뀌어도 감시·로그 커서가 "대상이 바뀌었다"고 다시 시작하지 않게 |
+| `git/fetch/service.rs`·`service/github.rs` | 일반 갈래(허용 목록·확인 창·승인) 앞에서 `Target::Github` 를 **`github_task` 로만** 보낸다. `github_task`: 링크·캐시 경로 일치(`cache_path_matches_link`·`GithubCachePath::new` — 어긋나면 `blocked: github (앱 캐시 경로가 저장소와 맞지 않음)`, 일반 흐름으로 가지 않는다) → `inspect_github_repo_at`(정확 일치·`origin` 하나 — 어긋나면 확인 없이 차단·네트워크 없음) → `run_github_fetch`(`--filter=blob:none`·`http.followRedirects=false`·고정 refspec·`--refmap=`) → `ensure_github_head`(레코드 브랜치 → `origin/HEAD` → `ls-remote`) → 알아낸 브랜치가 레코드와 다르면 `FetchHost::github_branch`. `Deadline`: 일반은 요청 때, github 는 **큐 슬롯을 얻은 뒤** 건다(ref 가 없으면 60분, 아니면 60초 — 시간 초과 문구에 실제 제한). 실패 분류는 `classify_failure(text, github)`(401·403·404·"Repository not found" 는 인증 정지). `fetch_if_empty`(선택 즉시), `resume_github_auth`(로그인 변경 — 멈춘 저장소를 풀고 열고 있는 빈 저장소를 바로 받는다, **진행 중인 fetch 는 건드리지 않는다**), `forget_and_wait`(5초 상한·삭제 중 표식으로 새 fetch 거부) |
+| `git/github_cache.rs`·`git/fetch/run.rs` | `inspect_github_repo_at`(원격 URL 출처 인자 — `None` 이 프로덕션 `https://github.com` 고정)·`has_no_refs`·`github_net_args`(`ls-remote` 앞의 fetch 와 같은 `-c` — 서비스가 `hooks_path_for` 를 직접 부르지 않게) |
+| `watch_host.rs` | `WatchKind::Github`(notify — 실행기가 로컬이다)·`local_git_dirs` 가 github 대상도 |
+| `lib.rs`·`fetch_host.rs`·`sidecar.rs` | fetch 서비스를 **GitHub 캐시 실행기 주입 뒤**에 만든다(실행기 공장이 라우터가 받은 `GithubExecutor` 의 복제를 쓴다 — 진행 중 프로세스 표(`LiveProcs`)가 같아 삭제 드레인이 fetch 도 센다). 서비스에 `with_github_cache(<userData>/remote-repos)`. 사이드카 env 는 `rust_github = router.github_cache_active()`. GitHub 로그인 콜백이 `router.github_auth_changed()`(`in_runtime_of`). `{t:"githubBranch",repoId,branch}` 줄(`Sidecar::github_branch`) |
+| `src/sidecar/` | `fetchOwns.ts` 의 허용 토큰에 `github`. `mirror.ts`·`protocol.ts`: 미러의 `github` 에 `defaultBranch`(Rust `config::derive::mirror_of` 도 같다 — 설정 골든 `store.json` 의 미러 절 재생성). `githubBranch.ts`(새): 저장소 존재·github 소스·`isSafeBranch` 를 다시 검사한 뒤 `setGithubDefaultBranch` — `fetchApprove.ts` 와 같은 모양이고 `index.ts` 가 예외를 삼켜 로그만 남긴다 |
+
+**소유 술어(일관성)**: github 의 조회·fetch·감시 소유는 **플래그 하나**(`RepoMirror.github`)다. 사이드카 env(`rust_github`)·미러의 `resolve`/`resolve_fetch`·감시 소유가 모두 이 값에서 나온다 — `ANTLER_RUST_GIT=0`·`ANTLER_RUST_API=0`·실행기 없음·GitHub 서비스 없음이면 env 에서 `github` 가 빠지고(또는 env 자체가 없고) Rust 는 맡지 않으며 사이드카가 전부 맡는다. 이중 fetch·이중 감시·무감시가 없다
+(`tests/github_fetch.rs::소유_판정은_사이드카_env_와_일치하고_이중_fetch_도_무감시도_없다` 가 여섯 조합을 본다).
+
+**보안 경계(리뷰 집중)**: (1) **일반 저장소가 github 갈래를 타는 길이 없다** — 갈래는 `Target::Github` 에서만 열리고, 그 대상은 미러가 `kind=="github"` 이고 스위치가 켜졌을 때만 만든다(`Target::Github` 를 만드는 곳은 `resolve` 한 곳). (2) **github 가 허용 목록 갈래를 타지 않는다** — 일반 갈래 앞에서 `github_task` 로 반환한다(소스 검사: 디스패치가 `inspect_config` 보다 앞이고, github 갈래는 `inspect_config`·`run_fetch`·승인·확인 창을 부르지 않으며, 일반 갈래는 `run_github_fetch`·`inspect_github_repo_at` 를 부르지 않는다). (3) **토큰이 리다이렉트·다른 호스트로 가지 않는다** — `http.followRedirects=false`(환경과 `-c` 둘 다)·`extraheader` 는 `https://github.com/` 로 한정(시험: 127.0.0.1 가짜 서버가 302 를 줘도 대상 서버에 요청 0·Authorization 헤더 0). (4) 토큰은 이벤트·오류·상태에 없다(`assert_no_secret`). (5) 원격 URL 출처 주입(`with_github_origin_for_test`)과 서비스의 `origin` 필드는 `test-hooks` 뒤에만 있다(배포 빌드에는 필드가 없다). (6) HEAD 쓰기(캐시 안의 ref 쓰기)는 `is_safe_branch` 를 통과한 이름만이고 `ensure_github_head` 호출은 이 갈래 한 곳이다.
+
+**삭제 순서(계획 §13 C2)**: renderer 가 `repos:remove` → 라우터가 "삭제 중" 표식 → **fetch 중지·대기**(서비스도 새 fetch 거부) → **감시 중지**(같은 저장소로 `repos:watch` 가 다시 와도 거부) → 진행 중 조회·로그 커서·활동 시그니처 정리 → 그 저장소의 git 프로세스 0 확인 → 사이드카가 레코드를 지우고 캐시 폴더를 지운다(PR 9 에서 Rust 로). 사이드카의 `forgetAndWait`·감시 정지는 이제 이 저장소에서 할 일이 없다(소유가 아니라 상태가 없다).
+
+**시험**: 새 바이너리 `tests/github_fetch.rs`(23개, `test-hooks`, `tauri.yml` 목록에 추가). 실제 git·`file:///` 소스·127.0.0.1 가짜 HTTP 서버(`tests/ghcache` 의 `StubServer` — 상태 코드·302·무응답) — 첫 fetch(받기·HEAD·기본 브랜치 기록 부탁 1회·미러가 알면 부탁 없음·원격 브랜치 이름 변경),
+**설정 오염 5종**(core.sshCommand·remote url·include.path·remote 둘·promisor — 확인 창·승인 없이 차단·받은 ref 0), **레코드·경로 불일치 3종**(다른 저장소 캐시·캐시 밖·링크 없음), 401·403 은 인증 정지·**로그인 변경이 다시 연다**(요청이 늘고 정지가 풀린 상태 이벤트), 5xx 는 네트워크 실패, **리다이렉트 거부**,
+**60분/60초·슬롯 대기 제외**(멈춘 시계 + 가짜 실행기), 소유 판정 6조합·`git:fetch` 라우팅, **감시**(bare 캐시의 외부 ref 변경을 notify 가 알림), **`repos:remove`**(응답 없는 서버에 걸린 fetch 와 감시가 정리돼 폴더가 바로 지워지고 새 fetch·감시는 거부), `forget_and_wait`, 소스 검사 4개.
+기존 시험의 갱신: `fetch_route`(종류 목록 4조합·`in_runtime_of` 3곳·github 갈래도 `resolve_fetch` 만)·`github_route`(소유 시험을 뒤집음 — fetch·감시도 Rust, 활동이 기억을 쓰고 `fetchChanged` 가 버림)·`watch_route`(소유 술어 4조합)·`ssh_route`(env 줄)·`mirror.rs`(브랜치)·`config.rs`(미러 골든의 `defaultBranch`). vitest: `sidecarFetchOwns`(github 토큰)·`sidecarMirror`(`defaultBranch`)·`sidecarGithubBranch`(새).
+**TS↔Rust 골든 패리티는 없다**: 계획이 말한 `target:"github"` fetch 시나리오 골든은 만들지 않았다(github 의 status 이벤트 순서를 TS 가 만든 골든과 대조하지 않는다) — 같은 흐름을 실제 git 통합 시험과 멈춘 시계 시험으로 봤다. 실패 문구 분류·설정 정확 일치·`git` 인자는 PR 2 의 골든이 이미 고정한다.
+대응표(`tests/golden/repos/test-map.json`): `N/A: PR 7` 5개를 `github_fetch.rs::…` 로 옮겼다(`goldenConfig.test.ts` 의 소스 목록에 `github_fetch.rs` 추가).
+
+**TS 와 다른 점**
+- **토큰 갱신**: TS·Rust 모두 진행 중인 fetch 를 취소하지 않는다. Rust 는 토큰을 git 을 띄울 때마다 읽는다(`GithubExecutor::spec`) — fetch 한 번 안의 `ls-remote`·`fetch` 가 다른 토큰을 쓸 수 있다는 점만 다르다(TS 는 fetch 시작 때 환경을 한 번 만든다).
+- **네트워크 설정 대기**: TS 와 같다. 사용자 git 설정(프록시·인증서)을 앱 시작 때 비동기로 읽고(`NetConfig` — 값 칸과 읽기 완료 신호), github fetch 가 `run_github_fetch` 앞에서 그 신호를 기다린다. 다른 점은 **상한 5초**(`NET_READY_TIMEOUT`)가 있다는 것뿐이다 — 넘기면 그 키 없이 돈다(실패하면 네트워크 실패로 백오프 뒤 다시). 읽지 못해 빈 목록이어도 신호는 선다.
+- **실행 직전 재검사**: 시그니처 계산 → 정확 일치 검사 → `run_github_fetch` 를 붙이고(검사와 fetch 사이에 다른 git 호출이 없다), `ensure_github_head`(`ls-remote` 가 네트워크를 쓴다) 앞에서 검사를 한 번 더 한다. 어긋나면 차단 상태로 두고 HEAD 맞추기를 생략하고, 검사 자체가 실패해도 생략한다.
+- **기본 브랜치**: 미러에 `defaultBranch` 가 실려 간다(TS 는 한 프로세스라 설정을 직접 읽는다). 기록은 사이드카에 부탁한다 — 미러가 새 값을 받기 전에 같은 fetch 가 한 번 더 돌면 부탁이 한 번 더 간다(사이드카는 같은 값이면 아무것도 하지 않는다).
+- 삭제 중인 저장소의 새 fetch·감시를 서비스·라우터가 거부한다(TS 는 한 프로세스의 순서에 기댄다).
+- 선택 즉시 fetch 의 `has_no_refs` 와 제한 계산의 `has_no_refs` 는 fetch 큐를 거치지 않고 실행기를 직접 부른다(TS 는 조회 큐). 큐를 거치면 같은 큐의 fetch 를 기다리는 자리가 생긴다.
+
+**사람 확인(자동화 불가·실환경)**
+- 실제 GitHub 로그인 → GitHub 탭으로 저장소 추가 → **선택 즉시 첫 fetch**(진행 표시)·큰 저장소의 첫 fetch 가 60초를 넘겨도 60분까지 가는지, 끝난 뒤 그래프·HEAD·기본 브랜치가 열리고 다음 실행의 설정 파일에 `defaultBranch` 가 기록됐는지(`ANTLER_ROUTE_LOG=1` 로 `git:fetch -> rust`).
+- private 저장소: 로그아웃 상태에서 인증 정지 표시가 뜨고, 다시 로그인하면 **새로고침 없이** 다시 받는지. 토큰이 만료돼 401 이 나는 경우도 같다.
+- 회사 프록시·사설 인증서 환경에서 fetch 가 되는지(사용자 git 설정의 네트워크 키를 읽는다 — 시작 직후 첫 fetch 가 실패하면 위의 "네트워크 설정 대기" 차이다).
+- github 저장소를 연 채 외부에서(다른 git 도구로) 캐시 폴더에 쓰는 일은 없지만, 앱이 받은 새 ref 가 그래프에 반영되는지(감시 + `repo:changed`). `ANTLER_RUST_GIT=0`(사이드카)과 같은 화면인지.
+- 삭제: fetch 가 진행 중인 github 저장소를 삭제해도 즉시 사라지고 캐시 폴더가 남지 않는지.
+
+**남은 위험**
+- `forget_and_wait` 의 5초 상한을 넘기는 fetch(프로세스 트리 종료가 늦는 경우)는 삭제를 붙잡지 않고 계속 돈다 — 뒤이은 드레인(5초)·사이드카의 삭제 재시도·고아 정리가 안전망이다(TS 와 같다).
+- 감시는 활성 저장소 하나만이라 비활성 github 저장소의 활동 기억은 알림 없이 낡을 수 있다(local 과 같다).
+- 첫 fetch 의 60분은 슬롯을 쥔 채라 같은 소스(github)의 다른 저장소 fetch 는 그동안 기다린다(TS 와 같다 — 큐가 소스당 1).
 
 ## 업데이터·패키징·Electron 사용자 이관(Phase 6c, `src-tauri/src/update/`)
 

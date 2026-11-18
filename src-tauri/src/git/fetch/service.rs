@@ -1,4 +1,5 @@
-//! fetch 상태 기계(`src/main/services/FetchService.ts` 의 이식, GitHub 원격 전용 갈래는 뺐다). 앱에서는 라우터가 [`FetchControl`] 로 부른다(local·WSL 저장소, 그리고 Rust 가 ssh 를 풀 때는 ssh 저장소).
+//! fetch 상태 기계(`src/main/services/FetchService.ts` 의 이식). 앱에서는 라우터가 [`FetchControl`] 로 부른다(local·WSL 저장소, 그리고 Rust 가 풀 때는 ssh·github 저장소).
+//! GitHub 원격 전용 저장소(github kind)는 **다른 갈래**다(`service/github.rs` — 허용 목록·확인 창 없이 정확 일치 검사, 큐 슬롯을 얻은 뒤부터 재는 60분/60초 제한, 선택 즉시 fetch, 로그인 변경으로 인증 정지 해제, 삭제 전 기다리는 forget).
 //!
 //! 이 앱이 저장소에 하는 유일한 쓰기라 흐름을 TS 와 같게 둔다:
 //! - 저장소당 진행 중인 요청은 하나다 — 진행 중이면 같은 [`FetchFuture`] 를 돌려준다(두 번째 호출의 `manual` 은 무시된다. TS 와 같다).
@@ -19,7 +20,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -30,6 +31,8 @@ use tokio::sync::OnceCell;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+
+mod github;
 
 use super::confirm_text::{fetch_confirm_plan, ConfirmBox, Decision};
 use super::guard::{classify_failure, next_delay_ms, version_at_least, FetchFailure, GitVersion, FILE_TRANSPORT_MIN_GIT};
@@ -47,6 +50,13 @@ pub const DEFAULT_AUTO_FETCH_MINUTES: f64 = 5.0;
 pub const FIRST_DELAY: Duration = Duration::from_secs(3);
 /// fetch 한 번의 제한 시간(요청 시점부터)
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+/// GitHub 원격 전용 저장소의 첫 fetch(아직 ref 가 없다)는 이력 전체를 받으므로 넉넉히 둔다. 큐 슬롯을 얻은 뒤부터 잰다
+pub const GITHUB_FIRST_FETCH_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// 저장소를 지우기 전에 진행 중인 fetch 가 끝나기를 기다리는 최대 시간(그 뒤에는 고아 캐시 정리가 안전망이다)
+pub const FORGET_WAIT: Duration = Duration::from_secs(5);
+/// "삭제 중" 표식의 안전장치 시간 — 레코드가 지워지지 않아도 이 시간이 지나면 풀린다(그 저장소가 영영 막히지 않게)
+const REMOVING_TTL: Duration = Duration::from_secs(30);
+const REMOVING_MESSAGE: &str = "저장소를 삭제하는 중입니다";
 const MAX_ERROR_LEN: usize = 300;
 /// 주기 계산이 JS 숫자처럼 무한이 될 때의 상한
 const DELAY_CAP: Duration = Duration::from_secs(30 * 24 * 60 * 60);
@@ -133,6 +143,10 @@ pub trait FetchHost: Send + Sync + 'static {
     /// 사이드카의 RepoService 에 알린다(`{t:"note"}`)
     fn note(&self, op: NoteOp, repo_id: &str);
 
+    /// GitHub 원격 전용 저장소의 fetch 가 HEAD 를 맞추며 알아낸 기본 브랜치가 레코드의 값과 다르다 — 사이드카가 레코드에 기록하게 부탁한다(설정 소유 PR 9 까지).
+    /// 서비스가 부르는 곳은 github 갈래 한 군데뿐이고, 이름은 `is_safe_branch` 를 통과한 값이다
+    fn github_branch(&self, _repo_id: &str, _branch: &str) {}
+
     /// 확인 창 제목에 쓸 저장소 이름(TS `config.repo(id)?.name ?? id`). 앱은 미러의 `name` 에서 꺼낸다. 없으면 id 를 쓴다
     fn repo_name(&self, _repo_id: &str) -> Option<String> {
         None
@@ -210,6 +224,8 @@ struct Core {
     /// 방금 사이드카에 부탁한 값. fetchPrefs 가 되돌려 주기 전까지(또는 저장소가 사라질 때까지) 쓴다
     overlay_approvals: HashMap<String, String>,
     overlay_trusted: HashMap<String, String>,
+    /// "삭제 중"인 저장소(id → 만료 시각). `forget_and_wait` 가 달고, 새 fetch 를 거부한다. 레코드가 지워져 Rust 가 맡지 않게 되거나 [`REMOVING_TTL`] 이 지나면 풀린다
+    removing: HashMap<String, Instant>,
 }
 
 impl Core {
@@ -249,6 +265,37 @@ struct Source<R> {
 struct RunFlags {
     approved_for_run: AtomicBool,
     has_http: AtomicBool,
+    deadline: Deadline,
+    /// github 갈래가 큐 슬롯을 얻은 뒤 거는 제한(초 — `run` 이 ref 유무로 정한다). 일반 저장소는 쓰지 않는다
+    github_limit_secs: AtomicU64,
+}
+
+/// fetch 한 번의 제한 시간 타이머. 걸린 제한과 터졌는지를 실패 분류가 읽는다(TS 의 `timeoutMs`·`timedOut`).
+/// 일반 저장소는 요청 때, github 는 큐 슬롯을 얻은 뒤에 건다 — 한 번만 걸고, 버려지면 타이머도 끝난다
+struct Deadline {
+    fired: Arc<AtomicBool>,
+    secs: AtomicU64,
+    timer: Mutex<Option<AbortOnDrop>>,
+}
+
+impl Deadline {
+    fn new() -> Self {
+        Deadline { fired: Arc::new(AtomicBool::new(false)), secs: AtomicU64::new(FETCH_TIMEOUT.as_secs()), timer: Mutex::new(None) }
+    }
+
+    fn arm(&self, token: &CancellationToken, limit: Duration) {
+        self.secs.store(limit.as_secs(), Ordering::SeqCst);
+        let (token, fired) = (token.clone(), self.fired.clone());
+        *lock(&self.timer) = Some(AbortOnDrop(tokio::spawn(async move {
+            tokio::time::sleep(limit).await;
+            fired.store(true, Ordering::SeqCst);
+            token.cancel();
+        })));
+    }
+
+    fn timed_out(&self) -> bool {
+        self.fired.load(Ordering::SeqCst)
+    }
 }
 
 /// 버려지면 태스크를 끝낸다(패닉·취소로 빠져도 60초 타이머가 남지 않게)
@@ -268,6 +315,8 @@ struct Inner<H, R> {
     make_runner: RunnerFactory<R>,
     /// 로컬 git 이 core.hooksPath 로 쓸 앱 소유의 빈 디렉터리(드라이브 문자가 있는 절대 경로). Windows 에서는 필수다
     no_hooks_dir: Option<String>,
+    /// GitHub 원격 전용 저장소의 앱 캐시 기준 폴더 등(`with_github_cache` 가 정한다). 없으면 github 저장소는 "캐시 경로가 맞지 않음"으로 막힌다
+    github: Option<github::GithubFetch>,
     sources: Mutex<HashMap<String, Arc<Source<R>>>>,
     core: Mutex<Core>,
 }
@@ -399,6 +448,11 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         if let Some(running) = core.inflight.get(repo_id) {
             return running.future.clone();
         }
+        // 삭제 중인 저장소(`forget_and_wait`)는 새 fetch 를 시작하지 않는다 — 캐시 폴더를 지우기 전에 git 이 폴더를 다시 쥐지 않게
+        if core.removing.get(repo_id).is_some_and(|until| *until > Instant::now()) {
+            let status = FetchStatus { error: Some(REMOVING_MESSAGE.to_string()), ..FetchStatus::idle(repo_id) };
+            return async move { status }.boxed().shared();
+        }
         let token = CancellationToken::new();
         let id = repo_id.to_string();
         let task = tokio::spawn(Self::run_guarded(self.clone(), id.clone(), manual, token.clone()));
@@ -442,20 +496,21 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         });
         self.emit_status(repo_id);
 
-        let timed_out = Arc::new(AtomicBool::new(false));
-        let _timer = {
-            let (token, flag) = (token.clone(), timed_out.clone());
-            AbortOnDrop(tokio::spawn(async move {
-                tokio::time::sleep(FETCH_TIMEOUT).await;
-                flag.store(true, Ordering::SeqCst);
-                token.cancel();
-            }))
-        };
+        // 소스가 github 면(레코드가 어긋나 있어도) 일반 저장소 흐름으로 가지 않는다 — `fetch_task` 가 `Target::Github` 를 github 갈래로만 보낸다
+        let resolved = self.resolve(repo_id);
+        let github = matches!(&resolved, Ok((Target::Github { .. }, _)));
+        let flags = Arc::new(RunFlags { approved_for_run: AtomicBool::new(true), has_http: AtomicBool::new(false), deadline: Deadline::new(), github_limit_secs: AtomicU64::new(FETCH_TIMEOUT.as_secs()) });
+        // 일반 저장소는 요청 때부터 잰다. github 는 큐 슬롯을 얻은 뒤부터 잰다(첫 fetch 는 이력 전체를 받는 긴 작업이라 다른 fetch 를 기다린 시간이 제한을 갉아먹지 않게)
+        if !github {
+            flags.deadline.arm(&token, FETCH_TIMEOUT);
+        }
         self.with_state(repo_id, |s| s.needs_manual = false);
 
-        let flags = Arc::new(RunFlags { approved_for_run: AtomicBool::new(true), has_http: AtomicBool::new(false) });
-        let result = match self.resolve(repo_id) {
+        let result = match resolved {
             Ok((target, source)) => {
+                if github {
+                    flags.github_limit_secs.store(self.github_limit(repo_id, &target, &source, &token).await.as_secs(), Ordering::SeqCst);
+                }
                 let queue = source.queue.clone();
                 let (this, id, tok, fl) = (self.clone(), repo_id.to_string(), token.clone(), flags.clone());
                 queue.run(None, Some(token.clone()), move || this.fetch_task(id, target, source, manual, tok, fl)).await
@@ -476,23 +531,25 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
                     self.host.emit(HostEvent::RepoChanged(repo_id.to_string()));
                 }
             }
-            Err(err) => self.record_failure(repo_id, &err, manual, timed_out.load(Ordering::SeqCst), &flags),
+            Err(err) => self.record_failure(repo_id, &err, manual, github, &flags),
         }
         self.with_state(repo_id, |s| s.fetching = false);
         self.emit_status(repo_id)
     }
 
-    fn record_failure(&self, repo_id: &str, err: &ExecError, manual: bool, timed_out: bool, flags: &RunFlags) {
+    /// `github`: GitHub 원격 전용 저장소의 fetch 다 — 분류가 "권한이 없는 저장소는 404 로 숨긴다"(401·403·404)를 인증 문제로 본다
+    fn record_failure(&self, repo_id: &str, err: &ExecError, manual: bool, github: bool, flags: &RunFlags) {
+        let timed_out = flags.deadline.timed_out();
         self.with_state(repo_id, |s| {
             if matches!(err, ExecError::Aborted) && !timed_out {
                 s.error = None; // 취소는 오류가 아니다
                 return;
             }
-            let text = if timed_out { format!("시간 초과({}초)", FETCH_TIMEOUT.as_secs()) } else { err.to_string() };
+            let text = if timed_out { format!("시간 초과({}초)", flags.deadline.secs.load(Ordering::SeqCst)) } else { err.to_string() };
             let mut error = slice_utf16_lossy(&text, MAX_ERROR_LEN);
             // SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패)는 문구가 아니라 종류로 network 다 — 재시도해도 소용없는 쪽이 아니라 백오프로 다시 본다.
             // 원격 git 이 낸 오류(`Git`)는 그대로 문구로 분류한다(원격이 자기 remote 에 인증하지 못한 것은 auth)
-            let kind = if timed_out || matches!(err, ExecError::Aborted | ExecError::Ssh { .. }) { FetchFailure::Network } else { classify_failure(&err.to_string(), false) };
+            let kind = if timed_out || matches!(err, ExecError::Aborted | ExecError::Ssh { .. }) { FetchFailure::Network } else { classify_failure(&err.to_string(), github) };
             if kind == FetchFailure::Protocol {
                 error = slice_utf16_lossy(&format!("자동 fetch 는 로컬 경로(file) remote 를 쓰지 않습니다. 새로고침으로 직접 fetch 하세요. {error}"), MAX_ERROR_LEN);
             }
@@ -510,6 +567,10 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
 
     /// 큐 슬롯 안에서 도는 본체(TS `queue.run` 의 콜백). 바뀐 ref 가 있으면 true
     async fn fetch_task(self: Arc<Self>, repo_id: String, target: Target, source: Arc<Source<R>>, manual: bool, token: CancellationToken, flags: Arc<RunFlags>) -> Result<bool, ExecError> {
+        // GitHub 원격 전용 저장소는 허용 목록·확인 창 없이 자기 갈래로만 간다(일반 저장소가 이 갈래를 타지도, 이 저장소가 아래 일반 갈래를 타지도 않는다)
+        if matches!(target, Target::Github { .. }) {
+            return self.github_task(repo_id, target, source, token, flags).await;
+        }
         let (r, path) = (&*source.runner, target.path());
         let ins = inspect_config(r, path, Some(&token)).await?;
         let blocked = |keys: Vec<String>, confirmable: bool| Some(Blocked { keys, confirmable });
@@ -602,7 +663,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
             let _ = std::fs::create_dir_all(dir);
         }
         FetchService {
-            inner: Arc::new(Inner { host, mirror, make_runner: Box::new(make_runner), no_hooks_dir, sources: Mutex::default(), core: Mutex::default() }),
+            inner: Arc::new(Inner { host, mirror, make_runner: Box::new(make_runner), no_hooks_dir, github: None, sources: Mutex::default(), core: Mutex::default() }),
         }
     }
 
@@ -634,6 +695,11 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
             core.active = repo_id.map(str::to_string);
         }
         self.inner.schedule();
+        // 아직 한 번도 받지 못한 GitHub 원격 전용 저장소는 보여 줄 것이 없으므로 선택 즉시 받는다(`fetch_if_empty` 가 github 가 아니면 아무것도 하지 않는다)
+        if let Some(id) = repo_id {
+            let (this, id) = (self.inner.clone(), id.to_string());
+            tokio::spawn(async move { this.fetch_if_empty(&id).await });
+        }
     }
 
     /// 창이 다시 포커스를 얻었을 때: 마지막 시도가 주기보다 오래됐으면 바로 fetch
@@ -709,7 +775,35 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
         for id in gone {
             self.forget(&id);
         }
+        // 레코드가 지워져 더는 Rust 가 맡지 않는 저장소(또는 만료된 것)의 "삭제 중" 표식을 푼다
+        {
+            let mut core = lock(&self.inner.core);
+            let now = Instant::now();
+            core.removing.retain(|id, until| *until > now && self.inner.is_rust_repo(id));
+        }
         self.inner.sync_sources();
+    }
+
+    /// 저장소를 지우기 전: "삭제 중" 표식을 달고(새 fetch 거부), 진행 중인 fetch 를 끊고 끝날 때까지 기다린다 — 캐시 폴더를 지우기 전에 git 이 손을 떼야 한다.
+    /// 끊어도 끝나지 않는 fetch 가 삭제를 붙잡지 않도록 [`FORGET_WAIT`] 까지만 기다린다(TS `forgetAndWait`). 끝난 실행이 되살린 상태·이벤트는 지운다
+    pub async fn forget_and_wait(&self, repo_id: &str) {
+        let running = {
+            let mut core = lock(&self.inner.core);
+            core.removing.insert(repo_id.to_string(), Instant::now() + REMOVING_TTL);
+            core.inflight.get(repo_id).map(|r| r.future.clone())
+        };
+        self.forget(repo_id);
+        if let Some(running) = running {
+            let _ = tokio::time::timeout(FORGET_WAIT, running).await;
+        }
+        lock(&self.inner.core).states.remove(repo_id);
+    }
+
+    /// GitHub 로그인 상태가 바뀌었다(로그인·로그아웃·토큰 만료): 인증 문제로 멈춰 있던 원격 전용 저장소의 자동 fetch 를 다시 연다.
+    /// 저장소를 열고 있다면 아직 받은 것이 없는 경우에 바로 다시 시도한다. **진행 중인 fetch 는 건드리지 않는다**(TS 와 같다 — 토큰은 git 을 띄울 때마다 읽는다).
+    /// tokio 런타임 안에서 불러야 한다
+    pub fn resume_github_auth(&self) {
+        self.inner.resume_github_auth();
     }
 
     pub fn dispose(&self) {
@@ -736,6 +830,14 @@ pub trait FetchControl: Send + Sync + 'static {
     fn apply_prefs(&self, prefs: FetchPrefs) -> bool;
     fn sync_mirror(&self);
     fn dispose(&self);
+
+    /// 저장소를 지우기 전에 fetch 를 멈추고 끝나기를 기다린다(`repos:remove` 가로채기가 부른다). 서비스가 없는 시험용 가짜는 기본(즉시 끝)을 쓴다
+    fn forget_and_wait(&self, _repo_id: &str) -> BoxFuture<'static, ()> {
+        async {}.boxed()
+    }
+
+    /// GitHub 로그인 상태가 바뀌었다 — 인증 문제로 멈춘 github 저장소를 다시 연다. 런타임 안에서 불러야 한다
+    fn resume_github_auth(&self) {}
 }
 
 impl<H: FetchHost, R: GitRunner + Send + 'static> FetchControl for FetchService<H, R> {
@@ -761,6 +863,15 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchControl for FetchService<
 
     fn dispose(&self) {
         FetchService::dispose(self);
+    }
+
+    fn forget_and_wait(&self, repo_id: &str) -> BoxFuture<'static, ()> {
+        let (this, id) = (self.clone(), repo_id.to_string());
+        async move { FetchService::forget_and_wait(&this, &id).await }.boxed()
+    }
+
+    fn resume_github_auth(&self) {
+        FetchService::resume_github_auth(self);
     }
 }
 

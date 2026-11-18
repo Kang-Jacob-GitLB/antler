@@ -194,3 +194,81 @@ impl GitRunner for Fake {
         async move { Ok(RunResult { stdout: stdout.into_bytes(), stderr, code }) }
     }
 }
+
+/// `StubServer` 의 응답 방식
+#[derive(Clone, Copy)]
+pub enum Stub {
+    /// 모든 요청에 이 상태 코드(본문 없음)
+    Status(u16),
+    /// 모든 요청을 이 포트의 같은 경로로 302 로 돌린다
+    Redirect(u16),
+    /// 연결을 받고 응답하지 않는다(git 이 끝나지 않는다 — 취소·종료 시험)
+    Hang,
+}
+
+/// 127.0.0.1 의 가짜 HTTP 서버(실제 GitHub 에 닿지 않는다). 받은 요청(첫 줄 + 헤더)을 모은다
+pub struct StubServer {
+    pub port: u16,
+    requests: std::sync::Arc<Mutex<Vec<String>>>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl StubServer {
+    pub fn start(mode: Stub) -> Self {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let requests = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (reqs, stop2) = (requests.clone(), stop.clone());
+        let thread = std::thread::spawn(move || {
+            // Hang 은 연결을 쥐고 있어야 git 이 응답을 기다린다 — 서버가 끝날 때까지 들고 있는다
+            let mut held = Vec::new();
+            while !stop2.load(Ordering::SeqCst) {
+                let Ok((mut conn, _)) = listener.accept() else {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue;
+                };
+                conn.set_nonblocking(false).unwrap();
+                conn.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                let mut head = Vec::new();
+                let mut b = [0u8; 1];
+                while !head.ends_with(b"\r\n\r\n") && conn.read(&mut b).is_ok_and(|n| n == 1) {
+                    head.push(b[0]);
+                }
+                let head = String::from_utf8_lossy(&head).into_owned();
+                let path = head.lines().next().and_then(|l| l.split(' ').nth(1)).unwrap_or("/").to_string();
+                reqs.lock().unwrap().push(head);
+                let resp = match mode {
+                    Stub::Status(code) => format!("HTTP/1.1 {code} Stub\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                    Stub::Redirect(p) => format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{p}{path}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                    Stub::Hang => {
+                        held.push(conn);
+                        continue;
+                    }
+                };
+                let _ = conn.write_all(resp.as_bytes());
+            }
+        });
+        StubServer { port, requests, stop, thread: Some(thread) }
+    }
+
+    pub fn origin(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+
+    pub fn requests(&self) -> Vec<String> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl Drop for StubServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}

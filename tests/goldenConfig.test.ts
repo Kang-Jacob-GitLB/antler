@@ -188,6 +188,8 @@ const RUST_SOURCES: Record<string, string> = {
   'github_cache_isolation.rs': '../src-tauri/tests/github_cache_isolation.rs',
   // github kind 의 git 조회(PR 6)
   'github_route.rs': '../src-tauri/tests/github_route.rs',
+  // github kind 의 fetch·감시(PR 7)
+  'github_fetch.rs': '../src-tauri/tests/github_fetch.rs',
   'github.rs': '../src-tauri/src/git/exec/github.rs',
   'github_link.rs': '../src-tauri/src/git/github_link.rs',
   'load.rs': '../src-tauri/src/config/load.rs',

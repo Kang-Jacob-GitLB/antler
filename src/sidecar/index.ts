@@ -18,6 +18,7 @@ import { UpdateService } from '../main/update/UpdateService'
 import { bindHost, invokeHandler, resolveHost } from './electronShim'
 import { rustOwnsApi, sidecarSkips } from './apiOwns'
 import { handleFetchApprove } from './fetchApprove'
+import { handleGithubBranch } from './githubBranch'
 import { fetchOwner, parseRustFetchKinds } from './fetchOwns'
 import { FetchPrefsSender } from './fetchPrefs'
 import { GhTokenMirror, handleGhToken } from './ghToken'
@@ -166,6 +167,13 @@ function onLine(line: string): void {
       handleFetchApprove(config, msg)
     } catch (err) {
       console.error('fetch 승인 저장 실패:', err)
+    }
+  } else if (msg.t === 'githubBranch') {
+    // Rust fetch 가 알아낸 원격 전용 저장소의 기본 브랜치 기록 부탁. 검증 뒤 기록하고, 실패는 로그만 남긴다(다음 fetch 에서 다시 알아낸다) — 던지면 readline 처리기가 죽는다
+    try {
+      handleGithubBranch(config, msg)
+    } catch (err) {
+      console.error('원격 저장소 기본 브랜치 기록 실패:', err)
     }
   } else if (msg.t === 'repoq') {
     // Rust 의 GitHub 서비스가 묻는 저장소 정보. Rust 가 GitHub 를 처리할 때(ANTLER_RUST_API=1)만 온다 — 아니면 무시한다

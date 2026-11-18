@@ -2,7 +2,7 @@
 //! 실제 git 을 띄우되 네트워크는 쓰지 않는다 — `file:///` 소스 저장소와 127.0.0.1 의 응답 없는 서버뿐이다(실제 GitHub 에는 닿지 않는다).
 //!
 //! 보는 것:
-//! - 소유: 스위치(`ANTLER_RUST_GIT`)·GitHub 서비스·캐시 실행기가 모두 있을 때만 조회를 Rust 가 맡고, fetch·감시는 늘 사이드카다(PR 7 전까지).
+//! - 소유: 스위치(`ANTLER_RUST_GIT`)·GitHub 서비스·캐시 실행기가 모두 있을 때만 조회(PR 6)와 fetch·감시(PR 7, `tests/github_fetch.rs`)를 Rust 가 맡는다 — 아니면 모두 사이드카다.
 //! - 패리티: 같은 저장소의 local 결과와 같은 채널 결과(TS 는 같은 `RepoService` 코드를 실행기만 바꿔 탄다), 그리고 github 만의 갈래(refs 의 worktrees·refsDetails 의 서브모듈·onRemote·wip·gh:repo·lenient).
 //! - `repos:remove`: 진행 중인 조회·열린 로그 커서를 정리해 사이드카가 지우기 전에 캐시 폴더를 쥔 핸들이 없다.
 //! - 비밀: 토큰은 어떤 응답·오류에도 없다.
@@ -179,24 +179,27 @@ impl Drop for Rig {
 // ---------------------------------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn github_저장소의_조회는_rust_가_처리하고_fetch_와_감시는_사이드카다() {
+async fn github_저장소의_조회_fetch_감시는_같은_스위치로_rust_가_처리한다() {
     let rig = Rig::new("file").await;
     let r = &rig.router;
     assert!(r.github_cache_active());
     let env = call(r, "git:commit", json!([G, rig.src.second])).await;
     assert_eq!(data(&env)["hash"], rig.src.second);
     assert_eq!(r.rust_handled(), 1);
-    // fetch·감시의 소유는 늘 사이드카다(PR 7 에서 함께 넘긴다) — 미러가 github 를 조회에만 풀어도 fetch 서비스·감시자는 이 저장소를 받지 않는다
-    assert!(is_sidecar(r.route("git:fetch", &json!([G, true])).await));
+    // fetch·감시의 소유도 같은 스위치로 Rust 다(Phase 6b PR 7) — `rust_fetch_kinds` 의 github 와 미러의 조회 해석이 같은 플래그 하나다.
+    // 이 시험의 라우터에는 fetch 서비스가 없어 `git:fetch` 는 "준비되지 않았다" 오류다(사이드카로 가지 않는다 — 사이드카는 이 저장소의 fetch 를 맡지 않는다). 서비스가 붙은 흐름은 `tests/github_fetch.rs`
+    let fetch = call(r, "git:fetch", json!([G, true])).await;
+    assert_eq!(fetch["ok"], false, "{fetch}");
     assert!(is_sidecar(r.route("repos:watch", &json!([G])).await));
-    assert_eq!(r.watching(), None, "github 저장소는 Rust 가 감시하지 않는다");
-    // local 저장소는 그대로 Rust 가 감시한다(대조군)
+    assert_eq!(r.watching().as_deref(), Some(G), "github 저장소도 Rust 가 감시한다");
+    // local 저장소로 옮기면 감시가 바뀐다
     assert!(is_sidecar(r.route("repos:watch", &json!([L])).await));
     assert_eq!(r.watching().as_deref(), Some(L));
     assert!(is_sidecar(r.route("repos:watch", &json!([G])).await));
-    assert_eq!(r.watching(), None, "github 로 옮겨 가면 이전 감시를 멈춘다");
-    // 소유 술어: 종류 목록은 github 를 포함하지 않는다
-    assert!(!antler_lib::router::rust_fetch_kinds(true).contains("github"));
+    assert_eq!(r.watching().as_deref(), Some(G));
+    // 소유 술어: 종류 목록의 github 는 같은 플래그(github_cache_active)를 따른다
+    assert!(antler_lib::router::rust_fetch_kinds(false, true).contains("github") && !antler_lib::router::rust_fetch_kinds(true, false).contains("github"));
+    assert_eq!(antler_lib::router::sidecar_fetch_kinds(r.enabled(), r.ssh_active(), r.github_cache_active()), Some("local,wsl,github"));
 }
 
 #[tokio::test]
@@ -418,17 +421,23 @@ async fn 링크가_없는_github_레코드의_gh_repo_는_remote_에서_추론�
 }
 
 #[tokio::test]
-async fn 활동은_github_저장소의_기억한_시그니처를_재사용하지_않는다() {
+async fn 활동은_github_저장소도_기억한_시그니처를_쓰고_fetch_알림이_버린다() {
+    // Phase 6b PR 7: fetch·감시가 Rust 로 왔으므로 local 과 같다 — 기억한 시그니처를 재사용하고, fetch 가 ref 를 바꾸면 알림(`fetchChanged`)이 기억을 버린다
+    use antler_lib::git::log_service::NoteOp;
     let rig = Rig::new("file").await;
     let r = &rig.router;
     let before = call(r, "git:activity", json!([G])).await;
     let n_before = data(&before).to_string();
-    // 사이드카가 fetch 했다고 가정: ref 를 바꾼다(Rust 에는 어떤 알림도 오지 않는다)
     rig.git(&["update-ref", "refs/remotes/origin/extra", &rig.src.first]);
     let new_commit = rig.git(&["commit-tree", "-p", &rig.fourth, "-m", "late", &format!("{}^{{tree}}", rig.fourth)]);
     rig.git(&["update-ref", "refs/remotes/origin/main", &new_commit]);
+    // 알림이 없으면 기억한 값이 쓰인다(감시하지 않는 저장소의 기억은 알림 없이 낡을 수 있다 — local 과 같다)
+    let stale = call(r, "git:activity", json!([G])).await;
+    assert_eq!(data(&stale).to_string(), n_before, "기억한 시그니처를 재사용해야 한다");
+    // Rust fetch 서비스가 ref 변경 뒤 보내는 알림(`HostEvent::RepoChanged` 앞의 note)
+    (r.note_sink())(NoteOp::FetchChanged, G);
     let after = call(r, "git:activity", json!([G])).await;
-    assert_ne!(data(&after).to_string(), n_before, "ref 가 바뀌었는데 낡은 활동을 돌려줬다");
+    assert_ne!(data(&after).to_string(), n_before, "fetch 알림 뒤에도 낡은 활동을 돌려줬다");
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -805,18 +814,18 @@ fn github_실행_대상은_미러_한_곳에서만_만들고_앱은_서비스_�
         let p = prod(&text);
         assert!(!p.contains("Target::Github { path"), "{file}: 대상을 직접 만들지 않는다");
     }
-    // fetch·감시의 소유 술어(종류 목록)는 github 를 포함하지 않는다 — 조회만 Rust 로 풀린다
+    // fetch·감시의 소유 술어(종류 목록)의 github 는 조회와 같은 플래그 하나(`github_active`)로만 더해진다(PR 7)
     let router = src("src/router.rs");
     let kinds = prod(&router).split("pub fn rust_fetch_kinds").nth(1).unwrap().split("\n}\n").next().unwrap();
-    assert!(!kinds.contains("github"), "{kinds}");
+    assert!(kinds.contains("github_active") && kinds.matches("github").count() >= 3, "{kinds}");
     // 앱 배선: 실행기는 GitHub 서비스(set_github) 뒤에, 사이드카를 띄우기 전에 주입한다
     let lib = src("src/lib.rs");
     let (host, cache, spawn) = (lib.find("router.set_github(api_host::GithubHost").unwrap(), lib.find("router.set_github_cache(").unwrap(), lib.find("sidecar::Sidecar::spawn(").unwrap());
     assert!(host < cache && cache < spawn);
     assert_eq!(prod(&lib).matches("GithubExecutor::new(").count(), 1);
-    // fetch 서비스의 실행기 공장은 github 에 일반 실행기를 주지 않는다(닫힌 실행기)
+    // fetch 서비스의 실행기 공장은 github 에 일반 실행기를 주지 않는다 — 라우터가 받은 캐시 실행기의 복제이고, 없으면 닫힌 실행기다
     let arm = lib.split("Target::Github { .. } =>").nth(1).unwrap().split("};").next().unwrap();
-    assert!(arm.contains("closed.dispose()") && !arm.contains("LocalExecutor"), "{arm}");
+    assert!(arm.contains("GitExecutor::Github(exec.clone())") && arm.contains("closed.dispose()") && !arm.contains("LocalExecutor"), "{arm}");
     // 토큰의 출처는 GitHub 서비스 하나다
     assert!(lib.contains("token_svc.git_token()"));
 }

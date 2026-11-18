@@ -319,6 +319,13 @@ pub async fn run_github_fetch<R: GitRunner>(r: &R, repo_path: &GithubCachePath, 
     Ok(())
 }
 
+/// `ensure_github_head` 의 `ls-remote`(네트워크) 앞에 붙는 `-c` 인자 — fetch 와 같은 보안 설정(훅 차단·번들 URI 끔·`http.followRedirects=false`·자격 증명 도우미 없음)이다.
+/// 훅 차단 디렉터리를 쓸 수 없으면 Err(보호 없이 실행하지 않는다). 서비스가 `hooks_path_for` 를 직접 부르지 않게 여기서 만든다
+pub fn github_net_args(no_hooks_dir: &str) -> Result<Vec<String>, ExecError> {
+    let hooks = hooks_path_for(true, Some(no_hooks_dir)).map_err(|message| ExecError::Other { message })?;
+    Ok(fetch_config_args(&hooks, ConfigArgsOpts { credential_helpers: false, follow_redirects: FollowRedirects::False }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

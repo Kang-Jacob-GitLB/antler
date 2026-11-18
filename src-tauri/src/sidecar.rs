@@ -139,6 +139,12 @@ impl Sidecar {
         let _ = self.write(&approve_message(kind, repo_id, fingerprint));
     }
 
+    /// GitHub 원격 전용 저장소의 fetch 가 알아낸 기본 브랜치를 레코드에 기록해 달라고 사이드카에 부탁한다(`{t:"githubBranch"}` — 설정 소유 PR 9 까지).
+    /// `FetchHost::github_branch` 의 구현(`fetch_host.rs`)만 부른다. 사이드카가 저장소 존재·github 소스·`isSafeBranch` 를 다시 검사한다
+    pub(crate) fn github_branch(&self, repo_id: &str, branch: &str) {
+        let _ = self.write(&json!({ "t": "githubBranch", "repoId": repo_id, "branch": branch }));
+    }
+
     /// 사이드카에 GitHub 토큰의 메모리 사본을 보낸다(`{t:"ghToken"}`). Rust 가 GitHub 를 처리할 때(`ANTLER_RUST_API=1`)만 부른다 —
     /// 사이드카에 남는 원격 전용 저장소의 fetch 가 쓴다. 읽기와 쓰기를 한 잠금 안에서 해서, 로그인 직후 로그아웃이 겹쳐도 마지막 상태가 마지막에 간다.
     /// 줄은 stdin 으로만 가고 env·인자·로그에 실리지 않는다

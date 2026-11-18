@@ -249,10 +249,11 @@ async fn rust_가_맡는_저장소만_감시하고_스위치가_꺼지면_감시
 /// Rust 가 감시를 맡는 종류 = 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)의 종류 — 같은 한 술어(`rust_fetch_kinds`)다. 이중 감시도 무감시도 없다
 #[test]
 fn 감시_소유는_사이드카_env_의_종류와_같은_술어다() {
-    let kinds = |ssh: bool| -> Vec<&'static str> { rust_fetch_kinds(ssh).split(',').collect() };
-    for ssh_active in [false, true] {
+    let kinds = |ssh: bool, github: bool| -> Vec<&'static str> { rust_fetch_kinds(ssh, github).split(',').collect() };
+    for (ssh_active, github_active) in [(false, false), (true, false), (false, true), (true, true)] {
         let mirror = RepoMirror::default();
         mirror.set_ssh(ssh_active);
+        mirror.set_github(github_active);
         let repos: Vec<MirrorRepo> = ["local", "wsl", "ssh", "github"]
             .iter()
             .map(|k| MirrorRepo {
@@ -269,7 +270,7 @@ fn 감시_소유는_사이드카_env_의_종류와_같은_술어다() {
                 continue; // WSL 은 Windows 에서만 연다(미러가 그 밖의 OS 에서는 사이드카로 보낸다)
             }
             let rust_watches = matches!(mirror.resolve_fetch(kind), Resolved::Rust(_));
-            assert_eq!(rust_watches, kinds(ssh_active).contains(&kind), "{kind} ssh_active={ssh_active}");
+            assert_eq!(rust_watches, kinds(ssh_active, github_active).contains(&kind), "{kind} ssh_active={ssh_active} github_active={github_active}");
         }
     }
     // 사이드카는 같은 술어를 감시에도 쓴다(소스 검사 — 둘에 같은 `ownsRepo` 를 준다)
@@ -288,7 +289,8 @@ fn 앱은_변화_싱크를_사이드카_기동_전에_달고_포커스를_감시
     assert!(sink < manage);
     // 포커스는 얻을 때도 잃을 때도 알린다(폴링 배율). 런타임 밖 스레드에서 불러도 되는 호출이라 `in_runtime_of` 밖이다
     assert_eq!(lib.matches("r.watch_focus(*focused)").count(), 1);
-    assert_eq!(lib.matches("in_runtime_of(").count(), 2);
+    // (fetchPrefs sink·창 포커스의 fetch, 그리고 GitHub 로그인 변경 콜백 — Phase 6b PR 7)
+    assert_eq!(lib.matches("in_runtime_of(").count(), 3);
     // 감시 이벤트는 사이드카의 `repo:changed` 와 같은 모양이다
     assert!(read_src("src/fetch_host.rs").contains("evt(\"repo:changed\", json!({ \"repoId\": repo_id }))"));
 }

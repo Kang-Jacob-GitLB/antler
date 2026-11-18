@@ -34,22 +34,25 @@ describe('사이드카 저장소 미러', () => {
     expect(mirrorOf(cfg)).toEqual([])
   })
 
-  it('github 소스의 저장소는 owner/repo 링크(기본 브랜치 없이)를 담고 다른 소스에는 실리지 않는다', () => {
+  it('github 소스의 저장소는 owner/repo 링크와 기본 브랜치를 담고 다른 소스에는 실리지 않는다', () => {
     const c = new ConfigStore(tmp())
     const link = { owner: 'octocat', repo: 'hello', defaultBranch: 'main' }
     const g = c.addRepo({ sourceId: 'github', path: 'C:\\cache\\octocat\\hello.git', name: 'hello', github: link }, { id: 'github', kind: 'github', label: 'GitHub' })
     const local = c.addRepo({ sourceId: 'local', path: 'C:\\work\\a', name: 'a' })
     expect(mirrorOf(c.get())).toEqual([
-      { id: g.id, kind: 'github', path: 'C:\\cache\\octocat\\hello.git', name: 'hello', github: { owner: 'octocat', repo: 'hello' } },
+      { id: g.id, kind: 'github', path: 'C:\\cache\\octocat\\hello.git', name: 'hello', github: { owner: 'octocat', repo: 'hello', defaultBranch: 'main' } },
       { id: local.id, kind: 'local', path: 'C:\\work\\a', name: 'a' }
     ])
-    // 기본 브랜치가 바뀌어도 미러는 바뀌지 않는다(Rust 는 브랜치를 쓰지 않는다)
+    // 기본 브랜치가 바뀌면 미러도 바뀐다(Rust fetch 가 HEAD 를 맞출 때 첫 후보로 쓴다) — 브랜치가 없는 레코드는 키 자체가 없다
     const sent: Extract<FromSidecar, { t: 'repos' }>[] = []
     const m = new MirrorSender((msg) => sent.push(msg))
     m.push(c.get())
     c.setGithubDefaultBranch(g.id, 'develop')
     m.push(c.get())
-    expect(sent).toHaveLength(1)
+    expect(sent).toHaveLength(2)
+    expect(sent[1]?.repos[0]?.github).toEqual({ owner: 'octocat', repo: 'hello', defaultBranch: 'develop' })
+    const bare = c.addRepo({ sourceId: 'github', path: 'C:\\cache\\octocat\\bare.git', name: 'bare', github: { owner: 'octocat', repo: 'bare' } })
+    expect(mirrorOf(c.get()).find((r) => r.id === bare.id)?.github).toEqual({ owner: 'octocat', repo: 'bare' })
   })
 
   it('저장소 목록이 바뀔 때만 보내고 gen 은 1 부터 오른다', () => {

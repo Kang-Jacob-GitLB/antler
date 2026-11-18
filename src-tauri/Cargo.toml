@@ -115,3 +115,8 @@ required-features = ["test-hooks"]
 [[test]]
 name = "github_cache_pin"
 required-features = ["test-hooks"]
+
+# GitHub 원격 전용 저장소의 fetch·감시를 Rust 가 맡는다(Phase 6b PR 7): 원격 URL 출처(`with_github_origin_for_test`)·프로토콜 주입이 test-hooks 뒤에 있다
+[[test]]
+name = "github_fetch"
+required-features = ["test-hooks"]
