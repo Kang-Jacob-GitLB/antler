@@ -1,5 +1,5 @@
 // drive.mjs 의 Tauri 호스트: 빌드된 exe(cdp 기능 빌드)를 띄우고 WebView2 에 CDP 로 붙는다.
-// host 인터페이스는 electronHost.mjs 와 같다. 창을 전면으로 가져오거나 OS 입력을 합성하지 않는다.
+// 창을 전면으로 가져오거나 OS 입력을 합성하지 않는다.
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:net'
 import { chromium } from 'playwright-core'
@@ -50,12 +50,12 @@ async function guardWindowControls(page) {
   }
 }
 
-export async function launchTauri({ exePath, userData, gpu }) {
+export async function launchTauri({ exePath, userData, gpu, extraEnv = {} }) {
   const port = await freePort()
   const debug = !!process.env['ANTLER_DRIVE_DEBUG']
   const startedAt = Date.now()
   const proc = spawn(exePath, [], {
-    env: { ...process.env, ANTLER_USER_DATA: userData, ANTLER_CDP_PORT: String(port), ANTLER_MEASURE: '1', ...(gpu ? { ANTLER_GPU: '1' } : {}) },
+    env: { ...process.env, ANTLER_USER_DATA: userData, ANTLER_CDP_PORT: String(port), ANTLER_MEASURE: '1', ...(gpu ? { ANTLER_GPU: '1' } : {}), ...extraEnv },
     stdio: debug ? ['ignore', 'pipe', 'pipe'] : 'ignore'
   })
   if (debug) {
@@ -118,7 +118,7 @@ export async function launchTauri({ exePath, userData, gpu }) {
         const at = await page.evaluate(() => (window.__ANTLER_FIRST_ROW__ === undefined ? null : performance.timeOrigin + window.__ANTLER_FIRST_ROW__))
         return at === null ? null : Math.round(at - startedAt)
       },
-      // Tauri 에는 getAppMetrics 가 없어 프로세스 트리(procTree)로 잰다. 값은 KB(Electron 과 같은 단위)
+      // Tauri 에는 getAppMetrics 가 없어 프로세스 트리(procTree)로 잰다. 값은 KB
       memory: async () => {
         const t = measureTree({ rootPid: proc.pid, userData })
         return Object.entries(t.groups)

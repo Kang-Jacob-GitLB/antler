@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// 빌드된 앱(out/)을 Playwright 로 띄워 시나리오를 돌리고 스크린샷·측정치를 남긴다.
-// 실사용 설정을 건드리지 않도록 임시 userData 를 쓴다.
+// 빌드된 Tauri 앱(`pnpm tauri:build:cdp` 산출물 src-tauri/target/release/antler.exe)을 Playwright(CDP)로 띄워 시나리오를 돌리고 스크린샷·측정치를 남긴다.
+// 실사용 설정을 건드리지 않도록 임시 userData 를 쓴다. cdp 기능이 켜진 빌드여야 붙는다(배포 빌드에는 그 코드가 없다).
 //
 // 사용: node scripts/drive.mjs <저장소 경로...> [--out <스크린샷 디렉터리>] [--theme dark|light] [--locale ko|en] [--tauri <exe>]
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { launchElectron } from './lib/electronHost.mjs'
 import { launchTauri } from './lib/tauriHost.mjs'
 import { formatTree, measureTree } from './lib/procTree.mjs'
 
 const APP_DIR = resolve(import.meta.dirname, '..')
+const DEFAULT_EXE = join(APP_DIR, 'src-tauri', 'target', 'release', 'antler.exe')
 const args = process.argv.slice(2)
 const opt = (name, def) => {
   const i = args.indexOf(`--${name}`)
@@ -32,18 +32,13 @@ const externalCommit = args.includes('--external-commit') && args.splice(args.in
 const githubScenario = args.includes('--github') && args.splice(args.indexOf('--github'), 1) && true
 // 지정 시 작업 트리(WIP) 행 시나리오를 돈다: 첫 저장소가 더럽혀져 있어야 한다(임시 저장소에만 쓸 것). wip-*.png 를 남긴다
 const wipScenario = args.includes('--wip') && args.splice(args.indexOf('--wip'), 1) && true
-// 실험용 Chromium·Electron 스위치(예: --electron-args "--disable-gpu-rasterization")
-const electronArgs = opt('electron-args', '').split(' ').filter(Boolean)
 // --idle-only: 첫 화면만 띄우고 조작 없이 N초 쉰 뒤 메모리를 잰다(유휴 메모리 측정)
 const idleOnly = Number(opt('idle-only', '0'))
 // --update-fake available|downloading|downloaded|error: 업데이트 스낵바 상태를 가짜로 띄워 update-<상태>-<테마>.png 만 남기고 끝낸다
-//   (--update-mode manual-dmg|manual-file 로 수동 설치 모드 문구 확인)
+//   (ANTLER_UPDATE_FAKE 는 개발·cdp 빌드에서만 읽는다 — 배포 바이너리에는 이 이름이 없다)
 const updateFake = opt('update-fake', '')
-const updateMode = opt('update-mode', '')
-// --exe <경로>: 패키지된 실행 파일(dist/win-unpacked/Antler.exe 등)을 띄운다
-const exePath = opt('exe', '') || undefined
-// --tauri <exe>: Electron 대신 Tauri 판(pnpm tauri:build:cdp 로 만든 src-tauri/target/release/antler.exe)을 같은 시나리오로 측정한다
-const tauriExe = opt('tauri', '') || undefined
+// --tauri <exe>: 띄울 Tauri 실행 파일(기본 src-tauri/target/release/antler.exe — `pnpm tauri:build:cdp` 산출물)
+const tauriExe = opt('tauri', '') || DEFAULT_EXE
 // --gpu: 하드웨어 가속을 켠다(Tauri 는 ANTLER_GPU=1). 기본은 끔
 const gpu = args.includes('--gpu') && args.splice(args.indexOf('--gpu'), 1) && true
 // 저장소 지정: 로컬 경로 또는 'wsl:<배포판>:<리눅스 경로>' / 'ssh:<호스트>:<경로>'
@@ -71,17 +66,9 @@ writeFileSync(
   })
 )
 
-// 호스트(Electron | Tauri) 뒤에 숨긴 것: 실행·종료, 앱 기준 시각, 메모리, CPU. 시나리오는 page 만 쓴다
-const host = tauriExe
-  ? await launchTauri({ exePath: resolve(tauriExe), userData, gpu })
-  : await launchElectron({
-      appDir: APP_DIR,
-      exePath,
-      electronArgs,
-      userData,
-      extraEnv: updateFake ? { ANTLER_UPDATE_FAKE: updateFake, ...(updateMode ? { ANTLER_UPDATE_FAKE_MODE: updateMode } : {}) } : {}
-    })
-// 프로세스 시작(spawn) 시각 — 두 호스트 모두 "spawn → 첫 커밋 행" 을 같은 정의로 잰다
+// 호스트 뒤에 숨긴 것: 실행·종료, 앱 기준 시각, 메모리, CPU. 시나리오는 page 만 쓴다
+const host = await launchTauri({ exePath: resolve(tauriExe), userData, gpu, extraEnv: updateFake ? { ANTLER_UPDATE_FAKE: updateFake } : {} })
+// 프로세스 시작(spawn) 시각 — "spawn → 첫 커밋 행" 을 잰다
 const t0 = host.startedAt
 const page = host.page
 const shot = async (name) => {
@@ -137,7 +124,7 @@ try {
     if (updateFake) {
       await page.waitForSelector('.update-snack', { timeout: 5_000 })
       await page.waitForTimeout(400)
-      const label = updateFake + (updateMode ? '-' + updateMode : '')
+      const label = updateFake
       console.log(`update snackbar [${label}]: "${(await page.textContent('.update-snack__msg'))?.trim()}" | buttons: ${(await page.$$eval('.update-snack button', (e) => e.map((x) => x.getAttribute('aria-label') || x.textContent?.trim()))).join(' / ')}`)
       console.log('update snackbar box:', JSON.stringify(await page.$eval('.update-snack', (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } })))
       await shot(`update-${label}-${theme}`)

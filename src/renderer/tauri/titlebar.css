@@ -1,4 +1,4 @@
-/* Tauri 창 버튼. Electron 의 titleBarOverlay 자리(우상단 138×43)에 직접 그린다 */
+/* Tauri 창 버튼. 우상단 138×43 자리에 직접 그린다 */
 .tb-controls {
   position: fixed;
   top: 0;

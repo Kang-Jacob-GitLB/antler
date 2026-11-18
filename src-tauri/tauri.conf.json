@@ -7,7 +7,7 @@
     "devUrl": "http://localhost:5174",
     "frontendDist": "../out-tauri/renderer",
     "beforeDevCommand": "pnpm tauri:web",
-    "beforeBuildCommand": "pnpm tauri:notices && vite build --config vite.tauri.config.mts"
+    "beforeBuildCommand": "pnpm tauri:notices && vite build"
   },
   "app": {
     "withGlobalTauri": false,

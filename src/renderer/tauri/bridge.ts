@@ -1,5 +1,4 @@
-// Tauri 용 window.antler 어댑터. Electron 의 preload(src/preload/index.ts)와 같은 규약(허용 목록·"[CODE] msg" 에러)으로
-// Rust 의 antler_invoke 를 부른다. React 가 렌더되기 전에 실행돼야 하므로 vite 플러그인이 main.tsx 앞에 끼워 넣는다.
+// window.antler 어댑터. 허용 목록(IPC_CHANNELS·IPC_EVENTS)과 "[CODE] msg" 에러 규약으로 Rust 의 antler_invoke 를 부른다. React 가 렌더되기 전에 실행돼야 하므로 vite 플러그인이 main.tsx 앞에 끼워 넣는다.
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -18,9 +17,9 @@ void listen<{ name: string; payload: unknown }>('antler:evt', (e) => {
 })
 
 /**
- * JSON 은 배열 속 undefined 를 null 로 바꾼다. Electron IPC(structured clone)는 undefined 를 그대로 넘기고 main 의 검증은
- * "생략(undefined)" 과 "잘못된 값(null)" 을 구분한다(예: git:search 의 scope 가 null 이면 invalid scope).
- * 그래서 빈 자리는 표식으로 보내고 사이드카가 undefined 로 되돌린다. 끝의 undefined 는 그냥 뗀다(인자 생략과 같다).
+ * JSON 은 배열 속 undefined 를 null 로 바꾼다. 그러나 Rust 의 검증은 "생략(undefined)" 과 "잘못된 값(null)" 을 구분한다
+ * (예: git:search 의 scope 가 null 이면 invalid scope — Electron 판 IPC 의 structured clone 이 undefined 를 그대로 넘기던 동작을 따른다).
+ * 그래서 빈 자리는 표식으로 보내고 Rust 가 undefined 로 되돌린다. 끝의 undefined 는 그냥 뗀다(인자 생략과 같다).
  */
 function encodeArgs(args: unknown[]): unknown[] {
   let end = args.length
