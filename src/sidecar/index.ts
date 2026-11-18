@@ -76,15 +76,17 @@ const netReady = readNetworkConfig().then((c) => {
 })
 
 const repos = new RepoService(config, { cacheDir, githubToken: () => (rustApi ? ghMirror.get() : gh.gitToken()), noHooksDir, netConfig: () => netConfig, netReady })
-const watcher = new RepoWatcher(repos, (repoId) => emit('repo:changed', { repoId }))
+// fetch 와 감시의 소유 판정은 **같은 술어 하나**다 — Rust 가 맡는 종류(env ANTLER_RUST_FETCH_KINDS, 없으면 사이드카가 전부)의 저장소는 사이드카가 fetch·자동 예약도 감시도 하지 않는다.
+// 둘을 따로 판정하면 이중 감시나 무감시 구간이 생긴다(src-tauri/src/router.rs 의 rust_fetch_kinds·RepoMirror::resolve_fetch 가 Rust 쪽 같은 술어)
+const ownsRepo = fetchOwner(() => config.get(), parseRustFetchKinds(process.env['ANTLER_RUST_FETCH_KINDS']))
+const watcher = new RepoWatcher(repos, (repoId) => emit('repo:changed', { repoId }), ownsRepo)
 const fetcher = new FetchService(
   config,
   repos,
   (status) => emit('fetch:status', status),
   (repoId) => emit('repo:changed', { repoId }),
   noHooksDir,
-  // Rust 가 fetch 를 맡는 환경(env 가 있을 때만)의 저장소는 이 서비스가 fetch·자동 예약하지 않는다
-  fetchOwner(() => config.get(), parseRustFetchKinds(process.env['ANTLER_RUST_FETCH_KINDS']))
+  ownsRepo
 )
 
 // 안전한 암호화 저장소가 없으므로 토큰은 메모리에만 둔다(디스크에 쓰지 않는다)

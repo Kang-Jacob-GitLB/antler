@@ -8,6 +8,10 @@
 //! `ANTLER_RUST_FETCH_KINDS=local,wsl[,ssh]` 로 띄워 사이드카의 FetchService 가 그 저장소를 fetch·예약하지 않게 한다([`sidecar_fetch_kinds`]).
 //! 스위치가 꺼져 있으면 env 도 서비스도 없다 — 사이드카가 전부 맡는다(이중 fetch 없음).
 //!
+//! 감시의 소유권(Phase 6a PR 7b): 활성 저장소 감시(`repos:watch` 가 시작·교체·중지, 창 포커스는 [`Router::watch_focus`])도 **같은 술어 하나**로 정한다 — Rust 는 fetch 를 맡는 종류의 저장소만 감시하고
+//! (notify·폴링 — `git::watcher`), 사이드카는 같은 env 로 그 저장소를 감시하지 않는다(`src/sidecar/index.ts` 가 `FetchService` 와 같은 `fetchOwner` 를 `RepoWatcher` 에 준다). github 저장소는 사이드카가 감시한다.
+//! 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) env 도 감시자도 없다 — 사이드카가 전부 감시한다.
+//!
 //! ssh(Phase 5 PR 3): `ANTLER_RUST_SSH` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이면 함께 꺼진다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 git 채널을 Rust 가 처리한다(Phase 5 PR 4: `git:fetch` 포함).
 //! 호스트마다 실행기(= 연결 하나)를 [`SshPool`] 에서 받고 큐는 호스트마다 하나(동시 4)다. fetch 서비스도 같은 풀의 연결을 쓴다.
 //! fetch 소유는 해석 결과가 아니라 소스 종류([`rust_fetch_kinds`])로 정한다(`RepoMirror::resolve_fetch`) — 사이드카 env 와 같은 술어 하나라 이중 fetch 도 미소유도 없다.
@@ -48,6 +52,7 @@ use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, SSH_LIMIT, WSL_LIMIT};
 use crate::git::exec::ssh::SshPool;
 use crate::git::exec::{ExecError, GitExecutor, LocalExecutor, RunOpts, WslExecutor};
 use crate::git::fetch::service::{FetchControl, FetchPrefs};
+use crate::git::fs_watch::NotifyDirs;
 use crate::git::file_channels::{
     compare, estimate_compare_bytes, estimate_diff_bytes, file_blame, file_diff, file_history, parse_compare, BlameRequest, DiffRequest, HistoryRequest,
 };
@@ -63,7 +68,12 @@ use crate::git::search::{search, SearchRequest};
 use crate::git::parsers::wip_status::WIP_UNTRACKED_LIMIT;
 use crate::git::signature::{refs_signature_digest, Signature};
 use crate::git::wip::{wip_file_diff, wip_status, WipDiffRequest};
+use crate::git::watcher::{DirWatch, PollTimes, RepoWatcher};
 use crate::mirror::{RepoMirror, Resolved, Target};
+use crate::watch_host::RouterWatchHost;
+
+/// 감시가 ref 변화를 알리는 곳(저장소 id). 앱은 renderer 의 `repo:changed` 이벤트로 보낸다. **감시 태스크(tokio 워커)에서 불리니** 막지 않는다
+pub type ChangeSink = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Rust 가 처리하는 채널. 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다
 /// (`tests/channels.rs` 가 `tests/golden/exec/channels.json` 으로 강제한다)
@@ -244,7 +254,7 @@ fn to_value<T: serde::Serialize>(v: &T) -> Result<Value, ExecError> {
 
 /// 시그니처 계산 한 번: 소스의 큐 슬롯을 받아(취소 토큰이 슬롯 대기에도 걸린다) 그 안에서 git 을 돌린다(실행에도 같은 토큰이 걸린다).
 /// 공유 계산은 spawn 된 태스크라 future 를 버려도 멈추지 않으므로 제한 시간의 취소가 닿는 길은 이 토큰뿐이다. 큐의 결과 타입이 JSON 이라 값은 셀로 꺼낸다
-async fn queued_signature(queue: ProcessQueue<Arc<Value>>, exec: Arc<GitExecutor>, path: String, token: CancellationToken) -> Result<Signature, SigError> {
+pub(crate) async fn queued_signature(queue: ProcessQueue<Arc<Value>>, exec: Arc<GitExecutor>, path: String, token: CancellationToken) -> Result<Signature, SigError> {
     let cell: Arc<Mutex<Option<Signature>>> = Arc::default();
     let (out, t) = (cell.clone(), token.clone());
     queue
@@ -411,9 +421,53 @@ impl CancelRegistry {
 /// 소스(local 하나, wsl 은 배포판마다 하나)마다 실행기와 동시성 큐를 하나씩 둔다(TS `RepoService.runtime` 과 같다).
 /// 큐의 결과 타입은 직렬화된 JSON 이라 이후 채널들이 같은 큐(같은 6/4 상한)를 나눠 쓸 수 있다
 /// ssh 소스의 실행기는 [`SshPool`] 에서 온다(호스트마다 하나 — fetch 서비스와 나눠 쓴다)
-struct SourceRuntime {
-    exec: Arc<GitExecutor>,
-    queue: ProcessQueue<Arc<Value>>,
+pub(crate) struct SourceRuntime {
+    pub(crate) exec: Arc<GitExecutor>,
+    pub(crate) queue: ProcessQueue<Arc<Value>>,
+}
+
+/// 소스별 실행기·큐와 SSH 풀. 라우터와 감시 호스트([`crate::watch_host`])가 **같은 것**을 쥔다 — 감시가 따로 연결을 맺으면 호스트당 연결이 둘이 된다.
+/// 복제하면 같은 표를 본다
+#[derive(Clone)]
+pub(crate) struct Runtimes {
+    mirror: RepoMirror,
+    sources: Arc<Mutex<HashMap<String, Arc<SourceRuntime>>>>,
+    /// 주입된 SSH 풀(스위치가 꺼져 있으면 없다)
+    pool: Arc<Mutex<Option<Arc<SshPool>>>>,
+}
+
+impl Runtimes {
+    fn new(mirror: RepoMirror) -> Self {
+        Runtimes { mirror, sources: Arc::default(), pool: Arc::default() }
+    }
+
+    fn ssh_pool(&self) -> Option<Arc<SshPool>> {
+        self.pool.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// 소스의 실행기·큐. ssh 는 호스트마다 하나이고 실행기는 풀에서 온다(풀이 없으면 — 미러가 ssh 를 풀지 않으므로 오지 않는 길 — 오류)
+    pub(crate) fn get(&self, target: &Target) -> Result<Arc<SourceRuntime>, ExecError> {
+        let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
+        let key = target.source_key();
+        if let Some(rt) = sources.get(&key) {
+            return Ok(rt.clone());
+        }
+        let rt = Arc::new(match target {
+            Target::Local { .. } => SourceRuntime { exec: Arc::new(GitExecutor::Local(LocalExecutor::default())), queue: ProcessQueue::new(LOCAL_LIMIT) },
+            Target::Wsl { distro, .. } => SourceRuntime { exec: Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))), queue: ProcessQueue::new(WSL_LIMIT) },
+            Target::Ssh { host, .. } => {
+                // resolve 와 이 사이에 미러가 바뀌어 정리된 호스트면 다시 만들지 않는다(낡은 대상이 지운 호스트로 접속·등록하지 않게).
+                // sources 잠금 안에서 본다 — 정리(sync_ssh_hosts)도 이 잠금을 잡으므로, 여기서 통과하면 뒤이은 정리가 지운다
+                if !self.mirror.ssh_hosts().contains(host) {
+                    return Err(ExecError::Other { message: "저장소 목록이 바뀌었습니다. 다시 시도하세요".to_string() });
+                }
+                let pool = self.ssh_pool().ok_or_else(|| ExecError::Other { message: "SSH 를 사용할 수 없습니다".to_string() })?;
+                SourceRuntime { exec: Arc::new(GitExecutor::Ssh(pool.get(host))), queue: ProcessQueue::new(SSH_LIMIT) }
+            }
+        });
+        sources.insert(key, rt.clone());
+        Ok(rt)
+    }
 }
 
 pub struct Router {
@@ -421,7 +475,17 @@ pub struct Router {
     log: bool,
     mirror: RepoMirror,
     cancels: Arc<CancelRegistry>,
-    sources: Mutex<HashMap<String, Arc<SourceRuntime>>>,
+    /// 소스별 실행기·큐·SSH 풀(감시 호스트와 나눠 쓴다)
+    runtimes: Runtimes,
+    /// 활성 저장소 감시(Phase 6a PR 7b). **Rust 가 맡는 저장소(fetch 와 같은 소유 판정 — `RepoMirror::resolve_fetch`)만** 감시한다. 나머지(github·미러에 없음)는 사이드카가 감시한다
+    watcher: RepoWatcher,
+    watch_host: Arc<RouterWatchHost>,
+    watch_dirs: Arc<dyn DirWatch>,
+    watch_polls: PollTimes,
+    /// 앱이 단 `repo:changed` 싱크(호스트가 호출 시점에 읽는다)
+    watch_sink: Arc<Mutex<Option<ChangeSink>>>,
+    /// 지금 감시 중인 저장소와 그 대상(미러가 바뀌었을 때 대상이 달라졌는지 본다). 감시자의 `current` 와 항상 함께 바뀐다(이 잠금 안에서)
+    watch_target: Mutex<Option<(String, Target)>>,
     commit_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
     compare_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
     diff_cache: Arc<Mutex<LruCache<Arc<Value>>>>,
@@ -437,7 +501,7 @@ pub struct Router {
     /// 슬롯과 무관하게 같은 키의 진행 중 요청을 합치는 큐(TS `RepoService.shared`). 슬롯을 쥔 채 시그니처의 슬롯을 기다리지 않도록 소스의 큐와 분리한다
     joins: ProcessQueue<Arc<Value>>,
     logs: LogService,
-    /// 첫 페이지 문·ref 시그니처 저장소(Phase 6a PR 3a). 소비자: refsDetails(문)·activity(문·시그니처)·wipStatus(문). 감시는 뒤 PR 에서 온다
+    /// 첫 페이지 문·ref 시그니처 저장소(Phase 6a PR 3a). 소비자: refsDetails(문)·activity(문·시그니처)·감시(문·시그니처 — 확인마다 기억값을 갱신한다). wipStatus(문)도 쓴다
     repo_state: RepoState,
     /// 저장소별 untracked diff 허용 목록(TS `untrackedAllow`). `wipStatus` 가 끝나면 교체하고, 미러에서 빠졌거나 대상이 바뀐 저장소는 `on_mirror_changed` 가 지운다. 없으면 untracked diff 는 거부다
     untracked_allow: Arc<Mutex<HashMap<String, AllowEntry>>>,
@@ -450,8 +514,6 @@ pub struct Router {
     pending_prefs: Mutex<Option<FetchPrefs>>,
     /// `ANTLER_RUST_SSH` 스위치(`ANTLER_RUST_GIT=0` 이어도 꺼진다). 꺼져 있으면 ssh 저장소는 풀 없이 사이드카로 간다
     ssh_enabled: bool,
-    /// 호스트별 SSH 실행기 풀(앱이 스위치가 켜져 있을 때만 주입한다). 없으면 ssh 저장소는 미러에서 사이드카로 해석된다
-    ssh_pool: Mutex<Option<Arc<SshPool>>>,
     /// `ANTLER_RUST_API` 스위치(`ANTLER_RUST_GIT=0` 이어도 꺼진다). 꺼져 있으면 `jira:*` 는 서비스 없이 사이드카로 간다
     api_enabled: bool,
     /// Jira 서비스(앱이 스위치가 켜져 있을 때만 주입한다). 없으면 `jira:*` 는 사이드카가 처리한다
@@ -468,10 +530,20 @@ impl Router {
         let user_sink: Arc<Mutex<Option<NoteSink>>> = Arc::default();
         let logs = LogService::new(mirror.clone());
         logs.set_sink(fanout_sink(&repo_state, &mirror, &user_sink));
+        let runtimes = Runtimes::new(mirror.clone());
+        let watch_sink: Arc<Mutex<Option<ChangeSink>>> = Arc::default();
+        let watch_host = Arc::new(RouterWatchHost::new(mirror.clone(), repo_state.clone(), runtimes.clone(), watch_sink.clone()));
+        let watch_dirs: Arc<dyn DirWatch> = Arc::new(NotifyDirs::new());
+        let watcher = RepoWatcher::new(watch_host.clone(), watch_dirs.clone());
         Router {
+            watcher,
+            watch_host,
+            watch_dirs,
+            watch_polls: PollTimes::default(),
+            watch_sink,
+            watch_target: Mutex::default(),
             enabled,
             ssh_enabled: enabled,
-            ssh_pool: Mutex::default(),
             api_enabled: enabled,
             jira: Mutex::default(),
             github: Mutex::default(),
@@ -479,7 +551,7 @@ impl Router {
             log,
             mirror: mirror.clone(),
             cancels: Arc::default(),
-            sources: Mutex::default(),
+            runtimes,
             commit_cache: Arc::new(Mutex::new(LruCache::new(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES))),
             compare_cache: Arc::new(Mutex::new(LruCache::new(COMMIT_CACHE_ENTRIES, COMMIT_CACHE_BYTES))),
             diff_cache: Arc::new(Mutex::new(LruCache::new(DIFF_CACHE_ENTRIES, DIFF_CACHE_BYTES))),
@@ -532,14 +604,14 @@ impl Router {
     /// 이후 fetch 서비스도 이 풀을 쓴다(호스트당 연결 하나)
     pub fn set_ssh_pool(&self, pool: Arc<SshPool>) {
         if self.enabled && self.ssh_enabled {
-            *self.ssh_pool.lock().unwrap_or_else(PoisonError::into_inner) = Some(pool);
+            *self.runtimes.pool.lock().unwrap_or_else(PoisonError::into_inner) = Some(pool);
             self.mirror.set_ssh(true);
         }
     }
 
     /// 주입된 SSH 풀(스위치가 꺼져 있으면 없다)
     pub fn ssh_pool(&self) -> Option<Arc<SshPool>> {
-        self.ssh_pool.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        self.runtimes.ssh_pool()
     }
 
     /// `ANTLER_RUST_API` 스위치가 켜져 있는가(서비스가 만들어졌는지와는 별개 — 만들기 전에 이 값으로 정한다)
@@ -656,8 +728,82 @@ impl Router {
         &self.repo_state
     }
 
-    /// 미러가 바뀐 직후 불린다 — 사라졌거나 대상이 바뀐 저장소의 로그 커서를 닫고, 더 이상 쓰지 않는 ssh 호스트의 연결·큐를 정리한다
+    /// 감시가 이벤트원을 바꿔 끼운다(만든 직후에만 — 시험이 가짜·계수 가능한 이벤트원을 준다)
+    pub fn with_dir_watch(mut self, dirs: Arc<dyn DirWatch>) -> Self {
+        self.watch_dirs = dirs;
+        self.rebuild_watcher();
+        self
+    }
+
+    /// 감시 폴링 주기를 바꾼다(만든 직후에만 — 시험이 실제 소켓에서 짧은 주기로 폴링을 본다)
+    pub fn with_watch_poll(mut self, polls: PollTimes) -> Self {
+        self.watch_polls = polls;
+        self.rebuild_watcher();
+        self
+    }
+
+    fn rebuild_watcher(&mut self) {
+        self.watcher = RepoWatcher::with_poll(self.watch_host.clone(), self.watch_dirs.clone(), self.watch_polls);
+    }
+
+    /// 감시가 ref 변화를 알릴 곳(`repo:changed`)을 단다. 감시 태스크에서 불리므로 막지 않는다. 나중에 달아도 된다
+    pub fn set_change_sink(&self, sink: ChangeSink) {
+        *self.watch_sink.lock().unwrap_or_else(PoisonError::into_inner) = Some(sink);
+    }
+
+    /// 창 포커스 변화(앱이 창 이벤트에서 부른다). 다시 포커스를 얻으면 감시가 바로 한 번 확인하고, 잃으면 폴링을 늦춘다. 어느 스레드에서 불러도 된다
+    pub fn watch_focus(&self, focused: bool) {
+        self.watcher.set_focused(focused);
+    }
+
+    /// 지금 Rust 가 감시 중인 저장소(시험·확인용)
+    pub fn watching(&self) -> Option<String> {
+        self.watcher.current()
+    }
+
+    /// 감시할 저장소를 정한다. **소유 판정은 fetch 와 같은 한 술어**(`resolve_fetch` — 종류 대조. 사이드카가 env `ANTLER_RUST_FETCH_KINDS` 로 같은 판정을 한다)라
+    /// Rust 가 맡는 저장소가 아니면(github·미러에 없음·검사에 걸림) `None` 이고 이전 감시를 멈춘다 — 사이드카가 맡지 않는 구간도 겹치는 구간도 없다.
+    /// 같은 저장소라도 대상(경로·호스트)이 달라졌으면 다시 시작한다. tokio 런타임 안에서 불러야 한다
+    fn set_watch(&self, active: Option<&str>) {
+        let next = active.and_then(|id| match self.mirror.resolve_fetch(id) {
+            Resolved::Rust(target) => Some((id.to_string(), target)),
+            _ => None,
+        });
+        let mut current = self.watch_target.lock().unwrap_or_else(PoisonError::into_inner);
+        match &next {
+            Some((id, target)) => {
+                if current.as_ref().is_some_and(|(cur_id, cur)| cur_id == id && cur != target) {
+                    self.watcher.watch(None);
+                }
+                self.watcher.watch(Some(id));
+            }
+            None => self.watcher.watch(None),
+        }
+        *current = next;
+    }
+
+    /// 미러가 바뀐 뒤 감시 대상을 맞춘다 — 저장소가 사라졌거나 Rust 가 맡지 않게 됐으면 `unwatch_if`(그 사이 다른 저장소로 바뀐 감시를 끊지 않는다), 대상이 바뀌었으면 다시 시작한다
+    fn sync_watch(&self) {
+        let mut current = self.watch_target.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some((id, old)) = current.clone() else { return };
+        match self.mirror.resolve_fetch(&id) {
+            Resolved::Rust(target) if target == old => {}
+            Resolved::Rust(target) => {
+                self.watcher.watch(None);
+                self.watcher.watch(Some(&id));
+                *current = Some((id, target));
+            }
+            _ => {
+                self.watcher.unwatch_if(&id);
+                *current = None;
+            }
+        }
+    }
+
+    /// 미러가 바뀐 직후 불린다 — 사라졌거나 대상이 바뀐 저장소의 로그 커서를 닫고, 더 이상 쓰지 않는 ssh 호스트의 연결·큐를 정리한다.
+    /// 감시도 맞춘다(연결 정리보다 먼저 — 지워진 호스트에 감시가 확인을 걸지 않게)
     pub fn on_mirror_changed(&self) {
+        self.sync_watch();
         self.logs.sync_mirror();
         self.sync_ssh_hosts();
         // 사라졌거나 Rust 가 맡지 않게 된 저장소의 remote 추론 결과를 치운다(저장소 id 로 쌓이는 표가 앱 수명 동안 자라지 않게)
@@ -680,7 +826,7 @@ impl Router {
     fn sync_ssh_hosts(&self) {
         let Some(pool) = self.ssh_pool() else { return };
         let keep = self.mirror.ssh_hosts();
-        let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut sources = self.runtimes.sources.lock().unwrap_or_else(PoisonError::into_inner);
         sources.retain(|key, _| key.strip_prefix("ssh:").is_none_or(|host| keep.contains(host)));
         pool.retain(&keep);
     }
@@ -688,6 +834,9 @@ impl Router {
     /// 앱 종료: 열려 있는 로그 커서(git 프로세스)를 모두 닫는다
     pub fn shutdown(&self) {
         self.logs.close_all();
+        // 감시를 먼저 끝낸다(notify 핸들·스레드를 닫는다). 문을 풀기 전이어야 종료 중에 기준 계산 git 이 뜨지 않는다
+        self.watcher.dispose();
+        *self.watch_target.lock().unwrap_or_else(PoisonError::into_inner) = None;
         // 첫 페이지 문을 기다리는 조회를 풀고 시그니처 기억을 비운다
         self.repo_state.dispose();
         self.activity_cache.lock().unwrap_or_else(PoisonError::into_inner).clear();
@@ -763,6 +912,8 @@ impl Router {
                 if let Some(id) = active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))) {
                     self.repo_state.arm(id);
                 }
+                // 감시: arm 다음이다(기준 시그니처는 첫 페이지 문 뒤에 잡는다). Rust 가 맡는 저장소가 아니면 이전 감시를 멈춘다
+                self.set_watch(active);
             }
             // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl, 그리고 Rust 가 ssh 를 풀 때는 ssh)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
             // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
@@ -1465,8 +1616,8 @@ impl Router {
     /// 커밋 활동. TS `RepoService.activity` 와 같은 순서다: 같은 키의 진행 중 요청에 합류(슬롯과 무관) → 첫 페이지 문 → **시그니처(매번 새로 계산)** → 캐시(8개) → 큐 슬롯 안에서 `log --format=%at` 스트림.
     /// 합친 요청의 취소는 기다리는 쪽이 모두 떠났을 때만 프로세스에 닿는다(기다리는 쪽이 모두 사라지면 future 가 버려져 git 이 정리된다). 각 호출자의 토큰은 그 호출자의 기다림만 끊는다.
     ///
-    /// **기억한 시그니처(`known_signature`)를 쓰지 않는다**: TS 는 감시가 갱신하는 기억값을 재사용하지만(`knownSigs`) 이 PR 에는 Rust 쪽 감시가 없어 기억값을 갱신할 주체가 없다(낡은 값이 캐시 적중을 만든다).
-    /// 그래서 `shared_signature`(진행 중인 계산에 합류, 제한 20초)로 매번 새로 얻는다 — 감시가 Rust 로 오는 PR 7b 에서 재사용을 켠다
+    /// **기억한 시그니처(`known_signature`)를 먼저 쓴다**(TS `knownSigs.get(repoId) ?? sharedSignature`): 감시(PR 7b)가 확인마다 갱신하고 `logStale`·`fetchChanged`·재 `arm` 이 버린다.
+    /// 기억이 없으면 `shared_signature`(진행 중인 계산에 합류, 제한 20초)로 얻는다. 감시하지 않는 저장소의 기억은 알림 없이 낡을 수 있다 — TS 도 같다
     async fn activity_job(&self, repo_id: &str, rt: &SourceRuntime, path: String, req: ActivityRequest, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
         let (state, cache, queue, exec) = (self.repo_state.clone(), self.activity_cache.clone(), rt.queue.clone(), rt.exec.clone());
         let repo = repo_id.to_string();
@@ -1474,9 +1625,12 @@ impl Router {
         let cache_key = format!("{repo_id}\0{}", req.scope_key());
         let run = self.joins.run(Some(&join_key), None, move || async move {
             state.after_first_page(&repo).await;
-            let sig = {
-                let (queue, exec, path) = (queue.clone(), exec.clone(), path.clone());
-                state.shared_signature(&repo, move |tok| queued_signature(queue, exec, path, tok), None).await.map_err(ExecError::from)?
+            let sig = match state.known_signature(&repo) {
+                Some(known) => known,
+                None => {
+                    let (queue, exec, path) = (queue.clone(), exec.clone(), path.clone());
+                    state.shared_signature(&repo, move |tok| queued_signature(queue, exec, path, tok), None).await.map_err(ExecError::from)?
+                }
             };
             if let Some(hit) = cache.lock().unwrap_or_else(PoisonError::into_inner).get(&cache_key, &sig) {
                 return Ok(hit);
@@ -1528,28 +1682,9 @@ impl Router {
         }
     }
 
-    /// 소스의 실행기·큐. ssh 는 호스트마다 하나이고 실행기는 풀에서 온다(풀이 없으면 — 미러가 ssh 를 풀지 않으므로 오지 않는 길 — 오류)
+    /// 소스의 실행기·큐([`Runtimes::get`])
     fn runtime(&self, target: &Target) -> Result<Arc<SourceRuntime>, ExecError> {
-        let mut sources = self.sources.lock().unwrap_or_else(PoisonError::into_inner);
-        let key = target.source_key();
-        if let Some(rt) = sources.get(&key) {
-            return Ok(rt.clone());
-        }
-        let rt = Arc::new(match target {
-            Target::Local { .. } => SourceRuntime { exec: Arc::new(GitExecutor::Local(LocalExecutor::default())), queue: ProcessQueue::new(LOCAL_LIMIT) },
-            Target::Wsl { distro, .. } => SourceRuntime { exec: Arc::new(GitExecutor::Wsl(WslExecutor::new(distro.clone()))), queue: ProcessQueue::new(WSL_LIMIT) },
-            Target::Ssh { host, .. } => {
-                // resolve 와 이 사이에 미러가 바뀌어 정리된 호스트면 다시 만들지 않는다(낡은 대상이 지운 호스트로 접속·등록하지 않게).
-                // sources 잠금 안에서 본다 — 정리(sync_ssh_hosts)도 이 잠금을 잡으므로, 여기서 통과하면 뒤이은 정리가 지운다
-                if !self.mirror.ssh_hosts().contains(host) {
-                    return Err(ExecError::Other { message: "저장소 목록이 바뀌었습니다. 다시 시도하세요".to_string() });
-                }
-                let pool = self.ssh_pool().ok_or_else(|| ExecError::Other { message: "SSH 를 사용할 수 없습니다".to_string() })?;
-                SourceRuntime { exec: Arc::new(GitExecutor::Ssh(pool.get(host))), queue: ProcessQueue::new(SSH_LIMIT) }
-            }
-        });
-        sources.insert(key, rt.clone());
-        Ok(rt)
+        self.runtimes.get(target)
     }
 
     /// 커밋 상세. TS `RepoService.commit` 과 같은 순서: 해시 기준 불변 캐시 → 같은 키 요청 합치기 → 큐 슬롯 안에서 git 세 번.

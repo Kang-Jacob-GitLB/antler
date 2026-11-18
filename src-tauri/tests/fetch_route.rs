@@ -300,6 +300,8 @@ async fn repos_watch_는_rust_가_맡는_저장소만_자동_fetch_대상으로_
         assert!(is_sidecar(&router.route("repos:watch", &arg).await), "{arg}");
         assert_eq!(log(&calls), [want], "{arg}");
     }
+    // 같은 소유 판정으로 Rust 감시도 시작됐다 — 존재하지 않는 경로에서 유예 뒤 기준 계산이 돌지 않게 끝내기 전에 멈춘다
+    router.shutdown();
 }
 
 #[tokio::test]
@@ -458,6 +460,8 @@ async fn ssh_저장소는_자동_fetch_대상이다() {
         assert!(is_sidecar(&router.route("repos:watch", &arg).await), "{arg}");
         assert_eq!(log(&calls), [want], "{arg}");
     }
+    // ssh 저장소를 활성화하면 Rust 감시도 시작된다 — 유예(1.5초) 뒤 기준 계산이 SSH 접속을 시도하지 않게 끝내기 전에 멈춘다
+    router.shutdown();
 }
 
 #[derive(Default)]
@@ -584,7 +588,7 @@ fn fetch_소유_판정은_소스_종류만_쓴다() {
     assert!(!service.contains("mirror.resolve("), "fetch 서비스가 mirror.resolve 로 소유를 정한다");
     assert_eq!(service.matches("mirror.resolve_fetch(").count(), 2);
     let router = prod_code("src/router.rs");
-    assert_eq!(router.matches("mirror.resolve_fetch(").count(), 2, "git_fetch 와 repos:watch 의 자동 fetch 대상");
+    assert_eq!(router.matches("mirror.resolve_fetch(").count(), 4, "git_fetch·repos:watch 의 자동 fetch 대상, 그리고 감시 소유(set_watch·sync_watch — PR 7b, fetch 와 같은 술어)");
     // git_fetch 안에는 해석 함수가 resolve_fetch 하나뿐이다
     let body = &router[router.find("async fn git_fetch").expect("git_fetch")..];
     let body = &body[..body.find("async fn git_file_channel").expect("다음 함수")];

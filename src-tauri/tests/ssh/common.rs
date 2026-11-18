@@ -100,7 +100,7 @@ pub fn openssh_no_comment(key: &PublicKey) -> String {
 
 /// 테스트 준비용 날 git(제품 경로가 아니다 — 저장소를 만들 뿐이다). 격리 환경변수는 `isolate`(ctor)가 프로세스에 넣었다
 #[allow(clippy::disallowed_methods)]
-fn git(dir: &Path, args: &[&str]) {
+pub fn git(dir: &Path, args: &[&str]) {
     let out = std::process::Command::new("git")
         .args(["-c", "user.name=t", "-c", "user.email=t@e.x", "-c", "commit.gpgsign=false"])
         .args(args)

@@ -1688,6 +1688,8 @@ async fn search_scenarios(mode: &Mode) {
                 let args = expand(args, &rev);
                 let args: Vec<&str> = args.as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
                 assert!(refs_git(&dir).args(&args).status().unwrap().success(), "{name}: git {args:?}");
+                // 앱에서는 감시가 ref 변경을 알아 기억한 시그니처를 새로 계산한다(활동이 재사용하므로) — 이 하네스에는 감시가 없으므로 TS 하네스와 같은 효과로 알림을 보낸다
+                router.note_sink()(NoteOp::Stale, &id);
                 continue;
             }
             // 인자 자리: search 는 (질의, 범위, requestId), activity 는 (범위, requestId). 비어 있는 자리는 bridge 가 보내는 표식이다
@@ -1972,9 +1974,8 @@ fn commit_empty(dir: &Path, msg: &str) {
 }
 
 // 아래 네 시험은 TS `repoService.test.ts` 의 첫 페이지 문·시그니처 `it` 4개를 activity 수준으로 옮긴 것이다(test-map.json).
-// Phase 6a PR 4 의 Rust `activity` 는 감시가 기억한 시그니처(`known_signature`)를 **쓰지 않고** 매번 새로 계산하므로(감시는 PR 7b 에서 온다)
-// 알림(`logStale`·`fetchChanged`)이 없어도 같은 결과가 나온다 — 알림 시험은 알림 길이 활동 결과를 깨지 않음을 보증하고,
-// 재사용 시험은 TS 와 반대로 "재사용하지 않음"을 단정한다. 7b 에서 재사용을 켜면 알림 시험이 의미를 갖는다(알림 없이는 낡은 값이 나오므로)
+// Rust `activity` 는 TS 처럼 **기억한 시그니처(`known_signature`)를 재사용한다**(PR 7b — 감시가 확인마다 갱신하고, 알림이 버린다).
+// 그래서 알림(`logStale`·`fetchChanged`) 시험이 의미를 갖는다: 알림 없이는 낡은 값이 나오고(재사용 시험이 단정한다), 알림이 오면 새로 센다
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn 활동은_logstale_알림_뒤에도_바뀐_저장소를_새로_센다() {
@@ -2005,24 +2006,29 @@ async fn 활동은_fetch_변경_알림_뒤에도_바뀐_저장소를_새로_센�
     router.note_sink()(NoteOp::FetchChanged, "nope");
 }
 
-/// TS 의 "감시가 계산한 ref 시그니처를 활동 조회가 다시 계산하지 않고 쓴다"의 PR 4 판: **재사용하지 않는다**.
-/// 첫 활동이 시그니처를 기억해도(공유 계산이 기록한다) 알림 없이 저장소가 바뀐 뒤의 활동은 낡은 기억 대신 새로 계산해 바뀐 값을 낸다 — 기억값을 읽는 구현이면 캐시 적중으로 낡은 값이 나온다
+/// TS 의 "감시가 계산한 ref 시그니처를 활동 조회가 다시 계산하지 않고 쓴다": 기억한 시그니처가 있으면 활동은 그것으로 캐시를 판정한다(for-each-ref 를 다시 돌리지 않는다).
+/// 증거는 **알림 없이는 낡은 값이 나온다**는 것이다 — 기억값을 읽지 않고 매번 새로 계산하는 구현이면 바뀐 값이 나온다. 알림(감시의 변화 감지·`logStale`·`fetchChanged`)이 오면 새로 센다
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn 활동은_기억한_시그니처를_재사용하지_않고_알림_없이도_매번_새로_계산한다() {
-    let tmp = TempDir::new("actfresh");
+async fn 감시가_계산한_ref_시그니처를_활동_조회가_다시_계산하지_않고_쓴다() {
+    let tmp = TempDir::new("actreuse");
     let dir = import(&tmp.0, "search");
     let router = Router::new(true, false, mirror_of(&[("a", dir.as_path())]));
     let first = activity_total(&router, "a").await;
     let remembered = router.repo_state().known_signature("a");
-    assert!(remembered.is_some(), "공유 계산은 시그니처를 기억한다(소비하지 않을 뿐이다)");
-    // 알림 없이 저장소가 바뀐다 — 감시가 없는 상태다
+    assert!(remembered.is_some(), "첫 계산이 시그니처를 기억한다");
+    // 알림 없이 저장소가 바뀐다 — 감시가 없는 상태다. 기억값을 재사용하므로 낡은 값이 나온다(TS 도 같다)
     commit_empty(&dir, "silent");
-    assert_eq!(activity_total(&router, "a").await, first + 1, "기억한 낡은 시그니처로 캐시에 적중했다");
+    assert_eq!(activity_total(&router, "a").await, first, "기억한 시그니처를 재사용하지 않고 다시 계산했다");
+    assert_eq!(router.repo_state().known_signature("a"), remembered, "재사용은 기억값을 바꾸지 않는다");
+    // 감시가 변화를 알면(`compute_signature` 가 기억을 갱신하거나 알림이 버린다) 새로 센다
+    router.note_sink()(NoteOp::Stale, "a");
+    assert_eq!(activity_total(&router, "a").await, first + 1);
     assert_ne!(router.repo_state().known_signature("a"), remembered, "새 계산이 기억을 갱신했다");
     // 바뀐 것이 없으면 같은 값(캐시 적중)이다
     assert_eq!(activity_total(&router, "a").await, first + 1);
-    // ref 를 지워도 같다
+    // ref 를 지워도 알림 뒤에는 새로 센다
     assert!(refs_git(&dir).args(["update-ref", "-d", "refs/heads/side"]).status().unwrap().success());
+    router.note_sink()(NoteOp::FetchChanged, "a");
     assert_eq!(activity_total(&router, "a").await, reachable_count(&dir));
 }
 

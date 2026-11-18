@@ -15,6 +15,7 @@ use crate::git::fetch::confirm_text::ConfirmBox;
 use crate::git::fetch::service::{ApprovalKind, FetchHost, HostEvent};
 use crate::git::log_service::{NoteOp, NoteSink};
 use crate::mirror::RepoMirror;
+use crate::router::ChangeSink;
 use crate::sidecar::Sidecar;
 
 pub struct AppFetchHost {
@@ -35,12 +36,24 @@ fn evt(name: &str, payload: Value) -> Value {
     json!({ "name": name, "payload": payload })
 }
 
+/// 저장소의 ref 가 바뀌었다는 renderer 이벤트(fetch 서비스와 감시가 같은 모양을 쓴다)
+fn repo_changed_event(repo_id: &str) -> Value {
+    evt("repo:changed", json!({ "repoId": repo_id }))
+}
+
 /// 서비스가 내보내는 이벤트를 renderer 이벤트로 바꾼다
 fn host_event(event: &HostEvent) -> Value {
     match event {
         HostEvent::Status(status) => evt("fetch:status", serde_json::to_value(status).unwrap_or(Value::Null)),
-        HostEvent::RepoChanged(repo_id) => evt("repo:changed", json!({ "repoId": repo_id })),
+        HostEvent::RepoChanged(repo_id) => repo_changed_event(repo_id),
     }
+}
+
+/// 감시(`Router::set_change_sink`)가 낸 변화를 renderer 의 `repo:changed` 로 보낸다
+pub fn change_sink(app: AppHandle) -> ChangeSink {
+    std::sync::Arc::new(move |repo_id| {
+        let _ = app.emit("antler:evt", repo_changed_event(repo_id));
+    })
 }
 
 impl FetchHost for AppFetchHost {

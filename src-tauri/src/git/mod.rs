@@ -6,6 +6,7 @@ pub mod commit;
 pub mod exec;
 pub mod fetch;
 pub mod file_channels;
+pub mod fs_watch;
 pub mod github_link;
 pub mod lfs;
 pub mod link_guard;

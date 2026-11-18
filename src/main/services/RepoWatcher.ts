@@ -35,10 +35,17 @@ export class RepoWatcher {
   private pendingSince = 0
   /** 기준 시그니처를 계산하는 중 — 이때 포커스로 확인을 또 돌리면 같은 for-each-ref 를 한 번 더 실행한다 */
   private baselining = false
+  /** 현재 저장소를 이 감시자가 맡는가. 아니면 id 만 기억하고 감시·확인(git)을 하지 않는다 */
+  private owned = true
 
+  /**
+   * @param owns 이 감시자가 맡는 저장소인가. 기본은 전부 맡는다(Electron). Tauri 사이드카는 Rust 가 감시를 맡는 종류의 저장소를 뺀다 —
+   *   fetch 와 같은 소유 판정(`ANTLER_RUST_FETCH_KINDS`, src/sidecar/fetchOwns.ts)이라 이중 감시도 무감시도 없다
+   */
   constructor(
     private readonly repos: RepoService,
-    private readonly onChange: (repoId: string) => void
+    private readonly onChange: (repoId: string) => void,
+    private readonly owns: (repoId: string) => boolean = () => true
   ) {}
 
   /** 지금 감시 중인 저장소 */
@@ -52,6 +59,9 @@ export class RepoWatcher {
     this.repoId = repoId
     const gen = ++this.generation
     if (!repoId) return
+    // 다른 쪽(Rust)이 감시하는 저장소는 id 만 기억한다 — `current` 비교(저장소 제거)는 그대로 동작하고, 포커스·타이머가 git 을 부르지 않는다
+    this.owned = this.owns(repoId)
+    if (!this.owned) return
     // 기준 시그니처를 먼저 잡아 둔다(감시 시작 전 상태와 비교). 첫 화면이 나온 뒤에 시작한다
     this.baselining = true
     try {
@@ -73,7 +83,7 @@ export class RepoWatcher {
   /** 창 포커스 변화. 다시 포커스를 얻으면 바로 한 번 확인한다(다른 도구에서 커밋하고 돌아온 경우) */
   setFocused(focused: boolean): void {
     this.focused = focused
-    if (focused && this.repoId && !this.baselining) void this.check(this.generation)
+    if (focused && this.repoId && this.owned && !this.baselining) void this.check(this.generation)
   }
 
   dispose(): void {
@@ -138,7 +148,7 @@ export class RepoWatcher {
   private async check(gen: number): Promise<void> {
     const repoId = this.repoId
     // 진행 중 표시는 세대별이다 — 이전 저장소의 확인이 멈춰 있어도 새 저장소 감시를 막지 않는다
-    if (!repoId || gen !== this.generation || this.checkingGen === gen) return
+    if (!repoId || !this.owned || gen !== this.generation || this.checkingGen === gen) return
     this.checkingGen = gen
     this.lastCheck = Date.now()
     try {
@@ -156,6 +166,7 @@ export class RepoWatcher {
   private stop(): void {
     this.generation++
     this.baselining = false
+    this.owned = true
     for (const w of this.watchers) w.close()
     this.watchers = []
     if (this.timer) clearTimeout(this.timer)

@@ -1,10 +1,10 @@
-//! 저장소 감시 상태 기계(`src/main/services/RepoWatcher.ts` 의 이식). **앱에 연결하지 않는다**(Phase 6a PR 7a) — 실제 파일 감시(notify)·포커스 배선·소유 판정은 PR 7b 의 몫이다.
+//! 저장소 감시 상태 기계(`src/main/services/RepoWatcher.ts` 의 이식). Phase 6a PR 7a 가 상태 기계를, PR 7b 가 실제 이벤트원(`fs_watch` — notify)·`WatchHost` 구현·포커스 배선·소유 판정을 더했다.
 //!
 //! 활성 저장소 하나만 감시하고, ref 시그니처가 **바뀐 경우에만** [`WatchHost::on_change`] 를 부른다(`.git` 안의 잦은 변화 — index·objects — 는 걸러진다):
 //! - 로컬·github: `.git`(워크트리면 공통 디렉터리까지)의 변화 → 디바운스([`DEBOUNCE`]) → 시그니처 비교. 안전망 폴링 [`LOCAL_SAFETY_POLL`].
 //! - WSL: 9P 는 이벤트를 믿을 수 없어 [`WSL_POLL`] 폴링만. SSH: [`SSH_POLL`] 폴링만. 포커스를 잃으면 폴링을 [`FOCUS_SLOWDOWN`] 배로 늦춘다.
 //!
-//! 외부와 닿는 곳은 둘 다 주입한다 — 이벤트원은 [`DirWatch`](7b 가 notify 로 구현), 시계는 `tokio::time` 이라 시험이 `start_paused` 로 멈춘다(fetch 서비스와 같다).
+//! 외부와 닿는 곳은 둘 다 주입한다 — 이벤트원은 [`DirWatch`](`fs_watch::NotifyDirs` 가 notify 로 구현), 시계는 `tokio::time` 이라 시험이 `start_paused` 로 멈춘다(fetch 서비스와 같다).
 //! git·소유 저장소 정보·알림은 [`WatchHost`] 다.
 //!
 //! **TS 와 같은 것**: 상수·세대(저장소를 바꾸면 이전 확인의 결과는 버린다)·기준 시그니처는 첫 페이지 문 뒤·확인은 한 번에 하나(진행 중이면 건너뜀)·확인 제한 20초·
@@ -103,12 +103,37 @@ pub type EventSink = Arc<dyn Fn(WatchEvent) + Send + Sync>;
 /// 감시 핸들. 버리면 감시가 멈춘다
 pub type WatchHandle = Box<dyn Send>;
 
-/// 디렉터리 이벤트원. 7b 가 notify 로 구현하고 시험은 가짜로 갈아 끼운다
+/// 디렉터리 이벤트원. `fs_watch::NotifyDirs`(notify)가 구현하고 시험은 가짜로 갈아 끼운다.
+/// 두 메서드는 future 다 — 파일 시스템을 만지므로(느린 네트워크 드라이브 stat·감시 등록의 확인 대기) 구현이 blocking 풀에서 돌려 tokio 워커를 막지 않는다
 pub trait DirWatch: Send + Sync + 'static {
     /// `dir` 이 실제 git 디렉터리인가(`HEAD` 가 있는가)
-    fn has_head(&self, dir: &str) -> bool;
+    fn has_head(&self, dir: &str) -> BoxFuture<'static, bool>;
     /// `dir` 을 재귀로 감시한다. 이벤트마다 `sink` 를 부른다. 재귀 감시를 못 하는 파일 시스템이면 `Err` — 안전망 폴링에 맡긴다
-    fn watch(&self, dir: &str, sink: EventSink) -> Result<WatchHandle, String>;
+    fn watch(&self, dir: &str, sink: EventSink) -> BoxFuture<'static, Result<WatchHandle, String>>;
+}
+
+/// 안전망·원격 폴링 주기(포커스 중). 기본은 TS 와 같은 상수이고, 시험만 짧게 준다([`RepoWatcher::with_poll`])
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PollTimes {
+    pub local: Duration,
+    pub wsl: Duration,
+    pub ssh: Duration,
+}
+
+impl Default for PollTimes {
+    fn default() -> Self {
+        PollTimes { local: LOCAL_SAFETY_POLL, wsl: WSL_POLL, ssh: SSH_POLL }
+    }
+}
+
+impl PollTimes {
+    fn of(&self, kind: WatchKind) -> Duration {
+        match kind {
+            WatchKind::Local | WatchKind::Github => self.local,
+            WatchKind::Wsl => self.wsl,
+            WatchKind::Ssh => self.ssh,
+        }
+    }
 }
 
 /// 감시가 기대는 저장소 서비스와 알림 출구
@@ -137,8 +162,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// 활성 저장소 하나를 감시한다. **복제되지 않는 소유자**다 — 공유가 필요하면 `Arc` 로 감싼다. 버리면(`dispose` 를 부르지 않아도) 감시가 멈춘다.
 ///
-/// 정지 계약: [`watch`](Self::watch)(`None`·다른 저장소)·[`unwatch_if`](Self::unwatch_if)·`Drop` 이 돌아올 때 이전 저장소의 디렉터리 감시 핸들은 **이미 닫혀 있다**
-/// (TS `stop()` 의 `w.close()` — 호출처가 바로 캐시 폴더를 지워도 Windows 에서 핸들 때문에 실패하지 않는다). 다만 멀티스레드 런타임에서는
+/// 정지 계약: [`watch`](Self::watch)(`None`·다른 저장소)·[`unwatch_if`](Self::unwatch_if)·`Drop` 이 돌아올 때 이전 저장소의 **맡겨진** 디렉터리 감시 핸들은 닫혀 있다
+/// (TS `stop()` 의 `w.close()`). 실제 notify 핸들(`fs_watch`)은 notify 가 스레드에 정지만 알리고 돌아오므로 `Drop` 이 스레드 종료를 최대 `CLOSE_WAIT`(1.5초)까지 기다릴 뿐 보장하지는 않고,
+/// 디렉터리를 **여는 중**(blocking 풀에서 등록하는 동안)에 정지하면 그 핸들은 곧 버려진다 — 호출처가 바로 폴더를 지워도 되는 보장으로 쓰지 않는다(github 캐시 삭제는 사이드카 몫이다). 또 멀티스레드 런타임에서는
 /// 정지 직전에 끝난 확인의 `on_change` 가 드물게 정지 뒤에 한 번 늦게 올 수 있다 — 받는 쪽(renderer)이 activeRepoId 로 거른다
 pub struct RepoWatcher {
     inner: Arc<Inner>,
@@ -147,6 +173,7 @@ pub struct RepoWatcher {
 struct Inner {
     host: Arc<dyn WatchHost>,
     dirs: Arc<dyn DirWatch>,
+    polls: PollTimes,
     /// 창 포커스. 저장소를 바꿔도 유지된다(TS `focused`)
     focused: AtomicBool,
     core: Mutex<Core>,
@@ -165,7 +192,8 @@ struct Run {
 
 impl Run {
     /// 태스크에 취소를 보내고 디렉터리 감시 핸들을 **이 스레드에서 바로** 닫는다.
-    /// 취소를 먼저 하므로 태스크가 핸들을 맡기는 순간(`Ctl::adopt`)에는 취소를 보거나, 아니면 여기서 닫힌다 — 새는 핸들이 없다
+    /// 취소를 먼저 하므로 태스크가 핸들을 맡기는 순간(`Ctl::adopt`)에는 취소를 보거나, 아니면 여기서 닫힌다 — 맡겨진 핸들이 새지 않는다
+    /// (등록 중이라 아직 맡겨지지 않은 핸들은 등록이 끝나는 대로 버려진다)
     fn stop(self) {
         self.cancel.cancel();
         let handles = std::mem::take(&mut *lock(&self.ctl.handles));
@@ -235,7 +263,12 @@ impl Timing {
 
 impl RepoWatcher {
     pub fn new(host: Arc<dyn WatchHost>, dirs: Arc<dyn DirWatch>) -> Self {
-        RepoWatcher { inner: Arc::new(Inner { host, dirs, focused: AtomicBool::new(true), core: Mutex::default() }) }
+        Self::with_poll(host, dirs, PollTimes::default())
+    }
+
+    /// 폴링 주기를 정해 만든다(시험이 실제 소켓 위에서 짧은 주기로 폴링을 본다 — 멈춘 시계는 실제 I/O 대기 중에 자동으로 전진해 제한 시간을 헛발화시킨다)
+    pub fn with_poll(host: Arc<dyn WatchHost>, dirs: Arc<dyn DirWatch>, polls: PollTimes) -> Self {
+        RepoWatcher { inner: Arc::new(Inner { host, dirs, polls, focused: AtomicBool::new(true), core: Mutex::default() }) }
     }
 
     /// 지금 감시 중인 저장소
@@ -331,7 +364,7 @@ impl Inner {
     fn next_poll(&self, kind: Option<WatchKind>) -> Option<Instant> {
         let kind = kind?;
         let slow = if self.focused.load(Ordering::SeqCst) { 1 } else { FOCUS_SLOWDOWN };
-        Some(Instant::now() + kind.poll_interval() * slow)
+        Some(Instant::now() + self.polls.of(kind) * slow)
     }
 
     fn begin_check(&self, repo_id: &str, cancel: &CancellationToken, from_poll: bool) -> Check {
@@ -355,7 +388,7 @@ impl Inner {
     async fn watch_dirs(&self, repo_id: &str, events: &Arc<Events>, ctl: &Ctl, cancel: &CancellationToken) {
         let Some(dirs) = self.host.local_git_dirs(repo_id).await else { return };
         for dir in dirs {
-            if is_unc(&dir) || !self.dirs.has_head(&dir) {
+            if is_unc(&dir) || !self.dirs.has_head(&dir).await {
                 continue;
             }
             let events = events.clone();
@@ -366,7 +399,7 @@ impl Inner {
                 }
             });
             // 재귀 감시를 지원하지 않는 파일 시스템 — 안전망 폴링에 맡긴다
-            if let Ok(h) = self.dirs.watch(&dir, sink) {
+            if let Ok(h) = self.dirs.watch(&dir, sink).await {
                 ctl.adopt(h, cancel);
             }
         }
@@ -467,13 +500,15 @@ mod tests {
     }
 
     impl DirWatch for FakeDirs {
-        fn has_head(&self, dir: &str) -> bool {
-            !lock(&self.no_head).iter().any(|d| d == dir)
+        fn has_head(&self, dir: &str) -> BoxFuture<'static, bool> {
+            let has = !lock(&self.no_head).iter().any(|d| d == dir);
+            async move { has }.boxed()
         }
-        fn watch(&self, dir: &str, sink: EventSink) -> Result<WatchHandle, String> {
+        fn watch(&self, dir: &str, sink: EventSink) -> BoxFuture<'static, Result<WatchHandle, String>> {
             lock(&self.sinks).push((dir.to_string(), sink));
             self.open.fetch_add(1, Ordering::SeqCst);
-            Ok(Box::new(Guard(self.open.clone())))
+            let handle: WatchHandle = Box::new(Guard(self.open.clone()));
+            async move { Ok(handle) }.boxed()
         }
     }
 

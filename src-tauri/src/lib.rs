@@ -25,6 +25,8 @@ pub mod routed_repos;
 pub mod secret;
 mod sidecar;
 mod snap;
+// 저장소 감시의 앱 쪽 호스트(Phase 6a PR 7b) — 라우터가 만든다
+mod watch_host;
 
 use std::path::PathBuf;
 
@@ -121,6 +123,8 @@ pub fn run() {
                     s.note(op, repo_id);
                 }
             }));
+            // Rust 가 맡는 저장소의 감시(Phase 6a PR 7b)가 ref 변화를 알리는 곳 — 사이드카의 `repo:changed` 와 같은 모양의 renderer 이벤트
+            router.set_change_sink(fetch_host::change_sink(app.handle().clone()));
             // SSH 풀(Phase 5 PR 3). 스위치가 꺼져 있으면(ANTLER_RUST_SSH=0·ANTLER_RUST_GIT=0) 만들지 않는다 — ssh 저장소는 사이드카가 전부 맡는다.
             // 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(사이드카가 처리한다).
             // **fetch 서비스·사이드카 env 보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓰고, 사이드카 env 가 같은 판정(ssh_active)을 따른다
@@ -247,9 +251,11 @@ pub fn run() {
                 if let Some(s) = window.app_handle().try_state::<sidecar::Sidecar>() {
                     s.set_focus(*focused);
                 }
-                // Rust 가 맡는 저장소의 자동 fetch(밀렸으면 바로). 이 스레드는 런타임 밖이라 들어가서 부른다
-                if *focused {
-                    if let Some(r) = window.app_handle().try_state::<router::Router>() {
+                if let Some(r) = window.app_handle().try_state::<router::Router>() {
+                    // Rust 가 맡는 저장소의 감시(포커스를 얻으면 바로 확인하고, 잃으면 폴링을 늦춘다). 플래그와 `Notify` 만 만지므로 런타임 밖 스레드에서 불러도 된다
+                    r.watch_focus(*focused);
+                    // Rust 가 맡는 저장소의 자동 fetch(밀렸으면 바로). 이 스레드는 런타임 밖이라 들어가서 부른다
+                    if *focused {
                         router::in_runtime_of(tauri::async_runtime::handle().inner(), || r.fetch_on_focus());
                     }
                 }

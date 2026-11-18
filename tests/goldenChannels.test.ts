@@ -527,7 +527,7 @@ describe('검색·활동 채널 골든(channels/{search,activity}.json)', () => 
         if ('git' in step) {
           git(dir, expand(step.git, rev) as string[])
           // 앱에서는 감시가 ref 변경을 알아 기억한 시그니처를 새로 계산한다 — 이 하네스에는 감시가 없으므로 같은 효과로 버린다.
-          // Rust(PR 4)는 기억값을 쓰지 않고 매번 새로 계산하므로 이 호출이 없어도 같은 결과여야 한다
+          // Rust 하네스(src-tauri/tests/channels.rs)도 같은 알림(`NoteOp::Stale`)을 보낸다 — Rust 의 활동도 기억값을 재사용한다(PR 7b)
           svc.noteLog('logStale', id)
           continue
         }
