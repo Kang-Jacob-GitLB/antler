@@ -45,7 +45,8 @@ jobs:
             '^scripts/make-repo-fixtures\.mjs$', '^scripts/make-edge-fixtures\.mjs$', '^scripts/lib/edgeFixtures6a\.mjs$', '^src/shared/', '^src/sidecar/',
             '^src/renderer/tauri/', '^tests/golden.*\.test\.ts$', '^\.github/workflows/tauri\.yml$',
             '^src/main/ipc/confirmText\.ts$', '^src/main/ipc/jira\.ts$', '^src/main/ipc/github\.ts$', '^scripts/gen-fetch-special\.mjs$', '^src/main/github/', '^src/main/jira/',
-            '^src/main/update/', '^tests/update\.test\.ts$'
+            '^src/main/update/', '^tests/update\.test\.ts$',
+            '^scripts/make-update-manifests\.mjs$', '^scripts/check-release-features\.mjs$'
           )
           if ($env:EVENT -ne 'pull_request') { "run=true" >> $env:GITHUB_OUTPUT; exit 0 }
           $files = git diff --name-only "$env:BASE_SHA" HEAD

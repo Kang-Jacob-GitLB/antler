@@ -124,7 +124,15 @@ fn env_host_port(app: tauri::AppHandle, home: Option<String>) -> env_host::EnvHo
     )
 }
 
+/// 배포 빌드 가드(`scripts/check-release-features.mjs`)가 바이너리에서 찾는 표식. `test-hooks` 를 켠 빌드에서만 존재한다.
+/// `test-hooks` 코드에는 따로 고유한 문자열이 없어, 시작할 때 실제로 출력해 링커가 지우지 못하게 한다.
+/// 이 문자열을 바꾸면 가드 스크립트의 같은 값도 바꿔야 한다(`tests/releaseFeatureGuard.test.ts` 가 일치를 강제한다)
+#[cfg(feature = "test-hooks")]
+const FEATURE_MARKER_TEST_HOOKS: &str = "antler-build-feature:test-hooks";
+
 pub fn run() {
+    #[cfg(feature = "test-hooks")]
+    eprintln!("{FEATURE_MARKER_TEST_HOOKS}");
     commands::mark_start();
     let mut builder = tauri::Builder::default();
     // 단일 인스턴스 — **다른 플러그인보다 먼저** 등록한다(플러그인 문서: 두 번째 실행은 나머지 설정이 돌기 전에 감지돼 종료해야 한다).
