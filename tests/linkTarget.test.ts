@@ -82,6 +82,16 @@ describe.skipIf(!win)('linksStayLocal (정션)', () => {
     expect(linksStayLocal(join(base, 'real'), remote)).toBe(true)
   })
 
+  it('중간 링크(b -> a\\sub, a -> 원격)는 a 에서 멈춰 거부한다(구성 요소 단위)', () => {
+    const a = mk('hopA', join(base, 'real'))
+    const b = mk('hopB', join(a, 'sub'))
+    // a 의 대상(real)만 원격이라고 주입한다 — b 의 대상(hopA\sub)은 원격 모양이 아니다
+    const remote = (t: string): boolean => t.toLowerCase().endsWith('real')
+    expect(linksStayLocal(b)).toBe(true)
+    expect(linksStayLocal(b, remote)).toBe(false)
+    expect(linksStayLocal(join(b, 'f.txt'), remote)).toBe(false)
+  })
+
   it('assertInsideRoot: 원격 판정 링크는 realpath 전에 invalid path', async () => {
     const root = join(base, 'repoA')
     mkdirSync(join(root, 'plain'), { recursive: true })

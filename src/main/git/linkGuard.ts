@@ -13,21 +13,25 @@ export const MAX_LINK_HOPS = 16
 
 /**
  * 링크(심볼릭 링크·정션) 대상 문자열이 원격(SMB·WebDAV)을 가리키는가 — 순수 판정이다.
- * 원격: `\\host\share`·`//host/share`·`\\host@SSL\DavWWWRoot\…`·`\\?\UNC\…`·`\??\UNC\…`·장치 경로(`\\.\…`)·볼륨 GUID(`\\?\Volume{…}`, 보수적으로).
- * 로컬: `\\wsl.localhost\…`·`\\wsl$\…`·`\\?\C:\…`·`\??\C:\…`(정션의 일반 대상)·드라이브·상대 경로.
+ * **허용 목록**이다 — 로컬로 알려진 모양만 로컬이고 나머지는 전부 원격으로 본다(차단 목록은 `\??\GLOBALROOT\Device\Mup\…` 같은 우회를 못 막는다).
+ * 로컬: 드라이브 경로(`C:\`·`C:/`·`\\?\C:\`·`\??\C:\` — 정션의 일반 대상)·상대 경로·단일 `/` 시작 경로, WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`).
+ * 원격: 그 밖의 `\\…`·`//…`(`\\host\share`·WebDAV `\\host@SSL\…`·장치 `\\.\…`)와 `\??\`·`\\?\` 뒤가 드라이브가 아닌 모든 것
+ * (`UNC\`·`Volume{`·`GLOBALROOT\…`·`Device\…`).
  * Rust 판(`repos/scan.rs` 의 `is_remote_link_target`)과 같아야 한다 — 같은 사례표(tests/fixtures/repos/link-target.cases.json)로 둘 다 시험한다.
  */
 export function isRemoteLinkTarget(target: string): boolean {
   const t = target.trim()
-  // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): UNC\ 나 Volume{ 이 이어지면 원격, 아니면 그 뒤가 로컬 경로(드라이브)다
-  const ns = /^(?:\\\?\?\\|[\\/]{2}\?[\\/])(.*)$/is.exec(t)
-  if (ns) return /^(?:UNC[\\/]|Volume\{)/i.test(ns[1]!)
+  // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): 뒤가 드라이브 문자 경로일 때만 로컬이다
+  const ns = NT_PREFIX.exec(t)
+  if (ns) return !/^[A-Za-z]:(?:[\\/]|$)/.test(t.slice(ns[0].length))
   if (!/^[\\/]{2}/.test(t)) return false
   return !isWslUnc(t)
 }
 
-/** readlink 가 돌려준 NT 접두(`\??\C:\x`·`\\?\C:\x`)를 벗겨 일반 경로로 만든다(UNC·Volume 은 이미 원격으로 판정돼 여기 오지 않는다) */
-const stripNtPrefix = (t: string): string => t.replace(/^(?:\\\?\?\\|\\\\\?\\)/, '')
+const NT_PREFIX = /^(?:[\\/]\?\?[\\/]|[\\/]{2}\?[\\/])/
+
+/** readlink 가 돌려준 NT 접두(`\??\C:\x`·`\\?\C:\x`)를 벗겨 일반 경로로 만든다(드라이브가 아닌 대상은 이미 원격으로 판정돼 여기 오지 않는다) */
+const stripNtPrefix = (t: string): string => t.replace(NT_PREFIX, '')
 
 /**
  * `path` 의 구성 요소를 루트부터 걸으며 lstat 으로 링크를 찾고, 링크마다 readlink 대상이 원격이 아닌지 본다(링크 대상에는 접속하지 않는다).
