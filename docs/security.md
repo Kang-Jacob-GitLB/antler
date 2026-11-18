@@ -118,3 +118,10 @@ WSL 은 4초, SSH 는 30초 폴링만 한다(`.git` 을 직접 보지 않는다)
 2. lazy fetch(`GIT_NO_LAZY_FETCH=0`)와 `GIT_ALLOW_PROTOCOL=https` 를 허용한다 — 필요한 blob 을 그때그때 받아야 해서다.
 3. 로컬 설정은 일반 허용 목록(`isAllowedConfig`)이 아니라 기대값과 정확히 일치하는지(`checkGithubConfig`)로 검사한다
    (`core.bare=true` 는 여기서만 허용). 사용자 전역·시스템 git 설정은 읽지 않고 프록시·인증서 키만 골라 옮긴다.
+
+토큰을 환경 변수로 싣는 이 git 은 **앱 프로세스의 환경도 거른다**(`githubEnv` 의 `SCRUB_PARENT_ENV_KEY` 표식 → `processRunner.childEnv`).
+부모에 `GIT_SSL_NO_VERIFY`(값이 비어도 TLS 검증이 꺼져 중간자가 Authorization 을 받는다)나 `GIT_TRACE*`·`GIT_CURL_VERBOSE`(헤더·설정값이 파일·stderr 에 남는다)가 있거나,
+`GIT_COMMON_DIR`·`GIT_WORK_TREE`·`GIT_INDEX_FILE`·`GIT_OBJECT_DIRECTORY`·`GIT_ALTERNATE_OBJECT_DIRECTORIES`·`GIT_NAMESPACE`·`GIT_CONFIG*`·`GIT_EXEC_PATH`·`GIT_TEMPLATE_DIR` 가 있어도
+물려주지 않는다(이름은 대소문자 무관 — Windows 환경 변수 규칙). 프록시·`GIT_SSL_CAINFO` 등 나머지 환경은 그대로 상속한다.
+일반 local·WSL·SSH git 은 토큰을 싣지 않으므로 이 거르기를 적용하지 않는다(사용자의 TLS·추적 설정은 사용자 선택이고, 자격 증명 도우미는 호스트가 정한다) — 표식을 `env` 에 넣는 실행만 거른다.
+시험: `tests/githubEnvScrub.test.ts`.
