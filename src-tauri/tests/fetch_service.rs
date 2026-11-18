@@ -17,7 +17,7 @@ use antler_lib::git::exec::{ExecError, GitExecutor, LocalExecutor, RunOpts, RunR
 use antler_lib::git::fetch::confirm_text::ConfirmBox;
 use antler_lib::git::fetch::guard::next_delay_ms;
 use antler_lib::git::fetch::run::{inspect_config, GitRunner};
-use antler_lib::git::fetch::service::{approve_message, ApprovalKind, FetchHost, FetchPrefs, FetchService, FetchStatus, HostEvent, FETCH_TIMEOUT, FIRST_DELAY};
+use antler_lib::git::fetch::service::{ApprovalKind, FetchHost, FetchPrefs, FetchService, FetchStatus, HostEvent, FETCH_TIMEOUT, FIRST_DELAY};
 use antler_lib::git::log_service::NoteOp;
 use antler_lib::mirror::{MirrorRepo, RepoMirror};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -121,7 +121,8 @@ fn 승인을_보내는_곳은_서비스의_두_지점뿐이고_줄을_만드는_
     assert!(service[run_fetch_at..manual_at].contains("if manual {"), "수동 fetch 일 때만");
     let always_at = service.find("self.send_approval(ApprovalKind::Trusted").expect("항상 허용 뒤");
     assert!(service[..always_at].rfind("decision == Decision::Always").is_some_and(|p| always_at - p < 200), "항상 허용 응답일 때만");
-    // 프로토콜 줄: "fetchApprove" 리터럴은 service.rs 의 approve_message 한 곳, 그것을 부르는 곳은 sidecar.rs 의 Sidecar::approve 한 곳
+    // 설정 쓰기(Phase 6b PR 9): 승인 변경자(`set_fetch_approval`·`set_trusted_config`)를 부르는 곳은 호스트 구현(`fetch_host.rs`) 한 곳이고,
+    // 사이드카로 승인을 부탁하는 줄(`fetchApprove`)은 Rust 에 더는 없다
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     collect(&dir, &mut files);
@@ -132,23 +133,20 @@ fn 승인을_보내는_곳은_서비스의_두_지점뿐이고_줄을_만드는_
         if code.contains("fetchApprove") {
             literal.push(rel.clone());
         }
-        if code.contains("approve_message(") && !rel.ends_with("fetch/service.rs") {
+        if (code.contains(".set_fetch_approval(") || code.contains(".set_trusted_config(")) && !rel.starts_with("config/") {
             callers.push(rel);
         }
     }
-    assert_eq!(literal, ["git/fetch/service.rs"]);
-    assert_eq!(callers, ["sidecar.rs"]);
-    let sidecar = prod_code("src/sidecar.rs");
-    assert_eq!(sidecar.matches("approve_message(").count(), 1);
-    // 사이드카로 req 를 보내는 길(request)은 args 를 값으로만 넣고, fetchApprove 를 만들지 않는다
-    assert!(!sidecar.contains("\"fetchApprove\""));
-    // 모양: 프로토콜의 kind 문자열 두 개뿐
+    assert!(literal.is_empty(), "fetchApprove 줄을 만드는 곳이 있다: {literal:?}");
+    assert_eq!(callers, ["fetch_host.rs"]);
+    let host = prod_code("src/fetch_host.rs");
+    assert_eq!(host.matches(".set_fetch_approval(").count(), 1);
+    assert_eq!(host.matches(".set_trusted_config(").count(), 1);
+    // 승인 쓰기 함수를 부르는 곳도 `FetchHost::approve` 구현 하나다
+    assert_eq!(host.matches("write_approval(").count(), 2, "정의 하나 + approve 구현의 호출 하나");
+    // 모양: 승인 종류는 둘뿐이다
     assert_eq!(ApprovalKind::Approval.as_str(), "approval");
     assert_eq!(ApprovalKind::Trusted.as_str(), "trusted");
-    assert_eq!(
-        approve_message(ApprovalKind::Trusted, "r", &"a".repeat(64)),
-        serde_json::json!({ "t": "fetchApprove", "kind": "trusted", "repoId": "r", "fingerprint": "a".repeat(64) })
-    );
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {

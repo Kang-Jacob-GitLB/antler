@@ -57,6 +57,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api_host::{self, GithubHost, JiraHost};
 use crate::app_host::{self, AppHost};
+use crate::config_host::{self, ConfigHost};
 use crate::env_host::{self, EnvHost};
 use crate::git::commit::{commit_detail, estimate_commit_bytes, has_line_stats, HexHash};
 use crate::git::activity::{commit_activity, now_secs, ActivityCache, ActivityRequest};
@@ -125,6 +126,23 @@ pub const APP_CHANNELS: &[&str] = &["dialog:pickFolder", "clipboard:writeText", 
 /// `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`EnvHost`])가 주입돼 있어야 하고, **ssh 종류**(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만이다 — 아니면 사이드카가 처리한다(계획 §13 C4)
 pub const ENV_CHANNELS: &[&str] = &["env:wslDistros", "env:sshHosts", "env:test", "env:listDir", "repos:scan"];
 
+/// Rust 가 응답하는 설정 소유 채널(`config_host`, Phase 6b PR 9): 설정 파일을 읽고 쓰는 채널과 그 설정이 필요한 `external:*`·`repos:watch`·`req:cancel`.
+/// 다른 채널 목록과 겹치지 않고 전부 `IPC_CHANNELS` 에 있다(`tests/config_route.rs`). 설정 소유자([`Router::set_config`])가 있을 때만 Rust 가 처리한다 —
+/// `ANTLER_RUST_GIT=0` 이면 소유자가 없어 전부 사이드카가 처리한다(그 실행에서는 사이드카가 설정 파일의 유일한 작성자다)
+pub const CONFIG_CHANNELS: &[&str] = &[
+    "config:get",
+    "config:setUi",
+    "repos:add",
+    "repos:addMany",
+    "repos:addGithub",
+    "repos:update",
+    "repos:remove",
+    "repos:watch",
+    "external:open",
+    "external:pickEditorExe",
+    "req:cancel",
+];
+
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
 /// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 하고, `IPC_CHANNELS` 의 `jira:`·`gh:` 채널에서 [`API_SIDECAR_CHANNELS`] 를 뺀 것과 정확히 같아야 한다(`tests/api_route.rs` 가 강제한다)
 pub const API_CHANNELS: &[&str] = &[
@@ -189,18 +207,6 @@ pub fn rust_fetch_kinds(ssh_active: bool, github_active: bool) -> &'static str {
 /// `ssh_active` 는 [`Router::ssh_active`]·`github_active` 는 [`Router::github_cache_active`] 와 같은 값이어야 한다(`ANTLER_RUST_SSH` 도 같은 값으로 넘어간다)
 pub fn sidecar_fetch_kinds(router_enabled: bool, ssh_active: bool, github_active: bool) -> Option<&'static str> {
     router_enabled.then(|| rust_fetch_kinds(ssh_active, github_active))
-}
-
-/// `ANTLER_RUST_SSH`(`0` 이면 끔)와 `ANTLER_RUST_GIT`(`0` 이면 함께 끔)으로 ssh 저장소의 git 채널(fetch 제외)을 Rust 가 처리할지 정한다.
-/// 기본은 켬이다. 실제 판정은 [`Router::ssh_active`] 하나(이 스위치 + 풀 주입)이고 미러 해석·사이드카 env 가 같은 값을 쓴다
-pub fn rust_ssh_enabled(ssh_var: Option<&str>, git_var: Option<&str>) -> bool {
-    ssh_var != Some("0") && rust_git_enabled(git_var)
-}
-
-/// `ANTLER_RUST_API`(`0` 이면 끔)와 `ANTLER_RUST_GIT`(`0` 이면 함께 끔)으로 [`API_CHANNELS`] 를 Rust 가 처리할지 정한다.
-/// 이 스위치는 미러·저장소와 무관하다 — 켜져 있으면(서비스가 만들어졌으면) 항상 Rust 가 처리한다
-pub fn rust_api_enabled(api_var: Option<&str>, git_var: Option<&str>) -> bool {
-    api_var != Some("0") && rust_git_enabled(git_var)
 }
 
 /// 주어진 tokio 런타임 안에서 `f` 를 부른다. 서비스의 예약·fetch 시작은 태스크를 만들어서 런타임 밖 스레드(사이드카 읽기 스레드·창 이벤트)에서는 패닉한다 —
@@ -611,6 +617,8 @@ pub struct Router {
     app: Mutex<Option<AppHost>>,
     /// 환경 채널 포트(앱이 주입한다). 없거나 `ANTLER_RUST_GIT=0` 이면 [`ENV_CHANNELS`] 는 사이드카가 처리한다
     env: Mutex<Option<EnvHost>>,
+    /// 설정 소유자(Phase 6b PR 9: 설정 파일의 유일한 작성자). 없거나 `ANTLER_RUST_GIT=0` 이면 [`CONFIG_CHANNELS`] 는 사이드카가 처리한다(그때는 사이드카가 파일을 쓴다)
+    config: Mutex<Option<Arc<ConfigHost>>>,
     /// github 저장소별 조회 범위(저장소 id → 범위). 미러가 바뀌면 github 로 풀리지 않는 저장소 것을 치운다
     github_scopes: Mutex<HashMap<String, Arc<GithubScope>>>,
     /// "삭제 중"인 github 저장소(id → 만료 시각). `repos:remove` 가 정리를 시작한 뒤 사이드카가 레코드를 지우고 미러가 바뀌기 전까지, 그 id 의 새 조회가
@@ -644,6 +652,7 @@ impl Router {
             api_owned: AtomicBool::new(false),
             app: Mutex::default(),
             env: Mutex::default(),
+            config: Mutex::default(),
             github_scopes: Mutex::default(),
             github_removing: Mutex::default(),
             log,
@@ -753,6 +762,28 @@ impl Router {
         self.env.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
+    /// 설정 소유자를 주입한다(Phase 6b PR 9). 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 그때 설정 파일의 작성자는 사이드카 하나다.
+    /// 주입하면 [`CONFIG_CHANNELS`] 를 Rust 가 응답하고 사이드카로 보내지 않는다
+    pub fn set_config(&self, host: Arc<ConfigHost>) {
+        if self.enabled {
+            *self.config.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
+        }
+    }
+
+    fn config_port(&self) -> Option<Arc<ConfigHost>> {
+        self.config.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Rust 가 설정 파일을 소유하는가(소유 술어 — 시작 때 `router.enabled()` 하나로 정해져 실행 중 바뀌지 않는다)
+    pub fn config_owned(&self) -> bool {
+        self.config_port().is_some()
+    }
+
+    /// GitHub 원격 전용 저장소의 캐시 실행기(저장소 추가·고아 복구가 `init` 을 돌린다). 서비스가 없거나 스위치가 꺼져 있으면 없다
+    pub(crate) fn github_executor(&self) -> Option<GithubExecutor> {
+        self.runtimes.github_exec()
+    }
+
     fn jira_port(&self) -> Option<JiraHost> {
         self.jira.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
@@ -837,14 +868,13 @@ impl Router {
         }
     }
 
-    /// 환경변수로 켜고 끈다. `ANTLER_RUST_GIT=0` 이면 모든 채널을 사이드카로 보낸다.
+    /// 환경변수로 켜고 끈다. `ANTLER_RUST_GIT=0` 이면 모든 채널을 사이드카로 보낸다(6c 에서 사이드카를 없앨 때까지 남는 되돌리기 스위치다).
+    /// 하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 Phase 6b PR 9 부터 읽지 않는다(결정 D5 — 사이드카가 설정을 쓰지 않으므로 그 갈래로는 돌아갈 수 없다).
     /// `ANTLER_ROUTE_LOG=1` 이면 [`RUST_CHANNELS`] 채널이 어디로 갔는지 stderr 에 한 줄씩 남긴다(확인용 — 기본은 조용하다)
     pub fn from_env(mirror: RepoMirror) -> Self {
         let enabled = rust_git_enabled(std::env::var("ANTLER_RUST_GIT").ok().as_deref());
-        let api = rust_api_enabled(std::env::var("ANTLER_RUST_API").ok().as_deref(), std::env::var("ANTLER_RUST_GIT").ok().as_deref());
-        let ssh = rust_ssh_enabled(std::env::var("ANTLER_RUST_SSH").ok().as_deref(), std::env::var("ANTLER_RUST_GIT").ok().as_deref());
         let log = std::env::var("ANTLER_ROUTE_LOG").as_deref() == Ok("1");
-        Router::new(enabled, log, mirror).with_api(api).with_ssh(ssh)
+        Router::new(enabled, log, mirror)
     }
 
     /// 로그 커서의 유휴 시간·훑는 주기를 바꾼다(테스트용 — 프로세스 목록을 읽는 테스트가 느려도 커서가 먼저 닫히지 않게). 만든 직후에만 부른다
@@ -1008,6 +1038,44 @@ impl Router {
         }
     }
 
+    /// `req:cancel` 의 Rust 쪽 일: 요청 id 의 레지스트리·Jira·GitHub 서비스 요청을 끊는다(없는 id 는 무시). 소유자가 있으면 응답까지, 없으면 사이드카에도 전달된다
+    pub(crate) fn cancel_request(&self, id: &str) {
+        if is_request_id(id) {
+            self.cancels.cancel(id);
+        }
+        // Jira 서비스도 자기 요청 표(TS `JiraService.cancel` 과 같다)에서 같은 id 를 찾아 끊는다. 없는 id 는 무시한다
+        // (레지스트리의 `is_request_id` 상한과 무관하다 — 서비스는 상한 없이 등록하므로 TS 와 같게 빈 id 가 아니면 부른다)
+        if let Some(host) = self.jira_port() {
+            host.service.cancel(id);
+        }
+        // GitHub 서비스도 같다(TS `GitHubService.cancel`). 없는 id 는 무시한다
+        if let Some(host) = self.github_port() {
+            host.service.cancel(id);
+        }
+    }
+
+    /// `repos:watch` 의 Rust 쪽 일: 다른 저장소(null 이면 전부)의 로그 커서를 닫고, 활성 저장소의 첫 페이지 문·감시·자동 fetch 대상을 맞춘다.
+    /// 소유자가 있으면 이 호출이 응답까지 하고, 없으면(사이드카가 설정을 쓴다) 사이드카가 응답한다. 런타임 안에서 불러야 한다
+    pub(crate) fn watch_repo(&self, active: Option<&str>) {
+        self.logs.close_others(active);
+        // 활성화된 저장소의 첫 페이지 문을 닫고 기억한 시그니처를 버린다.
+        // TS 의 `if (repoId && config.repo(repoId)) armFirstPage(repoId)` — Rust 가 푸는 저장소만(소비자가 Rust 쪽에 있는 저장소). null 은 arm 하지 않는다
+        if self.enabled {
+            if let Some(id) = active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))) {
+                self.repo_state.arm(id);
+            }
+            // 감시: arm 다음이다(기준 시그니처는 첫 페이지 문 뒤에 잡는다). Rust 가 맡는 저장소가 아니면 이전 감시를 멈춘다
+            self.set_watch(active);
+        }
+        // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl, 그리고 Rust 가 ssh·github 를 풀 때는 그것)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
+        // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
+        if self.enabled {
+            if let Some(service) = self.fetch_port() {
+                service.set_active(active.filter(|id| matches!(self.mirror.resolve_fetch(id), Resolved::Rust(_))));
+            }
+        }
+    }
+
     /// 열려 있는 로그 커서 수(테스트·확인용)
     pub fn log_cursor_count(&self) -> usize {
         self.logs.cursor_count()
@@ -1054,7 +1122,8 @@ impl Router {
                 return Routed::Sidecar;
             };
             let pool = self.ssh_pool().filter(|_| self.ssh_active());
-            if pool.is_none() && env_host::needs_ssh(channel, &args) {
+            // 풀이 없으면(홈을 알 수 없다) 설정을 소유하지 않은 실행은 사이드카가 처리하지만, Rust 가 설정을 소유하면 사이드카는 설정을 모르므로 Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다
+            if pool.is_none() && env_host::needs_ssh(channel, &args) && !self.config_owned() {
                 self.note(channel, "sidecar(ssh 풀 없음)");
                 return Routed::Sidecar;
             }
@@ -1062,48 +1131,32 @@ impl Router {
             self.rust_handled.fetch_add(1, Ordering::Relaxed);
             return Routed::Done(env_host::env_envelope(host, pool, channel, args).await);
         }
+        // 설정 소유 채널(Phase 6b PR 9): 설정 소유자가 주입돼 있으면 Rust 가 응답하고 사이드카에 닿지 않는다. 배열이 아닌 인자도 사이드카로 보내지 않고 빈 인자로 검증한다
+        if CONFIG_CHANNELS.contains(&channel) {
+            if let Some(host) = self.config_port().filter(|_| self.enabled) {
+                self.note(channel, "rust");
+                self.rust_handled.fetch_add(1, Ordering::Relaxed);
+                let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+                let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
+                return Routed::Done(config_host::config_envelope(self, &host, channel, args).await);
+            }
+        }
         let Some(raw) = args.as_array() else { return Routed::Sidecar };
         if channel == "req:cancel" {
             // Rust 레지스트리를 먼저 취소하고, 요청이 어디서 돌든(사이드카 포함) 항상 사이드카에도 전달한다
             if let Some(Value::String(id)) = raw.first() {
-                if is_request_id(id) {
-                    self.cancels.cancel(id);
-                }
-                // Jira 서비스도 자기 요청 표(TS `JiraService.cancel` 과 같다)에서 같은 id 를 찾아 끊는다. 없는 id 는 무시한다
-                // (레지스트리의 `is_request_id` 상한과 무관하다 — 서비스는 상한 없이 등록하므로 TS 와 같게 빈 id 가 아니면 부른다)
-                if let Some(host) = self.jira_port() {
-                    host.service.cancel(id);
-                }
-                // GitHub 서비스도 같다(TS `GitHubService.cancel`). 없는 id 는 무시한다
-                if let Some(host) = self.github_port() {
-                    host.service.cancel(id);
-                }
+                self.cancel_request(id);
             }
             return Routed::Sidecar;
         }
         if channel == "repos:watch" {
-            // 사이드카로 넘기기 전에 다른 저장소(또는 null 이면 전부)의 로그 커서를 닫는다 — 멈춘 git log 가 pack 파일 핸들을 쥐지 않게
+            // 사이드카로 넘기기 전에 다른 저장소(또는 null 이면 전부)의 로그 커서를 닫는다 — 멈춘 git log 가 pack 파일 핸들을 쥐지 않게.
+            // 응답은 사이드카가 한다(renderer 는 기다리지 않는다)
             let active = match raw.first() {
                 Some(Value::String(id)) => Some(id.as_str()),
                 _ => None,
             };
-            self.logs.close_others(active);
-            // 활성화된 저장소의 첫 페이지 문을 닫고 기억한 시그니처를 버린다. 응답은 사이드카가 한다(renderer 는 기다리지 않는다).
-            // TS 의 `if (repoId && config.repo(repoId)) armFirstPage(repoId)` — Rust 가 푸는 저장소만(소비자가 Rust 쪽에 있는 저장소). null 은 arm 하지 않는다
-            if self.enabled {
-                if let Some(id) = active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))) {
-                    self.repo_state.arm(id);
-                }
-                // 감시: arm 다음이다(기준 시그니처는 첫 페이지 문 뒤에 잡는다). Rust 가 맡는 저장소가 아니면 이전 감시를 멈춘다
-                self.set_watch(active);
-            }
-            // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl, 그리고 Rust 가 ssh 를 풀 때는 ssh)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
-            // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
-            if self.enabled {
-                if let Some(service) = self.fetch_port() {
-                    service.set_active(active.filter(|id| matches!(self.mirror.resolve_fetch(id), Resolved::Rust(_))));
-                }
-            }
+            self.watch_repo(active);
             return Routed::Sidecar;
         }
         if channel == "repos:update" || channel == "repos:remove" {
@@ -1201,7 +1254,7 @@ impl Router {
     /// 열려 있는 로그 커서·앵커를 닫고, 그 저장소의 git 프로세스가 모두 끝나기를 기다린다
     /// (실행기가 센다 — 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있어, 최대 [`SCOPE_DRAIN_TIMEOUT`] 까지만 기다린다). 이 뒤에 사이드카가 캐시 폴더를 지운다. 캐시 삭제 자체는 사이드카의 몫이다:
     /// 설정(레코드)·삭제의 소유가 아직 사이드카라 "Rust 가 멈춘 뒤 사이드카가 지운다"는 순서를 이 호출이 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
-    async fn release_github_repo(&self, repo_id: &str) {
+    pub(crate) async fn release_github_repo(&self, repo_id: &str) {
         let Resolved::Rust(target @ Target::Github { .. }) = self.mirror.resolve(repo_id) else { return };
         let path = target.path().to_string();
         // "삭제 중" 표식을 **먼저** 단다 — 이 뒤에 들어오는 새 조회는 범위에 들지 못하고 거부된다(사이드카가 레코드를 지워 미러가 바뀔 때까지)
@@ -2086,16 +2139,6 @@ mod tests {
         assert!(rust_git_enabled(Some("")));
         assert!(rust_git_enabled(Some("false")));
         assert!(!rust_git_enabled(Some("0")));
-    }
-
-    #[test]
-    fn ssh_스위치는_0_과_git_0_이_끈다() {
-        assert!(rust_ssh_enabled(None, None));
-        assert!(rust_ssh_enabled(Some("1"), None));
-        assert!(rust_ssh_enabled(Some(""), Some("1")));
-        assert!(!rust_ssh_enabled(Some("0"), None));
-        assert!(!rust_ssh_enabled(None, Some("0")));
-        assert!(!rust_ssh_enabled(Some("1"), Some("0")));
     }
 
     fn ssh_repo(id: &str, host: &str) -> MirrorRepo {

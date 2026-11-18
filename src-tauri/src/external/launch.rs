@@ -10,7 +10,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use super::opener::{normalize_canonical, LaunchRequest, OpenerDeps, Stat};
+use super::opener::{normalize_canonical, restore_mapped_drive, LaunchRequest, OpenerDeps, Stat};
 use super::plan::Platform;
 use crate::fsguard::path_stays_local;
 
@@ -39,7 +39,11 @@ impl OpenerDeps for SystemDeps {
         let s = real.to_str()?;
         // Windows 의 canonicalize 는 `\\?\` 접두를 붙인다 — 벗기고, WSL 이 아닌 UNC·장치 경로는 없는 것으로 취급한다(거부)
         if cfg!(windows) {
-            normalize_canonical(s)
+            // 매핑된 네트워크 드라이브(`Z:\repo`)로 등록된 저장소는 canonicalize 가 UNC 로 풀어 거부되는데 Electron 판은 열린다 — 같은 공유 아래일 때만 드라이브 표기로 되돌린다(PR 9 정책)
+            normalize_canonical(s).or_else(|| {
+                let root = fs::canonicalize(p.get(..3)?).ok()?;
+                restore_mapped_drive(p, s, root.to_str()?)
+            })
         } else {
             Some(s.to_string())
         }

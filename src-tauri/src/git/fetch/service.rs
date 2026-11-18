@@ -110,7 +110,7 @@ pub enum ApprovalKind {
 }
 
 impl ApprovalKind {
-    /// 프로토콜의 `kind` 문자열(`src/sidecar/protocol.ts` 의 `FETCH_APPROVE_KINDS`)
+    /// 승인 종류의 이름(로그·시험용 — 설정에는 종류별 변경자가 따로 있다)
     pub fn as_str(self) -> &'static str {
         match self {
             ApprovalKind::Approval => "approval",
@@ -119,17 +119,7 @@ impl ApprovalKind {
     }
 }
 
-/// 사이드카로 가는 승인 부탁 줄(`{t:"fetchApprove", kind, repoId, fingerprint}`). **이 줄을 만드는 곳은 여기 하나다** —
-/// 사이드카는 이 메시지로만 승인을 받고(renderer 의 `req` 경로로는 받지 않는다), 보내는 쪽은 [`FetchHost::approve`] 를 부르는 서비스뿐이다
-pub fn approve_message(kind: ApprovalKind, repo_id: &str, fingerprint: &str) -> Value {
-    serde_json::json!({ "t": "fetchApprove", "kind": kind.as_str(), "repoId": repo_id, "fingerprint": fingerprint })
-}
-
-/// 사이드카의 fetchPrefs 를 받는 곳(Tauri 관리 상태로 등록한다). **`Sidecar::spawn` 보다 먼저 등록해야 한다** — 첫 fetchPrefs 는 ready 전에 한 번만 오고
-/// 같은 내용이면 다시 오지 않는다(`lib.rs` 의 등록 순서와 `tests/channels.rs` 가 강제한다)
-pub struct FetchPrefsSink(pub Box<dyn Fn(FetchPrefs) + Send + Sync>);
-
-/// 서비스가 바깥에 기대는 것. 앱에서는 Tauri 이벤트·네이티브 확인 창·사이드카 쓰기로 구현한다(`fetch_host.rs`)
+/// 서비스가 바깥에 기대는 것. 앱에서는 Tauri 이벤트·네이티브 확인 창·설정 쓰기(`ConfigStore`)로 구현한다(`fetch_host.rs`)
 pub trait FetchHost: Send + Sync + 'static {
     fn emit(&self, event: HostEvent);
 
@@ -137,13 +127,13 @@ pub trait FetchHost: Send + Sync + 'static {
     /// **응답의 해석은 서비스가 [`super::confirm_text::ConfirmPlan::decide`] 로만 한다** — 구현이 허용 여부를 정하지 않는다
     fn confirm(&self, repo_id: &str, confirm: &ConfirmBox) -> impl Future<Output = Option<i64>> + Send;
 
-    /// 승인을 설정 파일에 남겨 달라고 사이드카에 부탁한다. 서비스가 부르는 곳은 두 군데뿐이다(모듈 문서)
+    /// 승인을 설정 파일에 남긴다(Rust 가 설정의 유일한 작성자다 — 동기 쓰기). 서비스가 부르는 곳은 두 군데뿐이다(모듈 문서)
     fn approve(&self, kind: ApprovalKind, repo_id: &str, fingerprint: &str);
 
     /// 사이드카의 RepoService 에 알린다(`{t:"note"}`)
     fn note(&self, op: NoteOp, repo_id: &str);
 
-    /// GitHub 원격 전용 저장소의 fetch 가 HEAD 를 맞추며 알아낸 기본 브랜치가 레코드의 값과 다르다 — 사이드카가 레코드에 기록하게 부탁한다(설정 소유 PR 9 까지).
+    /// GitHub 원격 전용 저장소의 fetch 가 HEAD 를 맞추며 알아낸 기본 브랜치가 레코드의 값과 다르다 — 설정의 레코드에 기록한다(Rust 가 설정의 유일한 작성자다).
     /// 서비스가 부르는 곳은 github 갈래 한 군데뿐이고, 이름은 `is_safe_branch` 를 통과한 값이다
     fn github_branch(&self, _repo_id: &str, _branch: &str) {}
 

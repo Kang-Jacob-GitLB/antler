@@ -142,7 +142,7 @@ impl EnvHost {
 
     /// 환경·경로 입력 검증(TS `checkEnvInput`) 뒤 해석한 환경을 돌려준다. 순서는 TS 와 같다: kind → (경로가 있으면) 경로·그룹 → WSL 설치 확인 / SSH 호스트 검사·확인 창.
     /// **저장·실행으로 이어지는 해석은 `resolve_env_checked_with` 하나다**(WSL 은 형식 + 설치 목록 대조)
-    async fn check_env_input(&self, input: Option<&Value>, with_path: bool) -> Result<ResolvedEnv, String> {
+    pub(crate) async fn check_env_input(&self, input: Option<&Value>, with_path: bool) -> Result<ResolvedEnv, String> {
         let obj = input.and_then(Value::as_object).ok_or(BAD_INPUT)?;
         let kind = match obj.get("kind").and_then(Value::as_str) {
             Some(k @ ("local" | "wsl" | "ssh")) => k,

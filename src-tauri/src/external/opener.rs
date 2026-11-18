@@ -59,7 +59,7 @@ pub trait OpenerDeps {
 ///
 /// **이것은 결과를 거르는 것뿐이다.** `canonicalize` 가 링크를 따라가는 순간 이미 SMB/WebDAV 인증(NTLM)이 나가므로, 유출을 막는 것은 그 **앞**에서
 /// 링크 대상을 미리 읽어 판정하는 `fsguard::links_stay_local`([`crate::fsguard::is_remote_link_target`])이다. 매핑된 네트워크 드라이브(`Z:\`)는 `canonicalize` 가
-/// UNC 로 풀어 여기서 거부된다(docs/tauri.md PR 3).
+/// UNC 로 풀어 여기서는 거부되지만, 드라이브 문자로 등록된 경로는 [`restore_mapped_drive`] 가 드라이브 표기로 되돌린다(PR 9 정책 — `SystemDeps::realpath` 가 이어서 부른다).
 pub fn normalize_canonical(p: &str) -> Option<String> {
     let out = if let Some(rest) = p.strip_prefix("\\\\?\\") {
         if rest.get(..4).is_some_and(|h| h.eq_ignore_ascii_case("UNC\\")) {
@@ -81,6 +81,35 @@ pub fn normalize_canonical(p: &str) -> Option<String> {
         return None;
     }
     Some(out)
+}
+
+/// `\\?\UNC\server\share\x` → `\\server\share\x`(그 밖의 모양은 `None`)
+fn unc_of_canonical(p: &str) -> Option<String> {
+    let rest = p.strip_prefix("\\\\?\\")?;
+    rest.get(..4).filter(|h| h.eq_ignore_ascii_case("UNC\\"))?;
+    Some(format!("\\\\{}", &rest[4..]))
+}
+
+/// **매핑된 네트워크 드라이브(`Z:\repo`)로 등록된 저장소**의 realpath(Phase 6b PR 9 정책 — Electron 판과 같게 허용한다). Node `realpathSync` 는 드라이브 문자를 유지하지만 Rust `canonicalize` 는
+/// `\\?\UNC\server\share\…` 로 풀어, [`normalize_canonical`] 이 WSL 이 아닌 UNC 로 보아 거부하던 것을 정상 처리한다. 입력(`input`)이 **드라이브 문자 경로**이고, `canonical`(대상의 canonicalize 결과)이
+/// `drive_root_canonical`(그 드라이브 루트 `Z:\` 의 canonicalize 결과)과 **같은 서버·공유 아래**일 때만 드라이브 표기로 되돌린다(`Z:\` + 나머지) — 드라이브 안의 링크가 다른 공유로 나가는 경우와
+/// UNC 로 직접 등록한 경로는 `None`(거부)이다. 링크로 원격에 가는 경우는 이 함수 앞의 `fsguard::path_stays_local` 이 `canonicalize` 전에 이미 막는다
+pub fn restore_mapped_drive(input: &str, canonical: &str, drive_root_canonical: &str) -> Option<String> {
+    let b = input.as_bytes();
+    if b.len() < 3 || !b[0].is_ascii_alphabetic() || b[1] != b':' || !matches!(b[2], b'\\' | b'/') {
+        return None;
+    }
+    let target = unc_of_canonical(canonical)?;
+    let share = unc_of_canonical(drive_root_canonical)?;
+    let share = share.trim_end_matches('\\');
+    // `\\server\share` 가 목적지의 접두이고 그 뒤가 구분자나 끝이어야 한다(`\\server\share2` 가 `share` 의 접두로 통과하지 않게). 대소문자는 구분하지 않는다
+    target.get(..share.len()).filter(|h| h.eq_ignore_ascii_case(share))?;
+    let rest = &target[share.len()..];
+    if !rest.is_empty() && !rest.starts_with('\\') {
+        return None;
+    }
+    let drive = input[..1].to_ascii_uppercase();
+    Some(if rest.is_empty() { format!("{drive}:\\") } else { format!("{drive}:{rest}") })
 }
 
 fn is_file(deps: &dyn OpenerDeps, p: &str) -> bool {
@@ -421,5 +450,26 @@ mod tests {
         assert!(check_chosen_exe("C:\\a\\x.com", Platform::Win32, None).is_ok());
         assert!(check_chosen_exe("C:\\a\\x.exe ", Platform::Win32, None).is_err());
         assert!(check_chosen_exe(&format!("/{}", "a".repeat(4096)), Platform::Linux, None).is_err());
+    }
+
+    #[test]
+    fn 매핑된_드라이브는_같은_공유_아래일_때만_드라이브_표기로_되돌린다() {
+        let root = r"\\?\UNC\srv\share\";
+        // 드라이브 문자로 등록한 경로: canonicalize 가 UNC 로 푼 결과를 드라이브 표기로(Electron 의 realpathSync 와 같다)
+        assert_eq!(restore_mapped_drive(r"z:\repo\sub", r"\\?\UNC\srv\share\repo\sub", root).as_deref(), Some(r"Z:\repo\sub"));
+        assert_eq!(restore_mapped_drive(r"Z:\", r"\\?\UNC\srv\share\", root).as_deref(), Some(r"Z:\"));
+        assert_eq!(restore_mapped_drive(r"Z:/repo", r"\\?\UNC\SRV\Share\repo", root).as_deref(), Some(r"Z:\repo"), "서버·공유 이름은 대소문자를 구분하지 않는다");
+        // 같은 드라이브 안에서 다른 공유로 나가는 링크·이름만 접두인 공유는 거부
+        assert_eq!(restore_mapped_drive(r"Z:\repo", r"\\?\UNC\srv\other\repo", root), None);
+        assert_eq!(restore_mapped_drive(r"Z:\repo", r"\\?\UNC\srv\share2\repo", root), None);
+        assert_eq!(restore_mapped_drive(r"Z:\repo", r"\\?\UNC\srv2\share\repo", root), None);
+        // UNC 로 직접 등록한 경로·상대 경로·로컬 드라이브(canonicalize 가 UNC 를 주지 않는다)는 이 정책의 대상이 아니다(기존 거부 유지)
+        assert_eq!(restore_mapped_drive(r"\\srv\share\repo", r"\\?\UNC\srv\share\repo", root), None);
+        assert_eq!(restore_mapped_drive(r"repo", r"\\?\UNC\srv\share\repo", root), None);
+        assert_eq!(restore_mapped_drive(r"C:\repo", r"\\?\C:\repo", r"\\?\C:\"), None);
+        // WSL 이 아닌 장치 경로·볼륨 GUID 모양은 거부
+        assert_eq!(restore_mapped_drive(r"Z:\repo", r"\\?\Volume{1234}\repo", root), None);
+        // 정책의 범위는 realpath 뿐이다 — 바깥의 normalize_canonical 은 그대로 UNC 를 거부한다
+        assert_eq!(normalize_canonical(r"\\?\UNC\srv\share\repo"), None);
     }
 }
