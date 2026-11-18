@@ -1,6 +1,6 @@
 // 자식 프로세스 실행 공통부. LocalExecutor 와 (M4) WslExecutor 가 공유한다.
 import { spawn, type ChildProcess } from 'node:child_process'
-import { AbortError, DEFAULT_MAX_BUFFER, GitError, type RunOpts, type RunResult } from './GitExecutor'
+import { AbortError, DEFAULT_MAX_BUFFER, GitError, SCRUB_PARENT_ENV_KEY, type RunOpts, type RunResult } from './GitExecutor'
 
 export interface SpawnSpec {
   command: string
@@ -27,9 +27,41 @@ export function stderrCollector(): { push(chunk: Buffer): void; text(): string }
   }
 }
 
+/**
+ * 토큰을 환경 변수로 싣는 git(GitHub 원격 전용 저장소)이 부모 환경에서 물려받으면 안 되는 이름.
+ *  - GIT_SSL_NO_VERIFY: 값이 비어 있어도 TLS 검증을 꺼 중간자가 Authorization 헤더를 받는다
+ *  - GIT_TRACE*(GIT_TRACE2* · GIT_TRACE_REDACT 포함) · GIT_CURL_VERBOSE: 헤더·설정값(토큰)을 파일·stderr 에 남긴다
+ *  - GIT_CONFIG*: 시스템·전역 설정 격리를 깬다(COUNT/KEY/VALUE/PARAMETERS 는 우리 값이 다시 채운다)
+ *  - 저장소·객체 위치(GIT_DIR · GIT_COMMON_DIR · GIT_WORK_TREE · GIT_INDEX_FILE · GIT_OBJECT_DIRECTORY · GIT_ALTERNATE_OBJECT_DIRECTORIES ·
+ *    GIT_NAMESPACE …): init·config 가 사용자 저장소로 새어 `.git/config` 를 덮어쓸 수 있다
+ *  - GIT_EXEC_PATH · GIT_TEMPLATE_DIR: 다른 git 하위 명령·템플릿을 쓰게 한다
+ * Windows 환경 변수는 대소문자를 구분하지 않으므로 이름은 대문자로 맞춰 비교한다.
+ */
+const SCRUBBED_PARENT_ENV =
+  /^GIT_(SSL_NO_VERIFY|TRACE.*|CURL_VERBOSE|CONFIG.*|DIR|COMMON_DIR|WORK_TREE|INDEX_FILE|OBJECT_DIRECTORY|ALTERNATE_OBJECT_DIRECTORIES|NAMESPACE|EXEC_PATH|TEMPLATE_DIR|CEILING_DIRECTORIES|PREFIX|SHALLOW_FILE|GRAFT_FILE|REPLACE_REF_BASE)$/
+
+/**
+ * 자식 프로세스 환경 = 부모 + spec + opts. spec·opts 에 SCRUB_PARENT_ENV_KEY 가 있으면 부모에서 위험 변수를 지운다.
+ * 부모의 `git_dir` 와 우리 `GIT_DIR` 가 한 객체에 같이 들어가면 Windows 에서 어느 쪽이 이기는지 불확실하므로,
+ * 호출자가 정한 이름은 대소문자 무관하게 부모 쪽을 지운다.
+ */
+export function childEnv(parent: NodeJS.ProcessEnv, spec: Record<string, string> = {}, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const own = { ...spec, ...extra }
+  if (!(SCRUB_PARENT_ENV_KEY in own)) return { ...parent, ...own }
+  delete own[SCRUB_PARENT_ENV_KEY]
+  const ours = new Set(Object.keys(own).map((k) => k.toUpperCase()))
+  const env: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(parent)) {
+    const name = k.toUpperCase()
+    if (SCRUBBED_PARENT_ENV.test(name) || ours.has(name)) continue
+    env[k] = v
+  }
+  return Object.assign(env, own)
+}
+
 function launch(spec: SpawnSpec, opts: RunOpts): ChildProcess {
   return spawn(spec.command, spec.argv, {
-    env: { ...process.env, ...spec.env, ...opts.env },
+    env: childEnv(process.env, spec.env, opts.env),
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe']
   })

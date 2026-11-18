@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { GithubRepoLink } from '@shared/types'
-import { GIT_ENV, GitError, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
+import { GIT_ENV, GitError, SCRUB_PARENT_ENV_KEY, type GitExecutor, type RunOpts } from '../executors/GitExecutor'
 import { isAllowedConfig, parseConfigList, readConfigEntries, type ConfigEntry } from './fetch'
 
 export const GITHUB_SOURCE_ID = 'github'
@@ -294,7 +294,9 @@ export function githubEnv(token: string | null, o: GithubEnvOpts): Record<string
     GIT_CEILING_DIRECTORIES: dirname(gitDir).replace(/\\/g, '/'),
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: EMPTY_GIT_CONFIG,
-    GIT_CONFIG_PARAMETERS: ''
+    GIT_CONFIG_PARAMETERS: '',
+    // 부모 환경의 GIT_SSL_NO_VERIFY·GIT_TRACE*·GIT_CURL_VERBOSE·저장소 위치 변수를 지운다(토큰 유출·사용자 저장소 오염 방지)
+    [SCRUB_PARENT_ENV_KEY]: '1'
   }
   const extra: [string, string][] = [
     ...(o.netConfig ?? []).map(([k, v]): [string, string] => [k, v]),

@@ -95,6 +95,12 @@ export const GIT_ENV: Record<string, string> = {
   LC_ALL: 'C.UTF-8'
 }
 
+/**
+ * 이 키가 든 환경은 부모(앱 프로세스) 환경에서 TLS 끄기·추적·저장소 위치 변수를 지우고 실행된다(processRunner 의 scrubParentEnv).
+ * GitHub 원격 전용 저장소처럼 토큰을 환경 변수로 싣는 실행이 쓴다. 키는 자식에게 넘기지 않는다.
+ */
+export const SCRUB_PARENT_ENV_KEY = 'ANTLER_SCRUB_PARENT_GIT_ENV'
+
 export const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024
 
 export function buildGitArgs(repoPath: string, args: string[]): string[] {
