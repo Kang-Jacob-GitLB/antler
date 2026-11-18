@@ -20,7 +20,7 @@
 
 ## Tauri 판 (Phase 6c PR 4)
 
-위는 Electron 판이다. Tauri 판은 `update:*` 7채널을 Rust(`src-tauri/src/update/`)가 처리한다(`ANTLER_RUST_GIT=0` 이면 사이드카가 예전처럼 처리한다). 화면·동작(스낵바·[나중에]·[이 버전 건너뛰기]·6시간 주기)은 같고 다음이 다르다. 구조·시험은 [tauri.md](tauri.md#pr-4--update-7채널을-rust-로앱에-연결한다--업데이트-공개-키-대기).
+위는 Electron 판이다. Tauri 판은 `update:*` 7채널을 Rust(`src-tauri/src/update/`)가 처리한다(Phase 6c PR 5 에서 Node 사이드카를 없앴다 — 서비스를 만들지 못하면 `update:*` 는 오류로 답한다). 화면·동작(스낵바·[나중에]·[이 버전 건너뛰기]·6시간 주기)은 같고 다음이 다르다. 구조·시험은 [tauri.md](tauri.md#pr-4--update-7채널을-rust-로앱에-연결한다--업데이트-공개-키-대기).
 
 - **Windows NSIS 설치본은 앱 안에서 설치하고, macOS dmg·Linux deb 는 수동 경로(PR 4b)다.** 켜는 조건은 번들러가 실행 파일에 심은 표식뿐이다 — Windows 는 NSIS, Linux 는 deb(x86_64), macOS 는 `bundle_type()` 이 항상 앱(`App`)을 돌려주므로 **실행 파일이 `*.app/Contents/MacOS/` 안**일 때만 켠다(arm64·x86_64). `--no-bundle` 개발·측정 빌드와 AppImage·rpm·msi·portable 은 확인하지 않는다(수동 확인은 "최신"). portable 은 폐지됐고 CI 는 AppImage 를 만들지 않는다.
 - **수동 경로(dmg·deb)**: 매니페스트·내려받기·무결성(minisign 서명 + 서명된 버전 = 매니페스트 버전)은 Windows 와 같고, **설치만 다르다** — 플러그인의 설치(`Update::install`)를 부르지 않는다. 검증을 통과한 바이트를 앱 전용 폴더(`<userData>/updates`, TS 와 같은 위치)에 자산 이름 그대로 저장하고 기본 앱으로 연다(dmg → 마운트, deb → 소프트웨어 센터). [다시 열기]는 디스크의 파일을 다시 읽어 **다시 검증한 뒤** 연다. 매니페스트 키는 `darwin-aarch64-dmg`·`darwin-x86_64-dmg`·`linux-x86_64-deb` 하나뿐이고(일반 키로 내려가지 않는다) URL 의 파일 이름이 `Antler-<버전>-<arm64|x64>.dmg`·`antler_<버전>_amd64.deb` 와 정확히 같아야 한다. 같은 이름의 파일이 이미 있으면 **덮어쓰지 않는다**(내용이 같으면 그대로 쓰고, 다르면 "같은 이름의 파일이 이미 있어 덮어쓰지 않았습니다 …" 오류 — 업데이트 폴더에서 그 파일을 지운 뒤 다시 시도한다). macOS 앱은 미서명·미공증이라 Gatekeeper 경고가 뜰 수 있다([build.md](build.md)).
