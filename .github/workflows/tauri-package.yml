@@ -1,0 +1,337 @@
+name: tauri-package
+
+# Tauri 판 설치본을 빌드해 워크플로 아티팩트로 올린다. **발행하지 않는다**: 릴리스·태그를 만들지 않고 쓰기 권한도 없다.
+# release.yml(Electron)과 이어져 있지 않다 — 야간 릴리스는 계속 Electron 판을 낸다. 전환은 마지막 `feat!:` PR 이 한다(docs/tauri.md "Phase 6c").
+#
+# 산출물은 아직 배포 후보가 아니다: Tauri 판이 Node 사이드카(PATH 의 node)에 기대기 때문이다. 사이드카 제거(6c PR 5) 전에는 배포하지 않는다.
+# 그래서 아티팩트 이름에 `-dev-sidecar` 를 붙인다.
+#
+# 실행: Actions 탭에서 수동 실행(workflow_dispatch)만. 워크플로 파일이 기본 브랜치에 있어야 실행되고, Environment `release` 는 main 이 아닌 브랜치에
+# 시크릿을 주지 않을 수 있어 PR 에서는 돌리지 않는다. 그래서 머지 뒤 한 번 눌러 아티팩트를 확인한다(docs/build.md).
+#
+# 갈래:
+#   windows — NSIS 설치 프로그램(x64)을 **시크릿 없이** 빌드한다. 이어지는 windows-sign 잡이 빌드 산출물만 받아 시크릿 TAURI_SIGNING_PRIVATE_KEY 로
+#             업데이트 서명(.sig)을 만들고 latest.json 도 만든다. 키가 없으면 경고하고 서명 없이 계속한다(latest.yml 은 서명과 무관하게 만든다).
+#             windows-sign 이 Environment `release` 를 선언해 시크릿을 받는다 — 그 Environment 의 브랜치 제한·승인자 설정이 필수다(docs/build.md)
+#   macos   — dmg x64·arm64(arm64 러너에서 둘 다 빌드). ad-hoc 서명(`-`), 공증 없음 — 처음 열 때 Gatekeeper 경고가 뜬다(docs/build.md)
+#   linux   — deb(x64). 의존: libwebkit2gtk-4.1-0 · libgtk-3-0
+# macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다(fail-fast 를 꺼 갈래마다 따로 본다).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "빌드할 버전(접두사 v 없이, 예: 2.0.0-rc.1). 비우면 0.0.0-ci.<실행 번호>"
+        type: string
+        required: false
+        default: ""
+
+concurrency:
+  group: tauri-package-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ── 버전 결정 ─────────────────────────────────────────────────────────
+  version:
+    name: 버전 결정
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: 버전 검사
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${INPUT_VERSION:-0.0.0-ci.${{ github.run_number }}}"
+          # release.yml 과 같은 식: semver(MAJOR.MINOR.PATCH[-pre]) 가 아니면 실패한다 — 설치본 이름·업데이트 비교가 이 값에 기댄다
+          # (grep 은 줄 단위라 개행이 낀 입력의 첫 줄만 보고 통과시킬 수 있어 문자열 전체를 보는 [[ =~ ]] 를 쓴다)
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::semver 가 아닌 버전입니다: $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "버전=$VERSION"
+
+  # ── Windows: NSIS ─────────────────────────────────────────────────────
+  windows:
+    name: 패키징 (windows · nsis)
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 60
+    # 이 잡은 시크릿을 받지 않는다(environment 없음, secrets.* 참조 없음) — 빌드 중 도는 npm 빌드 코드·crate 의 build.rs·proc-macro 가 서명 키를 읽지 못하게.
+    # 서명은 아래 `windows-sign` 잡이 빌드 산출물만 받아서 한다
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # 버전을 package.json 에 넣는다(이 러너 안에서만, 커밋하지 않음). tauri.conf.json 의 version 이 이 파일을 가리킨다
+      - name: 버전 → package.json
+        run: npm pkg set version="$VERSION"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Node 설정
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: 의존성 설치
+        run: pnpm install --frozen-lockfile
+
+      # 러너에 기본 설치된 rustup 을 쓴다(서드파티 액션을 늘리지 않는다)
+      - name: Rust stable
+        run: |
+          rustup default stable
+          rustc --version
+
+      # 서명 없이 빌드한다(createUpdaterArtifacts 를 켜지 않는다 — 빌드가 서명하는 구조가 아니다). --features 는 쓰지 않는다(cdp·test-hooks 금지)
+      - name: 빌드 (NSIS)
+        run: pnpm tauri build --bundles nsis
+
+      - name: 배포 빌드 feature 검사 (cdp · test-hooks 없음)
+        run: node scripts/check-release-features.mjs src-tauri/target/release/antler.exe
+
+      # Tauri 의 산출물 이름(Antler_<v>_x64-setup.exe)을 Electron 규칙(Antler-Setup-<v>-x64.exe)으로 바꾼다. 서명은 내용에 걸려 이름과 무관하다
+      - name: 설치본 이름 정리
+        run: |
+          dir=src-tauri/target/release/bundle/nsis
+          shopt -s nullglob
+          setups=("$dir"/*-setup.exe)
+          if [ "${#setups[@]}" -ne 1 ]; then
+            echo "::error::NSIS 설치본이 하나가 아닙니다(${#setups[@]}개)"
+            ls -la "$dir" || true
+            exit 1
+          fi
+          mkdir -p out
+          name="Antler-Setup-${VERSION}-x64.exe"
+          cp "${setups[0]}" "out/$name"
+          ls -la out
+
+      # 서명 잡으로 넘기는 중간 산출물이다(서명 전). 하루만 보관한다
+      - name: 서명 전 설치본 업로드
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tauri-win-unsigned
+          path: out/*
+          retention-days: 1
+          if-no-files-found: error
+
+  # ── Windows: 업데이트 서명·매니페스트 ─────────────────────────────────────
+  # 서명 키를 받는 유일한 잡이고, 키는 `.sig` 를 만드는 한 단계의 env 에만 있다. 이 잡은 빌드를 하지 않는다: 새 러너에서 `--ignore-scripts` 로 설치한
+  # Tauri CLI 로 `tauri signer sign` 만 돈다(Rust·crate·빌드 스크립트·proc-macro 가 없고, 설치 스크립트도 안 돈다). 서명할 파일은 위 잡의 산출물이다.
+  # 남는 신뢰: lockfile 이 고정한 `@tauri-apps/cli`(와 그 플랫폼 패키지) 한 벌의 코드. `cargo install tauri-cli` 로 바꾸면 이마저 줄지만 컴파일이 길다.
+  # Environment `release` 는 main 브랜치로 제한하고 승인자를 두어야 한다(필수 사전 설정: docs/build.md "업데이트 서명") — 워크플로 파일 안의 `if:` 는 방어가 아니다.
+  windows-sign:
+    name: 서명·매니페스트 (windows)
+    needs: [version, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Node 설정
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      # 설치 스크립트를 돌리지 않는다(--ignore-scripts). 서명 키는 아직 이 잡의 어느 단계에도 없다
+      - name: Tauri CLI 설치
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: tauri-win-unsigned
+          path: out
+
+      # 시크릿은 if: 에서 못 쓰므로 env 로 받아 비어 있는지만 본다. 값을 출력하지 않는다. 키가 없는 잡이 아니라 이 확인 단계만 키를 받는다
+      - name: 서명 키 확인
+        id: key
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY 시크릿이 없어 업데이트 서명(.sig)과 latest.json 을 건너뜁니다. Environment 'release' 에 시크릿을 등록하세요."
+          fi
+
+      # 서명 env 는 이 단계에만 넣는다. --app-version 으로 서명에 버전을 묶는다(앱의 requireSignedVersion 전제 — `tauri build` 도 같은 값을 넣는다)
+      - name: 업데이트 서명
+        if: steps.key.outputs.signed == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          name="Antler-Setup-${VERSION}-x64.exe"
+          pnpm exec tauri signer sign --app-version "$VERSION" "out/$name"
+          if [ ! -s "out/$name.sig" ]; then
+            echo "::error::.sig 가 만들어지지 않았습니다"
+            ls -la out
+            exit 1
+          fi
+
+      # latest.json(Tauri 업데이터, 서명이 있을 때만)과 latest.yml(Electron 판 이관용). 저장소 변수 ELECTRON_MIGRATION 이 off·false·0·no 면 latest.yml 을 만들지 않는다(기본 on)
+      - name: 업데이트 매니페스트 생성·검증
+        env:
+          ELECTRON_MIGRATION: ${{ vars.ELECTRON_MIGRATION }}
+        run: node scripts/make-update-manifests.mjs --version "$VERSION" --dir out --sig "out/Antler-Setup-${VERSION}-x64.exe.sig"
+
+      - name: 요약
+        run: |
+          {
+            echo "### Tauri 패키징 (windows) — $VERSION"
+            echo "서명: ${{ steps.key.outputs.signed }}"
+            echo '```'
+            (cd out && sha256sum *)
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 아티팩트 업로드
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tauri-installers-win-dev-sidecar
+          path: out/*
+          if-no-files-found: error
+
+  # ── macOS dmg · Linux deb ─────────────────────────────────────────────
+  # 업데이트 서명은 하지 않는다 — 이 형태의 앱 안 업데이트는 수동 경로(릴리스 자산을 직접 내려받기)를 쓴다
+  unix:
+    name: 패키징 (${{ matrix.name }})
+    needs: version
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      # 한 갈래가 실패해도 나머지는 끝까지 돌려 원인 파악을 쉽게 한다
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos · dmg arm64
+            os: macos-latest
+            asset: mac-arm64
+            bundle: dmg
+            target: aarch64-apple-darwin
+            arch: arm64
+          - name: macos · dmg x64
+            os: macos-latest
+            asset: mac-x64
+            bundle: dmg
+            target: x86_64-apple-darwin
+            arch: x64
+          - name: linux · deb
+            os: ubuntu-22.04
+            asset: linux
+            bundle: deb
+            target: ""
+            arch: amd64
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: 버전 → package.json
+        run: npm pkg set version="$VERSION"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Node 설정
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: 의존성 설치
+        run: pnpm install --frozen-lockfile
+
+      # Linux: Tauri 2 의 WebKitGTK 4.1 빌드 의존(deb 의 실행 의존은 libwebkit2gtk-4.1-0 · libgtk-3-0 이 번들러에 의해 자동 기록된다)
+      - name: Linux 빌드 의존 설치
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl wget file libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Rust stable
+        run: |
+          rustup default stable
+          if [ -n "${{ matrix.target }}" ]; then rustup target add "${{ matrix.target }}"; fi
+          rustc --version
+
+      # --features 는 쓰지 않는다(cdp·test-hooks 금지). macOS 는 --target 으로 아키텍처를 고른다(결과는 target/<triple>/release)
+      - name: 빌드
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            pnpm tauri build --bundles ${{ matrix.bundle }} --target ${{ matrix.target }}
+          else
+            pnpm tauri build --bundles ${{ matrix.bundle }}
+          fi
+
+      - name: 배포 빌드 feature 검사 (cdp · test-hooks 없음)
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            node scripts/check-release-features.mjs "src-tauri/target/${{ matrix.target }}/release/antler"
+          else
+            node scripts/check-release-features.mjs src-tauri/target/release/antler
+          fi
+
+      # 산출물 이름을 Electron 규칙으로 맞춘다(앱 안 수동 업데이트 경로의 자산 선택이 이 이름을 본다):
+      #   dmg → Antler-<v>-<arch>.dmg,  deb → antler_<v>_amd64.deb
+      - name: 설치본 이름 정리
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then base="src-tauri/target/${{ matrix.target }}/release/bundle"; else base="src-tauri/target/release/bundle"; fi
+          shopt -s nullglob
+          found=("$base/${{ matrix.bundle }}"/*.${{ matrix.bundle }})
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "::error::${{ matrix.bundle }} 산출물이 하나가 아닙니다(${#found[@]}개)"
+            ls -la "$base/${{ matrix.bundle }}" || true
+            exit 1
+          fi
+          mkdir -p out
+          if [ "${{ matrix.bundle }}" = "dmg" ]; then
+            cp "${found[0]}" "out/Antler-${VERSION}-${{ matrix.arch }}.dmg"
+          else
+            cp "${found[0]}" "out/antler_${VERSION}_${{ matrix.arch }}.deb"
+          fi
+          ls -la out
+
+      - name: deb 의존 확인
+        if: matrix.bundle == 'deb'
+        run: |
+          {
+            echo "### deb 메타데이터"
+            echo '```'
+            dpkg-deb --info out/*.deb
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 아티팩트 업로드
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tauri-installers-${{ matrix.asset }}-dev-sidecar
+          path: out/*
+          if-no-files-found: error

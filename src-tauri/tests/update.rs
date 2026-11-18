@@ -542,3 +542,22 @@ fn 판정_로직은_앱에_연결되지_않았다() {
         assert!(!text.contains("update::logic") && !text.contains("crate::update"), "{}: 아직 앱에 연결하지 않는다", f.display());
     }
 }
+
+// ── CI 가 만드는 latest.json ─────────────────────────────────────────────────
+
+/// `scripts/make-update-manifests.mjs` 가 만든 표본(`tests/fixtures/update/latest.json`)을 실제 `check_manifest` 가 받는지.
+/// 표본이 스크립트 출력과 같은지는 vitest(`tests/updateManifests.test.ts`)가 바이트로 대조한다 — 둘이 합쳐 "CI 산출물 → 앱의 검사"를 잇는다
+#[test]
+fn ci_가_만드는_latest_json_표본을_검사가_받는다() {
+    let path = root().join("tests").join("fixtures").join("update").join("latest.json");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let o = check_manifest(&text, "1.12.3").expect("검사").expect("새 버전");
+    assert_eq!(o.version, "2.0.0");
+    assert_eq!(o.platform, "windows-x86_64-nsis", "nsis 키가 먼저 쓰인다");
+    assert_eq!(o.url, format!("{BASE}/v2.0.0/Antler-Setup-2.0.0-x64.exe"));
+    // 두 키가 같은 항목이다(번들 표식이 없는 빌드가 generic 키로 내려가도 같은 파일을 받는다)
+    let doc: Value = serde_json::from_str(&text).expect("json");
+    assert_eq!(doc["platforms"]["windows-x86_64-nsis"], doc["platforms"]["windows-x86_64"]);
+    // 이미 이 버전이면 제안하지 않는다
+    assert_eq!(check_manifest(&text, "2.0.0"), Ok(None));
+}

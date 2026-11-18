@@ -2028,7 +2028,7 @@ Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가
 | PR | 제목 접두 | 내용 | 앱 연결 | 묶음·선행 | 상태 |
 |---|---|---|---|---|---|
 | 1 | `refactor:` | 업데이트 판정 순수 로직 Rust 이식 + TS↔Rust 골든: semver·`isOfferable`·URL 허용 목록·매니페스트 검사·정책·입력 검증·오류 정화·릴리스 노트 해석 | 없음 | A(지금) | **완료** — 아래 "PR 1" |
-| 2 | `ci:` | Tauri 패키징 워크플로(**발행 없음**): NSIS 설정·서명·`latest.json`·이관용 `latest.yml`·Electron 정리 NSIS 훅·배포 빌드 가드. 첫 단계는 go/no-go 스파이크 | 없음 | A(서명 키 결정 뒤) | |
+| 2 | `ci:` | Tauri 패키징 워크플로(**발행 없음**): NSIS 설정·서명·`latest.json`·이관용 `latest.yml`·Electron 정리 NSIS 훅·배포 빌드 가드. 첫 단계는 go/no-go 스파이크 | 없음 | A(서명 키 결정 뒤) | **완료(워크플로 실행 전)** — 아래 "PR 2" |
 | 3 | `refactor:` | 단일 인스턴스(`tauri-plugin-single-instance` — 새 크레이트) | 있음 | A | **완료** — 아래 "PR 3" |
 | 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | |
 | 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | |
@@ -2073,6 +2073,43 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 - **PR 4 연결 계약(보안 리뷰)**: 플러그인(`tauri-plugin-updater` 2.14.1)은 `bundle_type()` 이 NSIS 일 때만 `-nsis` 키를 보고, 표식이 없는 빌드는 `windows-x86_64` 만 본다 — 원문 매니페스트를 그대로 넘기면 `check_manifest` 가 검사한 항목과 플러그인이 설치할 항목이 다를 수 있다. 그래서 **검사를 통과한 `ManifestOffer` 로 고른 키 하나만 담은 JSON 을 다시 만들고** `target(offer.platform)` 으로 고정해 `restore_update` 에 넘긴다(그 경로는 `require_signed_version` 을 강제로 켠다; `check()` 경로를 쓰면 `requireSignedVersion = true` 필수). 중복 필드는 플러그인의 serde 가 오류로 막는다(fail-closed). 태그 결속은 매니페스트 생성 실수만 거르며, 옛 서명 설치본을 새 태그에 다시 올리는 롤백은 서명 안의 버전 결속(`require_signed_version`)만 막는다 — CI 는 버전을 기록하는 Tauri CLI 로 서명해야 한다.
 - 서명은 형식만 본다. 서명이 실제로 맞는지·**서명된 버전이 매니페스트 버전과 같은지**(옛 서명 바이트에 새 버전 번호를 붙이는 공격)는 PR 4 가 `Update::verify`(`requireSignedVersion`)로 막는다.
 - 리다이렉트 허용 판정(`is_allowed_download_url`)은 순수 함수만 있고, 5단·매 홉 확인은 PR 4 의 `net::http::Redirects::ReleaseAssets` 가 이 함수를 쓰게 만든다.
+
+### PR 2 — Tauri 패키징 워크플로(발행 없음)
+
+설치본을 만드는 워크플로와 부속(매니페스트 생성·NSIS 훅·배포 빌드 가드)이다. **발행하지 않고 앱 코드(Rust)는 `lib.rs` 의 표식 한 줄 외에 바뀌지 않는다.** 사용법·산출물·서명·macOS Gatekeeper 안내·Linux deb 의존은 [build.md](build.md#tauri-판-패키징발행-없음--phase-6c-pr-2)에 있다.
+
+| 파일 | 내용 |
+|---|---|
+| `.github/workflows/tauri-package.yml` | `workflow_dispatch` 전용. 갈래 windows(NSIS)·macOS(dmg x64·arm64, ad-hoc)·linux(deb). 아티팩트만 올린다(`contents: read`, 릴리스·태그 없음). Windows 는 `windows`(시크릿 없는 빌드) → `windows-sign`(Environment `release`, 서명 키는 `tauri signer sign` 단계 env 에만, 이어서 매니페스트) 두 잡. 시크릿이 없으면 경고하고 서명 없이 계속 |
+| `src-tauri/tauri.conf.json` | `version` 을 `../package.json` 으로(CI 가 `npm pkg set` 으로 넣는 값이 유일한 원천), `bundle.active: true`·NSIS(`currentUser`·훅·한국어/영어)·macOS ad-hoc·deb `Recommends: git`·아이콘에 `.icns`. `--no-bundle` 개발·측정 빌드는 그대로다 |
+| `scripts/make-update-manifests.mjs` | `latest.json`(Tauri)·`latest.yml`(Electron 이관용) 생성 + 실물 대조. `ELECTRON_MIGRATION=off` 면 yml 을 만들지 않는 비상 정지 |
+| `scripts/check-release-features.mjs` + `lib.rs` 표식 | 배포 빌드에 cdp·test-hooks 표식 문자열이 없는지 검사. test-hooks 는 고유한 문자열이 없어 `lib.rs` 의 `run()` 이 그 feature 에서만 표식을 출력한다 |
+| `src-tauri/nsis/hooks.nsh` | `NSIS_HOOK_POSTINSTALL` — 사용자별 Electron 판 제거 + `--force-run` 재실행 |
+| `tests/updateManifests.test.ts` · `tests/releaseFeatureGuard.test.ts` · `tests/fixtures/update/latest.json` · `src-tauri/tests/update.rs`(시험 하나) | 매니페스트를 electron-updater 의 `parseUpdateInfo`·`resolveFiles` 와 우리 파서로 되읽고, 표본을 실제 `check_manifest` 에 먹이고, 훅·워크플로의 정적 불변식을 본다 |
+
+**핵심 결정**
+- **계획과 다른 점(이유)**: ① `mainBinaryName: "Antler"` 를 넣지 않았다 — Cargo 바이너리는 `antler` 이고 CLI 가 이름을 바꿔 주는지(특히 대소문자를 구분하는 macOS·Linux)를 확인하지 못했다. Windows 는 대소문자를 구분하지 않아 `Antler.exe` 와 실질 차이가 없다(바로가기·방화벽 규칙·작업 관리자 이름). 다만 Electron 제거기가 이름으로 `Antler.exe` 를 종료시키므로 훅은 제거기를 앱 실행보다 먼저 돌린다. ② 기본 설정에 `plugins.updater` 를 넣지 않았다 — CLI 는 "공개 키가 있는데 개인 키가 없음"을 오류로 보고(바이너리 문자열 확인), 빈 `pubkey` 가 "있음"으로 읽히는지 알 수 없다. 공개 키는 사용자가 줄 때 PR 4 가 플러그인과 함께 넣는다. 서명은 빌드에 넣지 않고 사후 단계로 분리했다(보안 리뷰: 빌드 중 도는 코드가 키를 읽지 못하게). 그래서 `createUpdaterArtifacts` 와 덮어쓰기 설정 파일(`tauri.updater.conf.json`)도 없다 — `tauri signer sign` 은 공개 키 설정과 무관하게 `.sig` 를 만든다(`--app-version` 으로 서명에 버전을 묶는다). ③ PR 트리거 드라이런을 두지 않았다 — `environment: release` 잡은 PR 에서 시크릿을 못 받고, macOS·Linux 갈래가 실패할 가능성이 커 PR 을 빨갛게 만든다.
+- **macOS 는 x64·arm64 두 개**(universal 아님): Electron 과 같은 이름 규칙(`Antler-<v>-<arch>.dmg`)을 유지해 수동 업데이트 경로의 자산 선택이 그대로 맞는다. **이 이름 선택의 결과**: 지금 Electron 판 mac 사용자의 수동 경로는 같은 이름의 Tauri dmg 를 집을 수 있다(`latest-mac.yml` 은 만들지 않으므로 sha512 검증은 API 의 sha256 digest 로 떨어진다). 이 이관 동작은 계획이 분석하지 않았고 릴리스 전환 PR 에서 정해야 한다. deb(`antler_<v>_amd64.deb`)도 마찬가지다.
+- **업데이트 서명은 Windows 만**: dmg·deb 는 수동 경로라 서명이 필요 없다. `latest.json` 도 Windows 항목만 담는다.
+- **훅의 제거기 경로 검증**(계획 C6): `UninstallString` 의 따옴표 안 경로를 읽어 `InstallLocation` 바로 아래의 `.exe` 인지·실제 파일인지·드라이브 경로인지(UNC·`\\?\` 거부)·새 설치 폴더와 다른지 본다. 하나라도 어긋나면 아무것도 하지 않는다. 지우는 것은 검증한 제거기 파일과 비어 있는 `InstallLocation` 뿐이다(재귀 삭제·`%APPDATA%` 접근·레지스트리 쓰기 없음). 인자는 `/currentuser /S /KEEP_APP_DATA --updated --keep-shortcuts _?=<InstallLocation>`(electron-builder 가 옛 판을 지울 때와 같다 — `/currentuser` 는 사용자별 설치라 붙였다). 모든 사용자용(HKLM, 32·64비트 뷰)은 남기고 조용한 모드가 아니면 안내 창을 띄운다(한국어/영어). GUID 는 `UUID.v5("com.antler.app", electron-builder 네임스페이스)` 로 시험이 대조한다.
+- **재실행**: 템플릿은 `/R` 일 때만 앱을 띄우므로, `--force-run` 이 있고 `/R` 이 없을 때 템플릿과 같은 `nsis_tauri_utils::RunAsUser` 로 직접 띄운다(설치기가 관리자 토큰이어도 권한을 낮춰 실행). 스텁 템플릿에 플러그인 디렉터리를 등록한 makensis 컴파일로 플러그인 해석을 확인했고, 실제 템플릿에서의 순서는 리허설 R 에서 본다.
+- **훅의 추가 방어(보안 리뷰)**: 새 설치 폴더가 `InstallLocation` 과 같을 뿐 아니라 그 **하위**여도 제거하지 않는다(대소문자 무시). `DisplayName` 이 `Antler` 또는 `Antler <버전>`(electron-builder 의 기본 `${productName} ${version}`)이 아니면 같은 GUID 의 다른 앱으로 보고 건너뛴다. 설치기가 관리자 토큰(`UserInfo::GetAccountType` = Admin)이면 HKCU 가 가리키는 제거기를 자동 실행하지 않고 안내만 한다.
+- **훅 파일은 UTF-8 BOM 이 있어야 한다**: NSIS 는 BOM 없는 스크립트를 시스템 코드 페이지로 읽어 한국어 문구가 깨진다(시험이 BOM 을 강제한다).
+
+**검증한 것(로컬)**: 매니페스트·가드·훅 정적 시험 vitest, `cargo test --test update`(표본 포함), `cargo clippy --lib`(기본·`test-hooks`), 워크플로 YAML 구문(js-yaml — `${{ }}` 식과 컨텍스트는 검증하지 못한다), 훅을 `makensis`(Tauri 가 받아 둔 NSIS)로 **컴파일만**(스텁 템플릿 + `SetCompress off` 로 한국어 문구가 UTF-16 으로 들어간 것까지 확인, 산출물 실행 안 함), 가드를 기존 cdp 빌드 바이너리에 돌려 양성 대조(`ANTLER_CDP_PORT` 검출).
+
+**미검증 — 리허설 R 에서 확인** (스파이크 항목)
+1. 훅의 실제 동작: `isUpdated`·`isKeepShortcuts` 매크로가 Electron 제거기에서 `--updated`·`--keep-shortcuts` 를 정말 해석하는지(정의를 찾지 못했다), Electron 제거기가 `_?=` 모드에서 앱 데이터를 보존하고 바로가기를 남기는지, 제거 후 Tauri 바로가기가 살아 있는지, `--updated /S --force-run` 으로 부른 설치기가 앱을 다시 띄우는지(새 Windows 사용자 계정에서).
+2. 번들된 exe 에서 `bundle_type()` 이 NSIS 를 돌려주는지(업데이터를 켜는 유일한 조건 — PR 4).
+3. 프리릴리스 버전(`2.0.0-rc.1`, `0.0.0-ci.N`)으로 NSIS 가 빌드되는지.
+4. `.sig` 의 trusted comment 에 버전이 들어가는지(`requireSignedVersion` 전제).
+5. 플러그인 크레이트 없이 `plugins.updater` 설정만 있어도 빌드되는지(지금은 설정을 넣지 않아 해당 없음).
+6. `tauri build --bundles nsis` 가 기본 설정(훅·`version` 경로·`bundle.active`)으로 실제로 끝나는지 — 로컬에서 번들링을 하지 않았다(메모리·실행 중인 앱). 설정은 `tauri-build`(`cargo test`)가 파싱하는 것까지만 확인했다.
+7. macOS·Linux 갈래의 컴파일·번들링, ad-hoc 서명된 dmg 의 Gatekeeper 동작, test-hooks 표식이 릴리스 프로파일에서 살아남는지.
+8. Environment `release` 의 시크릿이 이 워크플로의 `windows-sign` 잡에 실제로 전달되는지, 그리고 새 러너에서 `--ignore-scripts` 로 설치한 Tauri CLI 의 `tauri signer sign` 이 동작하는지(로컬에서는 `--help` 로 서브커맨드·`--app-version`·env 이름만 확인했다).
+9. `nsis_tauri_utils::RunAsUser` 가 스택에 값을 남기지 않는지(템플릿 사용례를 따라 `Pop` 하지 않았다 — 로컬에 템플릿 원문이 없어 확인 못 함).
+
+**사람 확인(머지 뒤)**: 먼저 Settings > Environments > `release` 를 설정한다 — Deployment branches and tags 를 `main` 만(태그를 허용해야 하면 tag ruleset 으로 `v*` 생성 제한), Required reviewers 를 소유자 1명으로. 다른 브랜치의 워크플로 파일로 dispatch 하면 시크릿이 그 파일로 전달되고 파일 안의 `if:` 가드는 무효이기 때문이다(build.md "업데이트 서명"). 그다음 Actions 에서 `tauri-package` 를 `workflow_dispatch` 로 한 번 실행해 세 갈래의 로그·아티팩트를 확인한다. 사용자가 서명 키를 시크릿에 등록하면 한 번 더 실행해 `.sig`·`latest.json` 을 확인한다. 공개 키가 오면 PR 4 가 설정에 넣는다.
 
 ### PR 3 — 단일 인스턴스(`src/single_instance.rs`, 사용자 결정 U7: 세 OS 함께)
 

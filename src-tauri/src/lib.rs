@@ -1,6 +1,7 @@
 // jira:*·gh:* 채널 처리(Phase 4 PR 6·9). 통합 테스트(tests/channels.rs·api_route.rs)가 별도 크레이트라 pub 이다
 pub mod api_host;
 pub mod app_host;
+mod build_marker;
 mod commands;
 // 설정 저장소 코어(Phase 6b PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/config.rs)가 별도 크레이트라 pub 이다
 pub mod config;
@@ -124,7 +125,9 @@ fn env_host_port(app: tauri::AppHandle, home: Option<String>) -> env_host::EnvHo
     )
 }
 
+
 pub fn run() {
+    build_marker::announce();
     commands::mark_start();
     let mut builder = tauri::Builder::default();
     // 단일 인스턴스 — **다른 플러그인보다 먼저** 등록한다(플러그인 문서: 두 번째 실행은 나머지 설정이 돌기 전에 감지돼 종료해야 한다).
