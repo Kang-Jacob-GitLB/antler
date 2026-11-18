@@ -289,8 +289,8 @@ fn 앱은_변화_싱크를_사이드카_기동_전에_달고_포커스를_감시
     assert!(sink < manage);
     // 포커스는 얻을 때도 잃을 때도 알린다(폴링 배율). 런타임 밖 스레드에서 불러도 되는 호출이라 `in_runtime_of` 밖이다
     assert_eq!(lib.matches("r.watch_focus(*focused)").count(), 1);
-    // (fetchPrefs sink·창 포커스의 fetch, 그리고 GitHub 로그인 변경 콜백 — Phase 6b PR 7)
-    assert_eq!(lib.matches("in_runtime_of(").count(), 3);
+    // (설정 알림의 미러·fetch 설정 반영 둘(Phase 6b PR 9), 창 포커스의 fetch, 그리고 GitHub 로그인 변경 콜백 — Phase 6b PR 7)
+    assert_eq!(lib.matches("in_runtime_of(").count(), 4);
     // 감시 이벤트는 사이드카의 `repo:changed` 와 같은 모양이다
     assert!(read_src("src/fetch_host.rs").contains("evt(\"repo:changed\", json!({ \"repoId\": repo_id }))"));
 }

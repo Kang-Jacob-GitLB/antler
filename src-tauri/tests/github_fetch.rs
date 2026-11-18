@@ -905,14 +905,15 @@ fn 원격_url_출처_주입은_test_hooks_뒤에만_있고_프로덕션은_https
 }
 
 #[test]
-fn 기본_브랜치_기록_부탁은_한_줄_종류이고_사이드카가_다시_검사한다() {
-    let sidecar = prod_code("src/sidecar.rs");
-    assert_eq!(sidecar.matches("\"githubBranch\"").count(), 1, "줄을 만드는 곳은 하나다");
-    assert_eq!(prod_code("src/fetch_host.rs").matches("sidecar.github_branch(").count(), 1);
-    let ts = read_src("../src/sidecar/protocol.ts");
-    assert!(ts.contains("{ t: 'githubBranch'; repoId: string; branch: string }"));
-    let handler = read_src("../src/sidecar/githubBranch.ts");
-    assert!(handler.contains("isSafeBranch(branch)") && handler.contains("kind !== 'github'"));
+fn 기본_브랜치는_설정에_직접_쓰고_저장소_소스_이름을_다시_검사한다() {
+    // Phase 6b PR 9: Rust 가 설정의 유일한 작성자라 사이드카에 기록을 부탁하는 줄(`githubBranch`)은 더는 만들지 않는다
+    assert!(!prod_code("src/sidecar.rs").contains("githubBranch"), "사이드카로 가는 줄이 없다");
+    let host = prod_code("src/fetch_host.rs");
+    assert_eq!(host.matches(".set_github_default_branch(").count(), 1, "기록은 호스트 구현 한 곳");
+    // 쓰기 전에 저장소 존재·github 소스·`is_safe_branch` 를 다시 본다(사이드카 핸들러와 같은 검사)
+    let write = &host[host.find("fn write_github_branch(").expect("쓰기 함수")..];
+    let (repo, source, safe, set) = (write.find("store\n        .repo(repo_id)").unwrap_or(usize::MAX), write.find("Some(\"github\")").unwrap(), write.find("is_safe_branch(branch)").unwrap(), write.find(".set_github_default_branch(").unwrap());
+    assert!(repo != usize::MAX && repo < source && source < set && safe < set);
 }
 
 #[test]

@@ -72,7 +72,7 @@ mod tests {
         let (electron, tauri) = (d.0.join("electron.json"), d.0.join("tauri").join("antler.config.json"));
         fs::create_dir_all(tauri.parent().unwrap()).unwrap();
         fs::write(&electron, ELECTRON).unwrap();
-        assert_eq!(import_electron_config(&tauri, &electron, "C:\\cache").unwrap(), true);
+        assert!(import_electron_config(&tauri, &electron, "C:/cache").unwrap());
         let got = parse(&fs::read_to_string(&tauri).unwrap()).unwrap();
         assert!(js_get(&got, "trustedConfigs").is_none() && js_get(&got, "window").is_none());
         assert!(js_get(&got, "fetchApprovals").is_some());
@@ -80,7 +80,7 @@ mod tests {
         assert_eq!(fs::read_to_string(&electron).unwrap(), ELECTRON, "Electron 파일은 읽기만 한다");
         // 두 번째부터는 Tauri 설정이 있으므로 가져오지 않는다 — 사용자가 바꾼 설정을 덮지 않는다
         fs::write(&tauri, "{}").unwrap();
-        assert_eq!(import_electron_config(&tauri, &electron, "C:\\cache").unwrap(), false);
+        assert!(!import_electron_config(&tauri, &electron, "C:/cache").unwrap());
         assert_eq!(fs::read_to_string(&tauri).unwrap(), "{}");
     }
 
@@ -88,9 +88,9 @@ mod tests {
     fn 손상되었거나_없는_electron_파일은_가져오지_않고_옆에_아무것도_만들지_않는다() {
         let d = Dir::new("bad");
         let (electron, tauri) = (d.0.join("electron.json"), d.0.join("antler.config.json"));
-        assert_eq!(import_electron_config(&tauri, &electron, "C:\\cache").unwrap(), false);
+        assert!(!import_electron_config(&tauri, &electron, "C:/cache").unwrap());
         fs::write(&electron, "{ 손상").unwrap();
-        assert_eq!(import_electron_config(&tauri, &electron, "C:\\cache").unwrap(), false);
+        assert!(!import_electron_config(&tauri, &electron, "C:/cache").unwrap());
         assert!(!tauri.exists());
         let names: Vec<_> = fs::read_dir(&d.0).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["electron.json"], "백업 파일(.corrupt-*.bak)을 만들지 않는다");
