@@ -37,8 +37,11 @@ describe('check-release-features', () => {
   it('cdp 표식은 cdp 코드 안에서만, test-hooks 표식은 test-hooks 아래에서만 나온다', () => {
     const lib = read('src-tauri', 'src', 'lib.rs')
     expect(lib).toMatch(/#\[cfg\(any\(debug_assertions, feature = "cdp"\)\)\]\s*\n\s*if let Ok\(port\) = std::env::var\("ANTLER_CDP_PORT"\)/)
-    expect(lib).toMatch(/#\[cfg\(feature = "test-hooks"\)\]\s*\nconst FEATURE_MARKER_TEST_HOOKS: &str = "antler-build-feature:test-hooks";/)
-    expect(lib).toMatch(/#\[cfg\(feature = "test-hooks"\)\]\s*\n\s*eprintln!\("\{FEATURE_MARKER_TEST_HOOKS\}"\);/)
+    // test-hooks 표식은 build_marker.rs 에 있고(lib.rs 는 시험 훅 이름을 두지 않는다 — src-tauri/tests/api_route.rs), lib.rs 는 시작할 때 부르기만 한다
+    const marker = read('src-tauri', 'src', 'build_marker.rs')
+    expect(marker).toMatch(/#\[cfg\(feature = "test-hooks"\)\]\s*\nconst FEATURE_MARKER_TEST_HOOKS: &str = "antler-build-feature:test-hooks";/)
+    expect(marker).toMatch(/#\[cfg\(feature = "test-hooks"\)\]\s*\n\s*eprintln!\("\{FEATURE_MARKER_TEST_HOOKS\}"\);/)
+    expect(lib).toMatch(/pub fn run\(\) \{\s*\n\s*build_marker::announce\(\);/)
   })
 
   it('Cargo 의 기본 feature 에 cdp·test-hooks 가 없다', () => {

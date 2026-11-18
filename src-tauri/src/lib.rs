@@ -1,6 +1,7 @@
 // jira:*·gh:* 채널 처리(Phase 4 PR 6·9). 통합 테스트(tests/channels.rs·api_route.rs)가 별도 크레이트라 pub 이다
 pub mod api_host;
 pub mod app_host;
+mod build_marker;
 mod commands;
 // 설정 저장소 코어(Phase 6b PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/config.rs)가 별도 크레이트라 pub 이다
 pub mod config;
@@ -124,15 +125,9 @@ fn env_host_port(app: tauri::AppHandle, home: Option<String>) -> env_host::EnvHo
     )
 }
 
-/// 배포 빌드 가드(`scripts/check-release-features.mjs`)가 바이너리에서 찾는 표식. `test-hooks` 를 켠 빌드에서만 존재한다.
-/// `test-hooks` 코드에는 따로 고유한 문자열이 없어, 시작할 때 실제로 출력해 링커가 지우지 못하게 한다.
-/// 이 문자열을 바꾸면 가드 스크립트의 같은 값도 바꿔야 한다(`tests/releaseFeatureGuard.test.ts` 가 일치를 강제한다)
-#[cfg(feature = "test-hooks")]
-const FEATURE_MARKER_TEST_HOOKS: &str = "antler-build-feature:test-hooks";
 
 pub fn run() {
-    #[cfg(feature = "test-hooks")]
-    eprintln!("{FEATURE_MARKER_TEST_HOOKS}");
+    build_marker::announce();
     commands::mark_start();
     let mut builder = tauri::Builder::default();
     // 단일 인스턴스 — **다른 플러그인보다 먼저** 등록한다(플러그인 문서: 두 번째 실행은 나머지 설정이 돌기 전에 감지돼 종료해야 한다).

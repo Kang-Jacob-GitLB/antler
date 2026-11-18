@@ -2,7 +2,7 @@
 // 배포용으로 빌드한 실행 파일에 개발·시험 전용 feature(cdp, test-hooks)가 들어가지 않았는지 검사한다(.github/workflows/tauri-package.yml).
 // 방법: 그 feature 아래에서만 존재하는 문자열이 바이너리에 있는지 찾는다. 있으면 exit 1.
 //   cdp         — WebView2 원격 디버깅 포트를 여는 코드(src-tauri/src/lib.rs 의 browser_args)가 읽는 환경 변수 이름
-//   test-hooks  — 같은 lib.rs 가 test-hooks 빌드에서 시작할 때 출력하는 표식(그 feature 에는 따로 고유한 문자열이 없다)
+//   test-hooks  — src-tauri/src/build_marker.rs 가 test-hooks 빌드에서 시작할 때 출력하는 표식(그 feature 에는 따로 고유한 문자열이 없다)
 // 한계: "없음"을 확인하는 검사라 문자열이 바이너리에서 사라지면 조용히 통과한다. cdp 표식은 실제 cdp 빌드로 존재를 확인했고
 //   (docs/tauri.md), test-hooks 표식이 릴리스 프로파일에서 살아남는지는 아직 확인하지 못했다.
 // 사용: node scripts/check-release-features.mjs <바이너리 경로>
