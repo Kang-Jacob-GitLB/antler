@@ -70,13 +70,18 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 
 이름은 Electron 판의 규칙을 그대로 따른다(앱 안 수동 업데이트가 자산을 고르는 규칙, `pickAsset`).
 
-**업데이트 서명** — Environment `release` 의 시크릿 `TAURI_SIGNING_PRIVATE_KEY`(·`_PASSWORD`)가 있으면 Windows 갈래가 `src-tauri/tauri.updater.conf.json`(`createUpdaterArtifacts: true`)을 덮어써서 `.sig` 를 만든다. 없으면 경고(`::warning::`)를 내고 서명 없이 빌드한다 — 빌드는 성공하고 `latest.json` 만 빠진다. macOS·Linux 는 서명하지 않는다(이 형태의 앱 안 업데이트는 수동 경로).
+**업데이트 서명** — 빌드는 키 없이 한다. `windows` 잡이 시크릿 없이 NSIS 를 빌드해 서명 전 설치본을 중간 아티팩트(`tauri-win-unsigned`, 1일 보관)로 올리고, 이어서 `windows-sign` 잡(Environment `release`)이 그것을 받아 `tauri signer sign --app-version <버전>` 으로 `.sig` 를 만들고 매니페스트를 만든다. 키(`TAURI_SIGNING_PRIVATE_KEY`·`_PASSWORD`)는 서명 단계의 env 에만 있다 — 빌드 중에 도는 npm 빌드 코드·모든 crate 의 `build.rs`·proc-macro 가 키를 읽을 수 없게 하려는 분리다. `windows-sign` 은 새 러너에서 `pnpm install --frozen-lockfile --ignore-scripts` 로 Tauri CLI 만 설치해 쓰며(Rust·빌드 없음), 남는 신뢰는 lockfile 이 고정한 `@tauri-apps/cli` 의 코드뿐이다(`cargo install tauri-cli` 로 바꾸면 더 줄지만 컴파일이 길다). 시크릿이 없으면 경고(`::warning::`)를 내고 서명을 건너뛴다 — `latest.json` 만 빠진다. macOS·Linux 는 서명하지 않는다(이 형태의 앱 안 업데이트는 수동 경로).
+
+**필수 사전 설정(저장소 Settings > Environments > `release`)** — 시크릿을 넣기 전에 먼저 한다.
+- Deployment branches and tags: **Selected branches and tags → `main` 만**. 태그를 허용해야 한다면 tag ruleset 으로 `v*` 태그 생성을 제한한다.
+- Required reviewers: 소유자 1명.
+- 이유: `workflow_dispatch` 는 다른 브랜치의 워크플로 파일로도 실행할 수 있고, Environment 의 시크릿은 그 파일로 전달된다. 파일 안의 `if:` 가드는 공격자가 고친 파일에서는 무효이므로 방어가 되지 않는다 — 방어는 Environment 쪽 설정뿐이다.
 키는 사용자가 만들어 시크릿으로 넣고, **공개 키는 아직 저장소에 없다**(사용자 공개 키 대기). 업데이터를 앱에 연결하는 PR 4 가 `plugins.updater.pubkey` 를 `tauri.conf.json` 에 넣는다. 지금 `tauri.conf.json` 에는 `plugins.updater` 가 없으므로 업데이터는 비활성이다(플러그인 크레이트도 아직 없다).
 
 **매니페스트** — `scripts/make-update-manifests.mjs` 가 만든다(순수 함수 + `tests/updateManifests.test.ts`).
 - `latest.json`: Tauri 업데이터 형식. `url` 은 `https://github.com/Kang-Jacob-GitLB/antler/releases/download/v<버전>/<파일>`, 플랫폼 키는 `windows-x86_64-nsis` 와 `windows-x86_64`(같은 항목). 앱의 `check_manifest`(`update/logic.rs`)가 읽는 형식이고, 실제 검사가 표본 `tests/fixtures/update/latest.json` 을 받는지 `src-tauri/tests/update.rs` 가 확인한다.
 - `latest.yml`: Electron 판(electron-updater)이 Tauri 설치본을 받아 가게 하는 이관용. `url`·`path` 는 **파일 이름만**이다(절대 URL 이면 electron-updater 가 경로를 깨뜨린다). 서명과 무관하게 만든다.
-- **비상 정지**: 저장소 변수 `ELECTRON_MIGRATION` 이 `off` 면 `latest.yml` 을 만들지 않는다(기본 on). 이미 발행된 릴리스에서는 사람이 `latest.yml` 자산도 지워야 한다.
+- **비상 정지**: 저장소 변수 `ELECTRON_MIGRATION` 이 `off`·`false`·`0`·`no`(대소문자 무시)면 `latest.yml` 을 만들지 않는다(기본 on). 이미 발행된 릴리스에서는 사람이 `latest.yml` 자산도 지워야 한다.
 - 스크립트가 파일을 쓰기 전에 버전·파일 이름·해시·크기를 실물과 대조하고, 어긋나면 워크플로가 실패한다.
 
 **배포 빌드 가드** — 빌드 뒤 `scripts/check-release-features.mjs` 가 바이너리에 `cdp`·`test-hooks` feature 의 표식 문자열이 있는지 본다(있으면 실패). 워크플로는 `--features` 를 쓰지 않는다. "없음" 검사라 표식이 사라지면 조용히 통과하는 한계가 있다 — cdp 표식은 실제 cdp 빌드 바이너리에서 잡히는 것을 확인했고, test-hooks 표식이 릴리스 프로파일에서 살아남는지는 확인하지 못했다.
@@ -86,7 +91,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 
 **Linux — deb 의존** — Tauri 번들러가 `libwebkit2gtk-4.1-0`(WebKitGTK 4.1)·`libgtk-3-0` 를 `Depends` 로 기록하고, git 은 `Recommends` 로 둔다(`tauri.conf.json`). 따라서 WebKitGTK 4.1 이 있는 배포판(Ubuntu 22.04+ · Debian 12+)이 필요하다. 빌드 러너는 `libwebkit2gtk-4.1-dev` 등을 설치하며, 실제 `Depends` 는 실행 요약(deb 메타데이터)에서 확인한다.
 
-**머지 뒤 사람 확인** — (1) Actions 에서 `tauri-package` 를 한 번 실행해 세 갈래가 끝나는지, 아티팩트 이름·크기를 본다(**macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다** — 실패하면 갈래별 로그를 본다). (2) 서명 키를 시크릿에 등록한 뒤 다시 실행해 `.sig`·`latest.json` 이 생기고 시크릿이 실제로 전달되는지(Environment 시크릿이 호출 잡에 오는지) 본다. 이관 훅(NSIS)의 실제 설치·제거는 리허설 R 에서 확인한다.
+**머지 뒤 사람 확인** — (1) Actions 에서 `tauri-package` 를 한 번 실행해 세 갈래가 끝나는지, 아티팩트 이름·크기를 본다(**macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다** — 실패하면 갈래별 로그를 본다). (2) 위 "필수 사전 설정"(Environment `release` 의 브랜치 제한·승인자)을 한 뒤 서명 키를 시크릿에 등록하고 다시 실행해 `.sig`·`latest.json` 이 생기고 시크릿이 `windows-sign` 잡에 실제로 전달되는지 본다(승인 대기가 뜨는지 포함). 이관 훅(NSIS)의 실제 설치·제거는 리허설 R 에서 확인한다.
 
 아이콘은 `pnpm icons` 로 `resources/icon.svg`(48px 이상)와 `resources/icon-small.svg`(16–32px)에서
 `resources/icon.png`·`icon.ico`·`icon.icns` 와 `resources/icons/*.png` 를 다시 만든다(`@resvg/resvg-js` + `png2icons`).

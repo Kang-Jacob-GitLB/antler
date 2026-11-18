@@ -7,7 +7,7 @@
 // 사용: node scripts/make-update-manifests.mjs --version <semver> --dir <설치본이 있는 폴더> [--installer <파일 이름>]
 //         [--sig <.sig 파일>] [--electron-migration on|off]
 //   --installer  기본 Antler-Setup-<버전>-x64.exe (Electron 의 artifactName 규칙. 서명은 내용에 걸려 이름과 무관하다)
-//   --electron-migration  off 면 latest.yml 을 만들지 않는다(비상 정지 스위치). 기본은 환경 변수 ELECTRON_MIGRATION, 그것도 없으면 on
+//   --electron-migration  off·false·0·no 면 latest.yml 을 만들지 않는다(비상 정지 스위치). 기본은 환경 변수 ELECTRON_MIGRATION, 그것도 없으면 on
 //
 // latest.yml 의 url·path 는 **파일 이름만** 쓴다 — electron-updater 의 GitHub 공급자가 `/<소유자>/<저장소>/releases/download/<태그>/<url>` 로 붙이므로
 // 절대 URL 을 넣으면 경로가 깨져 이관이 통째로 실패한다. latest.json 의 url 은 반대로 절대 URL 이다(check_manifest 가 태그 결속을 본다).
@@ -79,8 +79,8 @@ export function buildLatestYml({ version, fileName, sha512, size, releaseDate })
   ].join('\n')
 }
 
-/** ELECTRON_MIGRATION 값 해석: 정확히 `off`(대소문자 무시)만 끈다. 비어 있거나 다른 값이면 켠다 */
-export const migrationEnabled = (value) => String(value ?? '').trim().toLowerCase() !== 'off'
+/** ELECTRON_MIGRATION 값 해석: `off`·`false`·`0`·`no`(대소문자·앞뒤 공백 무시)가 끈다. 비어 있거나 다른 값이면 켠다 */
+export const migrationEnabled = (value) => !['off', 'false', '0', 'no'].includes(String(value ?? '').trim().toLowerCase())
 
 /**
  * 설치본(디스크의 실물)을 읽어 매니페스트를 만들고, 만든 값이 실물과 맞는지 되짚는다(가드).
@@ -107,7 +107,7 @@ export function makeManifests({ dir, version, installer, signatureText, migratio
   if (migrationEnabled(migration)) {
     files['latest.yml'] = buildLatestYml({ version, fileName, sha512, size, releaseDate: now })
   } else {
-    warnings.push('ELECTRON_MIGRATION=off 라 latest.yml 을 만들지 않았습니다(Electron 판 이관 중단)')
+    warnings.push('ELECTRON_MIGRATION 이 꺼져(off·false·0·no) 있어 latest.yml 을 만들지 않았습니다(Electron 판 이관 중단)')
   }
 
   // 가드: url 의 파일 이름이 올릴 자산과 같고, 해시·크기가 실물과 같다

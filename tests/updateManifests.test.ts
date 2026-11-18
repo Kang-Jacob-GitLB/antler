@@ -178,9 +178,11 @@ describe('makeManifests (실물 대조 가드)', () => {
     }
   })
 
-  it('ELECTRON_MIGRATION=off 면 latest.yml 을 만들지 않는다(정확히 off 만)', () => {
+  it('ELECTRON_MIGRATION 이 off·false·0·no(대소문자·공백 무시)면 latest.yml 을 만들지 않는다', () => {
     const dir = installerDir('2.0.0', content)
-    for (const [migration, expected] of [['off', false], ['OFF', false], [' off ', false], ['on', true], ['', true], [undefined, true], ['0', true], ['false', true]] as const) {
+    const cases = [['off', false], ['OFF', false], [' off ', false], ['false', false], ['False', false], ['0', false], ['no', false], ['NO', false],
+      ['on', true], ['', true], [undefined, true], ['1', true], ['true', true], ['yes', true]] as const
+    for (const [migration, expected] of cases) {
       const r = M.makeManifests({ dir, version: '2.0.0', signatureText: SIG, migration, now: DATE })
       expect('latest.yml' in r.files, String(migration)).toBe(expected)
       expect('latest.json' in r.files).toBe(true)
@@ -238,20 +240,36 @@ describe('Electron 정리 NSIS 훅 (정적 검사)', () => {
     expect(exec).toBeGreaterThan(0)
     const before = code.slice(0, exec)
     for (const needle of ["!= ':\\'", "!= '$1\\'", "!= '.exe'", '${IfNot} ${FileExists} $2', '$1 == $INSTDIR']) expect(before, needle).toContain(needle)
+    // 새 설치 폴더가 InstallLocation 의 하위여도 제거하지 않는다(`$1\` 로 시작하는지)
+    expect(before).toMatch(/StrCpy \$4 \$INSTDIR \$3\n\s*\$\{If\} \$4 == '\$1\\'/)
+    // 같은 GUID 의 다른 앱 방어: DisplayName 이 `Antler` 또는 `Antler <버전>`
+    expect(before).toContain('ReadRegStr $3 HKCU "${ANTLER_ELECTRON_UNINSTALL_KEY}" "DisplayName"')
+    expect(before).toContain('${If} $3 != "Antler"')
+    expect(before).toContain('${AndIf} $4 != "Antler "')
     expect([...code.matchAll(/ExecWait/g)]).toHaveLength(1)
     // 모든 사용자용(HKLM)은 읽기만 하고 안내한다 — 32·64비트 뷰를 모두 본다
     expect(code).toContain('ReadRegStr $3 HKLM')
     expect(code).toContain('SetRegView 32')
   })
 
-  it('재실행(--force-run)은 제거기 호출 뒤에, /R 이 없을 때만 한다', () => {
+  it('설치기가 관리자 토큰이면 HKCU 기반 제거기를 실행하지 않고 안내만 한다(ExecWait 앞에서 분기)', () => {
+    const exec = code.indexOf('ExecWait')
+    const admin = code.indexOf('UserInfo::GetAccountType')
+    expect(admin).toBeGreaterThan(0)
+    expect(admin).toBeLessThan(exec)
+    const branch = code.slice(admin, exec)
+    expect(branch).toMatch(/\$\{If\} \$6 == "Admin"[\s\S]*MessageBox[\s\S]*Goto done\n\s*\$\{EndIf\}/)
+  })
+
+  it('재실행(--force-run)은 제거기 호출 뒤에, /R 이 없을 때만, 권한을 낮춰(RunAsUser) 한다', () => {
     const macro = code.slice(code.indexOf('!macro NSIS_HOOK_POSTINSTALL'))
     expect(macro.indexOf('AntlerRemoveElectron')).toBeGreaterThan(0)
     expect(macro.indexOf('AntlerForceRun')).toBeGreaterThan(macro.indexOf('AntlerRemoveElectron'))
     const fn = code.slice(code.indexOf('Function AntlerForceRun'))
     expect(fn).toContain('"--force-run"')
     expect(fn).toContain('"/R"')
-    expect(fn).toContain('${MAINBINARYNAME}.exe')
+    expect(fn).toContain('nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe"')
+    expect(fn).not.toMatch(/^\s*Exec(Wait|Shell)?\s/m)
   })
 
   it('한국어 문구가 깨지지 않도록 UTF-8 BOM 이 있다(NSIS 는 BOM 없는 파일을 시스템 코드 페이지로 읽는다)', () => {

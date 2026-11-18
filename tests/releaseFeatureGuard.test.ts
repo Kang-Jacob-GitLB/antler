@@ -1,6 +1,7 @@
 // 배포 빌드 feature 가드(scripts/check-release-features.mjs)와 패키징 워크플로(.github/workflows/tauri-package.yml)의 정적 검사.
 // 워크플로는 이 PR 머지 전에는 실행할 수 없다(workflow_dispatch 는 기본 브랜치의 파일만 돈다) — 여기서는 "발행하지 않는다"는 불변식과 가드 연결만 본다.
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error — 순수 JS 스크립트(타입 선언 없음)
@@ -65,33 +66,85 @@ describe('tauri-package.yml', () => {
     }
   })
 
-  it('서명 시크릿은 빌드 단계의 env 에만 들어가고 cdp·test-hooks 를 켜지 않는다', () => {
-    // 시크릿 이름이 나오는 줄: 존재 확인 단계(KEY) 하나, 빌드 단계(키·암호) 둘
+  type Step = { name?: string; uses?: string; run?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }
+  type Job = { environment?: string; env?: Record<string, string>; needs?: string | string[]; steps: Step[] }
+  const yaml = createRequire(createRequire(import.meta.url).resolve('electron-builder'))('js-yaml') as { load(s: string): unknown }
+  const jobs = (yaml.load(wf) as { jobs: Record<string, Job> }).jobs
+  const job = (id: string): Job => {
+    const j = jobs[id]
+    if (!j) throw new Error(`잡이 없다: ${id}`)
+    return j
+  }
+  const stepsWithSecrets = (job: Job): string[] => job.steps.filter((s) => JSON.stringify(s).includes('secrets.')).map((s) => s.name ?? '')
+
+  it('서명 시크릿은 서명 잡의 두 단계(키 존재 확인·서명)에만 있고, 빌드 잡·빌드 단계에는 없다', () => {
+    // 시크릿을 참조하는 줄: 존재 확인 단계(KEY) 하나, 서명 단계(키·암호) 둘 — 다른 곳에는 없다
     const uses = lines.filter((l) => !l.trimStart().startsWith('#') && l.includes('secrets.')).map((l) => l.trim())
     expect(uses).toEqual([
       'KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}',
       'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}',
       'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'
     ])
+    for (const [id, job] of Object.entries(jobs)) {
+      if (id === 'windows-sign') continue
+      expect(JSON.stringify(job), `${id} 잡에 시크릿이 있다`).not.toContain('secrets.')
+      expect(job.environment, `${id} 잡이 Environment 를 선언한다`).toBeUndefined()
+    }
+    const build = job('windows')
+    expect(JSON.stringify(build)).not.toMatch(/SIGNING|createUpdaterArtifacts|tauri\.updater\.conf/)
+    const buildStep = build.steps.find((s) => s.run?.includes('tauri build'))
+    expect(buildStep?.run?.trim()).toBe('pnpm tauri build --bundles nsis')
+    expect(buildStep?.env).toBeUndefined()
+    expect(build.env).toEqual({ VERSION: '${{ needs.version.outputs.version }}' })
+  })
+
+  it('windows-sign 잡: 키는 서명 단계에서만 쓰이고, 빌드·설치 스크립트가 도는 단계에는 없다', () => {
+    const sign = job('windows-sign')
+    expect(sign.environment).toBe('release')
+    expect(sign.needs).toEqual(['version', 'windows'])
+    expect(sign.env).toEqual({ VERSION: '${{ needs.version.outputs.version }}' })
+    expect(stepsWithSecrets(sign)).toEqual(['서명 키 확인', '업데이트 서명'])
+    const idx = (name: string): number => sign.steps.findIndex((s) => s.name === name)
+    const stepAt = (name: string): Step => {
+      const s = sign.steps[idx(name)]
+      if (!s) throw new Error(`단계가 없다: ${name}`)
+      return s
+    }
+    const install = stepAt('Tauri CLI 설치')
+    // 키가 주어지는 단계보다 앞에서 설치하고, 설치 스크립트는 돌리지 않는다. 이 잡에는 빌드가 없다
+    expect(install.run).toBe('pnpm install --frozen-lockfile --ignore-scripts')
+    expect(idx('Tauri CLI 설치')).toBeLessThan(idx('서명 키 확인'))
+    expect(idx('서명 키 확인')).toBeLessThan(idx('업데이트 서명'))
+    expect(sign.steps.some((s) => /tauri build|cargo|rustup/.test(s.run ?? ''))).toBe(false)
+    const step = stepAt('업데이트 서명')
+    expect(step.if).toBe("steps.key.outputs.signed == 'true'")
+    expect(Object.keys(step.env ?? {}).sort()).toEqual(['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD'])
+    // 서명에 버전을 묶는다(requireSignedVersion). 매니페스트 생성은 서명 뒤, 키 없는 단계에서
+    expect(step.run).toContain('tauri signer sign --app-version "$VERSION"')
+    const manifest = stepAt('업데이트 매니페스트 생성·검증')
+    expect(idx('업데이트 매니페스트 생성·검증')).toBeGreaterThan(idx('업데이트 서명'))
+    expect(manifest.env).toEqual({ ELECTRON_MIGRATION: '${{ vars.ELECTRON_MIGRATION }}' })
+    expect(manifest.run).toContain('scripts/make-update-manifests.mjs')
+  })
+
+  it('cdp·test-hooks 를 켜지 않는다', () => {
     // 단계 이름("… feature 검사 (cdp · test-hooks 없음)")은 빼고 본다
     expect(code.replace(/^\s*- name:.*$/gm, '')).not.toMatch(/--features|cdp|test-hooks/)
     expect(code).not.toMatch(/set -x|xtrace/)
   })
 
-  it('세 갈래가 모두 빌드 뒤 feature 가드를 부르고, 서명 설정은 시크릿이 있을 때만 쓴다', () => {
+  it('세 갈래가 모두 빌드 뒤 feature 가드를 부른다', () => {
     expect([...code.matchAll(/node scripts\/check-release-features\.mjs/g)].length).toBeGreaterThanOrEqual(2)
-    expect(code).toContain('if: steps.key.outputs.signed == \'true\'')
-    const signedStep = code.slice(code.indexOf('빌드 (NSIS, 업데이트 서명)'), code.indexOf('빌드 (NSIS, 서명 없음)'))
-    expect(signedStep).toContain('--config src-tauri/tauri.updater.conf.json')
-    expect(code.slice(code.indexOf('빌드 (NSIS, 서명 없음)'), code.indexOf('배포 빌드 feature 검사'))).not.toContain('tauri.updater.conf.json')
   })
 
-  it('저장소 변수 ELECTRON_MIGRATION 을 매니페스트 스크립트에 넘긴다', () => {
-    expect(code).toContain('ELECTRON_MIGRATION: ${{ vars.ELECTRON_MIGRATION }}')
+  it('버전 검사는 문자열 전체를 본다([[ =~ ]], 줄 단위 grep 이 아니다)', () => {
+    const check = job('version').steps.map((s) => s.run ?? '').join('\n')
+    expect(check).toContain('[[ "$VERSION" =~ ^')
+    expect(check).not.toContain('grep -E')
   })
 
-  it('서명 덮어쓰기 설정은 createUpdaterArtifacts 만 켜고, 기본 설정에는 업데이터 설정이 없다(공개 키 대기)', () => {
-    expect(JSON.parse(read('src-tauri', 'tauri.updater.conf.json')).bundle).toEqual({ createUpdaterArtifacts: true })
+  it('업데이트 서명은 빌드가 아니라 사후 서명이다: 덮어쓰기 설정이 없고 기본 설정에도 업데이터 설정이 없다(공개 키 대기)', () => {
+    expect(existsSync(join(root, 'src-tauri', 'tauri.updater.conf.json'))).toBe(false)
     const base = JSON.parse(read('src-tauri', 'tauri.conf.json')) as { plugins?: unknown; bundle: Record<string, unknown> }
     expect(base.plugins).toBeUndefined()
     expect(base.bundle.createUpdaterArtifacts).toBeUndefined()

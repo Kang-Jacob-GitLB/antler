@@ -10,8 +10,9 @@ name: tauri-package
 # 시크릿을 주지 않을 수 있어 PR 에서는 돌리지 않는다. 그래서 머지 뒤 한 번 눌러 아티팩트를 확인한다(docs/build.md).
 #
 # 갈래:
-#   windows — NSIS 설치 프로그램(x64). 시크릿 TAURI_SIGNING_PRIVATE_KEY 가 있으면 업데이트 서명(.sig)을 만들고 latest.json 도 만든다.
-#             없으면 경고하고 서명 없이 빌드한다(latest.yml 은 서명과 무관하게 만든다). Environment `release` 를 선언해 시크릿을 직접 받는다
+#   windows — NSIS 설치 프로그램(x64)을 **시크릿 없이** 빌드한다. 이어지는 windows-sign 잡이 빌드 산출물만 받아 시크릿 TAURI_SIGNING_PRIVATE_KEY 로
+#             업데이트 서명(.sig)을 만들고 latest.json 도 만든다. 키가 없으면 경고하고 서명 없이 계속한다(latest.yml 은 서명과 무관하게 만든다).
+#             windows-sign 이 Environment `release` 를 선언해 시크릿을 받는다 — 그 Environment 의 브랜치 제한·승인자 설정이 필수다(docs/build.md)
 #   macos   — dmg x64·arm64(arm64 러너에서 둘 다 빌드). ad-hoc 서명(`-`), 공증 없음 — 처음 열 때 Gatekeeper 경고가 뜬다(docs/build.md)
 #   linux   — deb(x64). 의존: libwebkit2gtk-4.1-0 · libgtk-3-0
 # macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다(fail-fast 를 꺼 갈래마다 따로 본다).
@@ -46,7 +47,8 @@ jobs:
         run: |
           VERSION="${INPUT_VERSION:-0.0.0-ci.${{ github.run_number }}}"
           # release.yml 과 같은 식: semver(MAJOR.MINOR.PATCH[-pre]) 가 아니면 실패한다 — 설치본 이름·업데이트 비교가 이 값에 기댄다
-          if ! echo "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'; then
+          # (grep 은 줄 단위라 개행이 낀 입력의 첫 줄만 보고 통과시킬 수 있어 문자열 전체를 보는 [[ =~ ]] 를 쓴다)
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::semver 가 아닌 버전입니다: $VERSION"
             exit 1
           fi
@@ -59,8 +61,8 @@ jobs:
     needs: version
     runs-on: windows-latest
     timeout-minutes: 60
-    # 시크릿(TAURI_SIGNING_PRIVATE_KEY·_PASSWORD)은 Environment `release` 에 있다. 이 갈래만 선언한다
-    environment: release
+    # 이 잡은 시크릿을 받지 않는다(environment 없음, secrets.* 참조 없음) — 빌드 중 도는 npm 빌드 코드·crate 의 build.rs·proc-macro 가 서명 키를 읽지 못하게.
+    # 서명은 아래 `windows-sign` 잡이 빌드 산출물만 받아서 한다
     env:
       VERSION: ${{ needs.version.outputs.version }}
     defaults:
@@ -92,29 +94,8 @@ jobs:
           rustup default stable
           rustc --version
 
-      # 시크릿은 if: 에서 못 쓰므로 env 로 받아 비어 있는지만 본다. 값을 출력하지 않는다
-      - name: 서명 키 확인
-        id: key
-        env:
-          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if [ -n "$KEY" ]; then
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::TAURI_SIGNING_PRIVATE_KEY 시크릿이 없어 업데이트 서명(.sig)과 latest.json 을 건너뜁니다(빌드는 계속). Environment 'release' 에 시크릿을 등록하세요."
-          fi
-
-      # 서명 env 는 이 두 빌드 단계에만 넣는다(다른 단계·스크립트에 새지 않게). --features 는 쓰지 않는다(cdp·test-hooks 금지)
-      - name: 빌드 (NSIS, 업데이트 서명)
-        if: steps.key.outputs.signed == 'true'
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm tauri build --bundles nsis --config src-tauri/tauri.updater.conf.json
-
-      - name: 빌드 (NSIS, 서명 없음)
-        if: steps.key.outputs.signed != 'true'
+      # 서명 없이 빌드한다(createUpdaterArtifacts 를 켜지 않는다 — 빌드가 서명하는 구조가 아니다). --features 는 쓰지 않는다(cdp·test-hooks 금지)
+      - name: 빌드 (NSIS)
         run: pnpm tauri build --bundles nsis
 
       - name: 배포 빌드 feature 검사 (cdp · test-hooks 없음)
@@ -134,17 +115,84 @@ jobs:
           mkdir -p out
           name="Antler-Setup-${VERSION}-x64.exe"
           cp "${setups[0]}" "out/$name"
-          if [ "${{ steps.key.outputs.signed }}" = "true" ]; then
-            if [ ! -f "${setups[0]}.sig" ]; then
-              echo "::error::서명 키가 있는데 .sig 가 만들어지지 않았습니다"
-              ls -la "$dir"
-              exit 1
-            fi
-            cp "${setups[0]}.sig" "out/$name.sig"
-          fi
           ls -la out
 
-      # latest.json(Tauri 업데이터, 서명이 있을 때만)과 latest.yml(Electron 판 이관용). 저장소 변수 ELECTRON_MIGRATION=off 면 latest.yml 을 만들지 않는다(기본 on)
+      # 서명 잡으로 넘기는 중간 산출물이다(서명 전). 하루만 보관한다
+      - name: 서명 전 설치본 업로드
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tauri-win-unsigned
+          path: out/*
+          retention-days: 1
+          if-no-files-found: error
+
+  # ── Windows: 업데이트 서명·매니페스트 ─────────────────────────────────────
+  # 서명 키를 받는 유일한 잡이고, 키는 `.sig` 를 만드는 한 단계의 env 에만 있다. 이 잡은 빌드를 하지 않는다: 새 러너에서 `--ignore-scripts` 로 설치한
+  # Tauri CLI 로 `tauri signer sign` 만 돈다(Rust·crate·빌드 스크립트·proc-macro 가 없고, 설치 스크립트도 안 돈다). 서명할 파일은 위 잡의 산출물이다.
+  # 남는 신뢰: lockfile 이 고정한 `@tauri-apps/cli`(와 그 플랫폼 패키지) 한 벌의 코드. `cargo install tauri-cli` 로 바꾸면 이마저 줄지만 컴파일이 길다.
+  # Environment `release` 는 main 브랜치로 제한하고 승인자를 두어야 한다(필수 사전 설정: docs/build.md "업데이트 서명") — 워크플로 파일 안의 `if:` 는 방어가 아니다.
+  windows-sign:
+    name: 서명·매니페스트 (windows)
+    needs: [version, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Node 설정
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      # 설치 스크립트를 돌리지 않는다(--ignore-scripts). 서명 키는 아직 이 잡의 어느 단계에도 없다
+      - name: Tauri CLI 설치
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: tauri-win-unsigned
+          path: out
+
+      # 시크릿은 if: 에서 못 쓰므로 env 로 받아 비어 있는지만 본다. 값을 출력하지 않는다. 키가 없는 잡이 아니라 이 확인 단계만 키를 받는다
+      - name: 서명 키 확인
+        id: key
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY 시크릿이 없어 업데이트 서명(.sig)과 latest.json 을 건너뜁니다. Environment 'release' 에 시크릿을 등록하세요."
+          fi
+
+      # 서명 env 는 이 단계에만 넣는다. --app-version 으로 서명에 버전을 묶는다(앱의 requireSignedVersion 전제 — `tauri build` 도 같은 값을 넣는다)
+      - name: 업데이트 서명
+        if: steps.key.outputs.signed == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          name="Antler-Setup-${VERSION}-x64.exe"
+          pnpm exec tauri signer sign --app-version "$VERSION" "out/$name"
+          if [ ! -s "out/$name.sig" ]; then
+            echo "::error::.sig 가 만들어지지 않았습니다"
+            ls -la out
+            exit 1
+          fi
+
+      # latest.json(Tauri 업데이터, 서명이 있을 때만)과 latest.yml(Electron 판 이관용). 저장소 변수 ELECTRON_MIGRATION 이 off·false·0·no 면 latest.yml 을 만들지 않는다(기본 on)
       - name: 업데이트 매니페스트 생성·검증
         env:
           ELECTRON_MIGRATION: ${{ vars.ELECTRON_MIGRATION }}

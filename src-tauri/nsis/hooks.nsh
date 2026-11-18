@@ -16,7 +16,8 @@
 !define ANTLER_ELECTRON_INSTALL_KEY "Software\${ANTLER_ELECTRON_GUID}"
 
 ; 사용자별 Electron 설치본을 지운다. 레지스트리 값은 믿지 않고 검증한 뒤에만 실행한다:
-;   - InstallLocation 이 비어 있지 않고, 드라이브 경로(`X:\`)이며(UNC·`\\?\`·`\\.\` 거부), 이 설치 폴더와 다르다
+;   - InstallLocation 이 비어 있지 않고, 드라이브 경로(`X:\`)이며(UNC·`\\?\`·`\\.\` 거부), 이 설치 폴더와 다르고 이 설치 폴더가 그 하위도 아니다
+;   - DisplayName 이 `Antler` 또는 `Antler <버전>` 이다(같은 GUID 를 쓰는 다른 앱 방어). 설치기가 관리자 토큰이면 제거하지 않고 안내만 한다
 ;   - UninstallString 이 따옴표로 감싼 경로이고, 그 파일이 InstallLocation **바로 아래**의 `.exe`(하위 경로·`:` 없음)이며 실제로 있다
 ; 하나라도 어긋나면 아무것도 하지 않는다(Electron 설치본은 그대로 남는다). 실행 파일은 검증한 그 경로 하나뿐이고, 지우는 것은 그 파일과
 ; 비어 있는 InstallLocation 뿐이다(재귀 삭제 없음).
@@ -56,8 +57,25 @@ Function AntlerRemoveElectron
     DetailPrint "Electron Antler: InstallLocation is too short - skipped"
     Goto done
   ${EndIf}
+  ; 새 설치 폴더가 InstallLocation 과 같거나 그 **하위**여도 건드리지 않는다(`$1\` 로 시작). NSIS 의 `==` 는 대소문자를 구분하지 않는다
   ${If} $1 == $INSTDIR
     DetailPrint "Electron Antler: InstallLocation equals the new install dir - skipped"
+    Goto done
+  ${EndIf}
+  StrLen $3 $1
+  IntOp $3 $3 + 1
+  StrCpy $4 $INSTDIR $3
+  ${If} $4 == '$1\'
+    DetailPrint "Electron Antler: the new install dir is inside InstallLocation - skipped"
+    Goto done
+  ${EndIf}
+
+  ; 같은 GUID 를 쓰는 다른 앱을 지우지 않도록 표시 이름을 대조한다. electron-builder 는 `<productName> <버전>`(예: `Antler 0.5.0`)을 쓴다
+  ReadRegStr $3 HKCU "${ANTLER_ELECTRON_UNINSTALL_KEY}" "DisplayName"
+  StrCpy $4 $3 7
+  ${If} $3 != "Antler"
+  ${AndIf} $4 != "Antler "
+    DetailPrint "Electron Antler: DisplayName is not Antler - skipped"
     Goto done
   ${EndIf}
 
@@ -120,6 +138,20 @@ Function AntlerRemoveElectron
     Goto done
   ${EndIf}
 
+  ; 설치기가 관리자 토큰으로 돌고 있으면(관리자 권한으로 실행) HKCU 는 이 사용자의 것이 아닐 수 있고, 관리자 권한으로 레지스트리 값이 가리키는
+  ; 제거기를 실행하는 것은 권한 상승 경로가 된다 — 자동 제거를 하지 않고 안내만 한다
+  UserInfo::GetAccountType
+  Pop $6
+  ${If} $6 == "Admin"
+    DetailPrint "Electron Antler: installer is elevated - automatic removal skipped"
+    ${If} $LANGUAGE == 1042
+      MessageBox MB_OK|MB_ICONINFORMATION "이전 버전(Electron 판) Antler 가 설치되어 있습니다. 관리자 권한으로 실행된 설치기는 자동으로 제거하지 않습니다. 'Windows 설정 > 앱'에서 이전 Antler 를 제거해 주세요. 설정과 저장소 목록은 지워지지 않습니다." /SD IDOK
+    ${Else}
+      MessageBox MB_OK|MB_ICONINFORMATION "An older (Electron) edition of Antler is installed. An installer running with administrator rights does not remove it automatically. Please remove it in Windows Settings > Apps. Your settings and repository list are kept." /SD IDOK
+    ${EndIf}
+    Goto done
+  ${EndIf}
+
   ; electron-builder 가 옛 판을 지울 때 쓰는 인자와 같다(/KEEP_APP_DATA 와 --updated 로 앱 데이터를 보존하고, --keep-shortcuts 로
   ; 방금 만든 바로가기를 지우지 않게 한다). `_?=` 는 제거기가 제자리에서 끝날 때까지 기다리게 하며 반드시 마지막 인자다
   DetailPrint "Removing the per-user Electron edition of Antler..."
@@ -164,7 +196,7 @@ Function AntlerRemoveElectron
   Pop $0
 FunctionEnd
 
-; Electron 업데이터가 `--force-run` 으로 설치기를 띄웠고 템플릿이 앱을 띄우지 않을 때(`/R` 없음)만 직접 띄운다. 사용자별 설치라 같은 권한으로 실행한다
+; Electron 업데이터가 `--force-run` 으로 설치기를 띄웠고 템플릿이 앱을 띄우지 않을 때(`/R` 없음)만 직접 띄운다(RunAsUser: 설치기가 관리자 토큰이어도 권한을 낮춰 실행)
 Function AntlerForceRun
   Push $0
   ClearErrors
@@ -173,7 +205,8 @@ Function AntlerForceRun
     ClearErrors
     ${GetOptions} $CMDLINE "/R" $0
     ${If} ${Errors}
-      Exec '"$INSTDIR\${MAINBINARYNAME}.exe"'
+      ; 템플릿의 `/R` 재실행과 같은 방식: 설치기가 관리자 토큰이어도 권한을 낮춘 사용자로 띄운다
+      nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
     ${EndIf}
   ${EndIf}
   Pop $0
