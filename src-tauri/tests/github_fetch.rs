@@ -29,7 +29,7 @@ use antler_lib::git::fetch::guard::classify_failure;
 use antler_lib::git::fetch::run::GitRunner;
 use antler_lib::git::fs_watch::NotifyDirs;
 use antler_lib::git::fetch::service::{ApprovalKind, FetchHost, FetchService, FetchStatus, HostEvent};
-use antler_lib::git::github_cache::{expected_github_config, init_github_repo_for_test, GithubCachePath};
+use antler_lib::git::github_cache::{expected_github_config, init_github_repo_for_test, remove_github_cache, GithubCachePath};
 use antler_lib::git::log_service::NoteOp;
 use antler_lib::github::ports::{GhRepoRef, RepoQuery};
 use antler_lib::github::service::{GitHubService, ServiceOptions};
@@ -797,8 +797,8 @@ async fn repos_remove_는_진행_중인_fetch_와_감시를_멈추고_기다려_
     assert_eq!(rig.exec.live_processes(&path), 0);
     assert_eq!(rig.router.watching(), None);
     assert_eq!(rig.dirs.live(), 0, "notify 핸들도 닫혔다");
-    // 그래서 사이드카의 폴더 삭제가 한 번에 된다(읽기 전용 pack 이 없어도 핸들이 남아 있으면 Windows 는 지우지 못한다)
-    fs::remove_dir_all(&path).expect("캐시 폴더 삭제");
+    // 그래서 운영 삭제 경로(`remove_github_cache` — 백신·인덱서 대비 짧은 재시도 1초 안)로 지워진다. 핸들이 남아 있으면 Windows 는 재시도 내내 지우지 못한다
+    assert_eq!(remove_github_cache(&rig.dir), Ok(true), "캐시 폴더 삭제");
     // 레코드가 지워지기 전의 틈: 새 fetch 도 새 감시도 폴더를 다시 쥐지 못한다
     let again = rig.svc.fetch(G, false).await;
     assert_eq!(again.error.as_deref(), Some(REMOVING), "{again:?}");
