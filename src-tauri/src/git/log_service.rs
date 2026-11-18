@@ -682,6 +682,19 @@ impl LogService {
         }
     }
 
+    /// 한 저장소의 커서와 앵커를 모두 닫는다(앵커를 남기지 않는다 — 저장소를 지운다). 커서의 읽기 태스크를 중단해 git 프로세스 트리를 종료한다.
+    /// GitHub 원격 전용 저장소의 `repos:remove` 가 캐시 폴더를 지우기 전에 부른다(Windows 는 pack 파일 핸들을 쥔 프로세스가 있으면 폴더를 지우지 못한다)
+    /// 닫은 커서 수를 돌려준다(읽기 태스크의 중단이 끝나야 프로세스가 사라지므로 호출자가 짧게 기다릴 수 있게)
+    pub fn close_repo(&self, repo_id: &str) -> usize {
+        let mut st = lock(&self.inner.state);
+        let keys: Vec<String> = st.cursors.iter().filter(|(_, e)| e.repo_id == repo_id).map(|(k, _)| k.clone()).collect();
+        for k in &keys {
+            st.drop_cursor(k);
+        }
+        st.anchors.retain(|a| a.repo_id != repo_id);
+        keys.len()
+    }
+
     /// 미러가 바뀐 뒤 불린다: 미러에서 사라졌거나 대상(경로·환경)이 바뀐 저장소의 커서와 앵커를 지운다(앵커 없이 닫는다)
     pub fn sync_mirror(&self) {
         let mirror = &self.inner.mirror;

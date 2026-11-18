@@ -393,7 +393,8 @@ pub async fn wip_file_diff(exec: &GitExecutor, repo_path: &str, req: &WipDiffReq
     if is_untracked_dir_entry(req.area, &req.path) {
         return Ok(parser.finish());
     }
-    if req.area != WipArea::Staged && exec.kind() == "local" {
+    // GitHub 원격 전용 저장소 실행기(`"github"`)도 로컬 git 이다(TS 는 같은 `LocalExecutor`). 다만 그 저장소의 WIP 는 라우터가 빈 결과로 먼저 답해 여기에 오지 않는다
+    if req.area != WipArea::Staged && matches!(exec.kind(), "local" | "github") {
         let (root, rel, allow_leaf_link) = (repo_path.to_string(), req.path.clone(), req.area == WipArea::Unstaged);
         match tokio::task::spawn_blocking(move || assert_no_link_escape(Path::new(&root), &rel, allow_leaf_link)).await {
             Ok(Ok(())) => {}

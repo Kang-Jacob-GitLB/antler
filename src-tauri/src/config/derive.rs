@@ -10,6 +10,8 @@ use super::model::js_get;
 pub struct MirrorEntry {
     pub repo: MirrorRepo,
     pub name: Option<String>,
+    /// github 소스 저장소의 owner/repo 링크(기본 브랜치는 싣지 않는다 — 바뀌어도 미러가 바뀌지 않게). github 소스가 아니면 없다
+    pub github: Option<(String, String)>,
 }
 
 fn same(a: Option<&Json>, b: Option<&Json>) -> bool {
@@ -37,7 +39,12 @@ pub fn mirror_of(config: &Json) -> Vec<MirrorEntry> {
         let (Some(id), Some(kind), Some(path)) = (str_of(js_get(r, "id")), str_of(js_get(s, "kind")), str_of(js_get(r, "path"))) else { continue };
         let distro = if kind == "wsl" { str_of(js_get(s, "distro")).filter(|d| !d.is_empty()) } else { None };
         let ssh_host = if kind == "ssh" { str_of(js_get(s, "sshHost")).filter(|d| !d.is_empty()) } else { None };
-        out.push(MirrorEntry { repo: MirrorRepo { id, kind, path, distro, ssh_host }, name: str_of(js_get(r, "name")) });
+        let github = if kind == "github" {
+            js_get(r, "github").and_then(|g| Some((str_of(js_get(g, "owner"))?, str_of(js_get(g, "repo"))?)))
+        } else {
+            None
+        };
+        out.push(MirrorEntry { repo: MirrorRepo { id, kind, path, distro, ssh_host }, name: str_of(js_get(r, "name")), github });
     }
     out
 }

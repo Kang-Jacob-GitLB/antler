@@ -43,7 +43,7 @@ use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
 
 use git::exec::ssh::SshPool;
-use git::exec::{GitExecutor, LocalExecutor, WslExecutor};
+use git::exec::{GitExecutor, GithubExecutor, LocalExecutor, WslExecutor};
 use git::fetch::service::{FetchPrefsSink, FetchService};
 use mirror::Target;
 
@@ -214,6 +214,13 @@ pub fn run() {
                             closed
                         }),
                     )),
+                    // github 의 fetch 소유는 PR 7 까지 사이드카다 — `resolve_fetch` 가 종류 목록(`rust_fetch_kinds`)에 없는 github 를 풀지 않으므로 오지 않는 길이다.
+                    // 와도 일반 fetch 의 허용 목록·환경으로 앱 캐시를 fetch 하는 일이 없게 닫힌 실행기(모든 호출 거부)를 준다
+                    Target::Github { .. } => std::sync::Arc::new(GitExecutor::Ssh({
+                        let closed = SshPool::for_home("").get("github");
+                        closed.dispose();
+                        closed
+                    })),
                 };
                 router.set_fetch(std::sync::Arc::new(FetchService::new(host, mirror.clone(), make_runner, Some(no_hooks_dir))));
             }
@@ -235,6 +242,24 @@ pub fn run() {
                     (Ok(jira), Ok(gh)) => {
                         router.set_jira(api_host::JiraHost { service: jira, opener: std::sync::Arc::new(open_https) });
                         router.set_github(api_host::GithubHost { service: gh.clone(), opener: std::sync::Arc::new(open_https) });
+                        // GitHub 원격 전용 저장소의 조회(Phase 6b PR 6): 토큰은 이 서비스의 것이 호출 때마다 읽혀 실행기의 환경 변수로만 간다(로그인·로그아웃이 바로 반영된다).
+                        // 사용자 git 설정의 네트워크 키(프록시·인증서)는 앱 시작 때 한 번 읽는다 — 읽는 동안·읽지 못하면 빈 목록이다(TS 의 `netConfig` 와 같다).
+                        // fetch·감시는 PR 7 전까지 사이드카가 맡는다. 서비스가 없거나 스위치가 꺼져 있으면 주입이 무시되고 github 는 사이드카가 전부 처리한다
+                        if router.enabled() {
+                            let net_config: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>> = std::sync::Arc::default();
+                            let (slot, token_svc) = (net_config.clone(), gh.clone());
+                            tauri::async_runtime::spawn(async move {
+                                let read = git::github_cache::read_network_config("git").await;
+                                *slot.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = read;
+                            });
+                            router.set_github_cache(GithubExecutor::new(
+                                "git",
+                                user_data.join("remote-repos").to_string_lossy().into_owned(),
+                                user_data.join("no-hooks").to_string_lossy().into_owned(),
+                                std::sync::Arc::new(move || token_svc.git_token()),
+                                std::sync::Arc::new(move || net_config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()),
+                            ));
+                        }
                         // 토큰이 바뀌면(로그인·로그아웃·폐기) 사이드카의 메모리 사본을 갱신한다. 서비스가 자기 자신을 쥐는 고리라 앱이 끝날 때까지 산다
                         let (handle, svc) = (app.handle().clone(), gh.clone());
                         gh.set_on_auth_changed(move || {

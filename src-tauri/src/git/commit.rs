@@ -115,7 +115,8 @@ fn fail(r: RunResult, mode: DiffMode) -> ExecError {
 
 /// 커밋 상세. 첫 부모를 알아야 하므로 메타데이터를 먼저 읽고, 이어서 name-status 와 numstat 을 동시에 돌린다.
 /// 루트 커밋은 `--root`(빈 트리 대비), merge 는 첫 부모 대비다. 취소는 호출한 future 를 버려서 한다(프로세스 트리는 실행기가 정리한다).
-pub async fn commit_detail(exec: &GitExecutor, repo_path: &str, hash: &HexHash) -> Result<CommitDetail, ExecError> {
+/// `lenient`: 통계를 못 읽어도(blob:none 저장소가 오프라인이라 blob 을 받지 못함) 던지지 않고 파일 목록만 돌려준다 — [`changed_files`] 참고. GitHub 원격 전용 저장소만 켠다
+pub async fn commit_detail(exec: &GitExecutor, repo_path: &str, hash: &HexHash, lenient: bool) -> Result<CommitDetail, ExecError> {
     let opts = RunOpts::default();
     let args = meta_args(hash);
     let meta_out = ok(exec.run(repo_path, &args, &opts).await?, &args)?;
@@ -130,25 +131,40 @@ pub async fn commit_detail(exec: &GitExecutor, repo_path: &str, hash: &HexHash) 
         None => Range::Root(this),
     };
 
-    let all = changed_files(exec, repo_path, &range).await?;
+    let all = changed_files(exec, repo_path, &range, lenient).await?;
     let (files, additions, deletions, truncated) = summarize(all);
     Ok(CommitDetail { meta, base_parent, files, additions, deletions, truncated })
 }
 
-/// 범위의 변경 파일 목록(name-status 에 numstat 의 +/- 를 합친다). 둘을 동시에 돌린다. 커밋 상세와 `git:compare` 가 같이 쓴다
-pub async fn changed_files(exec: &GitExecutor, repo_path: &str, range: &Range) -> Result<Vec<FileChange>, ExecError> {
+/// 범위의 변경 파일 목록(name-status 에 numstat 의 +/- 를 합친다). 둘을 동시에 돌린다. 커밋 상세와 `git:compare` 가 같이 쓴다.
+/// `lenient` 이고 어느 쪽이 실패하면 가능한 만큼만 돌려준다(TS `changedFiles`): 통계가 없으면 additions/deletions 가 null 이고 binary 가 false 인 파일
+/// (바이너리는 binary=true 라 구분된다), `-M`(이름 변경 감지)이 blob 을 받지 못해 실패하면 이름 변경 감지 없이 읽는다. 그것마저 실패하면 던진다
+pub async fn changed_files(exec: &GitExecutor, repo_path: &str, range: &Range, lenient: bool) -> Result<Vec<FileChange>, ExecError> {
     let opts = RunOpts::default();
     let ns_args = diff_tree_args(true, DiffMode::NameStatus, range);
     let num_args = diff_tree_args(true, DiffMode::Numstat, range);
     let (ns, num) = tokio::join!(exec.run(repo_path, &ns_args, &opts), exec.run(repo_path, &num_args, &opts));
     let (ns, num) = (ns?, num?);
-    if ns.code != 0 {
-        return Err(fail(ns, DiffMode::NameStatus));
+    if ns.code == 0 && num.code == 0 {
+        return Ok(parse_changes(&ns.stdout, &num.stdout));
     }
-    if num.code != 0 {
-        return Err(fail(num, DiffMode::Numstat));
+    if !lenient {
+        let (failed, mode) = if ns.code != 0 { (ns, DiffMode::NameStatus) } else { (num, DiffMode::Numstat) };
+        return Err(fail(failed, mode));
     }
-    Ok(parse_changes(&ns.stdout, &num.stdout))
+    if ns.code == 0 {
+        return Ok(parse_changes(&ns.stdout, &[]));
+    }
+    let plain = exec.run(repo_path, &diff_tree_args(false, DiffMode::NameStatus, range), &opts).await?;
+    if plain.code != 0 {
+        return Err(fail(plain, DiffMode::NameStatus));
+    }
+    Ok(parse_changes(&plain.stdout, &[]))
+}
+
+/// 모든 파일에 통계(또는 바이너리 표시)가 있는가(`hasLineStats`). lenient 로 읽은 결과는 이것이 참일 때만 캐시한다 — 오프라인에서 읽은 불완전한 결과가 굳지 않게
+pub fn has_line_stats(files: &[FileChange]) -> bool {
+    files.iter().all(|f| f.additions.is_some() || f.binary)
 }
 
 /// 변경 파일 목록에 +/- 합계를 매기고 상한에서 자른다. 합계는 잘리기 전 전체 기준이다(바이너리는 null 이라 빠진다)

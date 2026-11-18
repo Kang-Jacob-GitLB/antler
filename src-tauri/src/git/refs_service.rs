@@ -140,7 +140,8 @@ async fn probe_submodule(exec: &GitExecutor, base: &str, parent_git_dir: &str, s
     }
     let sub = format!("{base}/{}", s.path);
     // 로컬이면 정션·symlink 로 저장소 밖(또는 .git 안)을 가리키는 경로도 거부한다. WSL·SSH 는 Rust 가 그 파일 시스템을 볼 수 없어 하지 않는다
-    if exec.kind() == "local" {
+    // GitHub 원격 전용 저장소 실행기(`"github"`)도 로컬 git 이다 — TS 에서는 같은 `LocalExecutor`(kind `local`)다. 다만 그 경로는 서브모듈을 건너뛰어(`skip_submodules`) 여기에 오지 않는다
+    if matches!(exec.kind(), "local" | "github") {
         let (root, target) = (base.to_string(), sub.clone());
         match tokio::task::spawn_blocking(move || assert_inside_root(Path::new(&root), Path::new(&target))).await {
             Ok(Ok(())) => {}
