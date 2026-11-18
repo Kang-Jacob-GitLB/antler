@@ -1,0 +1,280 @@
+{
+  "cases": [
+    {
+      "input": "fail https://objects.githubusercontent.com/x?token=SECRET ghp_abcdefghijklmnopqrstuvwxyz0123 C:\\Users\\me\\a.dmg",
+      "out": "fail https://objects.githubusercontent.com *** (경로)"
+    },
+    {
+      "input": "net::ERR_INTERNET_DISCONNECTED",
+      "out": "net::ERR_INTERNET_DISCONNECTED"
+    },
+    {
+      "input": "GET https://github.com/a/b?x=1#y failed",
+      "out": "GET https://github.com failed"
+    },
+    {
+      "input": "http://example.com:8080/path?q=1 and https://u:p@host.example/x",
+      "out": "http://example.com:8080 and https://host.example"
+    },
+    {
+      "input": "https://[ bad url",
+      "out": "(url) bad url"
+    },
+    {
+      "input": "https:// (empty)",
+      "out": "https:// (empty)"
+    },
+    {
+      "input": "https://",
+      "out": "https://"
+    },
+    {
+      "input": "http://a",
+      "out": "http://a"
+    },
+    {
+      "input": "httpx://a/b",
+      "out": "httpx://a/b"
+    },
+    {
+      "input": "see HTTPS://github.com/a/b",
+      "out": "see HTTPS://github.com/a/b"
+    },
+    {
+      "input": "ghp_abcdefghijklmnopqrst",
+      "out": "***"
+    },
+    {
+      "input": "ghp_abcdefghijklmnopqrs",
+      "out": "ghp_abcdefghijklmnopqrs"
+    },
+    {
+      "input": "xghp_abcdefghijklmnopqrstuvwxyz",
+      "out": "xghp_abcdefghijklmnopqrstuvwxyz"
+    },
+    {
+      "input": "x ghp_abcdefghijklmnopqrstuvwxyz y",
+      "out": "x *** y"
+    },
+    {
+      "input": "gho_abcdefghijklmnopqrstuvwxyz0123 ghu_abcdefghijklmnopqrstuvwxyz0123 ghs_abcdefghijklmnopqrstuvwxyz0123 ghr_abcdefghijklmnopqrstuvwxyz0123 ghx_abcdefghijklmnopqrstuvwxyz0123",
+      "out": "*** *** *** *** ghx_abcdefghijklmnopqrstuvwxyz0123"
+    },
+    {
+      "input": "github_pat_abcdefghijklmnopqrstuvwxyz_0123",
+      "out": "***"
+    },
+    {
+      "input": "github_pat_short",
+      "out": "github_pat_short"
+    },
+    {
+      "input": "ghp_abcdefghijklmnopqrstuvwxyz-tail",
+      "out": "***-tail"
+    },
+    {
+      "input": "token abc",
+      "out": "token ***"
+    },
+    {
+      "input": "tokens",
+      "out": "token ***"
+    },
+    {
+      "input": "token",
+      "out": "token"
+    },
+    {
+      "input": "token ",
+      "out": "token "
+    },
+    {
+      "input": "token=",
+      "out": "token ***"
+    },
+    {
+      "input": "token:",
+      "out": "token ***"
+    },
+    {
+      "input": "token: ",
+      "out": "token *** "
+    },
+    {
+      "input": "token :",
+      "out": "token ***"
+    },
+    {
+      "input": "token = abc def",
+      "out": "token *** def"
+    },
+    {
+      "input": "token:abc",
+      "out": "token ***"
+    },
+    {
+      "input": "TOKEN=abc",
+      "out": "TOKEN ***"
+    },
+    {
+      "input": "Token:   abc  rest",
+      "out": "Token ***  rest"
+    },
+    {
+      "input": "mytoken abc",
+      "out": "mytoken ***"
+    },
+    {
+      "input": "bearer token x",
+      "out": "bearer *** x"
+    },
+    {
+      "input": "Authorization: Bearer abc.def.ghi",
+      "out": "Authorization *** abc.def.ghi"
+    },
+    {
+      "input": "authorization=basic dXNlcjpwYXNz",
+      "out": "authorization *** dXNlcjpwYXNz"
+    },
+    {
+      "input": "bearer\tabc",
+      "out": "bearer ***"
+    },
+    {
+      "input": "bearer abc",
+      "out": "bearer ***"
+    },
+    {
+      "input": "bearerabc",
+      "out": "bearer ***"
+    },
+    {
+      "input": "token::abc",
+      "out": "token ***"
+    },
+    {
+      "input": "token=:abc",
+      "out": "token ***"
+    },
+    {
+      "input": "token \n abc",
+      "out": "token ***"
+    },
+    {
+      "input": "token\nabc",
+      "out": "token ***"
+    },
+    {
+      "input": "a token b token c",
+      "out": "a token *** token ***"
+    },
+    {
+      "input": "C:\\Users\\me\\a.dmg",
+      "out": "(경로)"
+    },
+    {
+      "input": "C:\\",
+      "out": "C:\\"
+    },
+    {
+      "input": "c:\\x y",
+      "out": "(경로) y"
+    },
+    {
+      "input": "D:\\path\\with spaces\\file",
+      "out": "(경로) spaces\\file"
+    },
+    {
+      "input": "C:\\a'b",
+      "out": "(경로)'b"
+    },
+    {
+      "input": "C:/not/backslash",
+      "out": "C:/not/backslash"
+    },
+    {
+      "input": "/home/user/file",
+      "out": "(경로)"
+    },
+    {
+      "input": "/Users/me/Library/x.log",
+      "out": "(경로)"
+    },
+    {
+      "input": "/tmp/a.sock",
+      "out": "(경로)"
+    },
+    {
+      "input": "/var/log/x",
+      "out": "(경로)"
+    },
+    {
+      "input": "/home/",
+      "out": "/home/"
+    },
+    {
+      "input": "/home",
+      "out": "/home"
+    },
+    {
+      "input": "/etc/passwd",
+      "out": "/etc/passwd"
+    },
+    {
+      "input": "in /tmp/x and /var/y end",
+      "out": "in (경로) and (경로) end"
+    },
+    {
+      "input": "path \"/home/me/x\" quoted",
+      "out": "path \"(경로)\" quoted"
+    },
+    {
+      "input": "에러: 파일을 찾을 수 없습니다 C:\\Users\\나\\a.dmg",
+      "out": "에러: 파일을 찾을 수 없습니다 (경로)"
+    },
+    {
+      "input": "first line\nsecond line with token abc",
+      "out": "first line"
+    },
+    {
+      "input": "first\r\nsecond",
+      "out": "first\r"
+    },
+    {
+      "input": "\nleading newline",
+      "out": ""
+    },
+    {
+      "input": "",
+      "out": ""
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    },
+    {
+      "input": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가",
+      "out": "가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가가…"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+      "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nnext",
+      "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nnext",
+      "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…"
+    }
+  ]
+}

@@ -26,6 +26,8 @@ pub mod routed_repos;
 pub mod secret;
 mod sidecar;
 mod snap;
+// 업데이트 판정 로직(Phase 6c PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/update.rs)가 별도 크레이트라 pub 이다
+pub mod update;
 // 저장소 감시의 앱 쪽 호스트(Phase 6a PR 7b) — 라우터가 만든다
 mod watch_host;
 

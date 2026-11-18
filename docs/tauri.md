@@ -1933,6 +1933,63 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 **남은 위험**: 실제 OpenSSH `sftp-server`·Windows OpenSSH·`internal-sftp` 와는 **붙여 보지 못했다**(루프백 가짜 서버뿐) — 앱 연결(PR 8)에서 사람이 실제 서버로 확인한다. `russh-sftp` 는 서버가 보내는 패킷을 해석하는 새 크레이트다(256KiB·시간 제한으로 막았지만 파서 자체는 신뢰한다).
 `request_subsystem` 의 clippy 금지가 실제로 걸리는 것은 확인했다(`open_sftp` 의 allow 를 잠시 떼자 `use of a disallowed method russh::channels::Channel::request_subsystem` 오류). 소스 검사(`tests/ssh.rs`)를 함께 둔다.
 
+## 업데이터·패키징·Electron 사용자 이관(Phase 6c, `src-tauri/src/update/`)
+
+6c 가 끝나면 Tauri 판이 Electron 을 대체한다: 앱 안 업데이트(`update:*` 7채널)를 Rust 로 옮기고, Tauri 설치본(NSIS)을 만들어 발행하고, Electron 사용자를 그 설치본으로 이관하고, Node 사이드카·Electron 코드를 지우고, `feat!:` 한 번으로 릴리스를 바꾼다.
+계획의 근거와 정정(C1~C9)은 6c 계획서에 있다. 여기에는 결정과 진행 상태만 적는다.
+
+**순서를 강제하는 실패 모드**: 야간 릴리스는 매일 main 의 `feat`·`fix` 로 버전을 올린다. 그래서 `release.yml` 을 먼저 Tauri 로 바꾸면 사이드카(PATH 의 node)에 기대는 Tauri 판이 1.x 로 나가고,
+Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가 막힌다. Tauri 패키징은 **발행 경로에 연결하지 않은 별도 워크플로**(PR 2)로 먼저 굳히고, 전환은 `feat!:` PR 하나(PR 6)에서 한다.
+
+| PR | 제목 접두 | 내용 | 앱 연결 | 묶음·선행 | 상태 |
+|---|---|---|---|---|---|
+| 1 | `refactor:` | 업데이트 판정 순수 로직 Rust 이식 + TS↔Rust 골든: semver·`isOfferable`·URL 허용 목록·매니페스트 검사·정책·입력 검증·오류 정화·릴리스 노트 해석 | 없음 | A(지금) | **완료** — 아래 "PR 1" |
+| 2 | `ci:` | Tauri 패키징 워크플로(**발행 없음**): NSIS 설정·서명·`latest.json`·이관용 `latest.yml`·Electron 정리 NSIS 훅·배포 빌드 가드. 첫 단계는 go/no-go 스파이크 | 없음 | A(서명 키 결정 뒤) | |
+| 3 | `refactor:` | 단일 인스턴스(`tauri-plugin-single-instance` — 새 크레이트) | 있음 | A | |
+| 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | |
+| 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | |
+| R | (PR 아님) | 리허설: PR 6 브랜치 머리에 `v2.0.0-rc.N` 태그로 프리릴리스를 발행해 사람이 이관·자기 업데이트를 확인 | — | 5 뒤, 6 머지 전 | |
+| 6 | `feat!:` | Electron 제거 + 릴리스 전환(`release.yml` 을 Tauri 로, 골든 동결, 메이저 노트, 초안 발행 게이트·공개 전 릴리스 동결 가드) | 있음 | 직렬(R 뒤) | |
+
+계획 요약:
+- **업데이트는 Tauri 에서 한 번도 돈 적이 없다**(사이드카의 `UpdateService` 는 꺼진 PoC). TS 원본(`src/main/update/`, `tests/update.test.ts`)이 사양이다.
+- 사용 가능 판정은 번들러가 실행 파일에 심은 표식(`bundle_type()` 이 NSIS)이다 — 환경 변수는 믿지 않는다. `--no-bundle` 개발·측정 빌드는 꺼진다.
+- 무결성은 Electron 의 `latest.yml` sha512 에서 **minisign 서명**으로 바뀐다(공개키를 바이너리에 박는다). 매니페스트는 우리 HTTP 클라이언트(`net::http`)로 받고 플러그인은 서명 검증·설치에만 쓴다. 검증 전에는 디스크에 쓰지 않는다.
+- **사용자 결정(2026-11-18): v2.0.0 은 Windows(NSIS)·macOS(dmg)·Linux(deb) 를 함께 낸다**(계획 권고 U4 의 6d 분리 대신). 코드 서명 인증서는 없다고 가정한다(macOS 미서명·미공증 — Gatekeeper 안내는 PR 2·6 에서). **dmg·deb 수동 경로(`manual.ts`·`pickAsset`)는 6c PR 4 에서 옮긴다**.
+- Windows 코드 서명(Authenticode)은 없다 — 업데이트 진위는 minisign 이 맡는다.
+
+### PR 1 — 업데이트 판정 순수 로직(앱에 연결하지 않는다)
+
+Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연결은 `lib.rs` 의 `pub mod update;` 한 줄뿐이고, 라우터·채널·네트워크·다운로드·설치는 없다(소스 검사가 `src/update/` 에 입출력이 없고 다른 소스가 이 모듈을 쓰지 않음을 강제한다 — PR 4 가 바꾼다).
+
+| 파일 | 내용 |
+|---|---|
+| `src/update/logic.rs` | `logic.ts`·`releaseNotes.ts` 이식 + 새 검사. `parse_semver`·`compare_semver`·`is_offerable`(다운그레이드 방지·프리릴리스 규칙), `is_allowed_download_url`·`is_release_asset_url`(`net::url_rules` 재사용), `UpdatePolicy`(나중에·건너뛰기), `parse_dismiss`, `sanitize_error`, `check_manifest`·`prerelease_manifest_url`, `parse_release_response`·`fetch_release_notes`·`map_release_notes` |
+| `tests/fixtures/updateCases.ts` → `tests/goldenUpdate.test.ts` → `tests/golden/update/*.json` | 입력 표 → TS 로 골든 생성(`UPDATE_GOLDEN=1 pnpm exec vitest run tests/goldenUpdate.test.ts`). 릴리스 노트는 **실제 TS `fetchReleaseNotes` 를 모의 fetch 로** 돌려 요청 경로 순서까지 남긴다 |
+| `tests/update.rs`(새 시험 바이너리 `--test update`)·`tests/golden/update/test-map.json` | 골든 패리티 + TS 에 짝이 없는 검사의 단언 + 소스 검사. 대응표는 `tests/update.test.ts` 의 `it` 43개 전부다 — 16개가 Rust 시험에 대응하고 나머지는 `N/A`(사유 포함: 설치 형태·자산 선택·yml·해시 = 대체됨, mac·deb·portable = 6d, UpdateService·downloadVerified = PR 4) |
+| `src/net/url_rules.rs` | `has_encoded_separator` 를 `pub` 으로(`%2e`·`%2f`·`%5c` 검사를 복제하지 않는다) |
+
+**핵심 결정**
+- **TS 의 버릇을 그대로 옮기고 골든에 박았다**: 구성 요소는 f64(20자리 넘는 숫자는 JS 처럼 정밀도를 잃는다), 앞자리 0 이 있는 숫자 식별자(`-01` 대 `-1`)는 양방향 모두 "크다", `parseSemver` 는 공백을 지우지만 `parseDismiss` 는 지우지 않은 문자열을 돌려준다,
+  해석할 수 없는 건너뛴 버전은 자동 확인을 전부 숨기고 빈 문자열은 숨기지 않는다, 릴리스 자산 URL 은 빈 `?`·`#` 를 허용한다(`has_search`·`has_hash` 와 같은 의미), `sanitizeError` 는 네 정규식을 차례로 적용한다(손으로 옮겼고 TS 소스의 정규식 문자열을 골든이 고정한다 — `HAND_WRITTEN`).
+- **`check_manifest`(새)**: 입력은 `latest.json` 원문과 현재 버전. 본문 1MB 상한·`version` 은 공백 없는 semver(앞 `v` 는 뗀다)·`is_offerable` 을 **먼저** 보고(다운그레이드·정식 사용자의 프리릴리스는 `Ok(None)` — 플랫폼 항목이 깨져 있어도 오류가 아니다),
+  제안할 때만 플랫폼 항목을 검사한다. `windows-x86_64-nsis` 키가 **없을 때만** `windows-x86_64` 로 내려가고(있는데 틀린 항목은 오류), `url` 은 `is_release_asset_url` 을 통과하고 **`…/releases/download/v<버전>/<안전한 파일 이름>`**(태그 결속·하위 경로 금지)이어야 하며,
+  `signature` 는 base64 문자만 16KiB 이하다(서명 자체의 검증은 PR 4 의 minisign). 오류 문구에는 입력이 들어가지 않는다.
+- **`prerelease_manifest_url`(새)**: 프리릴리스 판은 릴리스 목록에서 첫 비초안 릴리스의 태그(`v<semver>` 꼴이어야 한다)로 `…/download/<태그>/latest.json` 을 만든다. 정식 판은 `STABLE_MANIFEST_URL`.
+- **릴리스 노트**: `fetch_release_notes` 는 API 경로를 받아 응답을 돌려주는 비동기 getter 를 주입받는다(HTTP 는 PR 4 의 몫). 태그 → 없거나 초안이면 최신으로 대신 → 링크는 항상 이 저장소 페이지로 조립(응답의 `html_url` 은 쓰지 않는다)·본문 100,000자·제목 200자.
+- **정책은 설정을 읽지 않는다**: `UpdatePolicy::should_notify(version, manual, skipped)` 가 건너뛴 값을 인자로 받는다(TS 는 생성자에 클로저). 건너뛴 값의 저장은 PR 4 의 서비스가 설정 저장소(`set_skipped_update_version`)로 한다.
+
+**TS 와 다른 점**(Rust 가 더 엄격하거나 표현이 다른 곳 — "Rust 허용 ⇒ TS 허용"은 지켜진다)
+- URL 해석은 `net::url_rules` 라 IDN 호스트가 TS 보다 엄격하다(6b PR 3·5 와 같은 알려진 차이). 골든 격자(허용 판정·자산 판정)에는 어긋나는 사례가 없었다.
+- `sanitize_error` 의 200자 경계가 서로게이트 쌍을 가르면 JS 는 반쪽을 남기고 Rust 는 `U+FFFD` 로 바꾼다(골든에는 담지 못한다 — 시험이 따로 단언). 풀 수 없는 URL 은 Rust 가 `(url)` 로 바꾸는 경우가 더 많다.
+- `parse_release_response` 의 JSON 문법 오류 문구는 V8 과 다르다(`릴리스 정보를 읽지 못했습니다`). `publishedAt` 은 ISO 8601 꼴만 인정한다(`net::js_date` 와 같다).
+- `UpdatePolicy` 의 건너뛴 값 전달 방식(위). `check_manifest`·`prerelease_manifest_url`·`is_safe_file_name` 의 태그 결속은 TS 에 없다.
+
+**남은 위험**(PR 4 로 넘긴다)
+- `net::json` 은 중복 키를 JS 처럼 마지막 값으로 합치는데, PR 4 가 원문을 플러그인(`Updater::restore_update`)에 넘기면 플러그인의 `serde` 파서는 다르게 읽을 수 있다(중복 `url`·`signature`). 검사한 값(`ManifestOffer`)에서 **원문을 다시 만들어** 넘기거나 중복 키를 거부해야 한다.
+- 서명은 형식만 본다. 서명이 실제로 맞는지·**서명된 버전이 매니페스트 버전과 같은지**(옛 서명 바이트에 새 버전 번호를 붙이는 공격)는 PR 4 가 `Update::verify`(`requireSignedVersion`)로 막는다.
+- 리다이렉트 허용 판정(`is_allowed_download_url`)은 순수 함수만 있고, 5단·매 홉 확인은 PR 4 의 `net::http::Redirects::ReleaseAssets` 가 이 함수를 쓰게 만든다.
+
 ## Phase 0 에서 확인한 것
 
 - renderer 를 고치지 않고 WebView2 에서 그대로 동작한다(그래프·사이드바·커밋 상세가 그려지고, 로드 뒤 CDP 로 붙어 본 콘솔 오류는 0).

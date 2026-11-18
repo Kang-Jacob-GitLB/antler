@@ -1,0 +1,690 @@
+{
+  "cases": [
+    {
+      "name": "그 버전의 릴리스가 있다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "v 접두사 현재 버전",
+      "current": "v1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "태그가 없으면 최신 릴리스로 대신한다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/latest": {
+          "body": {
+            "tag_name": "v1.2.4",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3",
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.4",
+          "exact": false,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.4",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "초안이면 최신 릴리스로 대신한다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": true
+          }
+        },
+        "/releases/latest": {
+          "body": {
+            "tag_name": "v1.2.4",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3",
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.4",
+          "exact": false,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.4",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "draft 가 불리언이 아니면 초안이 아니다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": "true"
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "둘 다 없다",
+      "current": "1.2.3",
+      "routes": {},
+      "requests": [
+        "/releases/tags/v1.2.3",
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases"
+        }
+      }
+    },
+    {
+      "name": "tag_name 이 문자열이 아니다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": 5,
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        },
+        "/releases/latest": {
+          "body": {
+            "tag_name": null,
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases"
+        }
+      }
+    },
+    {
+      "name": "tag_name 이 문자열이 아니고 exact 인 응답",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": 5,
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases"
+        }
+      }
+    },
+    {
+      "name": "태그 이름이 이상하면 링크는 릴리스 페이지",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1 2/3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1 2/3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "버전에 + 가 있으면 경로에서 인코딩한다",
+      "current": "1.2.3+b",
+      "routes": {
+        "/releases/tags/v1.2.3%2Bb": {
+          "body": {
+            "tag_name": "v1.2.3+b",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3%2Bb"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3+b",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3+b",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "버전 문자가 이상하면 태그를 묻지 않는다",
+      "current": "1.2.3 rc",
+      "routes": {
+        "/releases/latest": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "버전이 비었으면 태그를 묻지 않는다",
+      "current": "",
+      "routes": {
+        "/releases/latest": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "버전이 64자를 넘으면 태그를 묻지 않는다",
+      "current": "1.2.3-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "routes": {
+        "/releases/latest": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "제목은 200자로 자른다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "빈 제목은 넣지 않는다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "제목이 문자열이 아니다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": 7,
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "게시 시각이 날짜가 아니면 넣지 않는다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "yesterday-ish",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "## 변경\n- 고침",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3"
+        }
+      }
+    },
+    {
+      "name": "본문이 문자열이 아니면 빈 본문",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": null,
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": true,
+          "body": "",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.2.3",
+          "title": "Antler 1.2.3",
+          "publishedAt": "2026-10-15T09:23:46Z"
+        }
+      }
+    },
+    {
+      "name": "태그 조회가 한도(403)에 걸린다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "status": 403
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "err": "GitHub 요청 한도에 걸렸습니다. 잠시 후 다시 시도하세요"
+      }
+    },
+    {
+      "name": "최신 조회가 한도(429)에 걸린다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/latest": {
+          "status": 429
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3",
+        "/releases/latest"
+      ],
+      "out": {
+        "err": "GitHub 요청 한도에 걸렸습니다. 잠시 후 다시 시도하세요"
+      }
+    },
+    {
+      "name": "태그 조회가 서버 오류(500)",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "status": 500
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "err": "릴리스 노트를 가져오지 못했습니다 (HTTP 500)"
+      }
+    },
+    {
+      "name": "최신 조회가 서버 오류(502)",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/latest": {
+          "status": 502
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3",
+        "/releases/latest"
+      ],
+      "out": {
+        "err": "릴리스 노트를 가져오지 못했습니다 (HTTP 502)"
+      }
+    },
+    {
+      "name": "응답이 객체가 아니면(배열) 없는 것으로",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": []
+        },
+        "/releases/latest": {
+          "body": []
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3",
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases"
+        }
+      }
+    },
+    {
+      "name": "응답이 null 이면 없는 것으로",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/latest": {
+          "body": "null"
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3",
+        "/releases/latest"
+      ],
+      "out": {
+        "ok": {
+          "version": "1.2.3",
+          "exact": false,
+          "body": "",
+          "url": "https://github.com/Kang-Jacob-GitLB/antler/releases"
+        }
+      }
+    },
+    {
+      "name": "응답 본문이 비었다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "body": ""
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "err": "응답이 너무 큽니다"
+      }
+    },
+    {
+      "name": "3xx 응답은 실패다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "status": 301,
+          "body": {
+            "tag_name": "v1.2.3",
+            "name": "Antler 1.2.3",
+            "body": "## 변경\n- 고침",
+            "html_url": "https://evil.example/phish",
+            "published_at": "2026-10-15T09:23:46Z",
+            "draft": false
+          }
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "err": "릴리스 노트를 가져오지 못했습니다 (HTTP 301)"
+      }
+    },
+    {
+      "name": "2xx 의 다른 상태(204)도 성공으로 본다",
+      "current": "1.2.3",
+      "routes": {
+        "/releases/tags/v1.2.3": {
+          "status": 204,
+          "body": ""
+        }
+      },
+      "requests": [
+        "/releases/tags/v1.2.3"
+      ],
+      "out": {
+        "err": "응답이 너무 큽니다"
+      }
+    }
+  ]
+}

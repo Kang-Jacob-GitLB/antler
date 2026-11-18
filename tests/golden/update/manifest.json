@@ -1,0 +1,464 @@
+{
+  "cases": [
+    {
+      "name": "새 버전",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "offer",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "v 접두사 버전",
+      "current": "1.0.0",
+      "text": "{\"version\":\"v1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "offer",
+      "parts": {
+        "version": "v1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "같은 버전",
+      "current": "1.1.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "none",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": false,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "다운그레이드",
+      "current": "2.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "none",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": false,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "다운그레이드는 플랫폼 항목이 틀려도 오류가 아니다",
+      "current": "2.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{}}",
+      "expect": "none",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": false,
+        "urlOk": null
+      }
+    },
+    {
+      "name": "정식 사용자에게 프리릴리스는 숨긴다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0-rc.1\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0-rc.1/Antler-Setup-1.1.0-rc.1-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "none",
+      "parts": {
+        "version": "1.1.0-rc.1",
+        "offerable": false,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "프리릴리스 사용자에게 프리릴리스",
+      "current": "1.1.0-rc.1",
+      "text": "{\"version\":\"1.1.0-rc.2\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0-rc.2/Antler-Setup-1.1.0-rc.2-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "offer",
+      "parts": {
+        "version": "1.1.0-rc.2",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "프리릴리스 사용자에게 정식",
+      "current": "1.1.0-rc.1",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "offer",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "일반 키로 내려간다(nsis 키가 없을 때)",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "offer",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "nsis 키가 있으면 틀려도 일반 키로 내려가지 않는다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://evil.example/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"},\"windows-x86_64\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "다른 플랫폼만 있다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"linux-x86_64\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": null
+      }
+    },
+    {
+      "name": "다른 저장소의 URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/evil/repo/releases/download/v1.1.0/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "다른 호스트의 URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://evil.example/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "http URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"http://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "다른 태그의 URL(태그 결속)",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v0.9.0/Antler-Setup-0.9.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "태그에 v 가 없는 URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/1.1.0/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "더 새 태그의 URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v9.9.9/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "태그 아래 하위 경로",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/sub/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "경로 이탈",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/../v0.1.0/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "인코딩된 점",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/%2e%2e/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "쿼리가 붙은 URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/a.exe?x=1\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "해시가 붙은 URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/a.exe#x\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "자격 증명이 든 URL",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://u:p@github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/a.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": false
+      }
+    },
+    {
+      "name": "파일 이름 없음",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "빌드 메타데이터 버전",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0+b1\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0+b1/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "offer",
+      "parts": {
+        "version": "1.1.0+b1",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "URL 이 없다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": null
+      }
+    },
+    {
+      "name": "URL 이 숫자다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":5,\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": null
+      }
+    },
+    {
+      "name": "서명이 없다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "서명이 비었다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "서명에 허용되지 않은 문자",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"abc def\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "버전이 없다",
+      "current": "1.0.0",
+      "text": "{\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": null
+    },
+    {
+      "name": "버전이 숫자다",
+      "current": "1.0.0",
+      "text": "{\"version\":2,\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/Antler-Setup-2.0.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": null
+    },
+    {
+      "name": "버전이 semver 가 아니다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"latest\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "latest",
+        "offerable": false,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "버전에 공백이 있다",
+      "current": "1.0.0",
+      "text": "{\"version\":\" 1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": " 1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "버전에 개행이 있다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\\n\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0\n",
+        "offerable": true,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "플랫폼 표가 없다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\"}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": null
+      }
+    },
+    {
+      "name": "플랫폼 표가 배열이다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":[]}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": null
+      }
+    },
+    {
+      "name": "항목이 객체가 아니다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":\"x\"}}",
+      "expect": "err",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": null
+      }
+    },
+    {
+      "name": "최상위가 배열이다",
+      "current": "1.0.0",
+      "text": "[]",
+      "expect": "err",
+      "parts": null
+    },
+    {
+      "name": "최상위가 null 이다",
+      "current": "1.0.0",
+      "text": "null",
+      "expect": "err",
+      "parts": null
+    },
+    {
+      "name": "JSON 이 아니다",
+      "current": "1.0.0",
+      "text": "not json",
+      "expect": "err",
+      "parts": null
+    },
+    {
+      "name": "빈 본문",
+      "current": "1.0.0",
+      "text": "",
+      "expect": "err",
+      "parts": null
+    },
+    {
+      "name": "현재 버전을 해석할 수 없다",
+      "current": "dev",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"hi\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}}}",
+      "expect": "none",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": false,
+        "urlOk": true
+      }
+    },
+    {
+      "name": "매니페스트의 notes 등 다른 필드는 무시한다",
+      "current": "1.0.0",
+      "text": "{\"version\":\"1.1.0\",\"notes\":\"<script>\",\"pub_date\":\"2026-01-01T00:00:00Z\",\"platforms\":{\"windows-x86_64-nsis\":{\"url\":\"https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1.1.0/Antler-Setup-1.1.0-x64.exe\",\"signature\":\"dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==\"}},\"extra\":{\"a\":1}}",
+      "expect": "offer",
+      "parts": {
+        "version": "1.1.0",
+        "offerable": true,
+        "urlOk": true
+      }
+    }
+  ]
+}
