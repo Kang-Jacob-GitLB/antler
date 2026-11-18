@@ -747,6 +747,8 @@ gh 는 `gh auth token --hostname github.com`(가져오기)과 `gh --version`(`av
 
 ### PR 9 — GitHub 연결·`ghToken`/`repoq`·한도 시각(Phase 4 마지막)
 
+> Phase 6b PR 9(설정 소유 전환)가 `ghToken`·`repoq` 송신을 **중단했다** — 설정을 Rust 가 소유하므로 GitHub 토큰은 사이드카로 가지 않고 저장소 질의는 설정에서 직접 답한다(`ConfigRepos`). 아래는 그 전의 동작 기록이다. 하위 스위치 `ANTLER_RUST_API=0` 은 같은 PR 에서 은퇴했다.
+
 Tauri 판에서 `gh:*` 23개 채널(`gh:repo` 제외)을 Rust 가 처리한다(`API_CHANNELS`). 이 PR 부터 앱이 GitHub 토큰을 Windows 자격 증명 관리자(Jira 와 같은 `Vault`)에 두고 읽는다.
 스위치는 PR 6 의 `ANTLER_RUST_API`(0 이면 끔)·`ANTLER_RUST_GIT=0` 과 같다: 꺼져 있으면 서비스도 키체인도 없고 사이드카가 지금처럼 `jira:*`·`gh:*` 를 전부 처리한다.
 
@@ -1671,9 +1673,9 @@ GitHub 원격 전용(github kind) 저장소의 git 조회·fetch·감시·추가
 **PR 9 가 한 번에** Rust 로 넘긴다. 그 전(PR 1~8)에는 Rust 가 설정을 읽지도 쓰지도 않는다 — PR 1 의 코어는 시험에서만 쓴다. 소유 술어는 시작 때 한 번 `router.enabled()` 하나다.
 되돌릴 수 있는 길이 필요해 하위 스위치 `ANTLER_RUST_API=0`·`ANTLER_RUST_SSH=0` 은 PR 9 부터 은퇴한다(결정 D5).
 
-**사용자 결정 대기**(PR 9 의 범위에 걸린다): D1 Electron 설정 파일 가져오기(권고: Tauri 설정이 없을 때만, 읽기만, `trustedConfigs`·`window`·GitHub 캐시는 가져오지 않음) · D2 Electron 토큰은 옮기지 않고 다시 로그인 ·
-D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russh-sftp` 도입(PR 4b 스파이크가 go 일 때) · D5 하위 스위치 은퇴 · D6 `windows` 크레이트의 `Win32_System_Registry` 기능 추가(새 크레이트 아님).
-**PR 1 은 D1 의 가져오기 진입점 없이 코어만 둔다.**
+**사용자 결정(2026-11-18)**: D1 Electron 설정 파일 **가져온다**(Tauri 설정이 없을 때 한 번만, 읽기만, `trustedConfigs`·`window`·GitHub 캐시는 가져오지 않음 — PR 9 가 구현) · D2 Electron 토큰은 옮기지 않고 다시 로그인 ·
+D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russh-sftp` 도입(PR 4b 스파이크 go) · D5 하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 PR 9 부터 은퇴, `ANTLER_RUST_GIT=0` 만 6c 까지 · D6 `windows` 크레이트의 `Win32_System_Registry` 기능 추가(새 크레이트 아님).
+PR 1 은 D1 의 가져오기 진입점 없이 코어만 뒀고, PR 9 가 진입점(`config/import.rs`)을 더했다.
 
 | PR | 내용 | 앱 연결 | 묶음·선행 | 상태 |
 |---|---|---|---|---|
@@ -1683,9 +1685,9 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 | 4a / 4b | 4a: WSL 목록(레지스트리 관문)·`resolve_env`·로컬 폴더 찾기·`SshPool` 임시 잡기. 4b: SFTP 폴더 목록(D4, `russh-sftp` 3.0.1 — 스파이크 go) | 없음 | A(4b 는 D4 뒤) | **4a·4b 완료** |
 | 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | **완료(코드)** — 아래 "PR 5" |
 | 6 | github kind 의 git **조회**를 Rust 로(미러에 `github` 링크·모든 git 채널의 github 분기·`repos:remove` 가로채기). 감시는 PR 7 | 있음 | 직렬(6a 7b·8, PR 2 뒤) | **완료(코드)** — 아래 "PR 6" |
-| 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | |
+| 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | **완료(코드)** — 아래 "PR 7" |
 | 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | **완료(코드)** — 아래 "PR 8" |
-| 9 | **ConfigStore 소유 전환**: `config:*`·`repos:*`·`external:*`·`req:cancel` 응답, 미러·fetchPrefs·승인·repoq 내부화, Electron 설정 가져오기(D1) — 보안 리뷰 집중 | 있음 | 직렬(1·3·5·6·7·8 뒤) | |
+| 9 | **ConfigStore 소유 전환**: `config:*`·`repos:*`·`external:*`·`req:cancel` 응답, 미러·fetchPrefs·승인·repoq 내부화, Electron 설정 가져오기(D1) — 보안 리뷰 집중 | 있음 | 직렬(1·3·5·6·7·8 뒤) | **완료(코드)** — 아래 "PR 9(설정 소유 전환)" |
 | 10 | 사이드카 정리: Rust 소유 실행에서 `update:*` 밖 채널·메시지 제거(강제 시험) | 있음 | 직렬(9 뒤) | |
 
 모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 이식 대응표는 새 파일 `tests/golden/repos/test-map.json`(6b 전용)이고 PR 10 에서 `N/A: PR n` 이 0개여야 한다.
@@ -2115,6 +2117,85 @@ PR 9 가 설정에서 미러를 직접 만들 때는 **반드시 `sanitize_githu
 - `forget_and_wait` 의 5초 상한을 넘기는 fetch(프로세스 트리 종료가 늦는 경우)는 삭제를 붙잡지 않고 계속 돈다 — 뒤이은 드레인(5초)·사이드카의 삭제 재시도·고아 정리가 안전망이다(TS 와 같다).
 - 감시는 활성 저장소 하나만이라 비활성 github 저장소의 활동 기억은 알림 없이 낡을 수 있다(local 과 같다).
 - 첫 fetch 의 60분은 슬롯을 쥔 채라 같은 소스(github)의 다른 저장소 fetch 는 그동안 기다린다(TS 와 같다 — 큐가 소스당 1).
+
+### PR 9(설정 소유 전환) — Rust 가 설정 파일의 유일한 작성자가 된다(`config_host.rs`·`config/sync.rs`·`repos/manage.rs`, 앱에 연결한다 — 보안 리뷰 집중)
+
+(Phase 4 의 "PR 9"(GitHub 연결·`ghToken`/`repoq`·한도 시각)와 다른 절이다.) 새 크레이트·IPC 채널 없음. 채널 11개 — `config:get`·`config:setUi`·`repos:add`·`repos:addMany`·`repos:addGithub`·`repos:update`·`repos:remove`·`repos:watch`·`external:open`·`external:pickEditorExe`·`req:cancel` —
+를 라우터의 **`CONFIG_CHANNELS`** 분기가 `config_host::config_envelope` 로 넘기고 사이드카에는 닿지 않는다(배열이 아닌 인자도 사이드카로 보내지 않는다 — `as_array() else Sidecar` 보다 앞이다).
+
+**소유 술어는 하나다**: 시작 때 `router.enabled()`(`ANTLER_RUST_GIT≠0`). 켜져 있으면 `lib.rs` 가 `open_config`(D1 가져오기 → `ConfigStore::open(.., Some(cache_dir))`)로 파일을 열고 `Router::set_config` 로 소유자를 단다. 꺼져 있으면(`ANTLER_RUST_GIT=0`) **Rust 는 파일을 열지도 쓰지도 않고**
+사이드카가 지금처럼 전부 맡는다(되돌리기 — 6c 에서 사이드카와 함께 사라진다). **한 실행에서 설정 파일을 쓰는 쪽은 하나다.** 소유하면 사이드카를 env `ANTLER_RUST_CONFIG=1` 로 띄워 읽기 전용 빈 설정(`new ConfigStore(file, {readOnly})` — 파일을 열지 않고 `loadFailed=true`, 모든 변경자가 던진다)을 쓰게 하고,
+미러·fetch 설정을 보내지 않고, **고아 캐시 정리를 하지 않고**(빈 설정으로는 전부 고아로 보인다), 설정 소유 채널을 받지 않는다(`src/sidecar/configOwns.ts`). Rust 는 소유할 때 사이드카가 보낸 `repos`·`fetchPrefs` 줄을 버린다(`sidecar.rs` 의 `is_config_line`).
+하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 **은퇴**했다(결정 D5 — `Router::from_env` 가 읽지 않는다; 사이드카 env 로 *내보내는* `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 라우터 내부 신호라 그대로다).
+
+| 파일 | 내용 |
+|---|---|
+| `src/config/sync.rs` | `ConfigSync` — 설정 변경 알림(`ConfigStore::set_on_change`)이 **응답보다 먼저, 동기로** 미러(`RepoMirror::apply_message`)와 fetch 설정(`FetchPrefs::from_message`)을 맞춘다. 세대는 여기서 1부터 센다(설정의 세대는 뒤집힌 알림을 버리는 데만 — 미러는 gen 0 을 버린다). 직전과 같은 미러·같은 fetch 설정이면 `on_mirror_changed`·재예약을 부르지 않는다. 링크·기본 브랜치·지문은 사이드카가 보내던 `repos`·`fetchPrefs` 줄과 **같은 검증 경로**를 지난다(`sanitize_github_link`·`is_safe_branch`·`is_fingerprint` — "PR 6·7 의 PR 9 계약") |
+| `src/config_host.rs` | 채널 11개의 처리. 입력 검증·오류 문구·봉투는 TS 핸들러(`handlers.ts`·`external.ts`)와 같다(`repos:add` 는 `EnvHost::check_env_input` — 확인 창·WSL 설치 목록 대조를 그대로 쓴다). 포트(파일 선택 `PickExe`·프로그램 실행 `OpenerDeps`)는 주입한다 |
+| `src/repos/manage.rs` | GitHub 원격 전용 저장소의 추가(`add_github_repos`)·고아 정리(`cleanup_github_cache`)·빈 캐시 복구(`restore_missing_github_caches`)와 경로 잠금(`PathLocks`) |
+| `src/config/import.rs` | D1: Electron 설정 가져오기 |
+| `src/fetch_host.rs` | 승인(`set_fetch_approval`·`set_trusted_config`)·첫 fetch 가 알아낸 기본 브랜치(`set_github_default_branch`)를 **설정에 직접 쓴다** — 사이드카에 부탁하던 `fetchApprove`·`githubBranch` 줄은 없어졌다 |
+| `src/routed_repos.rs` | `ConfigRepos` — GitHub 서비스의 저장소 질의(`repoq`)의 대체: `github_client_id`·`repo_ids` 는 설정에서, 라우터가 풀지 못하는 저장소의 git 질의는 빈 답. `ghToken`·`repoq` 줄 송신(`Sidecar::push_gh_token`·`query`)은 없어졌다 — **GitHub 토큰은 Rust 만 쥔다** |
+| `src/router.rs` | `CONFIG_CHANNELS`·`Router::set_config`·`config_owned`·`watch_repo`·`cancel_request`(기존 가로채기에서 뽑아 두 경로가 같은 것을 쓴다)·`github_executor` |
+| `src/external/opener.rs`·`launch.rs` | `restore_mapped_drive`(매핑된 네트워크 드라이브 정책 — 아래) |
+| `src/sidecar/configOwns.ts`·`ConfigStore.ts`(`readOnly`)·`index.ts` | 사이드카 쪽 읽기 전용. Electron 판은 옵션을 쓰지 않아 동작이 같다 |
+
+**채널별**
+- `config:get`·`config:setUi`: `ConfigStore::get`·`set_ui`(PR 1 의 검증기 — `editorExePath`·`skippedUpdateVersion` 키는 거부, 패치는 `ui` 아래로만 가므로 **`config:setUi` 로 승인(`fetchApprovals`·`trustedConfigs`)을 위조할 수 없다**). `autoFetchMinutes` 변경은 같은 알림이 fetch 서비스에 준다(TS 의 `onPrefsChanged`).
+- `repos:add`·`repos:addMany`: 검증(`check_env_input`) → `source_for` → `git rev-parse --show-toplevel`(TS `resolveTopLevel` — 0 이 아닌 종료는 `GIT`) → **git 이 돌려준 경로를 다시 `check_path`**(쓸 때마다 거부되는 레코드가 저장되지 않게) → `ConfigStore::add_repo`. 로컬은 `git -C` 앞에 `fsguard::check_local_root`(링크가 원격으로 이어지면 거부), ssh 는 풀 `hold` 를 끝날 때까지 쥔다(저장 전 호스트의 연결을 다른 미러 변경이 끊지 않는다).
+  `addMany` 는 500개 상한·같은 환경 검사·환경 확인은 한 번(첫 경로)이고 경로마다 `resolve_env`(형식)만 다시 한다.
+- `repos:addGithub`: `validate_github_link` → 경로 잠금 → 찌꺼기 폴더 삭제(`remove_github_cache`) → 링크·부모 링크 검사 → `create_dir_all` → `init_github_repo`(네트워크 없음) → `add_repo`. 실패하면 만든 폴더를 지운다. 같은 이름이 다른 org 에 있으면 `owner/repo` 이름이다.
+- `repos:update`: `invalidate_gh_remotes` 뒤 `ConfigStore::update_repo`. `repos:watch`: `Router::watch_repo` 가 응답(`{ok:true}`)까지 한다. `req:cancel`: Rust 레지스트리·Jira·GitHub 서비스 취소 뒤 `{ok:true}` — **사이드카에 전달하지 않는다**.
+- `repos:remove`: **레코드를 지우기 전에 읽고** → GitHub 소스면 `release_github_repo`(표식 → fetch 정지·대기 → 감시 정지 → 조회·로그 커서·프로세스 드레인 — PR 6·7) → `github_target_of`(`cache_path_matches_link`: **레코드의 링크와 캐시 경로가 맞을 때만**) → 경로 잠금 안에서 `remove_github_cache(&GithubCachePath)` → `ConfigStore::remove_repo`.
+  폴더를 못 지워도 레코드는 지운다(남은 폴더는 다음 시작 때 고아 정리). 나머지(로그 커서·감시·ssh 풀 정리)는 설정 변경 → `on_mirror_changed` 가 한다.
+- `external:open`: 동작 허용 목록(`fileManager|editor|terminal`)·`path` 는 문자열이거나 없음(`null`·숫자는 거부)·저장소 id → **설정에서** 루트·환경(wsl 배포판·ssh 호스트)을 읽는다·github 소스 거부 → `ExternalOpener::open`(블로킹 — `spawn_blocking`). 프로그램을 띄우는 `SystemDeps` 는 `lib.rs` 가 주입하는 한 곳뿐이다.
+  `external:pickEditorExe`: 파일 선택(`.exe`/`.com` 필터는 Windows) → `check_chosen_exe` → `set_editor_exe_path`. 검사에 실패하면 저장하지 않는다.
+- 시작 때(앱 시작을 막지 않게 따로): `cleanup_github_cache`(어떤 레코드도 가리키지 않는 `<owner>/<repo>.git` 만 — 링크·모양이 다른 것은 건드리지 않고, **설정을 읽지 못한 채 시작했으면 아무것도 지우지 않는다**) 다음 `restore_missing_github_caches`.
+
+**승인 기억 하나(PR 8~9 확인 창 중복 해소)**: `repos:add`·`repos:addMany` 는 `env:test`·`env:listDir`·`repos:scan` 과 **같은 `EnvHost`**(`lib.rs` 가 복제를 라우터와 `ConfigHost` 에 나눠 준다)의 승인 집합을 쓴다. 설정에 없는 SSH 호스트는 한 번만 묻고, 거부(취소·닫기·Esc)한 호스트는 기억하지 않는다.
+SSH 풀이 없으면(홈 디렉터리를 모른다) 예전에는 사이드카가 처리했지만 이제 사이드카는 설정을 모르므로 Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다.
+
+**Electron 설정 가져오기(D1)**: Tauri 설정 파일이 **없을 때마다**(판정은 `config::import::should_import` — 설정 파일을 지우면 다음 시작에 다시 가져온다. 의도다 — 가져온 뒤에는 파일이 있어 한 번만 돈다), `ANTLER_USER_DATA` 가 없을 때만, `%APPDATA%\Antler\antler.config.json` 을 **읽기만** 한다(`ConfigStore::open` 이 아니라 `parse_config` — `open` 은 손상된 파일 옆에 `.corrupt-*.bak` 를 쓴다). 같은 로드·정화를 거쳐 `trustedConfigs`·`window` 를 뺀 설정을 Tauri 경로에 새로 쓴다.
+GitHub 저장소의 경로는 정화가 이 앱의 캐시 경로로 다시 계산하고, 폴더는 가져오지 않으므로 시작 때 `restore_missing_github_caches` 가 네트워크 없는 `init` 으로 빈 캐시를 만든다(처음 열 때 다시 받는다). 토큰은 옮기지 않는다(D2 — GitHub·Jira 는 한 번씩 다시 연결한다).
+손상됐거나 읽을 수 없으면 가져오지 않고 빈 설정으로 시작한다.
+
+**매핑된 네트워크 드라이브 정책(PR 3 의 보류 항목 — 결정: Electron 판과 같게 허용)**: `Z:\repo`(드라이브 문자로 등록한 경로)는 Node `realpathSync` 가 드라이브 문자를 유지해 열리지만 Rust `canonicalize` 는 `\\?\UNC\서버\공유\…` 로 풀어 `normalize_canonical` 이 거부했다.
+`SystemDeps::realpath` 는 `normalize_canonical` 이 거부한 경우에만 `restore_mapped_drive` 를 시도한다 — **입력이 드라이브 문자 경로이고 대상의 canonical 이 그 드라이브 루트(`Z:\`)의 canonical 과 같은 서버·공유 아래일 때만** `Z:\…` 로 되돌린다.
+유지되는 거부: UNC 로 직접 등록한 경로(입력이 드라이브가 아니다)·같은 드라이브 안에서 **다른 공유로 나가는 링크**(prefix 가 다르다)·`canonicalize` 앞의 링크 가드(`path_stays_local` — 원격 UNC 를 가리키는 링크는 따라가기 전에 거부). 근거: Electron 판에서 열리던 저장소가 "저장소 폴더를 찾을 수 없습니다"가 되면 회귀이고, 등록 시점에 이미 `check_path`(UNC 거부)를 통과한 드라이브 경로는 사용자가 마운트한 공유라는 신뢰를 이미 줬다.
+**이 PC 에서 매핑된 드라이브로 확인하지 못했다**(네트워크 접근 금지) — 순수 함수 시험(`opener.rs` 의 `매핑된_드라이브는…`)과 소스 검사만 있다. 사람 확인 항목이다.
+
+**TS 와 다른 점**
+- 키 순서: renderer 가 보낸 인자·응답은 `serde_json::Value` 를 지나므로 **객체 키가 정렬된다**. 응답은 renderer 가 키 순서에 기대지 않아 무해하다. 그러나 `config:setUi` 의 **패치**(키와 값 안의 객체 키)도 정렬돼 들어오므로, 새 키가 여럿이면 설정 파일의 키 순서가 Electron 판(패치 삽입 순서)과 다르다
+  (사이드카가 같은 길(JSON 줄)로 받던 때도 같았다 — 회귀는 아니다. 내용은 같고 파일 안 키 순서만 다르다). 저장소·소스 레코드처럼 Rust 가 직접 만드는 객체의 순서는 TS 와 같다(위 시나리오 시험이 값으로, 골든 재생이 바이트로 본다).
+- `repos:add` 는 git 이 돌려준 최상위 경로를 `check_path` 로 한 번 더 본다(TS 는 추가 때만 보고 쓸 때마다 다시 보지 않는다 — Rust 미러는 쓸 때마다 본다). `external:open` 의 `path: null` 은 TS 와 같이 `잘못된 입력입니다` 다(Rust 의 opener 는 null 을 루트로 받으므로 처리기가 먼저 거른다).
+- 원격 전용 저장소 삭제는 한 프로세스(Rust)에서 **경로 잠금 안에서** 한다(TS 는 `removeGithubCache` 에 잠금이 없다). 승인 쓰기는 동기이고 fetch 서비스의 태스크에서 불린다(작은 파일 쓰기 — 블로킹 풀로 보내지 않았다). 잠금 안에서 레코드를 다시 읽어 같은 레코드(id·링크·경로)일 때만 폴더를 지우고 레코드 삭제까지 잠금 안에서 한다(같은 owner/repo 재추가가 끼어들어도 새 캐시를 지우지 않는다). 고아 정리·복구의 잠금 키는 `..`·중복 구분자를 정리한 정규형(`canonical_key`)이다. `external:open` 은 설정의 루트도 `check_path`(UNC·NT 네임스페이스·NUL)를 거친다. WSL 소스는 대소문자만 다른 기존 소스를 재사용한다.
+- 설정 쓰기 실패 문구는 Node 가 아니라 Rust `io::Error` 다. `config:setUi` 등 쓰기 채널의 처리는 블로킹 풀(`spawn_blocking`)에서 한다.
+- 라우터가 풀지 못하는 저장소(WSL 이 아닌 OS 의 WSL·홈을 모르는 PC 의 ssh·서비스가 없는 github)의 git 채널은 여전히 사이드카로 가지만 사이드카의 설정이 비어 있어 TS 의 "알 수 없는 저장소" 오류가 난다(PR 10 이 Rust 쪽 명시적 오류로 바꾼다).
+
+**시험**: 새 바이너리 `tests/config_route.rs`(37개, `test-hooks`, `tauri.yml` 목록에 추가) — 채널 목록(`IPC_CHANNELS` 의 부분집합·다른 목록과 겹치지 않음·TS `configOwns.ts` 와 같음), **소유자가 없거나 `ANTLER_RUST_GIT=0` 이면 사이드카**·소유자가 있으면 11채널 모두 Rust(배열이 아닌 인자 포함),
+`config:get`·`setUi`(검증 문구·승인 위조 불가·UI 설정만 쓰면 미러 반영 없음), 추가(최상위 등록·응답 전 미러 반영·다시 추가하면 같은 항목·GIT 오류·입력 검증 표·WSL 미설치)·`addMany`(실패가 나머지를 막지 않음·500 상한·같은 환경), **SSH 승인 기억 하나**(`env:test`→`repos:add`→`addMany` 가 한 번만 묻고 거부는 기억하지 않음 — 127.0.0.1 닫힌 포트)·**루프백 SSH 서버로 추가하면 연결을 쥔 채 등록하고 등록한 뒤에도 연결이 남으며 삭제하면 닫힘**,
+이름·그룹 변경·삭제, **추가→이름→승인→삭제 시나리오의 설정 파일을 키 순서까지 값으로 대조**, `addGithub`(bare 캐시·`origin` URL·기본 브랜치 HEAD·같은 이름 org 접두·동시 추가·찌꺼기 폴더·init 실패 정리·상한), **삭제 순서·링크 일치 검사**(다른 저장소의 캐시를 가리키는 레코드·캐시 밖·github 아닌 소스·링크 틀림은 지우지 않음,
+빈 owner 폴더 정리, 폴더를 쥐고 있어도 레코드는 지움 — Windows), 고아 정리(모양이 다른 폴더·파일 보존·링크 owner 폴더 보존·로드가 버린 레코드의 폴더는 고아·**설정을 못 읽었으면 0**)·빈 캐시 복구, `external:open`(입력·github 거부·루트는 설정에서·파일은 보여 줌·에디터 인자·`ELECTRON_RUN_AS_NODE` 제거 — 가짜 `OpenerDeps`)·`pickEditorExe`(거부 사유 4가지는 저장 안 함),
+소스 검사(`ConfigStore::open` 은 `open_config` 한 곳·`router.enabled()` 분기 안, 승인 변경자는 `fetch_host.rs` 한 곳, 삭제 순서, 미러 진입점, 프로세스 실행은 주입 하나).
+`config_route.rs` 는 PR 1 TS 골든의 채널 연산 사례 199개를 라우터로 재생하고(위 "TS 와 다른 점"·아래 설명), 서비스를 만들지 못한 실행의 `jira:*`·`gh:*` 가 사이드카가 아니라 오류로 답함(토큰 인자가 사이드카로 가지 않음)도 본다.
+`fetch_host.rs` 단위 시험 3개가 승인·기본 브랜치 쓰기의 조건(저장소 존재·지문 모양·두 종류·소스·이름·같은 값·쓰기 실패 삼킴)을 본다.
+`config.rs`(PR 1 골든)·`sync.rs`·`import.rs`(D1 — Electron 파일 불변·`trustedConfigs`·`window` 제외·손상은 가져오지 않고 `.bak` 도 없음·github 경로 재계산)·`opener.rs`(드라이브 정책) 단위 시험, vitest `sidecarConfigOwns.test.ts`(읽기 전용 설정·목록 일치·Electron 불변).
+기존 시험 갱신: `fetch_route`·`fetch_service`(승인 소스 검사를 새 모양으로)·`api_route`(하위 스위치 은퇴·토큰 줄 없음)·`ssh_route`·`github_fetch`·`external`(외부 열기 연결). 대응표(`tests/golden/repos/test-map.json`)의 `N/A: PR 9` 17개와 6a 표의 `N/A: 6b` 7개를 `config_route.rs`·`config.rs`·`external.rs` 로 옮겼다
+(`goldenConfig.test.ts`·`golden6a.test.ts`·`golden.rs` 의 소스 목록에 더했다). net 표의 "ConfigStore 는 사이드카에 남아" 5개는 사유를 바꿨다. **`handlers.ts`·`external.ts` 를 가짜 `IpcHandle` 로 돌리는 TS 쪽 새 골든은 만들지 않았다**(`goldenGithubChannels.test.ts` 처럼 만들 수는 있다 — 만들지 않았을 뿐이다). 대신 **PR 1 의 TS 골든(`tests/golden/config/store.json`, 실제 TS `ConfigStore` 가 만든 최종 파일 바이트·단계별 오류 문구)에서
+채널로 표현되는 연산(`setUi`·`updateRepo`·`removeRepo`)만으로 된 사례 중 패치 키가 정렬된 199개를 라우터로 재생**해 최종 파일을 **바이트로**(96개)·오류 문구를(108개) 대조한다(`config_route.rs::설정_골든의_채널_연산_사례를…`). 키가 정렬되지 않은 패치는 renderer → 채널을 지나며 정렬되므로(아래) 제외한다.
+`repos:add`·`addMany`·`addGithub`·`external:*` 의 핸들러 입력 검증 문구는 TS 코드를 읽고 손으로 적은 기대값이다(남은 위험).
+
+**사람 확인(자동화 불가·실환경 — 실제 대화상자·프로그램·사용자 설정은 쓰지 않았다)**
+- 저장소 추가(로컬 하위 폴더·WSL·SSH 설정 밖 호스트의 확인 창 — **같은 호스트를 폴더 탐색·추가에서 다시 묻지 않는지**)·폴더 안 저장소 찾기 뒤 한 번에 추가, GitHub 탭 추가 → 첫 fetch → 삭제(캐시 폴더가 사라지는지·삭제 직후 재추가).
+- 에디터·터미널·파일 관리자로 열기(VS Code·Windows Terminal·탐색기)와 에디터 실행 파일 고르기. **매핑된 네트워크 드라이브(`Z:\repo`)로 등록된 저장소**에서 열기가 되는지(위 정책).
+- 재시작 뒤 설정 유지(이름·그룹·테마·마지막 저장소), 새 userData 로 **Electron 설정 가져오기**(`ANTLER_USER_DATA` 없이 %APPDATA%\com.antler.app 을 비운 뒤 — `trustedConfigs` 가 빠져 위험 설정 저장소가 한 번 다시 묻는지, GitHub 저장소는 처음 열 때 다시 받는지, 토큰은 다시 로그인), `ANTLER_RUST_GIT=0` 되돌리기(사이드카가 설정을 쓰고 Rust 는 파일을 열지 않는지).
+- 개발 PC 에서 하위 스위치 `ANTLER_RUST_API=0`·`ANTLER_RUST_SSH=0` 비교 확인(실제 sshd — SSH PR 3·4, 실제 GitHub·Jira·키체인 — Phase 4 PR 6·9)은 이 PR 이 머지되면 되돌릴 수 없으므로 **머지 전에** 끝내야 한다(결정 D5 의 전제).
+
+**남은 위험**
+- 설정 쓰기가 fetch 서비스의 비동기 태스크에서 동기로 일어난다(승인·기본 브랜치): 백신·OneDrive 가 설정 파일을 잡으면 그 태스크가 재시도(최대 5회·30×(n+1)ms) 동안 막힌다. 쓰기 실패는 "다음에 다시 묻는다"/"다음 fetch 가 다시 알아낸다"로 끝낸다. 저장소 변경 중 `ConfigStore` 의 뮤텍스를 쥔 채 쓰기(rename 재시도 최대 약 300ms)를 하므로 그동안 `config:get` 등 설정을 읽는 다른 워커도 기다린다(UI 가 잠깐 멎을 수 있다).
+- 알림 안에서 `on_mirror_changed`·`apply_fetch_prefs` 가 동기로 돈다 — 두 알림이 겹쳐도 `ConfigSync` 의 잠금 하나가 순서를 지키지만, 그 안에서 라우터의 다른 잠금을 잡으므로 라우터 쪽이 `ConfigSync::push` 를 잠금을 쥔 채 부르면 안 된다(지금은 부르는 곳이 없다).
+- 홈을 모르는 PC 의 ssh 저장소·서비스를 만들지 못한 PC 의 github 저장소는 사이드카도 처리하지 못한다(위 "TS 와 다른 점" 마지막). **서비스를 만들지 못하면(키체인 오류 등) `jira:*`·`gh:*` 는 오류로 답한다** — 설정을 소유한 실행에서는 `gh:loginPat` 의 토큰 인자가 사이드카로 가지 않게 `api_unserved` 가 사이드카로 보내지 않는다(시험: `api_route.rs`). 사이드카의 `ghToken`·`repoq`·`fetchApprove`·`githubBranch` 수신 코드는 남아 있다(PR 10 이 지운다).
+- 매핑된 드라이브 정책과 WSL 이 있는 PC 의 `repos:add`(레지스트리 읽기·`wsl.exe`)는 확인하지 못했다. 같은 새 SSH 호스트를 동시에 두 창이 입력하면 확인 창이 둘 뜰 수 있다(TS 와 같다).
 
 ## 업데이터·패키징·Electron 사용자 이관(Phase 6c, `src-tauri/src/update/`)
 

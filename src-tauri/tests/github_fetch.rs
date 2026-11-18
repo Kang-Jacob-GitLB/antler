@@ -29,7 +29,7 @@ use antler_lib::git::fetch::guard::classify_failure;
 use antler_lib::git::fetch::run::GitRunner;
 use antler_lib::git::fs_watch::NotifyDirs;
 use antler_lib::git::fetch::service::{ApprovalKind, FetchHost, FetchService, FetchStatus, HostEvent};
-use antler_lib::git::github_cache::{expected_github_config, init_github_repo_for_test, GithubCachePath};
+use antler_lib::git::github_cache::{expected_github_config, init_github_repo_for_test, remove_github_cache, GithubCachePath};
 use antler_lib::git::log_service::NoteOp;
 use antler_lib::github::ports::{GhRepoRef, RepoQuery};
 use antler_lib::github::service::{GitHubService, ServiceOptions};
@@ -797,8 +797,8 @@ async fn repos_remove_는_진행_중인_fetch_와_감시를_멈추고_기다려_
     assert_eq!(rig.exec.live_processes(&path), 0);
     assert_eq!(rig.router.watching(), None);
     assert_eq!(rig.dirs.live(), 0, "notify 핸들도 닫혔다");
-    // 그래서 사이드카의 폴더 삭제가 한 번에 된다(읽기 전용 pack 이 없어도 핸들이 남아 있으면 Windows 는 지우지 못한다)
-    fs::remove_dir_all(&path).expect("캐시 폴더 삭제");
+    // 그래서 운영 삭제 경로(`remove_github_cache` — 백신·인덱서 대비 짧은 재시도 1초 안)로 지워진다. 핸들이 남아 있으면 Windows 는 재시도 내내 지우지 못한다
+    assert_eq!(remove_github_cache(&rig.dir), Ok(true), "캐시 폴더 삭제");
     // 레코드가 지워지기 전의 틈: 새 fetch 도 새 감시도 폴더를 다시 쥐지 못한다
     let again = rig.svc.fetch(G, false).await;
     assert_eq!(again.error.as_deref(), Some(REMOVING), "{again:?}");
@@ -905,14 +905,15 @@ fn 원격_url_출처_주입은_test_hooks_뒤에만_있고_프로덕션은_https
 }
 
 #[test]
-fn 기본_브랜치_기록_부탁은_한_줄_종류이고_사이드카가_다시_검사한다() {
-    let sidecar = prod_code("src/sidecar.rs");
-    assert_eq!(sidecar.matches("\"githubBranch\"").count(), 1, "줄을 만드는 곳은 하나다");
-    assert_eq!(prod_code("src/fetch_host.rs").matches("sidecar.github_branch(").count(), 1);
-    let ts = read_src("../src/sidecar/protocol.ts");
-    assert!(ts.contains("{ t: 'githubBranch'; repoId: string; branch: string }"));
-    let handler = read_src("../src/sidecar/githubBranch.ts");
-    assert!(handler.contains("isSafeBranch(branch)") && handler.contains("kind !== 'github'"));
+fn 기본_브랜치는_설정에_직접_쓰고_저장소_소스_이름을_다시_검사한다() {
+    // Phase 6b PR 9: Rust 가 설정의 유일한 작성자라 사이드카에 기록을 부탁하는 줄(`githubBranch`)은 더는 만들지 않는다
+    assert!(!prod_code("src/sidecar.rs").contains("githubBranch"), "사이드카로 가는 줄이 없다");
+    let host = prod_code("src/fetch_host.rs");
+    assert_eq!(host.matches(".set_github_default_branch(").count(), 1, "기록은 호스트 구현 한 곳");
+    // 쓰기 전에 저장소 존재·github 소스·`is_safe_branch` 를 다시 본다(사이드카 핸들러와 같은 검사)
+    let write = &host[host.find("fn write_github_branch(").expect("쓰기 함수")..];
+    let (repo, source, safe, set) = (write.find("store\n        .repo(repo_id)").unwrap_or(usize::MAX), write.find("Some(\"github\")").unwrap(), write.find("is_safe_branch(branch)").unwrap(), write.find(".set_github_default_branch(").unwrap());
+    assert!(repo != usize::MAX && repo < source && source < set && safe < set);
 }
 
 #[test]

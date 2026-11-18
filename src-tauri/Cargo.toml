@@ -120,3 +120,8 @@ required-features = ["test-hooks"]
 [[test]]
 name = "github_fetch"
 required-features = ["test-hooks"]
+
+# 설정 소유 채널(Phase 6b PR 9): 임시 설정·캐시와 가짜 포트로 Rust 가 설정 파일의 유일한 작성자임을 본다. 저장소 id 주입(`ConfigStore::open_for_test`)이 test-hooks 뒤에 있다
+[[test]]
+name = "config_route"
+required-features = ["test-hooks"]

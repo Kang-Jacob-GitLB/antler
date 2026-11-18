@@ -190,6 +190,8 @@ const RUST_SOURCES: Record<string, string> = {
   'github_route.rs': '../src-tauri/tests/github_route.rs',
   // github kind 의 fetch·감시(PR 7)
   'github_fetch.rs': '../src-tauri/tests/github_fetch.rs',
+  // 설정 소유 전환(PR 9): 채널 → 변경 연산·삭제 순서·고아 정리·external 연결
+  'config_route.rs': '../src-tauri/tests/config_route.rs',
   'github.rs': '../src-tauri/src/git/exec/github.rs',
   'github_link.rs': '../src-tauri/src/git/github_link.rs',
   'load.rs': '../src-tauri/src/config/load.rs',

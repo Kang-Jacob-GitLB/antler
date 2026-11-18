@@ -142,6 +142,11 @@ function defaults(): AppConfig {
 export interface ConfigStoreOptions {
   /** GitHub 원격 전용 저장소의 캐시 기준 폴더. 있으면 로드할 때 github 저장소의 path 를 이 폴더와 링크로 다시 정한다 */
   cacheDir?: string
+  /**
+   * 파일을 열지 않고 기본값(빈 저장소 목록)으로 시작하며 모든 변경자가 던진다. 설정 파일의 작성자는 한 실행에 하나여야 하므로,
+   * Rust 가 설정을 소유하는 Tauri 사이드카(`ANTLER_RUST_CONFIG=1`)가 쓴다. `loadFailed` 도 켠다 — 빈 목록을 근거로 캐시를 지우지 못하게. Electron 판은 쓰지 않는다
+   */
+  readOnly?: boolean
 }
 
 /** 소스·저장소 목록과 UI 설정을 JSON 파일 하나에 저장한다. 쓰기는 임시 파일 → rename 으로 원자적으로 한다. */
@@ -289,6 +294,7 @@ export class ConfigStore {
 
   /** 디스크에 먼저 쓰고, 성공했을 때만 메모리 상태를 바꾼다 */
   private update(next: AppConfig): AppConfig {
+    if (this.opts.readOnly) throw new Error('설정은 Rust 가 소유합니다(이 프로세스는 읽기 전용)')
     this.save(next)
     this.config = next
     // 알림이 던져도 이미 저장된 설정 변경을 실패로 만들지 않는다
@@ -302,6 +308,10 @@ export class ConfigStore {
 
   private load(): AppConfig {
     const base = defaults()
+    if (this.opts.readOnly) {
+      this.loadFailed = true // 빈 목록은 사실이 아니다 — 이 프로세스는 캐시 정리의 근거로 삼지 않는다
+      return base
+    }
     let text: string
     try {
       text = readFileSync(this.file, 'utf8')

@@ -343,12 +343,12 @@ fn 앱은_풀을_fetch_서비스와_사이드카_env_보다_먼저_주입하고_
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
     assert!(guard < pool && pool < fetch && fetch < active && active < kinds && kinds < manage && manage < spawn);
     assert_eq!(lib.matches("router.set_ssh_pool(").count(), 1);
-    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh)"));
+    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh, config_owned)"));
     // 홈을 알 수 없으면 풀을 주입하지 않는다(사이드카가 처리한다) — 빈 홈으로 만들지 않는다
     assert!(lib.contains("app.path().home_dir()"));
-    // 스위치 읽기는 라우터 한 곳이다 — 앱·사이드카는 이 값을 다시 읽지 않는다
+    // 하위 스위치 `ANTLER_RUST_SSH` 는 Phase 6b PR 9 부터 은퇴했다(결정 D5) — 라우터도 앱·사이드카도 이 값을 읽지 않는다(사이드카 env 로 *내보내기만* 한다)
     let router = read_src("src/router.rs");
-    assert!(router.contains("rust_ssh_enabled(std::env::var(\"ANTLER_RUST_SSH\")"));
+    assert!(!router.contains("var(\"ANTLER_RUST_SSH\")") && !router.contains("fn rust_ssh_enabled"));
     for rel in ["src/lib.rs", "src/sidecar.rs", "src/mirror.rs", "src/git/fetch/service.rs"] {
         assert!(!read_src(rel).contains("var(\"ANTLER_RUST_SSH\")"), "{rel} 가 스위치를 직접 읽는다");
     }

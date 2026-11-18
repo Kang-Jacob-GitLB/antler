@@ -11,7 +11,7 @@ use antler_lib::github::ports::{GhRepoRef, RepoQuery};
 use antler_lib::github::service::{GitHubService, ServiceOptions};
 use antler_lib::jira::service::JiraService;
 use antler_lib::mirror::{MirrorRepo, RepoMirror};
-use antler_lib::router::{rust_api_enabled, Routed, Router, API_CHANNELS, API_SIDECAR_CHANNELS, RUST_CHANNELS};
+use antler_lib::router::{Routed, Router, API_CHANNELS, API_SIDECAR_CHANNELS, RUST_CHANNELS};
 use futures_util::future::{BoxFuture, FutureExt};
 use tokio_util::sync::CancellationToken;
 use antler_lib::secret::memory::MemoryStore;
@@ -95,21 +95,25 @@ fn api_채널은_ipc_채널의_jira_gh_채널에서_사이드카_몫을_뺀_것�
 }
 
 #[test]
-fn 스위치는_api_가_0_이거나_git_이_0_이면_꺼진다() {
-    assert!(rust_api_enabled(None, None));
-    assert!(rust_api_enabled(Some("1"), None));
-    assert!(rust_api_enabled(Some(""), Some("1")));
-    assert!(rust_api_enabled(Some("false"), None));
-    assert!(!rust_api_enabled(Some("0"), None));
-    assert!(!rust_api_enabled(None, Some("0")));
-    assert!(!rust_api_enabled(Some("1"), Some("0")));
-    assert!(!rust_api_enabled(Some("0"), Some("0")));
+fn 하위_스위치_api_와_ssh_는_은퇴했고_git_스위치_하나가_모두_정한다() {
+    // Phase 6b PR 9 의 결정 D5: `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 라우터가 더는 읽지 않는다(그 갈래로 돌아가려면 사이드카가 설정을 읽고 써야 한다). `ANTLER_RUST_GIT=0` 만 6c 까지 산다
+    let router = prod_code("src/router.rs");
+    let from_env = &router[router.find("pub fn from_env(").expect("from_env")..];
+    let from_env = &from_env[..from_env.find("\n    }\n").expect("from_env 끝")];
+    assert!(from_env.contains("ANTLER_RUST_GIT") && from_env.contains("ANTLER_ROUTE_LOG"));
+    assert!(!from_env.contains("ANTLER_RUST_API") && !from_env.contains("ANTLER_RUST_SSH"), "은퇴한 스위치를 읽는다");
+    assert!(!router.contains("fn rust_api_enabled") && !router.contains("fn rust_ssh_enabled"));
+    // 스위치가 꺼지면 API 도 ssh 도 함께 꺼진다
+    let off = Router::new(false, false, RepoMirror::default());
+    assert!(!off.api_enabled() && !off.ssh_enabled());
+    let on = Router::new(true, false, RepoMirror::default());
+    assert!(on.api_enabled() && on.ssh_enabled());
 }
 
 #[test]
 fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든다() {
     let lib = prod_code("src/lib.rs");
-    let guard = lib.find("if router.api_enabled() {").expect("스위치 분기");
+    let guard = lib.find("if let (true, Some(store)) = (router.api_enabled(), config_store.clone()) {").expect("스위치 분기");
     // 서비스·Vault·보관소를 만드는 호출은 이 분기 안(사이드카 기동 전)에만 있다
     let end = lib.find("let fetch_kinds").expect("분기 끝");
     for needle in ["open_store(", "Vault::new(", "JiraService::new(", "GitHubService::new("] {
@@ -134,17 +138,17 @@ fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든�
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
     let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
     assert!(jira < api && github < api && api < manage && manage < spawn);
-    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh)"));
+    assert!(lib.contains(", fetch_kinds, rust_api, rust_ssh, config_owned)"));
     // env 하나가 두 서비스를 함께 넘기므로 둘 다 만들어졌을 때만 둘 다 주입한다(하나만 되면 둘 다 사이드카가 처리한다)
     assert_eq!(lib.matches("router.set_jira(").count(), 1);
     assert_eq!(lib.matches("router.set_github(").count(), 1);
     let both = lib.find("(Ok(jira), Ok(gh)) =>").expect("둘 다 성공한 분기");
     assert!(both < jira && both < github && github < api);
-    // 토큰 사본은 Rust 가 GitHub 를 처리할 때만 사이드카로 보낸다(스위치가 꺼져 있으면 서비스가 없으니 보낼 토큰도 없다)
-    assert!(lib.contains("if let (true, Some(gh)) = (rust_api, gh_service)"));
-    assert_eq!(lib.matches("push_gh_token(").count(), 2, "초기 전송과 인증 변경 콜백 두 곳");
-    // 사이드카를 manage 한 뒤에 초기 사본을 보낸다(그 전의 변경은 콜백이 사이드카를 못 찾아 놓칠 수 있으므로)
-    assert!(lib.find("Sidecar::spawn(").unwrap() < lib.find("(rust_api, gh_service)").unwrap());
+    // GitHub 토큰은 Rust 만 쥔다 — 사이드카로 사본을 보내지 않는다(Phase 6b PR 9: `ghToken` 줄 중단. 사이드카에 남는 github 기능은 없다 — 설정이 비어 있어 저장소가 없다)
+    assert!(!lib.contains("push_gh_token("), "사이드카로 토큰 사본을 보내는 호출이 없다");
+    assert_eq!(lib.matches("git_token()").count(), 1, "토큰을 읽는 곳은 캐시 실행기의 출처 하나뿐이다");
+    let sidecar = prod_code("src/sidecar.rs");
+    assert!(!sidecar.contains("gh_token_line") && !sidecar.contains("ghToken"), "사이드카로 토큰 줄을 보내는 길이 없다");
     // 한도 해제 시각은 로컬 시간대 표시를 쓴다(서비스 생성자)
     assert!(prod_code("src/github/service.rs").contains("with_format_time(super::local_time::format_epoch_sec)"));
 }
@@ -155,17 +159,15 @@ fn 사이드카_env_는_항상_직접_정한다() {
     assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_API\", \"1\")"));
     // 값이 없을 때 부모의 env 를 지운다(되돌리기가 뒤집히지 않게)
     assert!(sidecar.contains("cmd.env_remove(\"ANTLER_RUST_API\")"));
-    // 사이드카에 env 로 가는 것은 이 넷뿐이다(ANTLER_USER_DATA·FETCH_KINDS·API·SSH) — 토큰은 env 에 없다(stdin 의 ghToken 줄로만 간다)
+    // 사이드카에 env 로 가는 것은 이 다섯뿐이다(ANTLER_USER_DATA·FETCH_KINDS·API·SSH·CONFIG) — 토큰은 env 에도 stdin 줄에도 없다(Phase 6b PR 9 부터 `ghToken` 줄도 없다)
     let envs: Vec<&str> = sidecar.lines().filter(|l| l.contains("cmd.env(") || l.contains(".env(") || l.contains("env_remove(")).collect();
     for l in &envs {
         assert!(
-            ["ANTLER_USER_DATA", "ANTLER_RUST_FETCH_KINDS", "ANTLER_RUST_API", "ANTLER_RUST_SSH"].iter().any(|n| l.contains(n)),
+            ["ANTLER_USER_DATA", "ANTLER_RUST_FETCH_KINDS", "ANTLER_RUST_API", "ANTLER_RUST_SSH", "ANTLER_RUST_CONFIG"].iter().any(|n| l.contains(n)),
             "사이드카에 알 수 없는 env 를 넘긴다: {l}"
         );
     }
-    assert!(!sidecar.to_lowercase().contains("token") || !envs.iter().any(|l| l.to_lowercase().contains("token")));
-    // 토큰 줄은 한 곳(push_gh_token)에서만 만든다
-    assert_eq!(sidecar.matches("gh_token_line(").count(), 1);
+    assert!(!sidecar.to_lowercase().contains("token"), "Rust 쪽 사이드카 중계 코드에 토큰을 다루는 곳이 없다");
 }
 
 #[test]

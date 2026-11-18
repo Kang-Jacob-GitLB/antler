@@ -10,9 +10,9 @@
 //! - 실패 분류: 인증·허용 안 된 전송은 `auth_paused`(수동 새로고침 전까지 자동 중단), 네트워크는 지수 백오프, 수동 fetch 로 승인되지 않은 http(s) remote 의
 //!   자동 인증 실패는 `needs_manual`. 오류 문구는 300 UTF-16 단위로 자른다(서로게이트가 쪼개지면 U+FFFD).
 //!
-//! **승인(`fetchApprovals`·`trustedConfigs`)은 main 의 설정 파일에만 있다.** 이 모듈은 그것을 쓰지 않고 [`FetchHost::approve`] 로 사이드카에 부탁할 뿐이며,
+//! **승인(`fetchApprovals`·`trustedConfigs`)은 설정 파일에만 있다**(Rust 의 `ConfigStore` 가 유일한 작성자다 — Phase 6b PR 9). 이 모듈은 그것을 쓰지 않고 [`FetchHost::approve`] 로 호스트에 맡길 뿐이며,
 //! 부탁하는 곳은 정확히 두 군데다: 수동 fetch 성공 뒤(`ApprovalKind::Approval`)와 확인 창에서 "이 저장소에서 항상 허용" 을 받은 뒤(`ApprovalKind::Trusted`).
-//! 읽는 쪽은 사이드카가 보낸 [`FetchPrefs`] 스냅샷과, 방금 부탁한 값을 되돌아오기 전까지 쥐는 메모리 오버레이다. 판정은 항상 **지문이 같은가**다("항목이 있는가"가 아니다).
+//! 읽는 쪽은 설정 변경 알림이 넣은 [`FetchPrefs`] 스냅샷과, 방금 쓴 값이 스냅샷에 반영되기 전까지 쥐는 메모리 오버레이다(쓰기가 동기라 보통 곧바로 스냅샷에 들어간다 — 오버레이는 PR 7 이전 흐름의 안전망으로 남겼다). 판정은 항상 **지문이 같은가**다("항목이 있는가"가 아니다).
 //!
 //! 이식 규칙: 운영 경로는 플랫폼·ssh 환경을 주입받지 않는다(`run_fetch`·`inspect_config` 만 부른다 — 주입 버전은 `*_for_test` 이고
 //! `tests/fetch_service.rs` 가 이 파일의 소스에 그 이름이 없음을 강제한다). 외부 의존(이벤트·확인 창·승인·사이드카 알림)은 [`FetchHost`] 로 주입한다.
@@ -110,7 +110,7 @@ pub enum ApprovalKind {
 }
 
 impl ApprovalKind {
-    /// 프로토콜의 `kind` 문자열(`src/sidecar/protocol.ts` 의 `FETCH_APPROVE_KINDS`)
+    /// 승인 종류의 이름(로그·시험용 — 설정에는 종류별 변경자가 따로 있다)
     pub fn as_str(self) -> &'static str {
         match self {
             ApprovalKind::Approval => "approval",
@@ -119,17 +119,7 @@ impl ApprovalKind {
     }
 }
 
-/// 사이드카로 가는 승인 부탁 줄(`{t:"fetchApprove", kind, repoId, fingerprint}`). **이 줄을 만드는 곳은 여기 하나다** —
-/// 사이드카는 이 메시지로만 승인을 받고(renderer 의 `req` 경로로는 받지 않는다), 보내는 쪽은 [`FetchHost::approve`] 를 부르는 서비스뿐이다
-pub fn approve_message(kind: ApprovalKind, repo_id: &str, fingerprint: &str) -> Value {
-    serde_json::json!({ "t": "fetchApprove", "kind": kind.as_str(), "repoId": repo_id, "fingerprint": fingerprint })
-}
-
-/// 사이드카의 fetchPrefs 를 받는 곳(Tauri 관리 상태로 등록한다). **`Sidecar::spawn` 보다 먼저 등록해야 한다** — 첫 fetchPrefs 는 ready 전에 한 번만 오고
-/// 같은 내용이면 다시 오지 않는다(`lib.rs` 의 등록 순서와 `tests/channels.rs` 가 강제한다)
-pub struct FetchPrefsSink(pub Box<dyn Fn(FetchPrefs) + Send + Sync>);
-
-/// 서비스가 바깥에 기대는 것. 앱에서는 Tauri 이벤트·네이티브 확인 창·사이드카 쓰기로 구현한다(`fetch_host.rs`)
+/// 서비스가 바깥에 기대는 것. 앱에서는 Tauri 이벤트·네이티브 확인 창·설정 쓰기(`ConfigStore`)로 구현한다(`fetch_host.rs`)
 pub trait FetchHost: Send + Sync + 'static {
     fn emit(&self, event: HostEvent);
 
@@ -137,13 +127,13 @@ pub trait FetchHost: Send + Sync + 'static {
     /// **응답의 해석은 서비스가 [`super::confirm_text::ConfirmPlan::decide`] 로만 한다** — 구현이 허용 여부를 정하지 않는다
     fn confirm(&self, repo_id: &str, confirm: &ConfirmBox) -> impl Future<Output = Option<i64>> + Send;
 
-    /// 승인을 설정 파일에 남겨 달라고 사이드카에 부탁한다. 서비스가 부르는 곳은 두 군데뿐이다(모듈 문서)
+    /// 승인을 설정 파일에 남긴다(Rust 가 설정의 유일한 작성자다 — 동기 쓰기). 서비스가 부르는 곳은 두 군데뿐이다(모듈 문서)
     fn approve(&self, kind: ApprovalKind, repo_id: &str, fingerprint: &str);
 
     /// 사이드카의 RepoService 에 알린다(`{t:"note"}`)
     fn note(&self, op: NoteOp, repo_id: &str);
 
-    /// GitHub 원격 전용 저장소의 fetch 가 HEAD 를 맞추며 알아낸 기본 브랜치가 레코드의 값과 다르다 — 사이드카가 레코드에 기록하게 부탁한다(설정 소유 PR 9 까지).
+    /// GitHub 원격 전용 저장소의 fetch 가 HEAD 를 맞추며 알아낸 기본 브랜치가 레코드의 값과 다르다 — 설정의 레코드에 기록한다(Rust 가 설정의 유일한 작성자다).
     /// 서비스가 부르는 곳은 github 갈래 한 군데뿐이고, 이름은 `is_safe_branch` 를 통과한 값이다
     fn github_branch(&self, _repo_id: &str, _branch: &str) {}
 
@@ -390,7 +380,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         core.approvals.get(repo_id).is_some_and(|f| f == fingerprint) || core.overlay_approvals.get(repo_id).is_some_and(|f| f == fingerprint)
     }
 
-    /// 승인을 사이드카에 부탁하고 되돌아오기 전까지 메모리에 쥔다. **서비스에서 승인을 쓰는 유일한 함수**다
+    /// 승인을 호스트에 맡기고(설정에 동기로 쓴다) 스냅샷에 반영되기 전까지 메모리에 쥔다. **서비스에서 승인을 쓰는 유일한 함수**다
     fn send_approval(&self, kind: ApprovalKind, repo_id: &str, fingerprint: &str) {
         {
             let mut core = lock(&self.core);
@@ -739,9 +729,9 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
         }
     }
 
-    /// 사이드카의 fetchPrefs 를 적용한다. 이미 받은 것 이하의 gen 이면 버리고 false.
-    /// 오버레이는 사이드카가 같은 값을 돌려줬거나(반영됨) 다른 값으로 바뀌었거나(덮어씌워짐) 저장소가 사라졌으면 정리한다 —
-    /// 값이 아직 없는 경우는 사이드카가 부탁을 처리하기 전의 스냅샷일 수 있어 남겨 둔다(실패하는 쪽은 안전한 쪽이다)
+    /// 설정 변경 알림이 만든 fetch 설정을 적용한다. 이미 받은 것 이하의 gen 이면 버리고 false.
+    /// 오버레이는 스냅샷이 같은 값을 돌려줬거나(반영됨) 다른 값으로 바뀌었거나(덮어씌워짐) 저장소가 사라졌으면 정리한다 —
+    /// 값이 아직 없는 경우는 쓰기가 실패해(다음에 다시 묻는다) 설정에 없는 승인일 수 있어 남겨 둔다(실패하는 쪽은 안전한 쪽이다)
     pub fn apply_prefs(&self, prefs: FetchPrefs) -> bool {
         {
             let mut core = lock(&self.inner.core);

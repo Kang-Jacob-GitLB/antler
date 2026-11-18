@@ -1,7 +1,6 @@
-//! 저장소 미러. 라우터가 저장소 경로·환경을 얻는 **유일한** 출처다. 설정을 쓰는 쪽은 Node 사이드카(main 의 ConfigStore)이고,
-//! 사이드카가 시작 때(ready 전)와 목록이 바뀔 때마다 보내는 `{t:"repos", gen, repos:[{id,kind,path,name,distro?,sshHost?}]}` 로 채운다
-//! (`src/sidecar/protocol.ts`·`mirror.ts`). renderer 가 보낸 경로·kind·배포판은 어디서도 쓰지 않는다.
-
+//! 저장소 미러. 라우터가 저장소 경로·환경을 얻는 **유일한** 출처다. Phase 6b PR 9 부터 Rust 가 설정을 소유하므로 `config::sync` 가 설정이 바뀔 때마다 [`RepoMirror::apply_message`] 로 채운다(`ANTLER_RUST_GIT=0` 이면 라우터가 꺼져 있어 쓰지 않는다),
+//! 같은 모양 `{t:"repos", gen, repos:[{id,kind,path,name,distro?,sshHost?,github?}]}` 의 메시지다(`src/sidecar/protocol.ts`·`mirror.ts` — 이전에는 사이드카가 보냈다. 링크·기본 브랜치·경로 검증이 이 한 경로다)
+//! — Rust 가 설정을 소유하지 않는 실행(`ANTLER_RUST_GIT=0`)에서는 사이드카가 보낸 줄이 채운다. renderer 가 보낸 경로·kind·배포판은 어디서도 쓰지 않는다.
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};

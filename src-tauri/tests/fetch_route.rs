@@ -56,7 +56,8 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn 사이드카에_승인을_부탁하는_호출은_호스트_구현_한_곳뿐이다() {
+fn 승인은_설정에_직접_쓰고_fetch_설정은_사이드카를_띄우기_전에_반영한다() {
+    // Rust 가 설정을 소유한다(Phase 6b PR 9): 승인을 쓰는 곳은 호스트 구현 한 곳이고 사이드카에 부탁하지 않는다. `.approve(` 호출은 서비스(`host.approve(`)와 호스트 안의 쓰기 함수뿐이다
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     collect(&dir, &mut files);
@@ -68,38 +69,28 @@ fn 사이드카에_승인을_부탁하는_호출은_호스트_구현_한_곳뿐�
             hits.push((rel, n));
         }
     }
-    // 서비스가 호스트에 부탁하는 호출(`host.approve(`, send_approval 안의 한 곳)과, 호스트 구현이 사이드카에 부탁하는 호출(한 곳)뿐이다.
-    // 그 밖의 어디서도 `.approve(` 를 부르면 renderer 의 값이 승인으로 저장되는 길이 생길 수 있다
-    assert_eq!(hits, [("fetch_host.rs".to_string(), 1), ("git/fetch/service.rs".to_string(), 1)]);
-    assert_eq!(prod_code("src/fetch_host.rs").matches("sidecar.approve(").count(), 1);
+    assert_eq!(hits, [("git/fetch/service.rs".to_string(), 1)]);
     assert_eq!(prod_code("src/git/fetch/service.rs").matches("self.host.approve(").count(), 1);
-    // Sidecar::approve 는 crate 밖에 열지 않고 dead_code 허용도 달지 않는다(실제로 쓰인다)
     let sidecar = prod_code("src/sidecar.rs");
-    assert!(sidecar.contains("pub(crate) fn approve("), "approve 는 pub(crate) 이어야 한다");
-    assert!(!sidecar.contains("pub fn approve("));
-    assert!(!sidecar.contains("allow(dead_code)"));
+    assert!(!sidecar.contains("fn approve(") && !sidecar.contains("fetchApprove"), "사이드카에 승인을 부탁하는 길이 없다");
     // 호스트 구현 파일도 플랫폼 주입 버전을 부르지 않는다
     let host = prod_code("src/fetch_host.rs");
     for banned in ["_for_test", "run_fetch(", "hooks_path_for("] {
         assert!(!host.contains(banned), "fetch_host.rs 에 {banned}");
     }
-}
-
-#[test]
-fn fetch_prefs_받는_곳은_사이드카를_띄우기_전에_등록한다() {
+    // fetch 설정(주기·승인)은 설정 변경 알림이 직접 서비스에 넣는다(`config::sync` — 사이드카의 `fetchPrefs` 줄은 받지 않는다). 첫 반영은 라우터 등록 뒤·사이드카 기동 앞이다
     let lib = prod_code("src/lib.rs");
-    let sink = lib.find("app.manage(FetchPrefsSink").expect("FetchPrefsSink 등록");
-    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(sink < spawn, "첫 fetchPrefs 는 ready 전에 한 번만 온다 — 받는 곳이 먼저 등록돼야 한다");
-    // 서비스 주입(set_fetch)도 사이드카보다 먼저고, 라우터 등록(sink 가 찾는 상태)도 sink 보다 먼저다
+    assert!(!lib.contains("FetchPrefsSink"), "사이드카가 보내던 fetchPrefs 받는 곳은 없다");
     let set_fetch = lib.find("router.set_fetch(").expect("서비스 주입");
     let manage_router = lib.find("app.manage(router)").expect("라우터 등록");
-    assert!(set_fetch < manage_router && manage_router < sink);
+    let first_push = lib.find("sync.push(None,").expect("설정의 첫 반영");
+    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
+    assert!(set_fetch < manage_router && manage_router < first_push && first_push < spawn);
     // 사이드카 기동 인자는 라우터 스위치에서 정한 값이다
     assert!(lib.contains("sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github)"));
-    // 포커스·sink 는 런타임 밖 스레드에서 불린다 — 라우터 호출은 앱 런타임 안에서
-    // (fetchPrefs sink·창 포커스, 그리고 GitHub 로그인 변경 콜백이 부르는 `github_auth_changed` — Phase 6b PR 7)
-    assert_eq!(lib.matches("in_runtime_of(").count(), 3);
+    // 사이드카 읽기 스레드·창 포커스·설정 알림·로그인 변경은 런타임 밖 스레드에서 불린다 — 라우터 호출은 앱 런타임 안에서
+    // (미러 반영·fetch 설정 반영 둘, 창 포커스, 그리고 GitHub 로그인 변경 콜백이 부르는 `github_auth_changed`)
+    assert_eq!(lib.matches("in_runtime_of(").count(), 4);
 }
 
 #[test]

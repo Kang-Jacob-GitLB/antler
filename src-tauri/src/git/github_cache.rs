@@ -1,4 +1,4 @@
-//! GitHub 원격 전용 저장소 캐시의 실행 기반(`src/main/git/githubCache.ts` 119-367 의 이식, Phase 6b PR 2). 조회는 PR 6, fetch·감시는 PR 7 이 앱에 연결했다(추가·삭제·고아 정리는 PR 9 까지 사이드카).
+//! GitHub 원격 전용 저장소 캐시의 실행 기반(`src/main/git/githubCache.ts` 119-367 의 이식, Phase 6b PR 2). 조회는 PR 6, fetch·감시는 PR 7 이 앱에 연결했다(추가·삭제·고아 정리는 PR 9 에서 Rust 가 맡았다 — `repos::manage`·`config_host`).
 //!
 //! 앱 캐시(`<userData>/remote-repos/<owner>/<repo>.git`)는 사용자 저장소에 쓰지 않는다는 규칙의 **유일한 예외**다. 이 모듈이 그 예외를 한 곳에 가둔다:
 //! - [`GithubCachePath`] — 캐시 모양(`github_cache_slug`)을 통과한 경로만 담는 newtype. 환경을 만들고 저장소를 만드는 함수는 이 타입만 받는다.
@@ -413,8 +413,8 @@ const REMOVE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis
 /// owner 폴더나 저장소 폴더가 링크(정션 포함)면 링크 너머의 실제 폴더를 지우게 되므로 아무것도 지우지 않고 `Ok(false)` 다. 폴더가 없어도 `Ok(false)`.
 /// 지웠으면 `Ok(true)` 이고 비게 된 owner 폴더도 정리한다(다른 저장소가 있으면 남는다). 파일을 쥔 프로세스가 있어 끝내 못 지우면 `Err`.
 ///
-/// 읽기 전용 pack 이 든 폴더도 `remove_dir_all` 이 그대로 지운다(`github_cache_exec.rs` 시험). **연결은 PR 9** — 지금 `repos:remove` 의 삭제는 Rust 가 fetch·감시·조회를 멈추고 기다린 뒤(PR 6·7)
-/// 사이드카가 한다(TS `RepoService.removeGithubCache` — 레코드의 owner/repo 와 캐시 경로가 맞을 때만 부른다). 호출자는 이 함수를 부르기 전에 이 저장소의 git(조회·fetch·감시)을 모두 멈춰야 한다
+/// 읽기 전용 pack 이 든 폴더도 `remove_dir_all` 이 그대로 지운다(`github_cache_exec.rs` 시험). PR 9 부터 `repos:remove` 의 삭제는 Rust 가 fetch·감시·조회를 멈추고 기다린 뒤(PR 6·7)
+/// `repos::manage::remove_cache_dir` 로 한다(TS `RepoService.removeGithubCache` — 레코드의 owner/repo 와 캐시 경로가 맞을 때만 부른다). 호출자는 이 함수를 부르기 전에 이 저장소의 git(조회·fetch·감시)을 모두 멈춰야 한다
 pub fn remove_github_cache(path: &GithubCachePath) -> Result<bool, String> {
     let repo = std::path::Path::new(path.as_str());
     let Some(owner) = repo.parent() else { return Ok(false) };

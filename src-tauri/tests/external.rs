@@ -676,9 +676,9 @@ fn 에디터와_터미널_프로세스는_launch_rs_한_곳에서만_띄운다()
 }
 
 #[test]
-fn 외부_열기는_링크_허용_판정만_앱에_연결되어_있다() {
-    // PR 9 가 `external:open` 을 연결하기 전까지 `external::link`(code:openLink 의 주소 허용, PR 5)를 `app_host.rs` 가 쓰는 것 말고는 이 모듈을 쓰는 곳이 없다.
-    // 에디터·터미널·파일 관리자 실행(plan·opener·launch)은 앱에 닿지 않는다
+fn 외부_열기는_설정_소유자와_링크_판정에만_연결되어_있고_실행기는_lib_한_곳이_단다() {
+    // Phase 6b PR 9: `external:open`·`external:pickEditorExe` 는 `config_host.rs` 가 처리한다(plan·opener 를 쓴다). `app_host.rs` 는 링크 판정만(PR 5).
+    // 프로세스를 띄우는 `SystemDeps`(launch) 는 `lib.rs` 가 `ConfigHost` 에 **주입하는** 한 곳뿐이다 — 판단하는 쪽(config_host)은 실행기를 직접 만들지 않는다
     let src = root().join("src-tauri/src");
     let mut files = Vec::new();
     rs_files(&src, &mut files);
@@ -689,19 +689,42 @@ fn 외부_열기는_링크_허용_판정만_앱에_연결되어_있다() {
         let code = production_code(&f);
         let name = f.file_name().unwrap().to_string_lossy().into_owned();
         let uses = code.matches("external::").count();
-        if name == "app_host.rs" {
-            assert_eq!(uses, code.matches("external::link::allowed_link_url").count(), "app_host.rs 는 링크 판정만 쓴다");
-            assert_eq!(uses, 1);
-        } else if name == "dialogs.rs" {
+        match name.as_str() {
+            "app_host.rs" => {
+                assert_eq!(uses, code.matches("external::link::allowed_link_url").count(), "app_host.rs 는 링크 판정만 쓴다");
+                assert_eq!(uses, 1);
+            }
+            "config_host.rs" => {
+                assert!(!code.contains("external::launch") && !code.contains("SystemDeps"), "config_host.rs 가 실행기를 직접 만든다");
+                assert!(code.contains("external::opener::{") && code.contains("external::plan::{"));
+            }
             // 폴더 선택 시작 위치의 링크 확인은 공용 링크 가드(`fsguard`)를 쓴다 — external 은 쓰지 않는다
-            assert_eq!(uses, 0, "dialogs.rs 가 external 을 쓴다");
-            assert_eq!(code.matches("fsguard::path_stays_local").count(), 1);
-        } else {
-            assert_eq!(uses, 0, "{} 가 external 을 쓴다", f.display());
+            "dialogs.rs" => {
+                assert_eq!(uses, 0, "dialogs.rs 가 external 을 쓴다");
+                assert_eq!(code.matches("fsguard::path_stays_local").count(), 1);
+            }
+            "lib.rs" => {
+                assert_eq!(code.matches("external::launch::SystemDeps").count(), 1, "실행기 주입은 한 곳");
+                assert_eq!(uses, 1);
+            }
+            // 설정 소유자가 에디터 설정(`EditorKind` 등)의 해석을 위해 쓰는 사용처는 위 둘뿐이다
+            _ => assert_eq!(uses, 0, "{} 가 external 을 쓴다", f.display()),
         }
     }
     let lib = fs::read_to_string(src.join("lib.rs")).unwrap();
     assert_eq!(lib.matches("pub mod external;").count(), 1);
+}
+
+#[test]
+fn 매핑된_네트워크_드라이브_정책은_realpath_한_곳에서_드라이브_표기로_되돌린다() {
+    // PR 9 정책: Electron 판과 같게 허용한다(드라이브 문자로 등록된 저장소). UNC 로 직접 등록한 경로·링크로 원격에 가는 경우의 기존 거부는 유지한다
+    let launch = production_code(&root().join("src-tauri/src/external/launch.rs"));
+    assert!(launch.contains("normalize_canonical(s).or_else("), "정책은 normalize_canonical 이 거부한 경우에만 적용된다");
+    assert!(launch.contains("restore_mapped_drive(p, s, root.to_str()?)"));
+    // 링크 가드는 canonicalize 앞에 그대로 있다(원격으로 이어지는 링크는 따라가기 전에 거부)
+    let at_guard = launch.find("path_stays_local(Path::new(p))").expect("링크 가드");
+    let at_canon = launch.find("fs::canonicalize(p)").expect("canonicalize");
+    assert!(at_guard < at_canon);
 }
 
 #[test]

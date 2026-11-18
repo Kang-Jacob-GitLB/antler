@@ -102,7 +102,7 @@ pub fn ssh_confirm_arg(host: &str) -> Value {
     })
 }
 
-/// 이 호출을 사이드카가 아니라 Rust 가 SSH 풀로 처리해야 하는가(ssh 종류 — `env:listDir` 는 항상 ssh). 풀이 없으면(`ANTLER_RUST_SSH=0`) 라우터가 이 호출을 사이드카로 보낸다(계획 §13 C4).
+/// 이 호출을 사이드카가 아니라 Rust 가 SSH 풀로 처리해야 하는가(ssh 종류 — `env:listDir` 는 항상 ssh). 풀이 없으면 설정을 소유하지 않은 실행에서만 라우터가 이 호출을 사이드카로 보낸다(계획 §13 C4 — PR 9 부터 설정을 소유한 실행은 Rust 가 오류로 답한다).
 /// local·wsl 과 `env:wslDistros`·`env:sshHosts` 는 풀과 무관하다
 pub fn needs_ssh(channel: &str, args: &[Option<Value>]) -> bool {
     match channel {
@@ -142,7 +142,7 @@ impl EnvHost {
 
     /// 환경·경로 입력 검증(TS `checkEnvInput`) 뒤 해석한 환경을 돌려준다. 순서는 TS 와 같다: kind → (경로가 있으면) 경로·그룹 → WSL 설치 확인 / SSH 호스트 검사·확인 창.
     /// **저장·실행으로 이어지는 해석은 `resolve_env_checked_with` 하나다**(WSL 은 형식 + 설치 목록 대조)
-    async fn check_env_input(&self, input: Option<&Value>, with_path: bool) -> Result<ResolvedEnv, String> {
+    pub(crate) async fn check_env_input(&self, input: Option<&Value>, with_path: bool) -> Result<ResolvedEnv, String> {
         let obj = input.and_then(Value::as_object).ok_or(BAD_INPUT)?;
         let kind = match obj.get("kind").and_then(Value::as_str) {
             Some(k @ ("local" | "wsl" | "ssh")) => k,

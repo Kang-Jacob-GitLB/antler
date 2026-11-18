@@ -33,7 +33,7 @@ pub mod win32_path;
 pub use auth::AgentSetting;
 pub use connection::{EnvFn, SshOptions, Timeouts, DEFAULT_MAX_CHANNELS, SHELL_PROBE};
 pub use executor::SshExecutor;
-pub use pool::SshPool;
+pub use pool::{HoldGuard, SshPool};
 pub use sftp::SftpError;
 pub use stream::{is_read_ahead_exceeded, ReadAheadExceeded, SshStream, STREAM_AHEAD_LIMIT};
 
