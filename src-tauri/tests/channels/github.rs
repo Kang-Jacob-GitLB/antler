@@ -180,7 +180,7 @@ async fn github_채널_시나리오가_ts_골든과_같다() {
         let from = mock.seen.lock().unwrap().len();
         opened.lock().unwrap().clear();
         let ch = step["ch"].as_str().unwrap();
-        assert_ne!(ch, "gh:repo", "{name}: gh:repo 는 사이드카가 처리한다");
+        assert_ne!(ch, "gh:repo", "{name}: gh:repo 는 서비스 채널이 아니다(git 채널 — channels.rs 가 본다)");
         let args = substitute(&step["args"], &mock.origin, "");
         let cancel = step["cancel"]["afterRequests"].as_u64().zip(step["cancel"]["id"].as_str().map(String::from));
 

@@ -1,5 +1,5 @@
 //! GitHub 서비스가 밖에 묻는 것들의 포트(트레이트). 구현은 따로 있다:
-//! - [`RepoQuery`]: 사이드카가 쥔 저장소 정보(저장소 → owner/repo, remote 목록, push 된 sha, `githubClientId`) — `repoq.rs` 의 `SidecarRepos` 가 `repoq` 질의로 구현한다(앱). 서비스 시험은 가짜로 채운다.
+//! - [`RepoQuery`]: 사이드카가 쥔 저장소 정보(저장소 → owner/repo, remote 목록, push 된 sha, `githubClientId`) — `repoq.rs` 의 `SidecarRepos` 가 `repoq` 질의로 구현한다. 앱은 `routed_repos::RoutedRepos` 가 Rust 가 git 을 맡는 저장소(local·WSL·SSH)는 라우터로 직접 답하고 나머지만 `SidecarRepos` 에 위임한다(Phase 6a PR 8). 서비스 시험은 가짜로 채운다.
 //! - [`ExternalTokenProvider`]: GitHub CLI(gh) 같은 밖의 토큰 출처 — `gh_cli::GhCli` 가 구현한다.
 use futures_util::future::BoxFuture;
 use tokio_util::sync::CancellationToken;

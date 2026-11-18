@@ -789,11 +789,7 @@ export class RepoService {
       { signal }
     )
     if (r.code !== 0) return []
-    return r.stdout
-      .toString('utf8')
-      .split('\n')
-      .map((s) => s.trim().toLowerCase())
-      .filter((s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(s))
+    return git.parsePushedShas(r.stdout.toString('utf8'))
   }
 
   /**

@@ -1,0 +1,287 @@
+[
+  {
+    "in": [],
+    "out": {
+      "all": [],
+      "one": null
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "origin",
+        "url": "git@gitlab.com:a/b.git"
+      }
+    ],
+    "out": {
+      "all": [],
+      "one": null
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "origin",
+        "url": "https://github.com/e/f.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "e",
+          "remote": "origin",
+          "repo": "f"
+        }
+      ],
+      "one": {
+        "owner": "e",
+        "remote": "origin",
+        "repo": "f"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "fork",
+        "url": "git@github.com:a/b.git"
+      },
+      {
+        "name": "upstream",
+        "url": "git@github.com:c/d.git"
+      },
+      {
+        "name": "origin",
+        "url": "git@github.com:e/f.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "a",
+          "remote": "fork",
+          "repo": "b"
+        },
+        {
+          "owner": "c",
+          "remote": "upstream",
+          "repo": "d"
+        },
+        {
+          "owner": "e",
+          "remote": "origin",
+          "repo": "f"
+        }
+      ],
+      "one": {
+        "owner": "e",
+        "remote": "origin",
+        "repo": "f"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "fork",
+        "url": "git@github.com:a/b.git"
+      },
+      {
+        "name": "upstream",
+        "url": "git@github.com:c/d.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "a",
+          "remote": "fork",
+          "repo": "b"
+        },
+        {
+          "owner": "c",
+          "remote": "upstream",
+          "repo": "d"
+        }
+      ],
+      "one": {
+        "owner": "c",
+        "remote": "upstream",
+        "repo": "d"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "x",
+        "url": "git@gitlab.com:a/b.git"
+      },
+      {
+        "name": "fork",
+        "url": "git@github.com:a/b.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "a",
+          "remote": "fork",
+          "repo": "b"
+        }
+      ],
+      "one": {
+        "owner": "a",
+        "remote": "fork",
+        "repo": "b"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "origin",
+        "url": "git@gitlab.com:a/b.git"
+      },
+      {
+        "name": "upstream",
+        "url": "git@github.com:c/d.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "c",
+          "remote": "upstream",
+          "repo": "d"
+        }
+      ],
+      "one": {
+        "owner": "c",
+        "remote": "upstream",
+        "repo": "d"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "origin",
+        "url": "git@github.com:Octo/Hello.git"
+      },
+      {
+        "name": "upstream",
+        "url": "git@github.com:octo/hello.git"
+      },
+      {
+        "name": "mirror",
+        "url": "https://github.com/OCTO/HELLO"
+      },
+      {
+        "name": "other",
+        "url": "git@github.com:octo/other.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "Octo",
+          "remote": "origin",
+          "repo": "Hello"
+        },
+        {
+          "owner": "octo",
+          "remote": "other",
+          "repo": "other"
+        }
+      ],
+      "one": {
+        "owner": "Octo",
+        "remote": "origin",
+        "repo": "Hello"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "b",
+        "url": "git@github.com:o/r.git"
+      },
+      {
+        "name": "a",
+        "url": "git@github.com:o/r.git"
+      },
+      {
+        "name": "origin",
+        "url": "git@github.com:o/r.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "o",
+          "remote": "b",
+          "repo": "r"
+        }
+      ],
+      "one": {
+        "owner": "o",
+        "remote": "origin",
+        "repo": "r"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "my.fork",
+        "url": "git@github.com:me/hello.git"
+      },
+      {
+        "name": "a.url",
+        "url": "https://example.com/x/y.git"
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "me",
+          "remote": "my.fork",
+          "repo": "hello"
+        }
+      ],
+      "one": {
+        "owner": "me",
+        "remote": "my.fork",
+        "repo": "hello"
+      }
+    }
+  },
+  {
+    "in": [
+      {
+        "name": "origin",
+        "url": ""
+      },
+      {
+        "name": "upstream",
+        "url": "  https://github.com/c/d  "
+      }
+    ],
+    "out": {
+      "all": [
+        {
+          "owner": "c",
+          "remote": "upstream",
+          "repo": "d"
+        }
+      ],
+      "one": {
+        "owner": "c",
+        "remote": "upstream",
+        "repo": "d"
+      }
+    }
+  }
+]

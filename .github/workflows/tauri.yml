@@ -85,7 +85,7 @@ jobs:
       # ssh: SSH 실행기(russh, Phase 5 PR 2)의 통합 테스트 — 127.0.0.1 의 프로세스 안 russh::server 만 쓴다(외부 접속·사용자의 ~/.ssh·agent 를 쓰지 않는다). 원격 git 은 LocalExecutor 로 돌린다.
       # 실제 sshd 를 쓰는 시험은 #[ignore] 라 CI 에서 돌지 않는다
       # ssh_route: ssh 저장소 라우팅(Phase 5 PR 3) — sshHost 검사·스위치·쓰지 않는 호스트의 연결 정리·앱 배선의 소스 검사. 같은 루프백 서버만 쓴다(channels 의 *_ssh_에서도_* 시험도 같다)
-      # Phase 6a(나머지 git 채널): 순수 로직(코드 탐색기·LFS·gitflow·활동·기본 브랜치·WIP 경로 검증·링크 확인)은 lib 단위 테스트와 golden 바이너리가 맡는다 — 새 바이너리 없음. 코드 탐색기 4채널(PR 2)·ref 2채널(PR 3b)·검색·활동(PR 4)·LFS·gitflow 2채널(PR 5)은 channels(local·SSH 골든)·ssh_route 가 맡는다.
+      # Phase 6a(나머지 git 채널): 순수 로직(코드 탐색기·LFS·gitflow·활동·기본 브랜치·WIP 경로 검증·링크 확인)은 lib 단위 테스트와 golden 바이너리가 맡는다 — 새 바이너리 없음. 코드 탐색기 4채널(PR 2)·ref 2채널(PR 3b)·검색·활동(PR 4)·LFS·gitflow 2채널(PR 5)·`gh:repo` 와 GitHub 서비스의 저장소 질의(remote 목록·push 된 커밋 — PR 8)는 channels(local·SSH 골든)·ssh_route 가 맡는다.
       # TS 테스트 대응표는 tests/golden/channels/test-map.json(vitest tests/golden6a.test.ts 가 누락을, golden.rs 가 가리키는 fn 을 강제)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'

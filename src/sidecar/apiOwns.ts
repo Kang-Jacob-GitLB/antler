@@ -6,8 +6,9 @@
 export const RUST_API_PREFIXES = ['jira:', 'gh:'] as const
 
 /**
- * 접두어는 Rust 것이지만 사이드카가 계속 처리하는 채널. gh:repo 는 저장소의 remote 를 git 으로 읽는 일이라 git 실행기·캐시를 쥔 RepoService 가 맡는다
- * (Rust 의 GitHub 서비스는 repoq 질의로 그 결과를 받는다). src-tauri/src/router.rs 의 API_SIDECAR_CHANNELS 와 같다
+ * 접두어는 Rust 것이지만 사이드카가 계속 처리하는 채널. gh:repo 는 저장소의 remote 를 git 으로 읽는 일이라 git 채널이다 — Rust 라우터가 Rust 가 맡는 저장소(local·wsl·ssh)는 가로채 답하고,
+ * 나머지(github 원격 전용·미러에 없는 id·ANTLER_RUST_GIT=0)는 git 실행기·캐시를 쥔 RepoService 가 맡는다(Rust 의 GitHub 서비스는 그 저장소만 repoq 질의로 결과를 받는다).
+ * src-tauri/src/router.rs 의 API_SIDECAR_CHANNELS 와 같다
  */
 export const SIDECAR_KEPT_CHANNELS = ['gh:repo'] as const
 

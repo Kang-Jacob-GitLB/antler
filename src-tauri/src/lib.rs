@@ -13,6 +13,8 @@ pub mod net;
 // Rust → Node 질의(`repoq`)·토큰 사본(`ghToken`)의 메시지와 검증(Phase 4 PR 9). 통합 테스트(tests/repoq.rs)가 별도 크레이트라 pub 이다
 pub mod repoq;
 pub mod router;
+// GitHub 서비스의 저장소 질의를 Rust 가 맡는 저장소는 라우터가, 나머지는 사이드카(repoq)가 답한다(Phase 6a PR 8)
+pub mod routed_repos;
 // 토큰 보관(Phase 4 PR 4) — Jira(PR 6)·GitHub(PR 9) 서비스가 같은 Vault 를 쓴다
 pub mod secret;
 mod sidecar;
@@ -154,8 +156,10 @@ pub fn run() {
             if router.api_enabled() {
                 let vault = std::sync::Arc::new(secret::Vault::new(secret::open_store(std::env::var_os("ANTLER_USER_DATA").as_deref())));
                 let jira = jira::service::JiraService::new(vault.clone());
-                // 저장소 정보는 사이드카에 묻는다(repoq). 사이드카는 이 서비스보다 늦게 만들어지므로 전송이 호출 때 찾는다
-                let repos = std::sync::Arc::new(repoq::SidecarRepos::new(std::sync::Arc::new(sidecar::SidecarQuery::new(app.handle().clone()))));
+                // 저장소 정보: Rust 가 git 을 맡는 저장소(local·WSL·SSH)는 라우터가 직접 답하고, 나머지(github·미러에 없음·스위치 꺼짐)와 설정 읽기는 사이드카에 묻는다(repoq).
+                // 사이드카·라우터는 이 서비스보다 늦게 만들어지므로 호출 때 찾는다
+                let sidecar_repos = std::sync::Arc::new(repoq::SidecarRepos::new(std::sync::Arc::new(sidecar::SidecarQuery::new(app.handle().clone()))));
+                let repos = std::sync::Arc::new(routed_repos::RoutedRepos::new(routed_repos::AppRouter(app.handle().clone()), sidecar_repos));
                 let cli: std::sync::Arc<dyn github::ports::ExternalTokenProvider> = std::sync::Arc::new(github::gh_cli::GhCli::new());
                 let opts = github::service::ServiceOptions { avatar_cache_file: Some(user_data.join(github::avatars::AVATAR_CACHE_FILE)), ..Default::default() };
                 let gh = github::service::GitHubService::new(vault, repos, Some(cli), opts);

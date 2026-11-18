@@ -1,0 +1,143 @@
+[
+  {
+    "in": "",
+    "out": []
+  },
+  {
+    "in": "remote.origin.url\nhttps://github.com/octo/hello.git\u0000",
+    "out": [
+      {
+        "name": "origin",
+        "url": "https://github.com/octo/hello.git"
+      }
+    ]
+  },
+  {
+    "in": "remote.origin.url\nhttps://github.com/octo/hello.git",
+    "out": [
+      {
+        "name": "origin",
+        "url": "https://github.com/octo/hello.git"
+      }
+    ]
+  },
+  {
+    "in": "remote.origin.url\nhttps://github.com/octo/hello.git\u0000remote.my.fork.url\ngit@github.com:me/hello.git\u0000remote.a.url.url\nhttps://example.com/x/y.git\u0000",
+    "out": [
+      {
+        "name": "origin",
+        "url": "https://github.com/octo/hello.git"
+      },
+      {
+        "name": "my.fork",
+        "url": "git@github.com:me/hello.git"
+      },
+      {
+        "name": "a.url",
+        "url": "https://example.com/x/y.git"
+      }
+    ]
+  },
+  {
+    "in": "remote.origin.url\nhttps://a/x\u0000remote.origin.url\nhttps://b/y\u0000",
+    "out": [
+      {
+        "name": "origin",
+        "url": "https://a/x"
+      }
+    ]
+  },
+  {
+    "in": "remote..url\nhttps://a/x\u0000remote.x.url\nhttps://b/y\u0000",
+    "out": [
+      {
+        "name": "x",
+        "url": "https://b/y"
+      }
+    ]
+  },
+  {
+    "in": "remote.origin.url\u0000remote.x.url\nhttps://b/y\u0000",
+    "out": [
+      {
+        "name": "x",
+        "url": "https://b/y"
+      }
+    ]
+  },
+  {
+    "in": "remote.sp ace.url\nhttps://host/with space/repo\u0000",
+    "out": [
+      {
+        "name": "sp ace",
+        "url": "https://host/with space/repo"
+      }
+    ]
+  },
+  {
+    "in": "remote.origin.url\n\u0000",
+    "out": [
+      {
+        "name": "origin",
+        "url": ""
+      }
+    ]
+  },
+  {
+    "in": "remote.origin.url\nline1\nline2\u0000",
+    "out": [
+      {
+        "name": "origin",
+        "url": "line1\nline2"
+      }
+    ]
+  },
+  {
+    "in": "remote.한글.url\nhttps://github.com/octo/hello\u0000",
+    "out": [
+      {
+        "name": "한글",
+        "url": "https://github.com/octo/hello"
+      }
+    ]
+  },
+  {
+    "in": "remote.😀.url\nhttps://github.com/octo/hello\u0000",
+    "out": [
+      {
+        "name": "😀",
+        "url": "https://github.com/octo/hello"
+      }
+    ]
+  },
+  {
+    "in": "remote.a.url\n�\u0000",
+    "out": [
+      {
+        "name": "a",
+        "url": "�"
+      }
+    ]
+  },
+  {
+    "in": "x.y\nz\u0000",
+    "out": []
+  },
+  {
+    "in": "\u0000\u0000",
+    "out": []
+  },
+  {
+    "in": "remote.url\nhttps://short/x\u0000",
+    "out": []
+  },
+  {
+    "in": "remote.origin.url\nhttps://github.com/octo/hello\r\n\u0000",
+    "out": [
+      {
+        "name": "origin",
+        "url": "https://github.com/octo/hello\r\n"
+      }
+    ]
+  }
+]

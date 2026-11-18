@@ -153,9 +153,14 @@ export async function remotes(exec: GitExecutor, repoPath: string, opts?: RunOpt
   const r = await exec.run(repoPath, args, opts)
   if (r.code === 1) return []
   if (r.code !== 0) throw new GitError(r.stderr.trim() || `git config failed (${r.code})`, r.code, r.stderr, args)
+  return parseRemoteConfig(r.stdout.toString('utf8'))
+}
+
+/** `remotes` 의 출력 해석(순수 — Rust 이식의 골든이 이 함수를 직접 부른다). 입력은 `git config --null --get-regexp` 의 stdout 전체다 */
+export function parseRemoteConfig(stdout: string): { name: string; url: string }[] {
   const seen = new Set<string>()
   const out: { name: string; url: string }[] = []
-  for (const rec of r.stdout.toString('utf8').split('\0')) {
+  for (const rec of stdout.split('\0')) {
     const nl = rec.indexOf('\n')
     if (nl < 0) continue
     const key = rec.slice(0, nl)
@@ -165,6 +170,14 @@ export async function remotes(exec: GitExecutor, repoPath: string, opts?: RunOpt
     out.push({ name, url: rec.slice(nl + 1) })
   }
   return out
+}
+
+/** 아바타 조회용 `git log --format=%H` 출력에서 커밋 해시(소문자 40·64자)만 고른다(순수 — Rust 이식의 골든이 직접 부른다) */
+export function parsePushedShas(stdout: string): string[] {
+  return stdout
+    .split('\n')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(s))
 }
 
 /** 서브모듈 수 상한 */

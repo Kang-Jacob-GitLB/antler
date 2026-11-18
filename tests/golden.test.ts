@@ -4,8 +4,9 @@ import { describe, expect, it } from 'vitest'
 import type { Branch, FileDiff, RemoteGroup } from '../src/shared/types'
 import { bucketize, TimeStreamParser } from '../src/main/git/activity'
 import { assertCommitId, imageMime, isResolvableRef, normalizeDir, normalizeFilePath, parseTree } from '../src/main/git/codeBrowse'
-import { isSafeSubmodulePath } from '../src/main/git/commands'
+import { isSafeSubmodulePath, parsePushedShas, parseRemoteConfig } from '../src/main/git/commands'
 import { pickDefaultBranch } from '../src/main/git/defaultBranch'
+import { parseGithubRemote, pickGithubRemote, pickGithubRemotes } from '../src/main/github/remoteUrl'
 import { assertRelPath, filterOverrideArgs, hasShortNameSegment, parseFilterDrivers } from '../src/main/git/wip'
 import { addedLines, gitattributesUsesLfs, parseCheckAttrLfs, parseLfsPointer } from '../src/shared/lfs'
 import { parseGitflowConfig } from '../src/shared/gitflow'
@@ -131,7 +132,14 @@ const PARSERS: Record<string, Parser> = {
       return true
     }),
   shortName: (b) => cases(b, (c) => hasShortNameSegment(c as string)),
-  submodulePath: (b) => cases(b, (c) => isSafeSubmodulePath(c as string))
+  submodulePath: (b) => cases(b, (c) => isSafeSubmodulePath(c as string)),
+  // Phase 6a PR 8: remote URL → GitHub owner/repo, remote 목록 고르기(origin → upstream → 처음; one·all 은 pickGithubRemote·pickGithubRemotes),
+  // `git config --null --get-regexp` 출력 해석, push 된 해시 고르기
+  githubRemote: (b) => cases(b, (c) => parseGithubRemote(c as string)),
+  pickRemote: (b) =>
+    cases(b, (c) => ({ one: pickGithubRemote(c as { name: string; url: string }[]), all: pickGithubRemotes(c as { name: string; url: string }[]) })),
+  remoteConfig: (b) => cases(b, (c) => parseRemoteConfig(c as string)),
+  pushedShas: (b) => cases(b, (c) => parsePushedShas(c as string))
 }
 
 /** filterOverrides 케이스를 바이트로 푼다. 문자열은 UTF-8, `{parts}` 는 조각을 이어 붙인다(잘못된 UTF-8 은 `{hex}` 로 쓴다) */
@@ -275,7 +283,11 @@ for (const [parser, f] of [
   ['filterDrivers', 'filter-overrides'],
   ['relPath', 'rel-path'],
   ['shortName', 'short-name'],
-  ['submodulePath', 'submodule-path']
+  ['submodulePath', 'submodule-path'],
+  ['githubRemote', 'github-remote'],
+  ['pickRemote', 'pick-remote'],
+  ['remoteConfig', 'remote-config'],
+  ['pushedShas', 'pushed-shas']
 ] as const) {
   add(parser, E(`${f}-cases.json`))
 }

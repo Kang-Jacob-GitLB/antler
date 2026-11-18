@@ -26,7 +26,9 @@ const TARGET_TESTS = [
   'submodule',
   'defaultBranch',
   'repoWatcher',
-  'repoService'
+  'repoService',
+  'ghRemote',
+  'pushedShas'
 ]
 
 /** repoService.test.ts 는 6a 에 걸린 describe 만 대상이다(`RepoService.log` 는 Phase 2 에서 옮긴 git:log 의 시험) */

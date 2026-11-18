@@ -10,7 +10,7 @@ use antler_lib::api_host::{GithubHost, JiraHost};
 use antler_lib::github::ports::{GhRepoRef, RepoQuery};
 use antler_lib::github::service::{GitHubService, ServiceOptions};
 use antler_lib::jira::service::JiraService;
-use antler_lib::mirror::RepoMirror;
+use antler_lib::mirror::{MirrorRepo, RepoMirror};
 use antler_lib::router::{rust_api_enabled, Routed, Router, API_CHANNELS, API_SIDECAR_CHANNELS, RUST_CHANNELS};
 use futures_util::future::{BoxFuture, FutureExt};
 use tokio_util::sync::CancellationToken;
@@ -81,7 +81,7 @@ fn api_채널은_ipc_채널의_jira_gh_채널에서_사이드카_몫을_뺀_것�
     want.sort_unstable();
     api.sort_unstable();
     assert_eq!(api, want, "IPC_CHANNELS 의 jira:*·gh:*(gh:repo 제외)와 API_CHANNELS 가 다르다 — 빠진 채널은 사이드카로 가서 토큰을 두 곳에서 다루게 된다");
-    assert_eq!(API_SIDECAR_CHANNELS, ["gh:repo"], "사이드카에 남기는 gh 채널은 gh:repo 뿐이다");
+    assert_eq!(API_SIDECAR_CHANNELS, ["gh:repo"], "API_CHANNELS 가 아닌 gh 채널은 gh:repo 뿐이다(Rust 가 맡는 저장소는 git 채널로 Rust 가, 나머지는 사이드카가 처리한다)");
     // git 채널 목록과 겹치지 않는다
     for ch in API_CHANNELS {
         assert!(!RUST_CHANNELS.contains(ch));
@@ -170,7 +170,7 @@ fn 사이드카_env_는_항상_직접_정한다() {
 
 #[test]
 fn 운영_코드에_시험_훅_호출이_없다() {
-    for rel in ["api_host.rs", "router.rs", "lib.rs", "sidecar.rs", "repoq.rs", "github/local_time.rs"] {
+    for rel in ["api_host.rs", "router.rs", "lib.rs", "sidecar.rs", "repoq.rs", "routed_repos.rs", "git/remotes.rs", "github/remote_url.rs", "github/local_time.rs"] {
         let code = prod_code(&format!("src/{rel}"));
         for banned in ["_for_test", "insecure_loopback", "standing_in_for_keychain", "test-hooks"] {
             assert!(!code.contains(banned), "{rel} 에 {banned}");
@@ -410,13 +410,25 @@ async fn 배열이_아닌_인자와_login_pat_의_토큰은_사이드카로_가�
     }
 }
 
+/// `gh:repo` 는 API 스위치와 무관한 git 채널이다(Phase 6a PR 8): Rust 가 git 을 맡는 저장소(미러의 local·wsl·ssh)는 Rust 가 답하고,
+/// 미러에 없는 id·github·잘못된 인자는 둘 다 켜져 있어도 사이드카가 처리한다(사이드카가 TS 와 같은 오류를 만든다)
 #[tokio::test]
-async fn gh_repo_는_둘_다_켜져_있어도_사이드카가_처리한다() {
+async fn gh_repo_는_미러에_없으면_둘_다_켜져_있어도_사이드카가_처리하고_맡은_저장소는_rust_가_처리한다() {
     let r = router_with_both();
     for args in [json!(["r1"]), json!([]), json!("r1"), json!(null)] {
         assert!(matches!(r.route("gh:repo", &args).await, Routed::Sidecar), "{args}");
     }
     assert_eq!(r.rust_handled(), 0);
+    assert!(RUST_CHANNELS.contains(&"gh:repo") && !API_CHANNELS.contains(&"gh:repo"));
+    let mirror = RepoMirror::default();
+    mirror.apply(1, vec![MirrorRepo { id: "l".into(), kind: "local".into(), path: "/nonexistent-antler-api".into(), distro: None, ssh_host: None }]);
+    let owned = Router::new(true, false, mirror);
+    owned.set_jira(host());
+    owned.set_github(gh_host());
+    // 저장소 경로가 없어 git 이 실패한다 — 사이드카로 가지 않고 Rust 가 GIT 오류를 낸 것이 소유의 증거다
+    let Routed::Done(env) = owned.route("gh:repo", &json!(["l"])).await else { panic!("gh:repo 가 사이드카로 갔다") };
+    assert_eq!(env["code"], "GIT", "{env}");
+    assert_eq!(owned.rust_handled(), 1);
 }
 
 #[tokio::test]
@@ -509,6 +521,7 @@ async fn 등록_전에_온_cancel_은_조회를_취소하지만_전환은_취소
 #[tokio::test]
 async fn 다른_채널은_영향을_받지_않는다() {
     let r = router_with_both();
+    // gh:repo 는 미러에 없는 저장소라 사이드카다(미러가 맡는 저장소는 위 시험이 본다)
     for ch in ["gh:repo", "config:get", "repos:list", "app:version"] {
         assert!(matches!(r.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
     }

@@ -1,0 +1,117 @@
+{
+  "_": "gh:repo·Launchpad 의 remote 목록(ghRemotes)·아바타 404 대비 조회(pushedShas)의 패리티 시나리오. TS(tests/goldenChannels.test.ts → RepoService.ghRepo·ghRemotes·pushedShasByAuthor)와 Rust(src-tauri/tests/channels.rs → Router::route('gh:repo')·RoutedRepos)가 시나리오마다 <repo>.fi 를 새 디렉터리에 import 해 steps 를 순서대로 돈다. 단계: { git: [인자…] }(그 저장소에서 날 git 실행 — 작성자·시각은 고정 환경, 인자의 '@rev:<식>' 은 git rev-parse 결과 해시), { ghRepo: true }(gh:repo), { ghRemotes: true }(모든 GitHub remote), { invalidate: true }(ghRemotes 캐시 비우기 — gh:repo 의 60초 캐시는 그대로다), { pushed: { email, limit } }(그 작성자의 push 된 커밋 — 해시는 고정 시각·작성자라 결정적이다). 결과는 tests/golden/channels/{ghRepo,ghRemotes,pushedShas}.json.",
+  "scenarios": [
+    {
+      "name": "remote 가 없다",
+      "repo": "basic",
+      "steps": [{ "ghRepo": true }, { "ghRemotes": true }, { "pushed": { "email": "dev@example.com", "limit": 3 } }]
+    },
+    {
+      "name": "origin 이 GitHub 다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["remote", "add", "origin", "https://github.com/octo/hello.git"] },
+        { "ghRepo": true },
+        { "ghRemotes": true }
+      ]
+    },
+    {
+      "name": "origin → upstream → 처음 GitHub remote 순이고 같은 저장소(대소문자 무시)는 먼저 나온 것만 둔다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["remote", "add", "origin", "git@gitlab.com:octo/hello.git"] },
+        { "git": ["remote", "add", "fork", "git@github.com:me/hello.git"] },
+        { "git": ["remote", "add", "upstream", "https://github.com/Octo/Hello"] },
+        { "git": ["remote", "add", "mirror", "ssh://git@github.com:22/octo/hello.git"] },
+        { "ghRepo": true },
+        { "ghRemotes": true }
+      ]
+    },
+    {
+      "name": "GitHub 가 아닌 remote·포트가 다른 ssh·자체 호스트만 있다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["remote", "add", "origin", "https://gitlab.com/octo/hello.git"] },
+        { "git": ["remote", "add", "ghe", "git@ghe.example.com:octo/hello.git"] },
+        { "git": ["remote", "add", "port", "ssh://git@github.com:2222/octo/hello.git"] },
+        { "git": ["remote", "add", "evil", "https://github.com.evil.com/octo/hello"] },
+        { "ghRepo": true },
+        { "ghRemotes": true }
+      ]
+    },
+    {
+      "name": "점이 든 이름·같은 remote 의 url 여러 개(첫 값만)·공백이 든 URL",
+      "repo": "basic",
+      "steps": [
+        { "git": ["remote", "add", "my.fork", "git@github.com:me/hello.git"] },
+        { "git": ["config", "--add", "remote.my.fork.url", "https://github.com/other/second"] },
+        { "git": ["remote", "add", "a.url", "https://example.com/x y/z.git"] },
+        { "ghRepo": true },
+        { "ghRemotes": true }
+      ]
+    },
+    {
+      "name": "캐시: gh:repo 는 60초 안에 바뀐 remote 를 보지 못하고, 무효화는 목록(ghRemotes)만 새로 읽는다",
+      "repo": "basic",
+      "steps": [
+        { "ghRepo": true },
+        { "ghRemotes": true },
+        { "git": ["remote", "add", "origin", "https://github.com/octo/hello.git"] },
+        { "ghRepo": true },
+        { "ghRemotes": true },
+        { "invalidate": true },
+        { "ghRepo": true },
+        { "ghRemotes": true }
+      ]
+    },
+    {
+      "name": "잘못된 owner·repo 모양은 거른다",
+      "repo": "basic",
+      "steps": [
+        { "git": ["remote", "add", "origin", "https://github.com/octo/.."] },
+        { "git": ["remote", "add", "a", "https://github.com/-octo/hello"] },
+        { "git": ["remote", "add", "b", "https://github.com/octo/hello/tree/main"] },
+        { "git": ["remote", "add", "c", "git@github.com:octo/hello%20x"] },
+        { "ghRepo": true },
+        { "ghRemotes": true }
+      ]
+    },
+    {
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "repo": "basic",
+      "steps": [
+        { "git": ["checkout", "-q", "-f", "main"] },
+        { "git": ["remote", "add", "origin", "https://github.com/octo/hello.git"] },
+        { "git": ["commit", "--allow-empty", "-q", "-m", "pushed", "--author=Dev <dev+x@corp.io>"] },
+        { "git": ["commit", "--allow-empty", "-q", "-m", "look-alike", "--author=Other <devxx@corp.io>"] },
+        { "git": ["update-ref", "refs/remotes/origin/main", "main"] },
+        { "git": ["switch", "-q", "-c", "local-only"] },
+        { "git": ["commit", "--allow-empty", "-q", "-m", "local", "--author=Dev <dev+x@corp.io>"] },
+        { "pushed": { "email": "dev+x@corp.io", "limit": 3 } },
+        { "pushed": { "email": "DEV+X@CORP.IO", "limit": 3 } },
+        { "pushed": { "email": "devxx@corp.io", "limit": 3 } },
+        { "pushed": { "email": "dev@example.com", "limit": 2 } },
+        { "pushed": { "email": "dev@example.com", "limit": 100 } },
+        { "pushed": { "email": "nobody@corp.io", "limit": 3 } },
+        { "pushed": { "email": ".*", "limit": 3 } },
+        { "pushed": { "email": "dev+x@corp.io>", "limit": 3 } },
+        { "pushed": { "email": "--output=pwned.txt", "limit": 3 } }
+      ]
+    },
+    {
+      "name": "원격 추적 ref 가 없으면 push 된 커밋이 없다",
+      "repo": "basic",
+      "steps": [{ "pushed": { "email": "dev@example.com", "limit": 5 } }]
+    },
+    {
+      "name": "커밋이 없는 저장소",
+      "repo": "empty",
+      "steps": [
+        { "ghRepo": true },
+        { "git": ["remote", "add", "origin", "git@github.com:octo/hello.git"] },
+        { "ghRemotes": true },
+        { "pushed": { "email": "dev@example.com", "limit": 3 } }
+      ]
+    }
+  ]
+}

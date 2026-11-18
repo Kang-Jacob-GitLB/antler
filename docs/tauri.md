@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 7a(감시 상태 기계) 완료(아래 "나머지 git 채널(Phase 6a)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 7a(감시 상태 기계)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -431,8 +431,8 @@ Tauri 판의 **local·WSL 저장소 fetch** 를 Rust 가 맡는다(github 는 �
 
 ### 계획 요약
 
-- **경계**: Rust 가 `gh:*`(`gh:repo` 제외)·`jira:*` 전부와 토큰 영속(Windows 자격 증명 관리자), API 호출·로그인을 맡는다. 사이드카에는 `gh:repo`·`repos:addGithub`·GitHub 원격 전용 저장소 git 이 남고,
-  GitHub 토큰의 메모리 사본만 Rust → Node(`{t:"ghToken"}`)로 간다(Jira 토큰은 넘기지 않는다). Rust → Node 질의 `{t:"repoq",id,op}` 로 `ghRepo`·`ghRemotes` 등을 받는다.
+- **경계**: Rust 가 `gh:*`(`gh:repo` 제외)·`jira:*` 전부와 토큰 영속(Windows 자격 증명 관리자), API 호출·로그인을 맡는다. 사이드카에는 `gh:repo`·`repos:addGithub`·GitHub 원격 전용 저장소 git 이 남고(**`gh:repo` 는 Phase 6a PR 8 부터 Rust 가 git 을 맡는 저장소 것만 Rust 가 답하고** 사이드카에는 github·미러에 없는 저장소 것이 남는다),
+  GitHub 토큰의 메모리 사본만 Rust → Node(`{t:"ghToken"}`)로 간다(Jira 토큰은 넘기지 않는다). Rust → Node 질의 `{t:"repoq",id,op}` 로 `ghRepo`·`ghRemotes` 등을 받는다(PR 8 부터 그 저장소 정보도 Rust 가 맡는 저장소는 Rust 가 직접 읽는다).
   스위치는 `ANTLER_RUST_API`(0 이면 끔), `ANTLER_RUST_GIT=0` 이면 함께 꺼진다. 마이그레이션은 없다(다시 로그인) — Phase 6 전에 사용자 확인이 필요하다.
 - **HTTP**: reqwest 0.13(`default-features=false`, `native-tls`), 클라이언트 생성은 한 곳(`net/http.rs`)에 모으고 `Client::new` 등은 clippy 로 막는다. `https_only`·`no_proxy`·15초·UA `Antler`,
   Jira·Device Flow 는 리다이렉트를 따르지 않고 GitHub API 는 origin 이 정확히 `https://api.github.com` 인 5홉까지만. 본문 상한은 Jira 5MB·사진 256KB·GitHub 32MB.
@@ -750,8 +750,8 @@ gh 는 `gh auth token --hostname github.com`(가져오기)과 `gh --version`(`av
 Tauri 판에서 `gh:*` 23개 채널(`gh:repo` 제외)을 Rust 가 처리한다(`API_CHANNELS`). 이 PR 부터 앱이 GitHub 토큰을 Windows 자격 증명 관리자(Jira 와 같은 `Vault`)에 두고 읽는다.
 스위치는 PR 6 의 `ANTLER_RUST_API`(0 이면 끔)·`ANTLER_RUST_GIT=0` 과 같다: 꺼져 있으면 서비스도 키체인도 없고 사이드카가 지금처럼 `jira:*`·`gh:*` 를 전부 처리한다.
 
-- **`gh:repo` 는 사이드카에 남는다**(`API_SIDECAR_CHANNELS`, 사이드카의 `SIDECAR_KEPT_CHANNELS` — 두 목록은 `tests/api_route.rs` 가 대조한다). 저장소의 remote 를 읽는 일이라 git 실행기·60초 캐시·원격 전용 저장소 레코드를 쥔 `RepoService.ghRepo` 의 몫이다.
-  Rust 서비스는 같은 정보를 `repoq` 질의로 받는다(`gh:repo` 를 Rust 로 옮기면 git 호출·캐시를 두 곳에서 하게 된다).
+- **`gh:repo` 는 이 PR 에서 사이드카에 남았다**(`API_SIDECAR_CHANNELS`, 사이드카의 `SIDECAR_KEPT_CHANNELS` — 두 목록은 `tests/api_route.rs` 가 대조한다). 저장소의 remote 를 읽는 일이라 git 실행기·60초 캐시·원격 전용 저장소 레코드를 쥔 `RepoService.ghRepo` 의 몫이었고,
+  Rust 서비스는 같은 정보를 `repoq` 질의로 받았다(`gh:repo` 를 Rust 로 옮기면 git 호출·캐시를 두 곳에서 하게 된다). **Phase 6a PR 8 이 Rust 가 git 을 맡는 저장소의 `gh:repo`·`repoq` 를 Rust 로 옮겼다**(아래 "PR 8"). 두 목록은 그대로이고 github kind·미러에 없는 id 는 여전히 사이드카가 처리한다.
 - **한 env, 두 서비스**: 사이드카의 `ANTLER_RUST_API=1` 하나가 `jira:*`·`gh:*` 를 함께 넘기므로 `lib.rs` 는 Jira·GitHub 서비스가 **둘 다** 만들어졌을 때만 둘 다 라우터에 주입한다. 하나라도 실패하면 둘 다 주입하지 않고 사이드카가 둘 다 처리한다(소스 검사가 이 분기를 고정한다).
   Vault(보관소)는 하나이고 생성은 스위치가 켜진 분기 안 한 곳이다.
 - **소유 판정은 하나**: `Router::api_active()`(스위치 && Jira·GitHub **둘 다** 주입)가 사이드카 env(`lib.rs` 의 `claim_api()`)와 채널 라우팅을 함께 정한다. 한쪽만 있으면 둘 다 사이드카가 처리한다. `claim_api()` 로 env=1 을 정한 뒤 서비스가 없는 채널은 사이드카로 넘기지 않고 `ERROR` 봉투다(방어 — 지금 경로로는 닿지 않는다).
@@ -759,7 +759,7 @@ Tauri 판에서 `gh:*` 23개 채널(`gh:repo` 제외)을 Rust 가 처리한다(`
   서비스가 requestId 로 직접 취소한다(`req:cancel` → `GitHubService::cancel`, 라우터가 Jira 와 함께 부른다). requestId 자리는 서비스가 정한다(`devicePoll`·`launchpad`·`accessibleRepos` 0번, `avatars` 1번).
   `gh:openExternal` 은 서비스의 `external_url`(`https://github.com` 만) 뒤에 Jira 와 **같은 열기 함수**(`open_href` → 앱이 주입한 `open_https`)를 쓴다.
 - **보안 수정(PR 6 과 같다)**: `gh:*` 도 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아닌 인자(`gh:loginPat` 의 토큰 포함 가능)는 서비스 검증이 거부하고 사이드카 stdin 으로 가지 않는다(`tests/api_route.rs` 의 회귀 테스트).
-- **서비스 조립**: `GitHubService::new(vault, SidecarRepos, GhCli, ServiceOptions{avatar_cache_file: <userData>/avatar-cache.json})`. 아바타 캐시 파일 이름은 Electron 판과 같지만 키가 sha256 이라 옛 파일의 항목은 버려진다(PR 7). 앱 종료(`RunEvent::Exit`)는 `Router::shutdown` 이 서비스 `dispose` 를 불러 2초 지연 쓰기를 비운다.
+- **서비스 조립**: `GitHubService::new(vault, RoutedRepos(SidecarRepos — PR 8 전에는 `SidecarRepos` 직접), GhCli, ServiceOptions{avatar_cache_file: <userData>/avatar-cache.json})`. 아바타 캐시 파일 이름은 Electron 판과 같지만 키가 sha256 이라 옛 파일의 항목은 버려진다(PR 7). 앱 종료(`RunEvent::Exit`)는 `Router::shutdown` 이 서비스 `dispose` 를 불러 2초 지연 쓰기를 비운다.
 
 **`repoq` — Rust → Node 질의(`src-tauri/src/repoq.rs`, `src/sidecar/repoQuery.ts`)**
 
@@ -774,6 +774,8 @@ Tauri 판에서 `gh:*` 23개 채널(`gh:repo` 제외)을 Rust 가 처리한다(`
 | `invalidateGhRemotes` | 없음 | (알림) | `RepoService.invalidateGhRemotes()` |
 | `githubClientId` | 없음 | 문자열 \| null | `config.get().ui.githubClientId` 를 trim(TS `clientId()` 와 같다) |
 | `repoIds` | 없음 | 문자열 배열 | `config.get().repos` 의 ID — **PR 7 의 숙제**(`RepoQuery::repo_ids`)를 이 op 로 풀었다 |
+
+**Phase 6a PR 8 이후**: `ghRepo`·`ghRemotes`·`pushedShas` 는 Rust 가 git 을 맡는 저장소(local·WSL·SSH)에 대해서는 사이드카에 오지 않는다(`RoutedRepos` 가 라우터로 직접 답한다). 이 표의 처리는 github 원격 전용 저장소·미러에 없는 id·`ANTLER_RUST_GIT=0` 만 받는다.
 
 - **응답은 신뢰하지 않는다**: 응답 전체 1MB·`ghRemotes` 100개·`repoIds` 5000개·문자열 200자(클라이언트 ID 256자)·오류 문구 300자 상한, 모양이 틀리면 거부(`ghRepo`·`ghRemotes`)하거나 없는 것으로 줄인다(`repoIds`·`githubClientId`).
   sha 는 소문자 hex 40/64 만 받고 물은 개수까지만 쓴다. owner/repo 의 최종 검증은 서비스의 `Slug::parse`(PR 7)다. 질의마다 제한 시간 30초(멈춘 시계 시험). 알 수 없는 op 는 Rust 가 보낼 수 없고(`Op` 닫힌 목록) 사이드카도 허용 목록(`REPOQ_OPS`)을 다시 검사한다 — 목록이 둘 다 같음은 테스트가 대조한다.
@@ -990,7 +992,8 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - 실제 sshd 지연·패킷 손실 아래의 상한 동작은 루프백으로만 봤다.
 
 **남은 위험(3)**
-- **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널·감시가 넘어오면 줄지만, 사이드카의 `gh:repo`·repoq 의 git 조회(`remotes`·`pushedShas`)가 남으면 사라지지 않는다 — 6a PR 8(포함 — 2026-11-17 결정, 아래 "나머지 git 채널(Phase 6a)")의 몫이다.
+- **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널·감시가 넘어오면 줄어든다. 사이드카의 `gh:repo`·repoq 의 git 조회(`remotes`·`pushedShas`)는 **6a PR 8 이 Rust 로 옮겼다**(아래 "PR 8"). 사라지는 것은 6a 가 끝났을 때다 — 이 PR 8 만으로는 아니다:
+  `wipStatus`·`wipDiff`(PR 6)·RepoWatcher(PR 7b)와 저장소 **추가 흐름**의 사이드카 git(`repos:add`·`scan`·`env:test`·`env:listDir` — 6b)가 남아 있는 동안은 Rust 가 맡은 저장소에도 사이드카가 연결을 연다.
 - **정리 경합.** 미러 변경 직전에 해석을 마친 요청이 정리(`sync_ssh_hosts`) 뒤에 `runtime()` 으로 들어오면 지운 호스트가 풀에 다시 생긴다. 다음 미러 변경이나 유휴 5분(연결 해제) 뒤에 정리되며 기능 영향은 없다.
 - `file_diff` 상한 초과(위)·실제 sshd 에서의 라우팅은 확인하지 않았다(루프백 서버만).
 - 검증 중 `cargo test` 가 한 번 `fetch_service` 의 `git clone file://…`(시험 준비용 git)에서 15분 넘게 멈춘 적이 있다 — 1회 관측, 원인은 확인하지 못했고 그 바이너리를 단독으로 다시 돌리면 통과했다(PR 3 의 코드는 그 바이너리에서 `MirrorRepo` 리터럴 한 줄만 바뀌었다).
@@ -1092,7 +1095,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 
 **결정(사용자 승인)**: ① refs 정렬은 `natural_compare` 근사를 유지한다(ICU 를 들이지 않는다 — 한글↔라틴 경계만 TS 와 다르다, 위 "골든 테스트"). ② `notify` 크레이트는 PR 7b 에서 도입한다(이 PR 에는 새 크레이트가 없다).
 ③ #113 에서 TS 에 들어간 방어(untracked 허용 목록·정션/심볼릭 링크 거부·unstaged `~숫자` 거부·서브모듈 경로 검증과 realpath)는 Rust 에 **동등 이상으로** 옮긴다.
-④ PR 8(`gh:repo`·repoq 의 git 조회를 Rust 가 처리)은 **아직 결정되지 않았다** — 하지 않으면 SSH 호스트당 사이드카 `ssh2` 연결이 6a 뒤에도 남는다.
+④ PR 8(`gh:repo`·repoq 의 git 조회를 Rust 가 처리)은 6a 에 **포함**한다(2026-11-17) — 하지 않으면 SSH 호스트당 사이드카 `ssh2` 연결이 6a 뒤에도 남는다.
 
 | PR | 내용 | 앱 연결 | 상태 |
 |---|---|---|---|
@@ -1103,7 +1106,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 | 5 | `repoExtras`·`lfsPaths` | 있음 | **완료(코드)** — 작업 트리 `--no-index` 읽기는 #121 의 `FilterGuard` 로 필터를 무력화한다(아래 "필터 실행 차단") |
 | 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | |
 | 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | 7a **완료** |
-| 8 | `gh:repo`·repoq 의 git 조회 | 있음 | |
+| 8 | `gh:repo`·repoq 의 git 조회 | 있음 | **완료(코드)** — 저장소 추가 흐름의 사이드카 git 은 6b 몫이다 |
 
 모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 마지막 PR 에서 이식 대응표의 `N/A: PR n` 이 0개여야 한다.
 
@@ -1509,6 +1512,70 @@ WSL(4초→포커스 잃으면 16초)·SSH(30초)·로컬 60초 폴링, 포커�
 7b 가 지킬 계약: `WatchHandle` 의 drop·`DirWatch::has_head`·`WatchHost::on_change` 는 tokio 워커(또는 정지를 부른 스레드)에서 불리니 **막지 않는다**(네트워크 드라이브 stat 등 오래 걸리는 일을 하지 않는다). 저장소를 제거할 때는 `watch(None)` 이 아니라 `unwatch_if(repo_id)` 를 쓴다(다른 저장소로 바뀐 감시를 끊지 않게 한 잠금 안에서 비교한다).
 
 **남은 위험**: 확인 건너뜀(위)이 TS 와 같아 변화를 한 주기 늦게 알 수 있다. 상태 기계 시험은 가짜 이벤트원이라 notify 의 실제 이벤트 모양(rename·rescan 표시)은 7b 에서 처음 확인된다.
+
+### PR 8 — `gh:repo`·repoq 의 git 조회(앱에 연결한다)
+
+Rust 가 git 을 맡는 저장소(local·WSL·SSH)의 `gh:repo` 채널과 GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq` 의 `ghRepo`·`ghRemotes`·`pushedShas`)를 Rust 가 처리한다. 그 저장소에 사이드카가 `git config --get-regexp ^remote…`·`git log --remotes` 를 돌리지 않는다.
+TS: `RepoService.ghRepo`·`ghRemotes`·`pushedShasByAuthor`·`invalidateGhRemotes` + `commands.ts` 의 `remotes` + `github/remoteUrl.ts`. github 원격 전용 저장소(kind github)는 사이드카 그대로다(레코드가 어느 GitHub 저장소인지 안다 — git 을 부르지 않는다).
+토큰은 건드리지 않았다(이 PR 의 git 은 remote URL·로컬 로그만 읽고, 서비스의 토큰 경로는 그대로 Rust 안이다).
+
+| 파일 | 내용 |
+|---|---|
+| `github/remote_url.rs` | `parseGithubRemote`·`pickGithubRemote(s)` 이식. URL 은 `url` 크레이트(WHATWG), scp 형식은 `^(?:[^@/\s]+@)?([^:/\s]+):(.+)$` 를 손으로 옮겼고 owner/repo 규칙은 `Slug::parse` 한 곳이다 |
+| `git/remotes.rs` | `remotes`(`config --null --get-regexp ^remote\..*\.url$`)·`parse_remote_config`·`pushed_shas`(`log --remotes --max-count=<n> --format=%H -F -i --author=<이메일>`)·`parse_pushed_shas`·요청 검사 |
+| `router.rs` | `RUST_CHANNELS` 에 `gh:repo`, `gh_repo_channel`, 서비스 길의 질의 `gh_repo`·`gh_remotes`·`pushed_shas_by_author`, 캐시 둘, `invalidate_gh_remotes`, `repos:update`·`repos:remove` 엿보기 |
+| `routed_repos.rs`(신규) | `RepoQuery` 의 합성 구현 `RoutedRepos` — Rust 가 맡는 저장소는 라우터가, 나머지는 `SidecarRepos`(repoq)가 답한다. `lib.rs` 가 GitHub 서비스에 이것을 넣는다 |
+
+**소유 판정은 새로 만든 것이 없다 — 한 술어 `RepoMirror::resolve` + 스위치 `ANTLER_RUST_GIT`**: 채널(`gh:repo`)과 서비스 길(`RoutedRepos`)이 같은 `Router::rust_target` 를 쓴다.
+
+| 결과 | `gh:repo` | 서비스의 `gh_repo`·`gh_remotes`·`pushed_shas_by_author` |
+|---|---|---|
+| `Resolved::Rust`(local·wsl·켜진 ssh) | Rust | Rust |
+| `Resolved::Sidecar`(github·미러에 없는 id·풀 없는 ssh)·`ANTLER_RUST_GIT=0` | 사이드카 | `SidecarRepos` 위임 |
+| `Resolved::Invalid`(미러가 경로·호스트·배포판을 거부) | ERROR 봉투 | **오류**(위임하지 않는다 — 위임하면 미러가 막은 경로에 사이드카가 git 을 돌린다) |
+
+`github_client_id`·`repo_ids`(설정 읽기)는 항상 사이드카다. `gh:repo` 는 `ANTLER_RUST_API` 와 무관하다(git 채널이다) — `ANTLER_RUST_API=0` 이면 GitHub 서비스가 사이드카에 있어 사이드카의 `RepoService` 가 remote 를 git 으로 읽는다.
+
+**TS 와 같은 순서·캐시** (`RepoService.ts` 745-797)
+- `gh:repo`: 60초 캐시(**없음도** 담는다) → 첫 로그 페이지 문(`RepoState::after_first_page` — 큐에 들어가기 전에) → 큐 슬롯 안에서 `config`(키 `remotes:<id>`) → `pick_github_remote`.
+- `ghRemotes`(Launchpad): 10분 캐시, 문은 없다(TS 도 없다), 같은 큐 키 `remotes:<id>` 라 진행 중인 `gh:repo` 의 git 과 합쳐진다. 취소는 기다림만 끊는다(합쳐진 다른 호출자의 git 은 죽이지 않는다).
+- `pushedShas`: 큐 키 없음, 취소가 슬롯 대기와 프로세스에 모두 닿는다. git 이 실패하면(`code != 0`) 빈 목록이다. 이메일은 `--author=<…>` 한 인자(`-F -i`)로만 들어간다.
+- `remotes`: 종료 코드 1 은 빈 목록, 그 밖의 실패는 GIT 오류(`stderr` 를 다듬은 문장, 비면 `git config failed (<코드>)`). stdout 은 손실 UTF-8 로 읽는다(TS `toString('utf8')`).
+- 무효화: `repos:update`·`repos:remove` 는 사이드카가 응답하므로 라우터가 인자의 저장소 id 를 엿보아 **목록 캐시(10분)만** 비운다(TS 핸들러의 `invalidateGhRemotes(repoId)` 와 같다 — `gh:repo` 의 60초 추론은 TS 도 그대로다). `gh:launchpad` 의 `fresh` 는 서비스가 `invalidate_gh_remotes` 로 전부 비우고 사이드카에도 알린다.
+  미러가 바뀌면 사라졌거나 Rust 가 맡지 않게 된 저장소의 캐시 항목을 치운다(표가 자라지 않게). 앱 종료 때 둘 다 비운다.
+- 실행기·큐·SSH 연결은 라우터의 `runtime()` 하나다 — 채널 핸들러도 서비스 길도 같은 큐(local 6·wsl·ssh 4)와 같은 `SshPool` 연결을 쓴다. 서비스는 라우터보다 먼저 만들어져서 `RoutedRepos` 가 라우터를 **호출 때 찾는다**(`RouterSource` — 앱은 `AppHandle` 의 관리 상태, 시험은 `Arc<Router>`).
+
+**보안 경계**
+- git 인자는 서브커맨드·옵션 상수 + 검증된 값뿐이다. 이메일은 renderer(아바타 작성자)에서 오는 값이라 `check_pushed_request` 가 사이드카 `repoq` 검사(길이 1~320·개수 1~100)에 **NUL·개행 거부**를 더해 git 을 띄우기 전에 거른다(원격 셸 줄·프로세스 인자에 들어갈 수 없는 값). 옵션처럼 보이는 이메일(`--output=x`)도 `--author=<…>` 한 인자라 옵션이 될 수 없다(골든 시나리오가 `pwned.txt` 가 생기지 않음을 본다).
+- 서비스 길에는 사이드카 질의와 같은 제한 시간(30초, `QUERY_TIMEOUT`)을 건다(멈춘 SSH 호스트가 `gh:*` 를 붙잡지 않게). 시간이 지나면 future 를 버려 대기 중인 git 이 정리된다. 채널(`gh:repo`)에는 TS 처럼 제한이 없다.
+- URL 해석: 앞뒤 JS 공백(`\s` 와 같은 집합 — `is_js_space`)을 자르고 NUL·공백이 있으면 거부, 스킴은 `http`·`https`·`ssh`·`git` 만, 호스트는 `github.com`·`www.github.com`(대소문자 무시), 포트는 그 스킴의 기본값만, 경로는 정확히 owner/repo 둘(끝 `/`·`.git` 한 번만). 서비스가 받은 값을 `Slug::parse` 로 다시 검증하는 것(PR 9)은 그대로다 — 이 PR 의 값도 같은 `Slug::parse` 를 통과한 것만 나온다.
+
+**골든·시험**
+- 순수 로직 골든(`tests/golden/parsers/{githubRemote,pickRemote,remoteConfig,pushedShas}__edge_*`): TS 가 만든 케이스 목록(`tests/fixtures/edge/{github-remote,pick-remote,remote-config,pushed-shas}-cases.json`)을 `tests/golden.rs` 가 같은 결과로 재현한다. URL 케이스 137개는 WHATWG 두 구현(Node·`url` 크레이트)이 갈릴 만한 입력을 모았다(포트 `:022`·`:443`·빈 포트, 호스트 끝 점·퍼센트 인코딩 호스트·대소문자, `\`, `?`·`#`, `..`·`%2e%2e` 경로, userinfo 의 `@`, NBSP·BOM·`U+0085`·NUL, 이모지·IPv6, owner 39/40자·repo 100/101자). 모두 일치했다.
+  TS 쪽은 `commands.ts` 에 순수 함수 `parseRemoteConfig`·`parsePushedShas` 를 export 만 했다(동작은 그대로).
+- 채널 골든(`tests/golden/channels/{ghRepo,ghRemotes,pushedShas}.json`, 시나리오 `tests/fixtures/repos/remotes.scenarios.json` 10개): TS `RepoService` 가 만들고 `channels.rs` 의 `remote_조회_시나리오가_ts_골든과_같다`(local)·`…ssh_에서도…`(127.0.0.1 루프백 SSH, 끝에 `connections()==1`)가 `gh:repo`(라우터)·`RoutedRepos`(remote 목록·push 된 커밋)로 같은 결과를 낸다. **어느 단계도 가짜 사이드카에 질의가 가지 않음**을 시나리오마다 본다.
+  캐시(60초 추론이 바뀐 remote 를 못 봄·무효화는 목록만), 우선순위·중복(대소문자)·포트가 다른 ssh·자체 호스트·`github.com.evil.com`, 점이 든 이름·같은 remote 의 여러 url, 이메일 고정 문자열·대소문자·`.*`·`>`·`--output=…`, 원격 추적 ref 없음, 커밋 없는 저장소를 본다. 골든에 시험 경로가 들지 않는다(결과는 owner/repo/해시뿐이라 TEMP 8.3 경로 문제가 없다).
+- 그 밖: `channels.rs` — `remote_질의는_rust_가_맡는_저장소만_답하고_나머지는_사이드카에_위임한다`(위임표·거부된 저장소는 위임 없음·스위치 꺼짐·설정 읽기·무효화 통지), `gh_repo_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카`, `저장소를_바꾸거나_지우면_remote_목록_캐시만_비워진다`,
+  `gh_repo_는_첫_페이지_문이_열릴_때까지_기다린다`, `push_된_커밋_조회는_적대적_입력을_git_없이_거절한다`, `remote_질의는_취소와_제한_시간을_따른다`. `lib` 단위 4개(scp 분해·우선순위·argv 바이트·요청 검사). `api_route.rs` 의 `gh:repo` 시험은 새 동작으로 바꿨다(미러에 없으면 사이드카·맡은 저장소는 Rust 가 GIT 오류로 증명), `ssh_route.rs` 의 두 표에 `gh:repo` 를 더했다(잘못된 호스트 → ERROR 이고 연결 0, 스위치 꺼짐 → 사이드카).
+- `test-map.json`: `ghRemote`(9)·`pushedShas`(2)의 모든 `it` 를 Rust 대응으로 적었다(`golden6a.test.ts` `TARGET_TESTS` 에 두 파일 추가). 이 PR 뒤 `N/A: PR n` 은 PR 6(wip 계열)·7b(repoWatcher) 분만 남는다.
+
+**TS 와 다른 점**
+- 서비스 길(`RoutedRepos`)에 30초 제한이 있다(TS `RepoService` 의 `ghRemotes`·`pushedShasByAuthor` 에는 없고 사이드카 경로의 `SidecarRepos` 에 있었다 — Rust 로 옮기며 그 제한을 잃지 않게 했다).
+- `pushedShas` 의 이메일에 NUL·개행이 있으면 오류다(사이드카의 `repoq` 검사는 길이만 봤다). 정상적인 이메일에는 없는 값이다.
+- 캐시 표를 미러 변경 때 치운다(TS 는 `dispose` 에서만 비운다).
+- Rust 경로에는 `SidecarRepos` 의 응답 모양 상한(remote 100개·이름 200자)이 걸리지 않는다 — 읽는 쪽이 Rust 자신이라 신뢰하지 않을 응답이 없고, 값은 `Slug::parse` 를 통과한 owner/repo 뿐이다(remote 개수는 git 설정이 정한다).
+- `U+0085`(NEL)는 JS 공백이 아니다 — 새 코드는 `is_js_space` 로 JS 와 같게 잘라, 기존 `parsers::js_trim`(Rust 의 `is_whitespace` + BOM)과 이 한 글자가 다르다. 기존 helper 는 건드리지 않았다.
+
+**사람 확인(자동화 불가·실환경)**
+- `pnpm tauri:build:cdp` 뒤 `ANTLER_ROUTE_LOG=1 ANTLER_DRIVE_DEBUG=1 node scripts/drive.mjs <저장소> --tauri …` 로 `gh:repo` 가 `-> rust`(local·WSL·SSH 저장소)인지, github 원격 전용 저장소는 `-> sidecar` 인지, 이슈·PR·Actions 탭과 커밋 아바타가 `ANTLER_RUST_GIT=0`·Electron 과 같게 나오는지(GitHub 실접속이라 이 PR 에서 하지 않았다).
+- **실제 sshd 의 SSH 저장소로 앱을 켠 뒤 사이드카 `ssh2` 연결 수**(원격 `ss`/`who`) — 위 "남은 위험(3)"의 이중 연결은 PR 6·7b 와 6b 가 끝나야 0 이 된다. 저장소를 **추가한 직후는 제외**한다(추가 흐름은 사이드카 실행기를 쓰고 저장된 소스의 런타임은 놓지 않는다 — `RepoService.ts` 443·497·530·551·579).
+- Launchpad 의 새로고침(`fresh`)이 저장소 remote 를 다시 읽는지, remote 를 바꾼 직후 `repos:update` 뒤 목록이 갱신되는지. WSL 저장소는 이 PC 에 WSL 이 없어 **실행해 보지 않았다**(git 인자는 상수 + 이메일 한 인자라 `wsl.exe` argv 단위 시험과 `tests/exec.rs` 의 `wsl_통합` 이 덮는다).
+
+**남은 위험**
+- `ANTLER_RUST_API=0`(또는 서비스를 못 만든 경우)이면 사이드카의 GitHubService 가 `RepoService` 로 remote 를 git 으로 읽는다 — Rust 가 맡는 SSH 저장소에도 사이드카 연결이 열린다(되돌리기 경로의 비용이다).
+- 앱 시작 직후 미러가 채워지기 전의 질의는 사이드카가 답한다(미러는 사이드카가 ready 전에 보내 거의 닿지 않는 틈이다).
+- 이 PR 만으로 이중 연결이 사라지지는 않는다: `wipStatus`·`wipDiff`(PR 6)·RepoWatcher(PR 7b)·저장소 추가 흐름(6b)이 남아 있다.
+- URL 해석은 두 WHATWG 구현의 일치에 기댄다. 골든 137개가 같았지만 `url` 크레이트가 올라 규칙이 바뀌면 골든이 알려 준다(`UPDATE_GOLDEN` 으로 덮지 않고 원인을 본다).
 
 ## Phase 0 에서 확인한 것
 

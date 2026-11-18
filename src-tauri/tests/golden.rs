@@ -21,7 +21,10 @@ use antler_lib::git::parsers::submodule::{parse_gitlinks, parse_gitmodules, pars
 use antler_lib::git::parsers::wip_status::WipStatusParser;
 use antler_lib::git::parsers::worktree::parse_worktrees;
 use antler_lib::git::refs_service::{is_safe_submodule_path, pick_default_branch};
+use antler_lib::git::remotes::{parse_pushed_shas, parse_remote_config};
 use antler_lib::git::wip::{assert_rel_path, filter_driver_names, has_short_name_segment, FilterGuard};
+use antler_lib::github::ports::GhRepoRef;
+use antler_lib::github::remote_url::{parse_github_remote, pick_github_remote, pick_github_remotes, Remote};
 use serde_json::{json, Map, Value};
 
 fn repo_root() -> PathBuf {
@@ -209,6 +212,15 @@ fn run_parser(parser: &str, input: &[u8], args: &Value) -> Option<Value> {
         "relPath" => cases(input, |c| assert_rel_path(as_text(c, "invalid path")?).map(|()| json!(true)).map_err(str::to_string)),
         "shortName" => cases(input, |c| Ok(json!(has_short_name_segment(as_text(c, "text")?)))),
         "submodulePath" => cases(input, |c| Ok(json!(is_safe_submodule_path(as_text(c, "text")?)))),
+        // ---- Phase 6a PR 8 ----
+        "githubRemote" => cases(input, |c| Ok(parse_github_remote(as_text(c, "text")?).map_or(Value::Null, |(owner, repo)| json!({ "owner": owner, "repo": repo })))),
+        "pickRemote" => cases(input, |c| {
+            let list: Vec<Remote> = serde_json::from_value(c.clone()).map_err(|e| e.to_string())?;
+            let r = |x: &GhRepoRef| json!({ "owner": x.owner, "repo": x.repo, "remote": x.remote });
+            Ok(json!({ "one": pick_github_remote(&list).as_ref().map_or(Value::Null, r), "all": pick_github_remotes(&list).iter().map(r).collect::<Vec<_>>() }))
+        }),
+        "remoteConfig" => cases(input, |c| sv(parse_remote_config(as_text(c, "text")?))),
+        "pushedShas" => cases(input, |c| sv(parse_pushed_shas(as_text(c, "text")?))),
         _ => return None,
     })
 }
