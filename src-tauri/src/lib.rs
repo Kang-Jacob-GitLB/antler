@@ -29,6 +29,7 @@ pub mod routed_repos;
 // 토큰 보관(Phase 4 PR 4) — Jira(PR 6)·GitHub(PR 9) 서비스가 같은 Vault 를 쓴다
 pub mod secret;
 mod sidecar;
+mod platform;
 mod single_instance;
 mod snap;
 // 앱 업데이트: 판정 로직(Phase 6c PR 1)·상태 기계와 호스트(PR 4 — `update:*` 7채널을 Rust 가 처리한다). 통합 테스트(tests/update*.rs)가 별도 크레이트라 pub 이다
@@ -407,7 +408,9 @@ pub fn run() {
                 .title("Antler")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(960.0, 600.0)
-                .decorations(false)
+                // Windows 만 창 단추를 직접 그린다(bridge.ts). macOS·Linux 는 OS 기본 제목 표시줄을 쓴다
+                .decorations(platform::native_titlebar())
+                .initialization_script(platform::init_script())
                 // 앱이 HTML5 드래그 앤 드롭을 쓴다 — Tauri 의 파일 드롭 처리가 이를 가로채지 않게 끈다
                 .disable_drag_drop_handler()
                 .background_color(BG)
