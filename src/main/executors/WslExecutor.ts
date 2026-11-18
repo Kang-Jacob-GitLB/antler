@@ -122,7 +122,8 @@ export function cachedProbe(probe: () => Promise<boolean>, ttl: number = WSL_REG
 }
 
 /** 프로세스 전역의 기억된 등록 여부 확인 — WSL 감시 폴링과 실행기가 같이 쓴다 */
-export const hasRegisteredWslDistroCached = cachedProbe(hasRegisteredWslDistro)
+// Windows 가 아니면 막지 않는다(레지스트리도 wsl.exe 스텁도 없다 — Rust `DistroGate` 와 같다)
+export const hasRegisteredWslDistroCached = cachedProbe(() => (process.platform === 'win32' ? hasRegisteredWslDistro() : Promise.resolve(true)))
 
 /** 설치된 WSL 배포판 목록. Windows 가 아니거나 등록된 배포판이 없거나 wsl.exe 가 없거나 멈추면(8초) 빈 배열. */
 export async function listWslDistros(): Promise<string[]> {

@@ -86,7 +86,7 @@ async function captureFetch(): Promise<unknown[]> {
       s.kind === 'local'
         ? new LocalExecutor()
         : s.kind === 'wsl'
-          ? new WslExecutor('Ubuntu')
+          ? new WslExecutor('Ubuntu', async () => true)
           : ({
               kind: 'ssh',
               run: async (repoPath: string, args: string[], opts: { env?: Record<string, string> } = {}) => {
@@ -128,7 +128,7 @@ function captureSsh(): unknown[] {
 async function capture(): Promise<unknown> {
   spawned.length = 0
   await new LocalExecutor().run('/r', ['log'])
-  await new WslExecutor('Ubuntu').run('/home/me/repo', ['log', '-z'])
+  await new WslExecutor('Ubuntu', async () => true).run('/home/me/repo', ['log', '-z'])
   const [local, wsl] = spawned
   // 부모 환경에 덧씌워진 값만 본다 — GIT_ENV 의 키는 spawn 환경에서 읽는다
   const pick = (env: Record<string, string | undefined>): string[][] => Object.keys(GIT_ENV).map((k) => [k, env[k] ?? '<없음>'])
