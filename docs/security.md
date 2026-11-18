@@ -86,7 +86,14 @@
   (대상에는 접속하지 않는다). 원격이면 거부, 로컬 대상은 그 경로도 같은 방식으로 이어서 확인하고, 링크 수가 합쳐 16 을 넘으면 거부한다. 판정은 **허용 목록**이다(차단 목록은 `GLOBALROOT` 같은 NT 장치 경로로 우회돼 폐기): 로컬은 드라이브 경로(`C:\`·`C:/`·`\\?\C:\`·`\??\C:\`)·상대 경로·단일 `/` 시작 경로·WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`)뿐이고,
   나머지(`\\…`·`//…`, 드라이브가 아닌 `\??\…`·`\\?\…`)는 전부 원격으로 본다. 중간 링크(`b -> a\x`, `a -> 원격`)도 구성 요소 단위로 a 에서 멈춘다.
   적용 지점: `assertInsideRoot`·`assertNoLinkEscape`(서브모듈 확인·WIP 열기 전), 저장소 스캔(`repoScan.ts` — 원격 대상 링크는 폴더·`.git` 어느 쪽이든 건너뛴다), 외부 열기(`opener.ts` `inspect`, 로컬만 — WSL 은 리눅스 쪽 링크라 Node 가 볼 수 없다).
-  Rust 판의 `repos/scan.rs` `is_remote_link_target` 은 같은 사례표 `tests/fixtures/repos/link-target.cases.json` 으로 TS 와 함께 시험한다. 한계: 확인과 사용 사이 경쟁(TOCTOU)은 막지 못한다. Rust 판 외부 열기의 같은 방어는 이 변경에 없다.
+  한계: 확인과 사용 사이 경쟁(TOCTOU)은 막지 못한다.
+  **Rust 판은 공용 모듈 `src-tauri/src/fsguard.rs` 한 곳에 둔다**(외부 열기·폴더 선택·폴더 찾기·환경 채널이 모두 이것을 쓰고, 소스 검사 `tests/external.rs` 가 다른 곳의 중복 구현을 막는다).
+  `is_remote_link_target` 은 **허용 목록**이다 — 로컬로 인정하는 것만 나열한다: 드라이브 문자 경로(`X:\`·`X:/`·`\\?\X:\`·`\??\X:\`)·상대 경로·WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`).
+  그 밖의 `\\…`·`//…`·`\??\…`·`\\?\…`·`\\.\…`(`GLOBALROOT\Device\Mup\…`·`Device\…`·`Volume{…}` 포함)는 전부 원격이다 — 예전에 `\??\`·`\\?\` 뒤가 `UNC\`·`Volume{` 이 아니면 로컬로 보던
+  차단 목록식 판정은 `\??\GLOBALROOT\Device\Mup\host\share` 로 SMB 접속을 열어 주었다. `links_stay_local` 은 경로의 **구성 요소마다** `symlink_metadata` 로 링크를 보고 대상만 판정한다
+  (`b -> a\x`, `a -> \\evil\share` 처럼 중간 구성 요소의 링크도 잡는다. 사슬 16 초과 거부). 적용 지점: 외부 열기 `realpath`, 폴더 선택 시작 위치, 폴더 찾기(`repos:scan`)의 하위 항목,
+  그리고 `repos:scan` 의 **루트**(local 종류, Windows) — `git -C <루트>` 와 `read_dir` 가 루트·중간 링크를 따라가기 전에 `check_local_root` 로 거른다("네트워크 공유 경로는 지원하지 않습니다(링크가 …)").
+  TS 사례표 `tests/fixtures/repos/link-target.cases.json` 은 `fsguard` 단위 시험이 TS 와 함께 읽고, GLOBALROOT·Mup 같은 Rust 쪽 추가 사례는 `fsguard.rs` 시험에 따로 있다(TS 수정 PR 과 맞춘 뒤 사례표로 옮긴다).
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
@@ -102,7 +109,7 @@ ssh CLI 로 직접 수락하라고 안내한다. ProxyJump 는 홉마다 검증)
 쓰기 계열 SFTP 요청은 부르지 않는다. 서버가 주는 값은 믿지 않는다 — 패킷 256KiB·읽는 항목 20,000개·이름 1024바이트 상한, `/`·NUL 이 든 이름은 건너뛰고, `.`·`..` 만 되풀이하는 응답(연속 2회)과 빈 응답은 오류로 끝내고, 서버가 준 오류 문구는 제어·방향 서식 문자를 지우고 300자로 자르며, 이름순은 전순서라 악성 이름으로 정렬이 패닉하지 않고, `realpath` 결과는 절대 경로·NUL 없음·4096 이하여야 한다. 시간 제한(전체 30초)이 있고 읽지 않는 채널로 세션이 멈추지 않게 채널은 항상 비운다. 서버가 여는 채널 거부는 그대로다.
 **ssh 저장소의 fetch**: 위 fetch 규칙(refspec 고정·`--refmap=`·허용 목록·훅 차단·원격 계정의 사용자 `core.sshCommand` 또는 `BatchMode` 기본)이 원격에서도 그대로이고, 훅 경로는 `/dev/null` 이다. 이 PC 의 `GIT_SSH_COMMAND`·`GIT_SSH` 는 원격으로 가지 않는다.
 SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패)는 문구가 아니라 오류 종류로 network(백오프)로 분류한다 — 호스트 키 불일치가 "인증 일시 정지"로 오분류되지 않는다. 원격 git 이 낸 인증 오류는 문구로 auth 다.
-호스트가 미러에서 빠지면 연결과 fetch 서비스의 실행기를 함께 닫는다. 연결 확인 창은 저장소를 **추가할 때만** 뜨고(사이드카 몫), fetch 중에는 원격 설정의 위험 항목에 대한 확인 창(local·WSL 과 같은 것)만 뜬다. 자세한 것은 docs/tauri.md "SSH(Phase 5)".
+호스트가 미러에서 빠지면 연결과 fetch 서비스의 실행기를 함께 닫는다. 연결 확인 창은 저장소를 **추가하는 흐름에서만** 뜨고(`env:test`·`env:listDir`·`repos:scan` 은 Rust `env_host.rs` 가, `repos:add` 는 PR 9 전까지 사이드카가 묻는다 — 승인은 프로세스 메모리이고 취소가 기본 버튼이다. 모르는 호스트·바뀐 키는 이 흐름에서도 거부하고 지문과 `ssh <별칭>` 안내를 보이며 `known_hosts` 에 쓰지 않는다), fetch 중에는 원격 설정의 위험 항목에 대한 확인 창(local·WSL 과 같은 것)만 뜬다. 자세한 것은 docs/tauri.md "SSH(Phase 5)".
 
 **저장소 감시**(Electron `RepoWatcher.ts`, Tauri `src-tauri/src/git/{watcher,fs_watch}.rs` — notify): 활성 저장소 하나의 `.git`(워크트리면 공통 디렉터리까지)만 재귀로 감시하고 변화는 **ref 시그니처가 바뀌었을 때만** 알린다(이벤트가 git 을 부르는 폭주가 되지 않게 400ms 디바운스·확인 사이 최소 2초·확인 제한 20초, 이벤트는 쌓지 않고 합친다).
 `.git` 파일의 `gitdir`/`commondir` 은 저장소(공격자)가 정하므로 **UNC(네트워크)·NT 네임스페이스(`\??\UNC\…`) 경로이거나, 디렉터리·`HEAD` 가 링크이거나, `HEAD` 가 없는 디렉터리는 감시하지 않는다**(링크를 따라가지 않고 `lstat` 로 본다 — stat 만으로도 SMB 접속이 일어난다. notify 도 `follow_symlinks(false)`) — 홈 전체·네트워크 경로를 가리켜 재귀 감시를 이벤트 폭주(DoS)로 만들지 못하게 한다. `objects/` 이벤트는 무시한다.

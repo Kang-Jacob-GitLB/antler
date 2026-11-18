@@ -22,6 +22,9 @@
 //!
 //! 앱 채널(Phase 6b PR 5, [`APP_CHANNELS`]: 폴더 선택·클립보드·링크 열기·타이틀바 테마)은 설정·미러와 무관하다: `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`AppHost`])가 주입돼 있으면 Rust 가 처리한다([`app_host`]).
 //!
+//! 환경 채널(Phase 6b PR 8, [`ENV_CHANNELS`]: `env:wslDistros`·`env:sshHosts`·`env:test`·`env:listDir`·`repos:scan`)도 설정을 읽지 않는다: `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`EnvHost`])가 주입돼 있으면 Rust 가 처리한다([`env_host`]).
+//! 단 ssh 종류(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만이고, 풀이 없으면(`ANTLER_RUST_SSH=0`) 사이드카가 처리한다(미러·fetch 와 같은 판정).
+//!
 //! `gh:repo`(Phase 6a PR 8)는 `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 위 git 채널과 같은 소유 술어(`RepoMirror::resolve`)를 쓴다 — Rust 가 맡는 저장소는 Rust 가 답하고
 //! (결과 캐시 60초), github kind·미러에 없는 id 는 사이드카가 답한다. GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
 //!
@@ -46,6 +49,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::api_host::{self, GithubHost, JiraHost};
 use crate::app_host::{self, AppHost};
+use crate::env_host::{self, EnvHost};
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
 use crate::git::activity::{commit_activity, now_secs, ActivityCache, ActivityRequest};
 use crate::git::code_browse::{
@@ -107,6 +111,10 @@ pub const RUST_CHANNELS: &[&str] = &[
 /// Rust 가 처리하는 앱 채널(`app_host`, Phase 6b PR 5): 설정이 필요 없는 폴더 선택·클립보드·링크 열기·타이틀바 테마. `RUST_CHANNELS`·`API_CHANNELS` 와 겹치지 않고
 /// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다(`tests/app_route.rs` 가 강제한다). 스위치는 `ANTLER_RUST_GIT` 하나(`0` 이면 사이드카가 처리한다)
 pub const APP_CHANNELS: &[&str] = &["dialog:pickFolder", "clipboard:writeText", "code:openLink", "win:setTitleBarTheme"];
+
+/// Rust 가 처리하는 환경 채널(`env_host`, Phase 6b PR 8): 저장소 추가 창의 WSL 목록·SSH 별칭·연결 테스트·원격 폴더 목록·폴더 안 저장소 찾기. 다른 채널 목록과 겹치지 않고 전부 `IPC_CHANNELS` 에 있다(`tests/env_route.rs`).
+/// `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`EnvHost`])가 주입돼 있어야 하고, **ssh 종류**(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만이다 — 아니면 사이드카가 처리한다(계획 §13 C4)
+pub const ENV_CHANNELS: &[&str] = &["env:wslDistros", "env:sshHosts", "env:test", "env:listDir", "repos:scan"];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
 /// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 하고, `IPC_CHANNELS` 의 `jira:`·`gh:` 채널에서 [`API_SIDECAR_CHANNELS`] 를 뺀 것과 정확히 같아야 한다(`tests/api_route.rs` 가 강제한다)
@@ -542,6 +550,8 @@ pub struct Router {
     api_owned: AtomicBool,
     /// 대화상자·클립보드·열기 포트(앱이 주입한다). 없거나 `ANTLER_RUST_GIT=0` 이면 [`APP_CHANNELS`] 는 사이드카가 처리한다
     app: Mutex<Option<AppHost>>,
+    /// 환경 채널 포트(앱이 주입한다). 없거나 `ANTLER_RUST_GIT=0` 이면 [`ENV_CHANNELS`] 는 사이드카가 처리한다
+    env: Mutex<Option<EnvHost>>,
 }
 
 impl Router {
@@ -569,6 +579,7 @@ impl Router {
             github: Mutex::default(),
             api_owned: AtomicBool::new(false),
             app: Mutex::default(),
+            env: Mutex::default(),
             log,
             mirror: mirror.clone(),
             cancels: Arc::default(),
@@ -663,6 +674,17 @@ impl Router {
 
     fn app_port(&self) -> Option<AppHost> {
         self.app.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// 환경 채널의 포트를 주입한다. 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 사이드카가 전부 맡는다
+    pub fn set_env(&self, host: EnvHost) {
+        if self.enabled {
+            *self.env.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
+        }
+    }
+
+    fn env_port(&self) -> Option<EnvHost> {
+        self.env.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn jira_port(&self) -> Option<JiraHost> {
@@ -924,6 +946,24 @@ impl Router {
             let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
             let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
             return Routed::Done(app_host::app_envelope(host, channel, args).await);
+        }
+        // 환경 채널(저장소 추가 창): 포트가 있고 스위치가 켜져 있으면 Rust 가 처리한다. ssh 종류는 풀이 있을 때만이고 아니면 사이드카가 처리한다(C4).
+        // 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아니면 빈 인자로 넘겨 검증이 거부한다
+        if ENV_CHANNELS.contains(&channel) {
+            let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
+            let Some(host) = self.env_port().filter(|_| self.enabled) else {
+                self.note(channel, "sidecar(ANTLER_RUST_GIT=0)");
+                return Routed::Sidecar;
+            };
+            let pool = self.ssh_pool().filter(|_| self.ssh_active());
+            if pool.is_none() && env_host::needs_ssh(channel, &args) {
+                self.note(channel, "sidecar(ssh 풀 없음)");
+                return Routed::Sidecar;
+            }
+            self.note(channel, "rust");
+            self.rust_handled.fetch_add(1, Ordering::Relaxed);
+            return Routed::Done(env_host::env_envelope(host, pool, channel, args).await);
         }
         let Some(raw) = args.as_array() else { return Routed::Sidecar };
         if channel == "req:cancel" {

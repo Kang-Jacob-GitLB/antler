@@ -432,7 +432,7 @@ fn dir_link(target: &Path, link: &Path) -> bool {
 
 #[test]
 fn 링크_사슬은_원격_대상과_깊이_상한에서_거부하고_로컬_대상은_통과한다() {
-    use antler_lib::external::launch::links_stay_local;
+    use antler_lib::fsguard::links_stay_local;
     let dir = std::env::temp_dir().join(format!("antler-links-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(dir.join("real").join("deep")).unwrap();
@@ -530,7 +530,7 @@ impl Drop for JunctionDir {
 #[cfg(windows)]
 #[test]
 fn 정션_사슬은_로컬_대상이면_통과하고_원격_판정이면_사슬_중간에서_거부한다() {
-    use antler_lib::external::launch::links_stay_local;
+    use antler_lib::fsguard::links_stay_local;
     let mut d = JunctionDir::new("chain");
     let real = d.root.join("real");
     // b -> a -> real (정션은 대상을 절대 경로로 저장한다)
@@ -569,7 +569,7 @@ fn 정션_사슬은_로컬_대상이면_통과하고_원격_판정이면_사슬_
 #[cfg(windows)]
 #[test]
 fn 정션_대상의_nt_접두는_win32_확장_접두로_바뀌어_판정_함수에_넘어간다() {
-    use antler_lib::external::launch::links_stay_local;
+    use antler_lib::fsguard::links_stay_local;
     let mut d = JunctionDir::new("prefix");
     let real = d.root.join("real");
     let a = d.junction("a", &real);
@@ -592,7 +592,7 @@ fn 정션_대상의_nt_접두는_win32_확장_접두로_바뀌어_판정_함수�
 #[cfg(windows)]
 #[test]
 fn 정션_사슬_길이_16_은_통과하고_17_은_거부한다() {
-    use antler_lib::external::launch::links_stay_local;
+    use antler_lib::fsguard::links_stay_local;
     let mut d = JunctionDir::new("hops");
     let mut prev = d.root.join("real");
     let mut links = Vec::new();
@@ -693,16 +693,40 @@ fn 외부_열기는_링크_허용_판정만_앱에_연결되어_있다() {
             assert_eq!(uses, code.matches("external::link::allowed_link_url").count(), "app_host.rs 는 링크 판정만 쓴다");
             assert_eq!(uses, 1);
         } else if name == "dialogs.rs" {
-            // 폴더 선택 시작 위치의 링크 확인만 쓴다(원격 UNC 링크를 stat 전에 거른다 — 실행은 하지 않는다)
-            let allowed = code.matches("external::launch::links_stay_local").count() + code.matches("external::opener::is_remote_link_target").count();
-            assert_eq!(uses, allowed, "dialogs.rs 는 링크 판정만 쓴다");
-            assert_eq!(uses, 2);
+            // 폴더 선택 시작 위치의 링크 확인은 공용 링크 가드(`fsguard`)를 쓴다 — external 은 쓰지 않는다
+            assert_eq!(uses, 0, "dialogs.rs 가 external 을 쓴다");
+            assert_eq!(code.matches("fsguard::path_stays_local").count(), 1);
         } else {
             assert_eq!(uses, 0, "{} 가 external 을 쓴다", f.display());
         }
     }
     let lib = fs::read_to_string(src.join("lib.rs")).unwrap();
     assert_eq!(lib.matches("pub mod external;").count(), 1);
+}
+
+#[test]
+fn 링크_판정_구현은_fsguard_한_곳에만_있고_쓰는_쪽은_모두_그것을_부른다() {
+    let src = root().join("src-tauri/src");
+    let mut files = Vec::new();
+    rs_files(&src, &mut files);
+    let mut definers = Vec::new();
+    for f in &files {
+        let code = production_code(f);
+        let name = f.file_name().unwrap().to_string_lossy().into_owned();
+        for pat in ["fn is_remote_link_target", "fn links_stay_local", "fn link_leads_remote", "fn push_components"] {
+            if code.contains(pat) {
+                definers.push(format!("{name}: {pat}"));
+            }
+        }
+    }
+    definers.sort();
+    assert_eq!(definers, ["fsguard.rs: fn is_remote_link_target", "fsguard.rs: fn links_stay_local", "fsguard.rs: fn push_components"], "중복 구현");
+    // 쓰는 곳: 외부 열기(realpath)·폴더 선택·폴더 찾기·환경 채널의 루트 확인
+    let uses = |rel: &str, pat: &str| production_code(&src.join(rel)).matches(pat).count();
+    assert_eq!(uses("external/launch.rs", "path_stays_local(Path::new(p))"), 1);
+    assert_eq!(uses("dialogs.rs", "fsguard::path_stays_local"), 1);
+    assert_eq!(uses("repos/scan.rs", "links_stay_local(&entry.path(), &is_remote)"), 1);
+    assert_eq!(uses("env_host.rs", "fsguard::check_local_root("), 1);
 }
 
 #[test]

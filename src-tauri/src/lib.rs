@@ -4,10 +4,13 @@ pub mod app_host;
 mod commands;
 // 설정 저장소 코어(Phase 6b PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/config.rs)가 별도 크레이트라 pub 이다
 pub mod config;
+// 저장소 추가 창의 환경 채널(Phase 6b PR 8)의 처리. 통합 테스트(tests/env_route.rs)가 별도 크레이트라 pub 이다
+pub mod env_host;
 mod dialogs;
 // 외부 도구로 열기(Phase 6b PR 3) — 순수 계획·실행기. 아직 앱에 연결하지 않는다(PR 9). 통합 테스트(tests/external.rs)가 별도 크레이트라 pub 이다
 pub mod external;
 mod fetch_host;
+pub mod fsguard;
 pub mod git;
 // Phase 4 의 순수 로직(PR 1)·응답 매퍼(PR 2)·HTTP 클라이언트(PR 3). Jira(PR 6)·GitHub(PR 9)는 api_host 가 부른다.
 // 통합 테스트(tests/net.rs)가 별도 크레이트라 pub 이다
@@ -17,7 +20,7 @@ pub mod mirror;
 pub mod net;
 // Rust → Node 질의(`repoq`)·토큰 사본(`ghToken`)의 메시지와 검증(Phase 4 PR 9). 통합 테스트(tests/repoq.rs)가 별도 크레이트라 pub 이다
 pub mod repoq;
-// 저장소 추가 흐름의 순수 로직(Phase 6b PR 4a). 앱에는 연결하지 않는다. 통합 테스트(tests/ssh.rs)가 별도 크레이트라 pub 이다
+// 저장소 추가 흐름의 순수 로직(Phase 6b PR 4a). env_host(PR 8)가 연결한다. 통합 테스트(tests/ssh.rs)가 별도 크레이트라 pub 이다
 pub mod repos;
 pub mod router;
 // GitHub 서비스의 저장소 질의를 Rust 가 맡는 저장소는 라우터가, 나머지는 사이드카(repoq)가 답한다(Phase 6a PR 8)
@@ -107,6 +110,20 @@ fn clipboard_port(app: tauri::AppHandle) -> app_host::ClipboardWrite {
     std::sync::Arc::new(move |text| app.clipboard().write_text(text.to_string()).map_err(|_| "복사하지 못했습니다".to_string()))
 }
 
+/// 환경 채널(`env:*`·`repos:scan`)의 운영 포트. 확인 창은 `dialogs::message_box`(취소가 기본 버튼) — 실패·닫기·Esc 는 거부다
+fn env_host_port(app: tauri::AppHandle, home: Option<String>) -> env_host::EnvHost {
+    use std::sync::Arc;
+    env_host::EnvHost::new(
+        Arc::new(|| Box::pin(git::exec::list_distros())),
+        Arc::new(move || home.as_deref().map(env_host::ssh_hosts_for_home).unwrap_or_default()),
+        Arc::new(move |arg| dialogs::message_box(&app, arg).and_then(|v| v.get("response")?.as_i64()) == Some(0)),
+        Arc::new(|kind, distro| match (kind, distro) {
+            ("wsl", Some(distro)) => GitExecutor::Wsl(WslExecutor::new(distro)),
+            _ => GitExecutor::Local(LocalExecutor::default()),
+        }),
+    )
+}
+
 pub fn run() {
     commands::mark_start();
     let mut builder = tauri::Builder::default();
@@ -164,13 +181,17 @@ pub fn run() {
             // **fetch 서비스·사이드카 env 보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓰고, 사이드카 env 가 같은 판정(ssh_active)을 따른다
             // 홈은 Node `os.homedir()`(libuv)와 같은 순서로 정한다 — 환경변수(Windows `USERPROFILE`·그 밖 `HOME`)가 있으면 그것, 없으면 Tauri 의 `home_dir`.
             // 그래야 사이드카와 Rust 가 같은 `~/.ssh` 를 읽는다
+            let env_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|v| !v.is_empty()).map(PathBuf::from);
+            let home: Option<PathBuf> = env_home.or_else(|| app.path().home_dir().ok());
             if router.ssh_enabled() {
-                let env_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|v| !v.is_empty()).map(PathBuf::from);
-                match env_home.or_else(|| app.path().home_dir().ok()) {
+                match &home {
                     Some(home) => router.set_ssh_pool(SshPool::for_home(&home.to_string_lossy())),
                     None => eprintln!("[ssh] 홈 디렉터리를 알 수 없다 — 사이드카가 SSH 를 처리한다"),
                 }
             }
+            // 저장소 추가 창의 환경 채널(Phase 6b PR 8)의 포트: WSL 목록(레지스트리 관문 뒤의 `list_distros` — `wsl.exe` 를 직접 부르지 않는다)·`~/.ssh/config` 별칭(홈을 모르면 빈 목록)·
+            // 설정에 없는 SSH 호스트의 확인 창(dialogs.rs)·local/wsl 실행기. ssh 연결은 위의 풀이 맡는다(풀이 없으면 ssh 종류는 사이드카가 처리한다). 스위치가 꺼져 있으면 주입하지 않는다
+            router.set_env(env_host_port(app.handle().clone(), home.map(|h| h.to_string_lossy().into_owned())));
             // fetch 서비스(local·wsl 저장소). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다
             if router.enabled() {
                 let ssh_pool = router.ssh_pool();

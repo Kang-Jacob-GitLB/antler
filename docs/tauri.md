@@ -1684,7 +1684,7 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 | 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | **완료(코드)** — 아래 "PR 5" |
 | 6 | github kind 의 git **조회**를 Rust 로(미러에 `github` 링크·모든 git 채널의 github 분기·`repos:remove` 가로채기). 감시는 PR 7 | 있음 | 직렬(6a 7b·8, PR 2 뒤) | |
 | 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | |
-| 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | |
+| 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | **완료(코드)** — 아래 "PR 8" |
 | 9 | **ConfigStore 소유 전환**: `config:*`·`repos:*`·`external:*`·`req:cancel` 응답, 미러·fetchPrefs·승인·repoq 내부화, Electron 설정 가져오기(D1) — 보안 리뷰 집중 | 있음 | 직렬(1·3·5·6·7·8 뒤) | |
 | 10 | 사이드카 정리: Rust 소유 실행에서 `update:*` 밖 채널·메시지 제거(강제 시험) | 있음 | 직렬(9 뒤) | |
 
@@ -1749,7 +1749,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 - **`opener.rs`**: `ExternalOpener`·`find_editor_exe`·`check_chosen_exe`·`resolve_editor_exe`·`terminal_tools`. 파일 시스템·환경변수·프로세스 실행·파일 관리자는 모두 **`OpenerDeps` 트레이트로 주입**한다. 실행기는 **판단이 끝난 `LaunchRequest`(file·args·cwd·지울 환경변수)** 를 받아 그대로 실행할 뿐이라 시험의 가짜는 argv 만 기록한다.
 - **`launch.rs`**: `SystemDeps`(운영 구현). **에디터·터미널 프로세스를 띄우고 opener 플러그인(`open_path`·`reveal_item_in_dir`)을 부르는 유일한 곳**이다. 분리 프로세스(Windows `DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP`, Node `detached` 와 같다)·셸 없음(`.args()` 만, `raw_arg` 금지)·stdio 없음·`ELECTRON_RUN_AS_NODE` 제거. `Command::new` 는 한 번뿐이고 `#[allow(clippy::disallowed_methods)]` 와 이유를 단다. 소스 검사(`tests/external.rs`)가 `src/external/` 의 다른 파일에서 `Command::new`·`std::process`·`tauri_plugin_opener`·`raw_arg` 가 쓰이지 않음, plan·opener·paths·link 가 `std::fs`·`std::env` 를 직접 읽지 않음을 강제한다.
 - **`link.rs`**: `allowed_link_url`(https·사용자 정보 없음·4096 UTF-16 단위). 해석은 `net::url_rules::parse_url`(TS 보다 IDN 이 엄격 — 그 문서의 알려진 차이). 연결(`code:openLink`)은 PR 5(아래).
-- **realpath 정규화**: Windows 의 `canonicalize` 는 `\\?\C:\x`·`\\?\UNC\…` 접두를 붙인다. `normalize_canonical`(순수)이 이를 벗기고, **벗긴 결과가 WSL 공유가 아닌 UNC 이거나 `\\?\`·`\\.\` 의 다른 모양(볼륨 GUID·장치 경로)이면 거부**한다(= 없는 경로). 임의의 SMB 공유가 열 대상이 되거나 NTLM 이 새지 않게 한다. 운영 `realpath` 가 이것을 거친다. **다만 이것은 결과를 거를 뿐이다** — `canonicalize` 가 링크를 따라가는 순간 SMB/WebDAV 인증(NTLM)이 이미 나간다(저장소 안의 `docs/x -> //attacker/share/x`·`\\host@SSL\DavWWWRoot\…` 를 "열기" 하면 해시가 샌다). 그래서 Windows 의 운영 `realpath` 는 `canonicalize` **전에** `launch.rs::links_stay_local` 로 경로의 구성 요소마다 `symlink_metadata` 로 링크(심볼릭 링크·정션)인지 보고 `read_link` 대상을 순수 판정 `opener.rs::is_remote_link_target`(`\\host\…`·`//host/…`·`\\?\UNC\…`·정션의 `\??\UNC\…`·`\\.\`·볼륨 GUID 는 원격, WSL 공유는 허용)에 건다. 원격이면 따라가지 않고 없는 경로(None)로 취급하며, 상대·로컬 대상은 이어서 확인한다(링크 사슬, 상한 16 — 순환 포함 넘으면 거부). 읽을 수 없는 링크도 거부한다. 시험: 판정 함수 표(`opener.rs`)와 로컬 대상 링크 사슬·순환·상한(`tests/external.rs`, 링크를 만들 권한이 없으면 건너뜀 — 원격 대상 링크는 실제로 만들지 않았다). **TS 판에도 같은 문제가 있다(별도 fix 예정).**
+- **realpath 정규화**: Windows 의 `canonicalize` 는 `\\?\C:\x`·`\\?\UNC\…` 접두를 붙인다. `normalize_canonical`(순수)이 이를 벗기고, **벗긴 결과가 WSL 공유가 아닌 UNC 이거나 `\\?\`·`\\.\` 의 다른 모양(볼륨 GUID·장치 경로)이면 거부**한다(= 없는 경로). 임의의 SMB 공유가 열 대상이 되거나 NTLM 이 새지 않게 한다. 운영 `realpath` 가 이것을 거친다. **다만 이것은 결과를 거를 뿐이다** — `canonicalize` 가 링크를 따라가는 순간 SMB/WebDAV 인증(NTLM)이 이미 나간다(저장소 안의 `docs/x -> //attacker/share/x`·`\\host@SSL\DavWWWRoot\…` 를 "열기" 하면 해시가 샌다). 그래서 Windows 의 운영 `realpath` 는 `canonicalize` **전에** `fsguard::links_stay_local` 로 경로의 구성 요소마다 `symlink_metadata` 로 링크(심볼릭 링크·정션)인지 보고 `read_link` 대상을 순수 판정 `fsguard::is_remote_link_target`(`\\host\…`·`//host/…`·`\\?\UNC\…`·정션의 `\??\UNC\…`·`\\.\`·볼륨 GUID 는 원격, WSL 공유는 허용)에 건다. 원격이면 따라가지 않고 없는 경로(None)로 취급하며, 상대·로컬 대상은 이어서 확인한다(링크 사슬, 상한 16 — 순환 포함 넘으면 거부). 읽을 수 없는 링크도 거부한다. 시험: 판정 함수 표(`opener.rs`)와 로컬 대상 링크 사슬·순환·상한(`tests/external.rs`, 링크를 만들 권한이 없으면 건너뜀 — 원격 대상 링크는 실제로 만들지 않았다). **TS 판에도 같은 문제가 있다(별도 fix 예정).**
 - **WSL**: 배포판 이름은 UNC 를 만들기 전에 `assert_safe_name` 으로 검증한다. `wsl.exe` 는 `%SystemRoot%\System32\wsl.exe` 절대 경로이고 `-d <distro> --cd <path>` 인자 배열로만 넘긴다(`start ""` 의 빈 창 제목 인자 유지 — 시험이 단언한다). 배포판이 꺼져 UNC 를 풀 수 없으면 어휘 검사만 하되 폴더로 취급하지 않는다(openPath 안 함).
 
 **골든·시험**: TS `tests/fixtures/externalCases.ts` → `tests/goldenExternal.test.ts`(실제 TS plan·opener 로 생성) → `tests/golden/external/{plan,opener,link}.json` → `src-tauri/tests/external.rs`(`--test external`, `tauri.yml` 목록에 추가). plan 은 순수 함수 8개의 표(상대 경로·절대 경로·실경로 포함·에디터·터미널·점 구성 요소·CLSID·파일 관리자 계획), opener 는 가짜 fs·env 로 도는 시나리오(리눅스·macOS·Windows·WSL·SSH, 단계마다 오류 문구와 실행·표시 기록)와 에디터 탐색·선택 파일 검사·터미널 도구, link 는 주소 사례다. 오류 문구까지 TS 와 같아야 통과한다. TS `it` 71개(externalPlan 26·externalOpener 26·externalReveal 14·externalClsid 5)는 `tests/golden/external/test-map.json` 이 Rust 시험에 대응시키고 vitest 가 누락을 강제한다. 단위 시험은 `paths.rs`(Node 값)·`plan.rs`(이름 경계·CLSID·cmd 메타문자)·`opener.rs`(`\\?\` 접두 사례)·`link.rs`. **시험은 어떤 프로그램도 띄우지 않는다**(`SystemDeps` 는 임시 폴더에 대한 `realpath`·`stat` 만 시험한다).
@@ -1788,7 +1788,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 - **ssh 안내 명령**: `with_host_key_hint` 는 호스트가 안전 문자(ASCII 영숫자·`._-@:[]%+`)만이고 `-` 로 시작하지 않을 때만 `확인 명령: ssh …` 를 붙인다. 아니면 명령 없이 "터미널에서 ssh 로 이 호스트에 한 번 접속해 키를 확인하세요." 안내만 한다(셸 메타문자·bidi 서식 문자가 복사용 명령에 들어가지 못하게).
 - **풀 잡기 경쟁**: `HoldGuard` 는 마지막 해제 때 **채택되지 않은 임시 호스트(`transient`)이거나 `retain` 이 잡혀서 미룬(`deferred`) 호스트일 때만** 닫는다. `get`·`get_if`(채택)·보존 목록에 든 `retain` 은 두 표에서 지우므로, 라우터가 이미 채택한 실행기를 낡은 보존 목록으로 닫지 않는다.
   `dispose_all` 은 세대 번호를 올려 그 이전의 가드가 이후의 새 `hold` 장부를 건드리지 못하게 한다.
-- **폴더 찾기 링크**: 하위 항목이 링크·정션이면 `read_link` 사슬(최대 8단계)을 보고 대상이 원격(`\\host\…`·`\\?\UNC\…`·`\??\UNC\…`·`\\.\…`)이면 따라가지 않는다(`\\wsl.localhost` 는 허용). 판정은 순수 함수 `is_remote_link_target` 으로 분리해 단위 시험한다(원격 대상 링크는 권한상 만들기 어렵다).
+- **폴더 찾기 링크**: 하위 항목이 링크·정션이면 공용 `fsguard::links_stay_local`(구성 요소마다 링크 확인 — `b -> a\x` 의 중간 링크도 잡는다, 사슬 16 상한)로 대상이 원격이면 따라가지 않는다. 판정은 허용 목록 `fsguard::is_remote_link_target`(드라이브·상대·WSL 공유만 로컬, `\??\GLOBALROOT\…` 포함 나머지는 원격)이고 순수 함수라 단위 시험한다(원격 대상 링크는 권한상 만들기 어렵다 — 정션 시험은 판정 함수를 주입한다).
   `.git` 은 `symlink_metadata` 로 존재만 본다. `scan_local_repos` 는 root 가 WSL 이 아닌 UNC·NT 네임스페이스면 거부하지만, **호출자는 먼저 `check_path` 를 통과시킨다**(길이·NUL 등은 호출자 몫).
 
 **시험**: `--lib`(WSL 목록 6·풀 잡기 7·scan 9·env 10 외), `--test golden`(manifest 에 `wslList`·`lxssQuery`·`scanFromListing`·`resolveEnv`·`remoteRelative` 5종, 케이스는 `tests/fixtures/edge/*-cases.json`), `--test ssh`(127.0.0.1 루프백 서버·임시 홈만: 저장 전 연결 성공 뒤 닫힘·모르는 호스트 거부+지문+`ssh test` 안내+`known_hosts` 불변·바뀐 키·`retain` 중 잡힌 연결 유지).
@@ -1932,6 +1932,52 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 
 **남은 위험**: 실제 OpenSSH `sftp-server`·Windows OpenSSH·`internal-sftp` 와는 **붙여 보지 못했다**(루프백 가짜 서버뿐) — 앱 연결(PR 8)에서 사람이 실제 서버로 확인한다. `russh-sftp` 는 서버가 보내는 패킷을 해석하는 새 크레이트다(256KiB·시간 제한으로 막았지만 파서 자체는 신뢰한다).
 `request_subsystem` 의 clippy 금지가 실제로 걸리는 것은 확인했다(`open_sftp` 의 allow 를 잠시 떼자 `use of a disallowed method russh::channels::Channel::request_subsystem` 오류). 소스 검사(`tests/ssh.rs`)를 함께 둔다.
+
+### PR 8 — 환경 채널과 폴더 안 저장소 찾기를 Rust 가 처리한다(`src-tauri/src/env_host.rs`, 앱에 연결한다)
+
+새 크레이트·IPC 채널 없음. 채널 5개(`env:wslDistros`·`env:sshHosts`·`env:test`·`env:listDir`·`repos:scan`)를 라우터의 **`ENV_CHANNELS`** 분기(가로채기는 `req:cancel`·`repos:*` 특수 처리·`RUST_CHANNELS` 보다 앞)에서 처리하고, 처리하는 호출은 사이드카로 보내지 않는다.
+설정(ConfigStore)은 읽지도 쓰지도 않는다 — 입력과 `~/.ssh/config` 만 본다(설정을 쓰는 `repos:add*`·`repos:update`·`repos:remove` 는 PR 9). 포트는 `EnvHost`(확인 창·WSL 설치 목록·별칭 목록·local/wsl 실행기)로 주입한다.
+
+| 채널 | 입력 검증(TS `checkEnvInput`·핸들러와 같은 순서) | 결과 |
+|---|---|---|
+| `env:wslDistros` | 없음 | 설치된 배포판 이름 배열(레지스트리 관문 뒤의 `list_distros`) |
+| `env:sshHosts` | 없음 | `~/.ssh/config` 의 구체 별칭 `{alias,hostName,user,port,proxyJump?}[]` |
+| `env:test` | 객체이고 kind 가 local·wsl·ssh(아니면 `잘못된 입력입니다`) → WSL 설치 확인 / SSH 호스트 검사·확인 창 | `git --version` 문자열(25초 제한) |
+| `env:listDir` | **경로 검사가 먼저**(문자열이 아니면 `''`, 4096 UTF-16 단위·NUL) → SSH 호스트 검사·확인 창 | `RemoteDirListing`(SFTP, 25초 제한) |
+| `repos:scan` | kind → 경로(JS trim·4096·NUL·NT 네임스페이스·local/wsl 의 UNC) → 그룹(문자열·200) → WSL 설치 확인 / SSH 호스트 검사·확인 창 | `RepoScanResult` — 저장소 안이면 `isRepo:true`, 아니면 하위 저장소 |
+
+- **PR 4a·4b 의 함수만 쓴다**(계약): WSL 은 `resolve_env_checked_with`(= `resolve_env_checked` 의 설치 목록 주입형 — 형식 + 설치 목록 대조, 대소문자를 맞춰 설치된 표기로 바꾼다. 운영은 `list_distros`, `wsl.exe` 를 직접 부르지 않으므로 WSL 이 없는 PC 에서 스텁이 뜨지 않는다. 소스 검사가 `resolve_env(` 직접 호출을 막는다),
+  경로·호스트는 `mirror::{check_path,check_ssh_host,check_listdir_path}` 의 결과값(JS trim 한 값)만 쓴다, SSH 는 `SshPool::hold` 하나를 작업이 끝날 때까지 쥐고(저장 전 호스트라 다른 미러 변경이 끊지 않고, 끝나면 닫힌다) `test_ssh_env`·`list_dirs` 를 부른다, 로컬 찾기는 `scan_local_repos`(`spawn_blocking`, 호출 전 `check_path`).
+- **SSH 호스트 키는 `known_hosts` 로만 검증한다(TOFU 금지, D3)**: 모르는 호스트·바뀐 키는 실행기가 거부하고 오류에 지문이 든다. 호스트 문자열이 안전할 때만 `확인 명령: ssh <별칭>`(직접 입력 `user@host:port` 는 `ssh -p port user@host`)이 붙는다. 이 모듈은 `known_hosts` 를 쓰지 않는다(소스 검사).
+  `test_ssh_env` 뿐 아니라 `env:listDir`·`repos:scan`(ssh)의 오류에도 같은 안내를 붙인다.
+- **설정에 없는 SSH 호스트의 확인 창**: `check_ssh_host` 가 돌려준 값이 이번 실행의 승인 집합에도 `~/.ssh/config` 별칭에도 없으면 **연결하기 전에** `dialogs::message_box`(`[연결][취소]`, 취소가 기본 버튼 — 사이드카 확인 창과 같은 경로·같은 인자 모양)로 묻는다. 응답 "연결"만 승인이고 그때만 집합에 넣는다(취소·닫기·Esc·창 실패는 `연결을 취소했습니다`, 기억하지 않는다).
+  승인 기억은 프로세스 메모리이고 채널이 달라도(`env:test`·`env:listDir`·`repos:scan`) 같은 호스트는 한 번만 묻는다. 창에 찍는 호스트 이름의 서식 문자(bidi·제로폭)는 `\u{…}` 로 드러낸다(연결 값은 그대로).
+- **스위치·라우팅**: `ANTLER_RUST_GIT=0` 이거나 포트가 없으면 5개 모두 사이드카다. **ssh 종류**(`env:listDir` 는 항상)는 SSH 풀이 있을 때(`Router::ssh_active` — 미러·fetch 와 같은 판정)만 Rust 이고, 풀이 없으면(`ANTLER_RUST_SSH=0`) 검증·확인 창 없이 사이드카가 처리한다(계획 §13 C4).
+  배열이 아닌 인자도 사이드카로 보내지 않고 빈 인자로 검증한다. **사이드카가 이 채널을 받지 않음**은 라우터 가로채기와 라우트 시험으로 보장한다 — C4 때문에 사이드카의 처리기는 지우지 않는다(ssh 종류·`ANTLER_RUST_GIT=0`). 사이드카 쪽 거부는 PR 10 이다.
+- **확인 창 중복(PR 8~9 사이)**: Rust(`env:test` 등)와 사이드카(`repos:add`)의 승인 기억이 따로라 설정에 없는 호스트를 한 번씩 더 묻는다. PR 9 에서 사라진다(계획 §0 (b)).
+
+**시험**: 새 바이너리 `tests/env_route.rs`(21개, `tauri.yml` 목록에 추가) — 채널 목록(`IPC_CHANNELS` 의 부분집합·다른 목록과 겹치지 않음), 풀 없음·스위치 꺼짐·포트 없음의 라우팅, 배열이 아닌 인자, 잘못된 kind·경로(빈·공백·NUL·4097 단위·NT 네임스페이스·UNC)·그룹·SSH 호스트(공백·`-`·제어 문자·256자·비문자열)가 **확인 창·목록·실행기·연결 없이** 거부됨(가짜 포트 호출 0·루프백 서버의 연결 수 0),
+WSL(설치 목록 가짜 — 없는 배포판·형식 오류·UNC 의 배포판·대소문자 교정·설치된 배포판이 없으면 실행기 0), `~/.ssh/config` 별칭 모양(임시 홈), 로컬 찾기(숨김·파일·일반 폴더 제외·이름순·JS trim 경로·없는 폴더 오류·저장소 안/하위 폴더 `isRepo`·**정션 사슬** — `mklink /J` 로 만들고 Drop 에서 정션부터 지운다),
+루프백 SSH(설정 별칭은 확인 창 없이 연결·저장 전 연결이 끝나면 풀에서 빠지고 닫힘·설정 밖 호스트는 한 번만 묻고 기억·취소는 기억하지 않고 연결 없음·모르는 호스트 키는 지문 + `ssh -p` 안내 + `known_hosts` 불변·SFTP 목록·경로가 문자열이 아니면 홈·SFTP 를 막은 서버의 목록 오류/찾기 폴백·ssh 찾기의 `isRepo`/원격 목록), 소스 검사(프로세스·`known_hosts`·`resolve_env(` 직접 호출 없음, 앱 배선).
+`app_route.rs` 는 "사이드카에 남는 채널" 예시를 `repos:addMany`·`repos:addGithub` 로 바꿨다. 대응표: 6a 표의 `repoService > scanRepos` 2개를 `env_route.rs` 로, ssh 표의 `sshRemoteDir` 9개(`N/A: 저장소 추가 흐름(사이드카 유지)`)를 `ssh.rs::sftp_*` 로 옮겼고(`golden.rs`·`golden6a.test.ts` 의 소스 목록에 `env_route.rs` 를 더했다),
+repos 표의 `githubRemote > repos:add · scan · env:test 경로로는 github 환경을 만들 수 없다` 는 `repos:add` 가 PR 9 라 `N/A: PR 9` 로 옮겼다(env 쪽은 `resolveEnv` 골든과 `잘못된_종류…` 시험이 덮는다). **TS 쪽 핸들러 골든 하네스는 만들지 않았다**(electron 핸들러를 가짜 host 로 돌리는 구동기가 없고 PR 5 도 `app_route.rs` 의 손으로 쓴 기대값으로 갔다) — 기대값은 `handlers.ts`·`RepoService.ts` 를 읽고 적었다.
+
+**TS 와 다른 점**
+- **WSL**: 설치 확인이 **local 로 보낸 WSL 공유 경로(`\\wsl.localhost\…`)에도** 걸린다(TS 는 kind 가 wsl 일 때만 목록을 본다 — PR 4a 의 `resolve_env_checked` 계약). 배포판 이름 형식(서식 문자·`\`·`/`·`..`)도 거부한다. 오류 문구는 TS 처럼 `설치된 WSL 배포판이 아닙니다: <이름|(없음)>` 인데 형식이 틀린 이름은 되돌려 싣지 않는다(접미 없음). 이름을 비교하는 방식이 대소문자 무시라 `ubuntu` 도 통과해 설치된 표기로 실행한다.
+  설치된 배포판이 하나도 없는 PC(`docker-desktop` 만 있어도)는 `wsl.exe` 를 부르지 않는다(PR 4a).
+- **SSH 호스트**: 제어 문자 전체를 거부한다(TS 는 NUL·공백류만, PR 4a). 호스트 키 거부 오류에 `ssh <별칭>` 안내가 붙는다(TS 에 없음). 확인 창의 호스트 이름은 서식 문자를 드러낸다.
+- **실행**: `repos:scan`·`env:test` 의 `git` 은 소스별 큐(`ProcessQueue`) 없이 바로 돈다(저장 전 환경은 미러에 없어 라우터의 `Runtimes::get` 을 쓸 수 없다 — 미러에 없는 호스트를 거부한다). 동시에 열린 창에서도 호출 하나씩이라 문제는 없다고 본다.
+  `repos:scan` 의 `git rev-parse` 는 TS 처럼 제한 시간이 없다(ssh 는 연결 단계의 제한이 있다).
+- **루트 링크 가드**: 보안 리뷰 뒤 `repos:scan` 의 루트(local 종류, Windows)에 `fsguard::check_local_root` 를 `git -C`(probe)·`read_dir` 전에 건다 — 루트·중간 구성 요소가 원격으로 이어지면 "네트워크 공유 경로는 지원하지 않습니다(링크가 …)" 오류. WSL 공유 루트는 리눅스 쪽 링크라 보지 않는다. 링크 판정은 `external::` 에서 공용 `fsguard.rs` 로 옮겼다(docs/security.md).
+- `env:sshHosts` 는 `user` 를 항상 싣는다(설정에 없으면 로컬 사용자 이름 — TS `resolveHost` 도 같다). 이름순은 `localeCompare` 근사(PR 4a 와 같다). 읽기 실패 문구는 Node 가 아니라 Rust `io::Error` 다.
+- 호출 시점의 홈은 `lib.rs` 가 정한다(PR 3 의 SSH 풀과 같은 순서: `USERPROFILE`/`HOME` → Tauri `home_dir`). 홈을 모르면 `env:sshHosts` 는 빈 목록이고 풀이 없어 ssh 종류는 사이드카가 처리한다.
+
+**사람 확인(자동화 불가·실환경)**
+- 저장소 추가 창: ① 설정에 없는 SSH 호스트를 입력했을 때 확인 창이 한 번만 뜨고 **Enter 가 취소**(기본 버튼)이며 Esc·닫기도 취소인지, 연결을 누르면 이후 폴더 탐색·찾기·추가에서 다시 묻지 않는지(추가 `repos:add` 는 사이드카라 한 번 더 묻는다). ② 폴더 탐색·`폴더 안 저장소 찾기`가 실제 sshd(OpenSSH `sftp-server`·Windows OpenSSH·`internal-sftp`)에서 되는지(루프백 가짜 서버만 확인했다), SFTP 를 막은 서버에서 경로 직접 입력 안내가 뜨는지.
+  ③ 모르는 호스트 키일 때 지문 + `ssh <별칭>` 안내가 보이고, 안내대로 터미널에서 한 번 접속하면 다음부터 통과하는지(앱은 `known_hosts` 를 쓰지 않는다). ④ **WSL 이 있는 PC**에서 배포판 목록·연결 테스트·WSL 경로 폴더 찾기(`\\wsl.localhost\…` 공유 읽기)가 되는지 — 이 PC 는 WSL 이 없어 실행해 보지 못했다(실행기는 가짜). ⑤ `ANTLER_RUST_GIT=0`·`ANTLER_RUST_SSH=0` 으로 되돌렸을 때 같은 화면이 사이드카로 동작하는지(`ANTLER_ROUTE_LOG=1` 로 `-> rust`/`-> sidecar` 확인).
+
+**남은 위험**: 설정 밖 호스트의 확인 창이 **막는 호출**이라 `spawn_blocking` 으로 부른다(대화상자 금지로 앱에서 띄워 보지 못했다 — 사이드카 경로와 같은 `dialogs::message_box` 를 쓴다). 같은 새 호스트를 동시에 두 창이 입력하면 확인 창이 둘 뜰 수 있다(TS 와 같다).
+SFTP 채널 닫기 순서가 실제 sshd 의 `MaxSessions` 에 걸릴 수 있다는 PR 4b 의 위험은 이 PR 이 앱에 연결했으므로 사람 확인 ②에서 본다.
 
 ## 업데이터·패키징·Electron 사용자 이관(Phase 6c, `src-tauri/src/update/`)
 

@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 use serde::{Deserialize, Serialize};
 
+use crate::fsguard::links_stay_local;
 use crate::git::exec::ssh::win32_path;
 use crate::git::parsers::refs::SYMBOL_ORDER;
 
@@ -60,11 +61,17 @@ pub struct RemoteDirListing {
 }
 
 /// 로컬·WSL 공유 경로: 고른 폴더 바로 아래에서 `.git` 이 있는 폴더를 찾는다(고른 폴더가 저장소가 아님은 호출자가 확인했다).
-/// 숨김(`.` 시작) 폴더는 뺀다. 링크(정션)는 대상이 **원격(UNC·`\??\UNC`)이 아닐 때만** 따라가 폴더인지 본다(원격 대상은 SMB 접속·NTLM 해시 유출 위험).
+/// 숨김(`.` 시작) 폴더는 뺀다. 링크(정션)는 **경로 전체(구성 요소마다)가 원격으로 이어지지 않을 때만**(`fsguard::links_stay_local`) 따라가 폴더인지 본다(원격 대상은 SMB 접속·NTLM 해시 유출 위험).
 /// `.git` 은 `symlink_metadata` 로 존재만 본다(링크를 따라가지 않는다). 폴더가 2000개를 넘으면 앞쪽만 보고 `truncated`.
 ///
-/// **호출자는 먼저 `mirror::check_path("local", root)` 를 통과시킨다.** 여기서도 root 가 WSL 이 아닌 UNC·NT 네임스페이스면 거부하지만(방어), 길이·NUL 같은 검사는 호출자 몫이다
+/// **호출자는 먼저 `mirror::check_path("local", root)` 를 통과시킨다.** 여기서도 root 가 WSL 이 아닌 UNC·NT 네임스페이스면 거부하지만(방어), 길이·NUL 같은 검사는 호출자 몫이다.
+/// 고른 폴더(루트) 자체가 링크로 원격에 이어지는지는 여기서 보지 않는다 — `env_host` 가 git 을 돌리기 전에 `fsguard::check_local_root` 로 확인한다
 pub fn scan_local_repos(root: &str) -> Result<RepoScanResult, String> {
+    scan_local_repos_with(root, crate::fsguard::is_remote_link_target)
+}
+
+/// [`scan_local_repos`] 의 판정 함수 주입판(시험이 원격 링크를 만들지 않고도 거부 경로를 보게 한다)
+pub fn scan_local_repos_with(root: &str, is_remote: impl Fn(&str) -> bool) -> Result<RepoScanResult, String> {
     crate::mirror::check_path("local", root)?;
     let entries = fs::read_dir(root).map_err(|e| e.to_string())?;
     let mut dirs: Vec<String> = Vec::new();
@@ -76,8 +83,8 @@ pub fn scan_local_repos(root: &str) -> Result<RepoScanResult, String> {
             continue;
         }
         let Ok(kind) = entry.file_type() else { continue };
-        // 심볼릭 링크(정션)는 대상이 원격이 아닐 때만 따라가 폴더인지 본다
-        let is_dir = kind.is_dir() || (kind.is_symlink() && !link_leads_remote(&entry.path()) && fs::metadata(entry.path()).is_ok_and(|m| m.is_dir()));
+        // 심볼릭 링크(정션)는 경로의 어느 구성 요소도 원격으로 이어지지 않을 때만 따라가 폴더인지 본다
+        let is_dir = kind.is_dir() || (kind.is_symlink() && links_stay_local(&entry.path(), &is_remote) && fs::metadata(entry.path()).is_ok_and(|m| m.is_dir()));
         if !is_dir {
             continue;
         }
@@ -96,49 +103,6 @@ pub fn scan_local_repos(root: &str) -> Result<RepoScanResult, String> {
         .collect();
     repos.sort_by(|a, b| locale_compare(&a.name, &b.name));
     Ok(RepoScanResult { path: root.to_string(), is_repo: false, repos, truncated })
-}
-
-/// 링크 대상 문자열이 원격(SMB)을 가리키는가 — 순수 판정이고 **허용 목록**이다. 로컬: 드라이브 경로(`C:\`·`\\?\C:\`·`\??\C:\`)·상대 경로·
-/// 단일 `/` 시작 경로·WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`). 그 밖의 `\\…`·`//…`와 `\??\`·`\\?\` 뒤가 드라이브가 아닌 것
-/// (`UNC\`·`Volume{`·`GLOBALROOT\…`·`Device\…`)은 전부 원격이다. TS 판(`linkGuard.ts` 의 `isRemoteLinkTarget`)과 같은 사례표
-/// (`tests/fixtures/repos/link-target.cases.json`)로 시험한다
-fn is_remote_link_target(target: &str) -> bool {
-    let t = target.trim();
-    let is_sep = |c: char| c == '\\' || c == '/';
-    // NT 네임스페이스(`\??\`)·확장 경로(`\\?\`): 뒤가 드라이브 문자 경로일 때만 로컬이다
-    let b = t.as_bytes();
-    let nt_ns = b.len() >= 4
-        && is_sep(b[0] as char)
-        && is_sep(b[3] as char)
-        && ((b[1] == b'?' && b[2] == b'?') || (is_sep(b[1] as char) && b[2] == b'?'));
-    if nt_ns {
-        let r = &b[4..];
-        let drive = r.len() >= 2 && r[0].is_ascii_alphabetic() && r[1] == b':' && (r.len() == 2 || is_sep(r[2] as char));
-        return !drive;
-    }
-    let mut chars = t.chars();
-    if !matches!((chars.next(), chars.next()), (Some(a), Some(b)) if is_sep(a) && is_sep(b)) {
-        return false;
-    }
-    !crate::git::exec::wsl_paths::is_wsl_unc(t)
-}
-
-/// 링크(정션)를 따라가면 원격에 닿는가. 링크 사슬을 최대 8단계까지 `read_link` 로만 따라가 본다(대상 파일 시스템에 접속하지 않는다).
-/// 읽을 수 없으면 따라가지 않는다(`true`)
-fn link_leads_remote(link: &Path) -> bool {
-    let mut cur = link.to_path_buf();
-    for _ in 0..8 {
-        let Ok(target) = fs::read_link(&cur) else { return true };
-        if is_remote_link_target(&target.to_string_lossy()) {
-            return true;
-        }
-        let next = if target.is_absolute() { target } else { cur.parent().map_or(target.clone(), |p| p.join(&target)) };
-        match next.symlink_metadata() {
-            Ok(m) if m.file_type().is_symlink() => cur = next,
-            _ => return false,
-        }
-    }
-    true
 }
 
 /// 각 하위 폴더의 `.git` 존재(파일이어도 된다 — 워크트리·서브모듈). `PROBE_CONCURRENCY` 개씩 동시에, 결과는 입력 순서대로
@@ -324,39 +288,6 @@ mod tests {
     fn 없는_폴더는_오류() {
         let t = Tmp::new("missing");
         assert!(scan_local_repos(&format!("{}\\nope", t.root())).is_err());
-    }
-
-    /// TS 판과 공유하는 사례표(`tests/fixtures/repos/link-target.cases.json`)를 그대로 돌린다
-    #[test]
-    fn 링크_대상_판정이_ts_사례표와_같다() {
-        let cases: serde_json::Value = serde_json::from_str(include_str!("../../../tests/fixtures/repos/link-target.cases.json")).unwrap();
-        let list = |k: &str| cases[k].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>();
-        let (remote, local) = (list("remote"), list("local"));
-        assert!(remote.len() > 10 && local.len() > 5);
-        for t in remote {
-            assert!(is_remote_link_target(&t), "원격이어야 한다: {t:?}");
-        }
-        for t in local {
-            assert!(!is_remote_link_target(&t), "로컬이어야 한다: {t:?}");
-        }
-    }
-
-    #[test]
-    fn 링크_대상이_원격이면_따라가지_않는다() {
-        for remote in [r"\\host\share\x", "//host/share", r"\??\UNC\host\share", r"\\?\UNC\host\share", r"\??\unc\h\s", "//?/UNC/h/s", r"\\.\pipe\x", r"  \\host\s"] {
-            assert!(is_remote_link_target(remote), "{remote}");
-        }
-        for local in [r"C:\work\repo", r"\??\C:\work\repo", r"\\?\C:\work", r"\\wsl.localhost\Ubuntu\home", r"\\wsl$\Ubuntu\x", "../sibling", "repo", "/usr/x", ""] {
-            assert!(!is_remote_link_target(local), "{local}");
-        }
-    }
-
-    #[test]
-    fn 읽을_수_없는_링크는_따라가지_않는다() {
-        let t = Tmp::new("notlink");
-        t.dir("plain");
-        // read_link 가 실패하면(링크가 아니다) 보수적으로 따라가지 않는다
-        assert!(link_leads_remote(&t.0.join("plain")));
     }
 
     #[test]
