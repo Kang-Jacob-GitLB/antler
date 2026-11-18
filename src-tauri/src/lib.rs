@@ -1,5 +1,6 @@
 // jira:*·gh:* 채널 처리(Phase 4 PR 6·9). 통합 테스트(tests/channels.rs·api_route.rs)가 별도 크레이트라 pub 이다
 pub mod api_host;
+pub mod app_host;
 mod commands;
 // 설정 저장소 코어(Phase 6b PR 1) — 앱에 연결하지 않았다. 통합 테스트(tests/config.rs)가 별도 크레이트라 pub 이다
 pub mod config;
@@ -85,6 +86,24 @@ fn open_https(url: &str) -> Result<(), String> {
     tauri_plugin_opener::open_url(url, None::<&str>).map_err(|_| "주소를 열지 못했습니다".to_string())
 }
 
+/// `dialog:pickFolder` 의 폴더 선택 포트. 시작 위치는 라우터가 관문(`app_host::safe_default_path`)을 통과시킨 값만 온다. 창이 없으면 취소(`None`)다
+fn pick_folder_port(app: tauri::AppHandle) -> app_host::PickFolder {
+    std::sync::Arc::new(move |default| {
+        let mut arg = serde_json::json!({ "mode": "folder", "title": "Git 저장소 선택" });
+        if let Some(d) = default {
+            arg["defaultPath"] = serde_json::Value::String(d);
+        }
+        let picked = dialogs::pick_path(&app, &arg);
+        Ok(picked.and_then(|v| v.get("filePaths")?.as_array()?.first()?.as_str().map(str::to_string)))
+    })
+}
+
+/// `clipboard:writeText` 의 클립보드 쓰기 포트(읽기는 없다)
+fn clipboard_port(app: tauri::AppHandle) -> app_host::ClipboardWrite {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    std::sync::Arc::new(move |text| app.clipboard().write_text(text.to_string()).map_err(|_| "복사하지 못했습니다".to_string()))
+}
+
 pub fn run() {
     commands::mark_start();
     let mut builder = tauri::Builder::default()
@@ -125,6 +144,12 @@ pub fn run() {
             }));
             // Rust 가 맡는 저장소의 감시(Phase 6a PR 7b)가 ref 변화를 알리는 곳 — 사이드카의 `repo:changed` 와 같은 모양의 renderer 이벤트
             router.set_change_sink(fetch_host::change_sink(app.handle().clone()));
+            // 설정이 필요 없는 앱 채널(Phase 6b PR 5)의 포트: 폴더 선택(dialogs.rs)·클립보드(플러그인)·링크 열기(open_https). 스위치가 꺼져 있으면 주입하지 않는다
+            router.set_app(app_host::AppHost {
+                pick_folder: pick_folder_port(app.handle().clone()),
+                clipboard: clipboard_port(app.handle().clone()),
+                open_link: std::sync::Arc::new(open_https),
+            });
             // SSH 풀(Phase 5 PR 3). 스위치가 꺼져 있으면(ANTLER_RUST_SSH=0·ANTLER_RUST_GIT=0) 만들지 않는다 — ssh 저장소는 사이드카가 전부 맡는다.
             // 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(사이드카가 처리한다).
             // **fetch 서비스·사이드카 env 보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓰고, 사이드카 env 가 같은 판정(ssh_active)을 따른다

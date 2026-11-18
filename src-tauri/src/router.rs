@@ -20,6 +20,8 @@
 //! Rust 가 처리한다([`api_host`]). 꺼져 있으면 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
 //! env `ANTLER_RUST_API=1` 로 띄워 jira·gh 를 소유하지 않음을 알린다(앱은 두 서비스가 모두 만들어졌을 때만 주입한다)(라우터가 가로채므로 닿지 않는다 — 방어).
 //!
+//! 앱 채널(Phase 6b PR 5, [`APP_CHANNELS`]: 폴더 선택·클립보드·링크 열기·타이틀바 테마)은 설정·미러와 무관하다: `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`AppHost`])가 주입돼 있으면 Rust 가 처리한다([`app_host`]).
+//!
 //! `gh:repo`(Phase 6a PR 8)는 `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 위 git 채널과 같은 소유 술어(`RepoMirror::resolve`)를 쓴다 — Rust 가 맡는 저장소는 Rust 가 답하고
 //! (결과 캐시 60초), github kind·미러에 없는 id 는 사이드카가 답한다. GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
 //!
@@ -43,6 +45,7 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::api_host::{self, GithubHost, JiraHost};
+use crate::app_host::{self, AppHost};
 use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
 use crate::git::activity::{commit_activity, now_secs, ActivityCache, ActivityRequest};
 use crate::git::code_browse::{
@@ -100,6 +103,10 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:wipStatus",
     "git:wipDiff",
 ];
+
+/// Rust 가 처리하는 앱 채널(`app_host`, Phase 6b PR 5): 설정이 필요 없는 폴더 선택·클립보드·링크 열기·타이틀바 테마. `RUST_CHANNELS`·`API_CHANNELS` 와 겹치지 않고
+/// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다(`tests/app_route.rs` 가 강제한다). 스위치는 `ANTLER_RUST_GIT` 하나(`0` 이면 사이드카가 처리한다)
+pub const APP_CHANNELS: &[&str] = &["dialog:pickFolder", "clipboard:writeText", "code:openLink", "win:setTitleBarTheme"];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
 /// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 하고, `IPC_CHANNELS` 의 `jira:`·`gh:` 채널에서 [`API_SIDECAR_CHANNELS`] 를 뺀 것과 정확히 같아야 한다(`tests/api_route.rs` 가 강제한다)
@@ -533,6 +540,8 @@ pub struct Router {
     github: Mutex<Option<GithubHost>>,
     /// 사이드카를 `ANTLER_RUST_API=1` 로 띄웠다([`Router::claim_api`]). 켜지면 사이드카는 `jira:*`·`gh:*` 를 받지 않는다
     api_owned: AtomicBool,
+    /// 대화상자·클립보드·열기 포트(앱이 주입한다). 없거나 `ANTLER_RUST_GIT=0` 이면 [`APP_CHANNELS`] 는 사이드카가 처리한다
+    app: Mutex<Option<AppHost>>,
 }
 
 impl Router {
@@ -559,6 +568,7 @@ impl Router {
             jira: Mutex::default(),
             github: Mutex::default(),
             api_owned: AtomicBool::new(false),
+            app: Mutex::default(),
             log,
             mirror: mirror.clone(),
             cancels: Arc::default(),
@@ -642,6 +652,17 @@ impl Router {
         let active = self.api_active();
         self.api_owned.store(active, Ordering::SeqCst);
         active
+    }
+
+    /// 앱 채널의 포트를 주입한다. 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 사이드카가 전부 맡는다
+    pub fn set_app(&self, host: AppHost) {
+        if self.enabled {
+            *self.app.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
+        }
+    }
+
+    fn app_port(&self) -> Option<AppHost> {
+        self.app.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn jira_port(&self) -> Option<JiraHost> {
@@ -890,6 +911,19 @@ impl Router {
         if API_CHANNELS.contains(&channel) {
             let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
             return if channel.starts_with("gh:") { self.gh_channel(channel, raw).await } else { self.jira_channel(channel, raw).await };
+        }
+        // 앱 채널(폴더 선택·클립보드·링크·타이틀바 테마)은 설정·미러와 무관하다. 인자 모양과 무관하게 먼저 가로챈다 — 복사할 텍스트가 배열이 아닌 인자로도 사이드카 stdin 으로 가지 않게.
+        // 배열이 아니면 빈 인자로 넘겨 검증이 거부한다
+        if APP_CHANNELS.contains(&channel) {
+            let Some(host) = self.app_port().filter(|_| self.enabled) else {
+                self.note(channel, "sidecar(ANTLER_RUST_GIT=0)");
+                return Routed::Sidecar;
+            };
+            self.note(channel, "rust");
+            self.rust_handled.fetch_add(1, Ordering::Relaxed);
+            let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
+            return Routed::Done(app_host::app_envelope(host, channel, args).await);
         }
         let Some(raw) = args.as_array() else { return Routed::Sidecar };
         if channel == "req:cancel" {
