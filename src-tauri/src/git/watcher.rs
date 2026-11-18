@@ -173,7 +173,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 ///
 /// 정지 계약: [`watch`](Self::watch)(`None`·다른 저장소)·[`unwatch_if`](Self::unwatch_if)·`Drop` 이 돌아올 때 이전 저장소의 **맡겨진** 디렉터리 감시 핸들은 **닫기 요청이 끝나 있다**(핸들을 이 스레드에서 바로 버린다 — TS `stop()` 의 `w.close()`). 실제 notify 핸들(`fs_watch`)은 요청만 즉시 하고 notify 스레드의 종료(완료)는 비동기다 —
 /// 런타임 안에서는 기다리지 않아(사이드카 리더 스레드·`watch_target` 잠금을 최대 1.5초 붙잡지 않는다) 그 사이 `NotifyDirs::live` 가 잠깐 남는다. 앱 종료([`dispose`](Self::dispose))만 끝날 때까지 기다린다.
-/// 디렉터리를 **여는 중**(blocking 풀에서 등록하는 동안)에 정지하면 그 핸들은 곧 버려진다 — 호출처가 바로 폴더를 지워도 되는 보장으로 쓰지 않는다(github 캐시 삭제는 사이드카 몫이다). 또 멀티스레드 런타임에서는
+/// 디렉터리를 **여는 중**(blocking 풀에서 등록하는 동안)에 정지하면 그 핸들은 곧 버려진다 — 호출처가 바로 폴더를 지워도 되는 보장으로 쓰지 않는다(github 캐시 삭제 — `config_host` 의 `repos:remove` — 는 재시도하는 `remove_github_cache` 로 지운다. notify 는 `FILE_SHARE_DELETE` 로 열어 닫히는 중에도 지워진다). 또 멀티스레드 런타임에서는
 /// 정지 직전에 끝난 확인의 `on_change` 가 드물게 정지 뒤에 한 번 늦게 올 수 있다 — 받는 쪽(renderer)이 activeRepoId 로 거른다
 pub struct RepoWatcher {
     inner: Arc<Inner>,
