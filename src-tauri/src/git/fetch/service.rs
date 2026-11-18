@@ -15,7 +15,7 @@
 //! 읽는 쪽은 설정 변경 알림이 넣은 [`FetchPrefs`] 스냅샷과, 방금 쓴 값이 스냅샷에 반영되기 전까지 쥐는 메모리 오버레이다(쓰기가 동기라 보통 곧바로 스냅샷에 들어간다 — 오버레이는 PR 7 이전 흐름의 안전망으로 남겼다). 판정은 항상 **지문이 같은가**다("항목이 있는가"가 아니다).
 //!
 //! 이식 규칙: 운영 경로는 플랫폼·ssh 환경을 주입받지 않는다(`run_fetch`·`inspect_config` 만 부른다 — 주입 버전은 `*_for_test` 이고
-//! `tests/fetch_service.rs` 가 이 파일의 소스에 그 이름이 없음을 강제한다). 외부 의존(이벤트·확인 창·승인·사이드카 알림)은 [`FetchHost`] 로 주입한다.
+//! `tests/fetch_service.rs` 가 이 파일의 소스에 그 이름이 없음을 강제한다). 외부 의존(이벤트·확인 창·승인·알림)은 [`FetchHost`] 로 주입한다.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -44,7 +44,7 @@ use crate::git::log_service::NoteOp;
 use crate::git::signature::refs_signature;
 use crate::mirror::{RepoMirror, Resolved, Target};
 
-/// 자동 fetch 기본 주기(분). TS `DEFAULT_AUTO_FETCH_MINUTES`. 기본값을 정하는 곳은 사이드카 한 곳이라(`fetchPrefs.autoFetchMinutes` 는 이미 해석된 값) 이 상수는 테스트·문서용이다
+/// 자동 fetch 기본 주기(분). TS `DEFAULT_AUTO_FETCH_MINUTES`. 기본값을 정하는 곳은 설정 해석(`config::derive`) 한 곳이라(`fetchPrefs.autoFetchMinutes` 는 이미 해석된 값) 이 상수는 테스트·문서용이다
 pub const DEFAULT_AUTO_FETCH_MINUTES: f64 = 5.0;
 /// 저장소를 선택한 뒤 첫 자동 fetch 까지의 지연(선택 직후의 조회들이 먼저 끝나도록)
 pub const FIRST_DELAY: Duration = Duration::from_secs(3);
@@ -130,7 +130,7 @@ pub trait FetchHost: Send + Sync + 'static {
     /// 승인을 설정 파일에 남긴다(Rust 가 설정의 유일한 작성자다 — 동기 쓰기). 서비스가 부르는 곳은 두 군데뿐이다(모듈 문서)
     fn approve(&self, kind: ApprovalKind, repo_id: &str, fingerprint: &str);
 
-    /// 사이드카의 RepoService 에 알린다(`{t:"note"}`)
+    /// 알림(`Router::note_sink`)으로 알린다
     fn note(&self, op: NoteOp, repo_id: &str);
 
     /// GitHub 원격 전용 저장소의 fetch 가 HEAD 를 맞추며 알아낸 기본 브랜치가 레코드의 값과 다르다 — 설정의 레코드에 기록한다(Rust 가 설정의 유일한 작성자다).
@@ -143,7 +143,7 @@ pub trait FetchHost: Send + Sync + 'static {
     }
 }
 
-/// 사이드카가 보내는 fetch 설정 스냅샷(`{t:"fetchPrefs", gen, autoFetchMinutes, approvals, trusted}`)
+/// 설정에서 만든 fetch 설정 스냅샷(`{t:"fetchPrefs", gen, autoFetchMinutes, approvals, trusted}`)
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchPrefs {
     pub gen: u64,
@@ -167,7 +167,7 @@ fn fingerprint_map(v: &Value) -> Option<HashMap<String, String>> {
 }
 
 impl FetchPrefs {
-    /// 사이드카 메시지를 읽는다. 모양이 틀리면(gen·주기가 숫자가 아니거나 음수·무한, 승인 맵이 객체가 아님) None — 적용하지 않는다
+    /// 설정 메시지를 읽는다. 모양이 틀리면(gen·주기가 숫자가 아니거나 음수·무한, 승인 맵이 객체가 아님) None — 적용하지 않는다
     pub fn from_message(msg: &Value) -> Option<Self> {
         let gen = msg.get("gen")?.as_u64()?;
         let minutes = msg.get("autoFetchMinutes")?.as_f64().filter(|m| m.is_finite() && *m >= 0.0)?;
@@ -211,7 +211,7 @@ struct Core {
     last_gen: u64,
     approvals: HashMap<String, String>,
     trusted: HashMap<String, String>,
-    /// 방금 사이드카에 부탁한 값. fetchPrefs 가 되돌려 주기 전까지(또는 저장소가 사라질 때까지) 쓴다
+    /// 방금 설정에 쓰도록 부탁한 값. fetchPrefs 가 되돌려 주기 전까지(또는 저장소가 사라질 때까지) 쓴다
     overlay_approvals: HashMap<String, String>,
     overlay_trusted: HashMap<String, String>,
     /// "삭제 중"인 저장소(id → 만료 시각). `forget_and_wait` 가 달고, 새 fetch 를 거부한다. 레코드가 지워져 Rust 가 맡지 않게 되거나 [`REMOVING_TTL`] 이 지나면 풀린다
@@ -342,7 +342,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
     fn resolve(&self, repo_id: &str) -> Result<(Target, Arc<Source<R>>), ExecError> {
         let target = match self.mirror.resolve_fetch(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => return Err(ExecError::Other { message: format!("unknown repo: {repo_id}") }),
+            Resolved::Unserved => return Err(ExecError::Other { message: format!("unknown repo: {repo_id}") }),
             Resolved::Invalid(message) => return Err(ExecError::Other { message }),
         };
         let key = target.source_key();
@@ -393,7 +393,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
         self.host.approve(kind, repo_id, fingerprint);
     }
 
-    /// Rust fetch 서비스가 맡는 저장소인가 — **소스 종류(`rust_fetch_kinds`)로** 정한다(`RepoMirror::resolve_fetch`). 사이드카의 소유 판정과 같은 술어라 이중 fetch 가 없다
+    /// Rust fetch 서비스가 맡는 저장소인가 — **소스 종류(`rust_fetch_kinds`)로** 정한다(`RepoMirror::resolve_fetch`). 조회·감시의 소유 판정과 같은 술어라 이중 fetch 가 없다
     fn is_rust_repo(&self, repo_id: &str) -> bool {
         matches!(self.mirror.resolve_fetch(repo_id), Resolved::Rust(_))
     }
@@ -516,7 +516,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
                     s.auth_paused = false;
                 });
                 if changed {
-                    // 사이드카가 기억한 시그니처를 먼저 버린다 — repo:changed 로 다시 계산하는 쪽이 낡은 값을 쓰지 않게
+                    // 기억한 시그니처를 먼저 버린다 — repo:changed 로 다시 계산하는 쪽이 낡은 값을 쓰지 않게
                     self.host.note(NoteOp::FetchChanged, repo_id);
                     self.host.emit(HostEvent::RepoChanged(repo_id.to_string()));
                 }
@@ -594,7 +594,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> Inner<H, R> {
                 return Ok(false);
             }
             self.with_state(&repo_id, |s| s.accepted = Some(ins.fingerprint.clone()));
-            // 확인 창이 떠 있는 동안 저장소를 지웠으면 남기지 않는다. 저장은 사이드카가 하고, 실패해도 이번 실행 동안의 허용으로 계속한다
+            // 확인 창이 떠 있는 동안 저장소를 지웠으면 남기지 않는다. 저장은 설정 소유자가 하고, 실패해도 이번 실행 동안의 허용으로 계속한다
             if decision == Decision::Always && self.is_rust_repo(&repo_id) {
                 self.send_approval(ApprovalKind::Trusted, &repo_id, &ins.fingerprint);
             }
@@ -811,7 +811,7 @@ impl<H: FetchHost, R: GitRunner + Send + 'static> FetchService<H, R> {
 /// 라우터가 서비스를 다루는 입구. 서비스는 호스트·실행기 타입에 제네릭이라(`FetchHost::confirm` 이 `impl Future` 라 dyn 이 안 된다)
 /// 라우터(`State<Router>`)가 제네릭이 되지 않게 이 객체 안전한 포트로만 부른다.
 ///
-/// **tokio 런타임 안에서 불러야 하는 것**: `fetch`·`set_active`·`on_focus`·`apply_prefs`(예약이 태스크를 만든다). 사이드카 읽기 스레드·창 이벤트 스레드에서 부를 때는
+/// **tokio 런타임 안에서 불러야 하는 것**: `fetch`·`set_active`·`on_focus`·`apply_prefs`(예약이 태스크를 만든다). 창 이벤트 스레드 같은 런타임 밖 스레드에서 부를 때는
 /// 앱이 런타임에 들어간 뒤 부른다(`router::in_runtime_of`)
 pub trait FetchControl: Send + Sync + 'static {
     fn fetch(&self, repo_id: &str, manual: bool) -> FetchFuture;

@@ -71,7 +71,7 @@ impl Rig {
     }
 
     fn router(&self, mirror: &RepoMirror) -> Router {
-        let router = Router::new(true, false, mirror.clone());
+        let router = Router::new(false, mirror.clone());
         router.set_ssh_pool(self.pool.clone());
         router
     }
@@ -80,7 +80,7 @@ impl Rig {
 fn envelope(r: Routed) -> Value {
     match r {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("Rust 경로를 타야 하는데 사이드카로 갔다"),
+        Routed::Unserved => panic!("Rust 경로를 타야 하는데 풀지 못했다"),
     }
 }
 
@@ -162,29 +162,22 @@ async fn 호스트_앞뒤_공백은_지우고_그_값으로_연결한다() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn 스위치가_꺼지면_ssh_는_사이드카이고_연결하지_않는다() {
+async fn 풀이_없으면_ssh_는_풀_수_없고_연결하지_않는다() {
     let rig = Rig::new().await;
     let m = RepoMirror::default();
     m.apply(1, vec![rig.repo("s", "a")]);
-    // ANTLER_RUST_SSH=0
-    let off = Router::new(true, false, m.clone()).with_ssh(false);
-    off.set_ssh_pool(rig.pool.clone());
-    assert!(!off.ssh_active() && off.ssh_pool().is_none());
-    // ANTLER_RUST_GIT=0(라우터 전체가 꺼지면 ssh 도 함께 꺼진다)
-    let git_off = Router::new(false, false, m.clone());
-    git_off.set_ssh_pool(rig.pool.clone());
-    assert!(!git_off.ssh_active());
-    for r in [&off, &git_off] {
+    // 풀이 주입되지 않은 라우터
+    let bare = Router::new(false, m);
+    assert!(!bare.ssh_active() && bare.ssh_pool().is_none());
+    for r in [&bare] {
         for ch in ["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame", "git:resolveRev", "git:tree", "git:blob", "git:onRemote", "git:refs", "git:refsDetails", "git:search", "git:activity", "git:repoExtras", "git:lfsPaths", "gh:repo", "git:wipStatus", "git:wipDiff"] {
-            assert!(matches!(r.route(ch, &json!(["s", { "skip": 0, "count": 1 }])).await, Routed::Sidecar), "{ch}");
+            assert!(matches!(r.route(ch, &json!(["s", { "skip": 0, "count": 1 }])).await, Routed::Unserved), "{ch}");
         }
     }
     assert_eq!(rig.server.connections(), 0);
-    assert_eq!((off.rust_handled(), git_off.rust_handled()), (0, 0));
-    // 풀이 주입되지 않은 기본 라우터도 같다
-    let bare = Router::new(true, false, m);
-    assert!(!bare.ssh_active());
-    assert!(matches!(bare.route("git:log", &json!(["s", { "skip": 0, "count": 1 }])).await, Routed::Sidecar));
+    assert_eq!(bare.rust_handled(), 0);
+    // 앱 경계는 명시적 오류로 답한다
+    assert_eq!(bare.invoke("git:log", &json!(["s", { "skip": 0, "count": 1 }])).await["error"], "SSH 를 사용할 수 없습니다");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -212,8 +205,8 @@ async fn 같은_호스트는_연결_하나를_나눠_쓰고_쓰지_않는_호스
     router.on_mirror_changed();
     assert_eq!(rig.pool.hosts(), ["a"]);
     wait_for("b 연결 닫힘", || rig.server.open_connections() == 1).await;
-    // 닫힌 호스트의 저장소는 이제 미러에 없어 사이드카가 처리한다
-    assert!(matches!(router.route("git:log", &json!(["t1", { "skip": 0, "count": 5 }])).await, Routed::Sidecar));
+    // 닫힌 호스트의 저장소는 이제 미러에 없어 풀 수 없다
+    assert!(matches!(router.route("git:log", &json!(["t1", { "skip": 0, "count": 5 }])).await, Routed::Unserved));
 
     // 같은 호스트를 다시 추가하면 새 연결이 맺어져 동작한다(닫은 실행기는 영구히 거부하므로 풀·큐에서 빼 두지 않으면 계속 실패한다)
     let before = rig.server.connections();
@@ -335,27 +328,10 @@ async fn log_ok_at(router: &Router, id: &str, commits: usize) -> bool {
 fn 앱은_풀을_fetch_서비스보다_먼저_주입하고_판정은_ssh_active_하나다() {
     let lib = read_src("src/lib.rs");
     let pool = lib.find("router.set_ssh_pool(").expect("풀 주입");
-    let guard = lib.find("if router.ssh_enabled()").expect("스위치 확인");
     let fetch = lib.find("router.set_fetch(").expect("fetch 서비스 주입");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
-    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(guard < pool && pool < fetch && fetch < manage && manage < spawn);
+    assert!(pool < fetch && fetch < manage);
     assert_eq!(lib.matches("router.set_ssh_pool(").count(), 1);
-    assert!(!lib.contains("rust_ssh") && !lib.contains("sidecar_fetch_kinds"), "PR 10: 사이드카에 ssh·fetch 소유를 알리지 않는다");
-    assert!(lib.contains("mirror, config_owned)?"));
-    // 홈을 알 수 없으면 풀을 주입하지 않는다(사이드카가 처리한다) — 빈 홈으로 만들지 않는다
+    // 홈을 알 수 없으면 풀을 주입하지 않는다(Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다) — 빈 홈으로 만들지 않는다
     assert!(lib.contains("app.path().home_dir()"));
-    // 하위 스위치 `ANTLER_RUST_SSH` 는 Phase 6b PR 9 부터 은퇴했다(결정 D5) — 라우터도 앱·사이드카도 이 값을 읽지 않는다(사이드카 env 로 *내보내기만* 한다)
-    let router = read_src("src/router.rs");
-    assert!(!router.contains("var(\"ANTLER_RUST_SSH\")") && !router.contains("fn rust_ssh_enabled"));
-    for rel in ["src/lib.rs", "src/sidecar.rs", "src/mirror.rs", "src/git/fetch/service.rs"] {
-        assert!(!read_src(rel).contains("var(\"ANTLER_RUST_SSH\")"), "{rel} 가 스위치를 직접 읽는다");
-    }
-}
-
-#[test]
-fn 사이드카에_ssh_소유를_알리는_env_는_없다() {
-    // Phase 6b PR 10: 소유하는 실행의 사이드카는 ssh 저장소를 맡지 않고(어떤 git 채널도 받지 않는다) 되돌리기는 전부 맡으므로 알릴 값이 없다
-    let sidecar = read_src("src/sidecar.rs");
-    assert!(!sidecar.contains("cmd.env(\"ANTLER_RUST_SSH\"") && !sidecar.contains("env_remove(\"ANTLER_RUST_SSH\")") && !sidecar.contains("rust_ssh: bool"));
 }

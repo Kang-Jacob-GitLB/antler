@@ -1,6 +1,6 @@
-//! 사이드카가 부탁한 확인 창·폴더/파일 선택을 Rust 네이티브 대화상자로 띄운다(webview HTML 이 아니다).
+//! Rust 포트(`env_host`·`fetch_host`·`config_host`)가 부탁한 확인 창·폴더/파일 선택을 Rust 네이티브 대화상자로 띄운다(webview HTML 이 아니다).
 //! renderer 에는 이 대화상자를 띄우거나 누를 경로가 없다 — 플러그인의 JS command 는 capability 에 주지 않는다.
-//! 실패(창 없음·잘못된 인자·닫기·Esc)는 모두 `None` 이고, 사이드카가 이를 취소(cancelId)로 바꾼다.
+//! 실패(창 없음·잘못된 인자·닫기·Esc)는 모두 `None` 이고, 호출한 포트가 이를 취소(cancelId)로 바꾼다.
 //! 인자 모양은 src/sidecar/protocol.ts 의 MessageBoxArg·PickPathArg 와 같아야 한다.
 
 use std::path::Path;
@@ -62,7 +62,7 @@ fn show(parent: &tauri::WebviewWindow, buttons: &[&str], cancel_id: usize, title
         2 => MessageButtons::OkCancelCustom(label(0), label(1)),
         _ => MessageButtons::YesNoCancelCustom(label(0), label(1), label(2)),
     };
-    // 이 함수는 사이드카 host 처리 스레드(std::thread)에서 불린다. TaskDialog 는 부르는 스레드에서 돌고 부모 창을 비활성화한다(모달)
+    // 이 함수는 블로킹 스레드(std::thread·spawn_blocking)에서 불린다. TaskDialog 는 부르는 스레드에서 돌고 부모 창을 비활성화한다(모달)
     let result = MessageDialog::new().set_level(level).set_title(title).set_description(message).set_buttons(shown).set_parent(parent).show();
     match result {
         MessageDialogResult::Custom(pressed) => Some(pressed),

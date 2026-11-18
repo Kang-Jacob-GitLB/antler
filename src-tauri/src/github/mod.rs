@@ -8,7 +8,7 @@
 //! - [`remote_url`]: git remote URL → GitHub owner/repo(Phase 6a PR 8. `remoteUrl.ts`)
 //! - [`local_time`]: 한도 해제 시각의 로컬 표시(PR 9. `client.ts` 의 `formatTime`)
 //! - [`service`]: 로그인 상태·세대·Device Flow·조회를 가진 서비스(PR 7. `service.ts`. PR 9 부터 `api_host` 가 부른다). 하위: [`device_flow`](Device Flow 요청), [`queries`](`api.ts` 의 호출부),
-//!   [`ports`](사이드카·외부 토큰 출처에 묻는 트레이트), [`error`](봉투 오류), [`avatars`](작성자 아바타 해석·캐시), [`checks`](체크 상태 조회·캐시), [`launchpad`](Launchpad 조회)
+//!   [`ports`](저장소 정보·외부 토큰 출처에 묻는 트레이트), [`error`](봉투 오류), [`avatars`](작성자 아바타 해석·캐시), [`checks`](체크 상태 조회·캐시), [`launchpad`](Launchpad 조회)
 //!
 //! 공통 해석(오류 분류·Link·rate limit·토큰 가리기)은 [`crate::net`] 이다.
 pub mod accessible_repos;

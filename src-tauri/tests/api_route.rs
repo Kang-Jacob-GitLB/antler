@@ -1,5 +1,5 @@
-//! `jira:*`·`gh:*` 라우팅(Phase 4 PR 6·9) 통합 테스트: 스위치(`ANTLER_RUST_API`·`ANTLER_RUST_GIT`)에 따른 라우터의 선택, 꺼졌을 때 서비스·키체인이 없다는 것,
-//! 켜졌을 때 `jira:*` 가 사이드카로 가지 않는다는 것, 앱 배선 순서와 열기 경로의 소스 검사. 네트워크·git 을 쓰지 않는다
+//! `jira:*`·`gh:*` 라우팅(Phase 4 PR 6·9) 통합 테스트: 서비스 주입 여부에 따른 라우터의 선택, 서비스를 만들지 못했을 때의 오류,
+//! 앱 배선 순서와 열기 경로의 소스 검사. 네트워크·git 을 쓰지 않는다
 //! (연결하지 않은 서비스·잘못된 인자로만 부르므로 HTTP 요청이 나가지 않는다). 채널 골든(TS 와의 패리티)은 `channels.rs` 의 `jira_채널_시나리오가_ts_골든과_같다`.
 
 use std::fs;
@@ -11,7 +11,7 @@ use antler_lib::github::ports::{GhRepoRef, RepoQuery};
 use antler_lib::github::service::{GitHubService, ServiceOptions};
 use antler_lib::jira::service::JiraService;
 use antler_lib::mirror::{MirrorRepo, RepoMirror};
-use antler_lib::router::{Routed, Router, API_CHANNELS, API_SIDECAR_CHANNELS, RUST_CHANNELS};
+use antler_lib::router::{Routed, Router, API_CHANNELS, RUST_CHANNELS};
 use futures_util::future::{BoxFuture, FutureExt};
 use tokio_util::sync::CancellationToken;
 use antler_lib::secret::memory::MemoryStore;
@@ -71,51 +71,43 @@ fn ipc_channels() -> Vec<String> {
 }
 
 #[test]
-fn api_채널은_ipc_채널의_jira_gh_채널에서_사이드카_몫을_뺀_것과_정확히_같다() {
+fn api_채널은_ipc_채널의_jira_gh_채널에서_gh_repo_를_뺀_것과_정확히_같다() {
     let all = ipc_channels();
-    for ch in API_CHANNELS.iter().chain(API_SIDECAR_CHANNELS) {
+    for ch in API_CHANNELS {
         assert!(all.iter().any(|c| c == ch), "{ch} 가 IPC_CHANNELS 에 없다(tests/golden/exec/channels.json)");
     }
-    let mut want: Vec<&str> = all.iter().map(String::as_str).filter(|c| (c.starts_with("jira:") || c.starts_with("gh:")) && !API_SIDECAR_CHANNELS.contains(c)).collect();
+    let mut want: Vec<&str> = all.iter().map(String::as_str).filter(|c| (c.starts_with("jira:") || c.starts_with("gh:")) && *c != "gh:repo").collect();
     let mut api: Vec<&str> = API_CHANNELS.to_vec();
     want.sort_unstable();
     api.sort_unstable();
-    assert_eq!(api, want, "IPC_CHANNELS 의 jira:*·gh:*(gh:repo 제외)와 API_CHANNELS 가 다르다 — 빠진 채널은 사이드카로 가서 토큰을 두 곳에서 다루게 된다");
-    assert_eq!(API_SIDECAR_CHANNELS, ["gh:repo"], "API_CHANNELS 가 아닌 gh 채널은 gh:repo 뿐이다(Rust 가 맡는 저장소는 git 채널로 Rust 가, 나머지는 사이드카가 처리한다)");
+    assert_eq!(api, want, "IPC_CHANNELS 의 jira:*·gh:*(gh:repo 제외)와 API_CHANNELS 가 다르다 — 빠진 채널은 처리기가 없다");
+    // gh:repo 는 저장소를 보는 git 채널이라 RUST_CHANNELS 에 있다(Rust 가 맡는 저장소는 라우터가 답한다)
+    assert!(RUST_CHANNELS.contains(&"gh:repo") && all.iter().any(|c| c == "gh:repo"));
     // git 채널 목록과 겹치지 않는다
     for ch in API_CHANNELS {
         assert!(!RUST_CHANNELS.contains(ch));
     }
-    // 사이드카 쪽 판정(`apiOwns.ts` 와 `ANTLER_RUST_API`)은 PR 10 에서 없앴다 — 소유하는 실행의 사이드카는 update:* 밖의 채널을 어떤 것도 받지 않는다(`tests/sidecar_scope.rs`)
-    assert!(!Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("src/sidecar/apiOwns.ts").exists());
 }
 
 #[test]
-fn 하위_스위치_api_와_ssh_는_은퇴했고_git_스위치_하나가_모두_정한다() {
-    // Phase 6b PR 9 의 결정 D5: `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 라우터가 더는 읽지 않는다(그 갈래로 돌아가려면 사이드카가 설정을 읽고 써야 한다). `ANTLER_RUST_GIT=0` 만 6c 까지 산다
+fn 라우터는_환경변수로_로그만_켜고_되돌리기_스위치를_읽지_않는다() {
     let router = prod_code("src/router.rs");
     let from_env = &router[router.find("pub fn from_env(").expect("from_env")..];
     let from_env = &from_env[..from_env.find("\n    }\n").expect("from_env 끝")];
-    assert!(from_env.contains("ANTLER_RUST_GIT") && from_env.contains("ANTLER_ROUTE_LOG"));
-    assert!(!from_env.contains("ANTLER_RUST_API") && !from_env.contains("ANTLER_RUST_SSH"), "은퇴한 스위치를 읽는다");
-    assert!(!router.contains("fn rust_api_enabled") && !router.contains("fn rust_ssh_enabled"));
-    // 스위치가 꺼지면 API 도 ssh 도 함께 꺼진다
-    let off = Router::new(false, false, RepoMirror::default());
-    assert!(!off.api_enabled() && !off.ssh_enabled());
-    let on = Router::new(true, false, RepoMirror::default());
-    assert!(on.api_enabled() && on.ssh_enabled());
+    assert!(from_env.contains("ANTLER_ROUTE_LOG"));
+    assert!(!from_env.contains("ANTLER_RUST_"), "되돌리기 스위치를 읽는다");
+    assert!(!router.contains("fn rust_api_enabled") && !router.contains("fn rust_ssh_enabled") && !router.contains("fn rust_git_enabled"));
 }
 
 #[test]
-fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든다() {
+fn 서비스_보관소_키체인은_앱_시작의_한_곳에서만_만든다() {
     let lib = prod_code("src/lib.rs");
-    let guard = lib.find("if let (true, Some(store)) = (router.api_enabled(), config_store.clone()) {").expect("스위치 분기");
-    // 서비스·Vault·보관소를 만드는 호출은 이 분기 안(사이드카 기동 전)에만 있다
-    let end = lib.find("router.claim_api()").expect("분기 끝");
+    // 서비스·Vault·보관소를 만드는 호출은 라우터 등록 전의 한 곳에만 있다
+    let end = lib.find("app.manage(router)").expect("라우터 등록");
     for needle in ["open_store(", "Vault::new(", "JiraService::new(", "GitHubService::new("] {
         assert_eq!(lib.matches(needle).count(), 1, "{needle} 는 한 번만");
         let at = lib.find(needle).unwrap();
-        assert!(guard < at && at < end, "{needle} 가 스위치 분기 밖에 있다");
+        assert!(at < end, "{needle} 가 라우터 등록 뒤에 있다");
     }
     // 보관소(키체인)를 여는 곳은 앱에서 이 한 곳뿐이다(secret 모듈 안의 정의·위임은 제외)
     for rel in src_files() {
@@ -127,47 +119,25 @@ fn 서비스_보관소_키체인은_스위치가_켜진_분기에서만_만든�
             assert!(!code.contains(banned), "{rel} 가 {banned} 를 부른다");
         }
     }
-    // 서비스가 실제로 만들어졌을 때만 소유를 기록한다(`claim_api`). 서비스는 사이드카 기동·라우터 등록보다 먼저다
+    // 서비스는 라우터 등록보다 먼저다
     let jira = lib.find("router.set_jira(").expect("서비스 주입");
     let github = lib.find("router.set_github(").expect("GitHub 서비스 주입");
-    let api = lib.find("router.claim_api()").expect("사이드카 env 값(라우팅과 같은 api_active 판정)");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
-    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(jira < api && github < api && api < manage && manage < spawn);
-    assert!(lib.contains("mirror, config_owned)?"), "사이드카 기동 인자는 설정 소유 여부 하나다");
-    // env 하나가 두 서비스를 함께 넘기므로 둘 다 만들어졌을 때만 둘 다 주입한다(하나만 되면 둘 다 사이드카가 처리한다)
+    assert!(jira < manage && github < manage);
+    // 둘 다 만들어졌을 때만 둘 다 주입한다(하나만 되면 둘 다 오류로 답한다 — `Router::api_active`)
     assert_eq!(lib.matches("router.set_jira(").count(), 1);
     assert_eq!(lib.matches("router.set_github(").count(), 1);
     let both = lib.find("(Ok(jira), Ok(gh)) =>").expect("둘 다 성공한 분기");
-    assert!(both < jira && both < github && github < api);
-    // GitHub 토큰은 Rust 만 쥔다 — 사이드카로 사본을 보내지 않는다(Phase 6b PR 9: `ghToken` 줄 중단. 사이드카에 남는 github 기능은 없다 — 설정이 비어 있어 저장소가 없다)
-    assert!(!lib.contains("push_gh_token("), "사이드카로 토큰 사본을 보내는 호출이 없다");
+    assert!(both < jira && both < github);
+    // GitHub 토큰은 Rust 만 쥔다
     assert_eq!(lib.matches("git_token()").count(), 1, "토큰을 읽는 곳은 캐시 실행기의 출처 하나뿐이다");
-    let sidecar = prod_code("src/sidecar.rs");
-    assert!(!sidecar.contains("gh_token_line") && !sidecar.contains("ghToken"), "사이드카로 토큰 줄을 보내는 길이 없다");
     // 한도 해제 시각은 로컬 시간대 표시를 쓴다(서비스 생성자)
     assert!(prod_code("src/github/service.rs").contains("with_format_time(super::local_time::format_epoch_sec)"));
 }
 
 #[test]
-fn 사이드카_env_는_항상_직접_정한다() {
-    let sidecar = prod_code("src/sidecar.rs");
-    // 값이 없을 때 부모의 env 를 지운다(되돌리기가 뒤집히지 않게)
-    assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_CONFIG\", \"1\")") && sidecar.contains("cmd.env_remove(\"ANTLER_RUST_CONFIG\")"));
-    // 사이드카에 env 로 가는 것은 이 둘뿐이다(ANTLER_USER_DATA·CONFIG — PR 10 에서 FETCH_KINDS·API·SSH 를 없앴다) — 토큰은 env 에도 stdin 줄에도 없다
-    let envs: Vec<&str> = sidecar.lines().filter(|l| l.contains("cmd.env(") || l.contains(".env(") || l.contains("env_remove(")).collect();
-    for l in &envs {
-        assert!(
-            ["ANTLER_USER_DATA", "ANTLER_RUST_CONFIG"].iter().any(|n| l.contains(n)),
-            "사이드카에 알 수 없는 env 를 넘긴다: {l}"
-        );
-    }
-    assert!(!sidecar.to_lowercase().contains("token"), "Rust 쪽 사이드카 중계 코드에 토큰을 다루는 곳이 없다");
-}
-
-#[test]
 fn 운영_코드에_시험_훅_호출이_없다() {
-    for rel in ["api_host.rs", "router.rs", "lib.rs", "sidecar.rs", "routed_repos.rs", "git/remotes.rs", "github/remote_url.rs", "github/local_time.rs"] {
+    for rel in ["api_host.rs", "router.rs", "lib.rs", "routed_repos.rs", "git/remotes.rs", "github/remote_url.rs", "github/local_time.rs"] {
         let code = prod_code(&format!("src/{rel}"));
         for banned in ["_for_test", "insecure_loopback", "standing_in_for_keychain", "test-hooks"] {
             assert!(!code.contains(banned), "{rel} 에 {banned}");
@@ -188,9 +158,9 @@ fn 열기는_검증한_주소만_쓰고_https_가_아니면_열지_않는다() {
 }
 
 #[test]
-fn api_host_는_앱_핸들과_사이드카에_기대지_않는다() {
+fn api_host_는_앱_핸들에_기대지_않는다() {
     let host = prod_code("src/api_host.rs");
-    for banned in ["AppHandle", "Sidecar", "tauri::", "tauri_plugin"] {
+    for banned in ["AppHandle", "tauri::", "tauri_plugin"] {
         assert!(!host.contains(banned), "api_host.rs 에 {banned}");
     }
 }
@@ -205,7 +175,7 @@ fn host() -> JiraHost {
     JiraHost { service, opener: Arc::new(|_| Ok(())) }
 }
 
-/// 사이드카에 묻지 않는 저장소 정보(저장소도 클라이언트 ID 도 없다) — 오프라인 호출이 사이드카를 필요로 하지 않게
+/// 저장소 정보를 묻지 않는 대체 질의(저장소도 클라이언트 ID 도 없다) — 오프라인 호출이 저장소를 필요로 하지 않게
 struct NoRepos;
 
 impl RepoQuery for NoRepos {
@@ -235,7 +205,7 @@ fn gh_host() -> GithubHost {
 
 /// 둘 다 주입한 라우터(앱이 만드는 모양)
 fn router_with_both() -> Router {
-    let r = Router::new(true, false, RepoMirror::default());
+    let r = Router::new(false, RepoMirror::default());
     r.set_jira(host());
     r.set_github(gh_host());
     r
@@ -293,16 +263,15 @@ fn 오프라인_호출표가_모든_api_채널을_덮는다() {
 }
 
 #[tokio::test]
-async fn 스위치가_켜지면_jira_채널은_미러와_무관하게_rust_가_처리한다() {
+async fn 서비스가_주입되면_jira_채널은_미러와_무관하게_rust_가_처리한다() {
     // 미러는 비어 있다 — git 채널과 달리 저장소와 무관하다
-    let router = Router::new(true, false, RepoMirror::default());
-    assert!(router.api_enabled());
+    let router = Router::new(false, RepoMirror::default());
     assert!(!router.api_active() && !router.github_active(), "서비스가 주입되기 전에는 활성이 아니다");
     router.set_jira(host());
     router.set_github(gh_host());
     assert!(router.api_active() && router.github_active());
     for (ch, args) in offline_calls() {
-        let Routed::Done(env) = router.route(ch, &args).await else { panic!("{ch} 가 사이드카로 갔다") };
+        let Routed::Done(env) = router.route(ch, &args).await else { panic!("{ch} 를 풀지 못했다") };
         assert!(env["ok"].is_boolean(), "{ch}: {env}");
     }
     assert_eq!(router.rust_handled(), API_CHANNELS.len() as u64);
@@ -326,104 +295,83 @@ async fn 연결하지_않으면_조회는_jira_auth_이고_검증_실패는_erro
     assert_eq!(call("jira:connect", json!([{ "kind": "cloud", "siteUrl": "http://example.com", "email": "a@b.c", "token": "tok" }])).await["code"], "ERROR");
     // 연결한 사이트가 없으면 어떤 주소도 열지 않는다
     assert_eq!(call("jira:openExternal", json!(["https://example.com/"])).await["code"], "ERROR");
-    // void 채널은 data 가 없다(사이드카의 JSON 직렬화와 같다) — 여기서는 연결이 없어 오류다
+    // void 채널은 data 가 없다 — 여기서는 연결이 없어 오류다
     assert_eq!(call("jira:transition", json!(["ABC-1", "31"])).await["code"], "JIRA_AUTH");
     assert_eq!(call("jira:avatar", json!(["https://example.com/a.png"])).await, json!({ "ok": true, "data": null }));
 }
 
 #[tokio::test]
-async fn 스위치가_꺼지면_서비스를_두지_않고_jira_채널은_사이드카로_간다() {
-    // ANTLER_RUST_API=0 에 해당: 서비스를 주입해도 받지 않는다
-    let off = Router::new(true, false, RepoMirror::default()).with_api(false);
-    assert!(!off.api_enabled());
-    off.set_jira(host());
-    off.set_github(gh_host());
-    assert!(!off.api_active() && !off.github_active());
-    // ANTLER_RUST_GIT=0 에 해당(라우터 전체가 꺼진다)
-    let git_off = Router::new(false, false, RepoMirror::default());
-    git_off.set_jira(host());
-    git_off.set_github(gh_host());
-    assert!(!git_off.api_active() && !git_off.github_active());
-    for r in [&off, &git_off] {
-        for (ch, args) in offline_calls() {
-            assert!(matches!(r.route(ch, &args).await, Routed::Sidecar), "{ch}");
-        }
-        assert_eq!(r.rust_handled(), 0);
-    }
-}
-
-#[tokio::test]
-async fn 서비스를_만들지_못했으면_사이드카가_처리한다() {
-    // 스위치는 켜졌지만 서비스가 주입되지 않았다(생성 실패) — 활성이 아니고 jira:* 는 사이드카로 간다(앱은 사이드카에 env 를 주지 않는다)
-    let r = Router::new(true, false, RepoMirror::default());
-    assert!(r.api_enabled() && !r.api_active() && !r.github_active());
+async fn 서비스를_만들지_못했으면_연결_서비스를_사용할_수_없다는_오류로_답한다() {
+    // 서비스가 주입되지 않았다(생성 실패) — 활성이 아니고 jira:*·gh:* 는 풀 수 없음이며, 앱 경계(`invoke`)가 오류 봉투로 답한다
+    let r = Router::new(false, RepoMirror::default());
+    assert!(!r.api_active() && !r.github_active());
     for (ch, args) in offline_calls() {
-        assert!(matches!(r.route(ch, &args).await, Routed::Sidecar), "{ch}");
+        assert!(matches!(r.route(ch, &args).await, Routed::Unserved), "{ch}");
+        assert_eq!(r.invoke(ch, &args).await, json!({ "ok": false, "error": "연결 서비스를 사용할 수 없습니다", "code": "ERROR" }), "{ch}");
     }
+    assert_eq!(r.rust_handled(), 0);
 }
 
 #[tokio::test]
-async fn 한쪽_서비스만_있으면_활성이_아니고_둘_다_사이드카가_처리한다() {
-    // 사이드카 env 하나가 jira·gh 를 함께 넘기므로 한쪽만 있으면 api_active=false 이고(env 를 주지 않는다) 두 계열 모두 사이드카다
-    let only_jira = Router::new(true, false, RepoMirror::default());
+async fn 한쪽_서비스만_있으면_활성이_아니고_둘_다_풀_수_없다() {
+    // 채널 소유를 하나로 정하려고 한쪽만 있으면 api_active=false 이고 두 계열 모두 풀 수 없다
+    let only_jira = Router::new(false, RepoMirror::default());
     only_jira.set_jira(host());
-    let only_gh = Router::new(true, false, RepoMirror::default());
+    let only_gh = Router::new(false, RepoMirror::default());
     only_gh.set_github(gh_host());
     for r in [&only_jira, &only_gh] {
         assert!(!r.api_active());
-        assert!(!r.claim_api());
         for (ch, args) in offline_calls() {
-            assert!(matches!(r.route(ch, &args).await, Routed::Sidecar), "{ch}");
+            assert!(matches!(r.route(ch, &args).await, Routed::Unserved), "{ch}");
         }
         assert_eq!(r.rust_handled(), 0);
     }
 }
 
 #[tokio::test]
-async fn 둘_다_있으면_claim_api_가_참이고_채널을_rust_가_처리한다() {
+async fn 둘_다_있으면_활성이고_채널을_rust_가_처리한다() {
     let r = router_with_both();
-    assert!(r.api_active() && r.claim_api());
+    assert!(r.api_active());
     assert!(matches!(r.route("gh:auth", &json!([])).await, Routed::Done(_)));
     assert!(matches!(r.route("jira:auth", &json!([])).await, Routed::Done(_)));
 }
 
 #[tokio::test]
-async fn 배열이_아닌_인자와_login_pat_의_토큰은_사이드카로_가지_않는다() {
-    // 서비스가 있는 소유 상태(둘 다 사이드카 아님)와 한쪽만 있는 상태 모두에서: 배열이 아닌 인자는 Done(검증 거부)이어야 하고, 사이드카로는 토큰이 가지 않는다
+async fn 배열이_아닌_인자와_login_pat_의_토큰도_서비스_검증이_거부한다() {
+    // 배열이 아닌 인자는 Done(검증 거부)이어야 하고, 토큰이 오류 문구에 남지 않는다
     let r = router_with_both();
-    assert!(r.claim_api());
     for args in [json!("ghp_secret"), json!({"token": "ghp_secret"}), json!(null), json!(5)] {
         for ch in ["gh:loginPat", "jira:connect"] {
-            let Routed::Done(env) = r.route(ch, &args).await else { panic!("{ch} {args} 가 사이드카로 갔다") };
+            let Routed::Done(env) = r.route(ch, &args).await else { panic!("{ch} {args} 를 풀지 못했다") };
             assert_eq!(env["ok"], false, "{ch}: {env}");
             assert!(!env.to_string().contains("ghp_secret"), "{env}");
         }
     }
-    // 배열 인자의 loginPat 토큰도 Rust 서비스가 받는다(사이드카 stdin 으로 가지 않는다)
+    // 배열 인자의 loginPat 토큰도 Rust 서비스가 받는다
     for token in ["has space", "ghp_secret bad"] {
-        let Routed::Done(env) = r.route("gh:loginPat", &json!([token])).await else { panic!("gh:loginPat 이 사이드카로 갔다") };
+        let Routed::Done(env) = r.route("gh:loginPat", &json!([token])).await else { panic!("gh:loginPat 을 풀지 못했다") };
         assert_eq!(env["code"], "ERROR");
         assert!(!env.to_string().contains("secret"), "{env}");
     }
 }
 
-/// `gh:repo` 는 API 스위치와 무관한 git 채널이다(Phase 6a PR 8): Rust 가 git 을 맡는 저장소(미러의 local·wsl·ssh)는 Rust 가 답하고,
-/// 미러에 없는 id·github·잘못된 인자는 둘 다 켜져 있어도 사이드카가 처리한다(사이드카가 TS 와 같은 오류를 만든다)
+/// `gh:repo` 는 서비스와 무관한 git 채널이다(Phase 6a PR 8): Rust 가 git 을 맡는 저장소(미러의 local·wsl·ssh)는 Rust 가 답하고,
+/// 미러에 없는 id·github·잘못된 인자는 둘 다 주입돼 있어도 풀 수 없다(`invoke` 가 오류로 답한다)
 #[tokio::test]
-async fn gh_repo_는_미러에_없으면_둘_다_켜져_있어도_사이드카가_처리하고_맡은_저장소는_rust_가_처리한다() {
+async fn gh_repo_는_미러에_없으면_풀_수_없고_맡은_저장소는_rust_가_처리한다() {
     let r = router_with_both();
     for args in [json!(["r1"]), json!([]), json!("r1"), json!(null)] {
-        assert!(matches!(r.route("gh:repo", &args).await, Routed::Sidecar), "{args}");
+        assert!(matches!(r.route("gh:repo", &args).await, Routed::Unserved), "{args}");
     }
     assert_eq!(r.rust_handled(), 0);
     assert!(RUST_CHANNELS.contains(&"gh:repo") && !API_CHANNELS.contains(&"gh:repo"));
     let mirror = RepoMirror::default();
     mirror.apply(1, vec![MirrorRepo { id: "l".into(), kind: "local".into(), path: "/nonexistent-antler-api".into(), distro: None, ssh_host: None }]);
-    let owned = Router::new(true, false, mirror);
+    let owned = Router::new(false, mirror);
     owned.set_jira(host());
     owned.set_github(gh_host());
-    // 저장소 경로가 없어 git 이 실패한다 — 사이드카로 가지 않고 Rust 가 GIT 오류를 낸 것이 소유의 증거다
-    let Routed::Done(env) = owned.route("gh:repo", &json!(["l"])).await else { panic!("gh:repo 가 사이드카로 갔다") };
+    // 저장소 경로가 없어 git 이 실패한다 — Rust 가 GIT 오류를 낸 것이 소유의 증거다
+    let Routed::Done(env) = owned.route("gh:repo", &json!(["l"])).await else { panic!("gh:repo 를 풀지 못했다") };
     assert_eq!(env["code"], "GIT", "{env}");
     assert_eq!(owned.rust_handled(), 1);
 }
@@ -459,41 +407,32 @@ async fn gh_채널의_봉투는_코드_순서를_지킨다() {
 }
 
 #[tokio::test]
-async fn 배열이_아닌_인자의_gh_호출도_사이드카로_보내지_않는다() {
-    // 토큰을 담은 인자가 사이드카 stdin 으로 가지 않게 — 서비스 검증이 거부한다(jira 와 같은 보안 수정)
+async fn 배열이_아닌_인자의_gh_호출도_서비스_검증이_거부한다() {
+    // 토큰을 담은 인자가 다른 처리기로 가지 않게 — 서비스 검증이 거부한다(jira 와 같은 보안 수정)
     let r = router_with_both();
     let bad = [json!({"token": "SECRET-ghp_abcdef"}), json!("SECRET-ghp_abcdef"), json!(null), json!(5)];
     for ch in ["gh:loginPat", "gh:auth", "gh:pull", "gh:devicePoll", "gh:openExternal", "gh:avatars", "gh:launchpad"] {
         for args in &bad {
-            let Routed::Done(env) = r.route(ch, args).await else { panic!("{ch} 가 사이드카로 갔다: {args}") };
+            let Routed::Done(env) = r.route(ch, args).await else { panic!("{ch} 를 풀지 못했다: {args}") };
             assert!(!env.to_string().contains("SECRET"), "{ch}");
         }
     }
 }
 
 #[tokio::test]
-async fn gh_채널은_스위치가_꺼지면_사이드카로_간다() {
-    let off = Router::new(true, false, RepoMirror::default()).with_api(false);
-    off.set_github(gh_host());
-    for (ch, args) in offline_calls().into_iter().filter(|(c, _)| c.starts_with("gh:")) {
-        assert!(matches!(off.route(ch, &args).await, Routed::Sidecar), "{ch}");
-    }
-}
-
-#[tokio::test]
-async fn req_cancel_은_jira_가_켜져_있어도_사이드카에_전달한다() {
+async fn req_cancel_은_jira_가_주입돼_있어도_라우터가_응답한다() {
     let r = router_with_both();
-    assert!(matches!(r.route("req:cancel", &json!(["x"])).await, Routed::Sidecar));
-    assert!(matches!(r.route("req:cancel", &json!([])).await, Routed::Sidecar));
+    assert!(matches!(r.route("req:cancel", &json!(["x"])).await, Routed::Done(_)));
+    assert!(matches!(r.route("req:cancel", &json!([])).await, Routed::Done(_)));
 }
 
 #[tokio::test]
-async fn 배열이_아닌_인자의_jira_호출도_사이드카로_보내지_않는다() {
-    // 토큰을 담은 객체 인자가 사이드카 stdin 으로 가지 않게 — 서비스 검증이 거부한다(보안 리뷰)
+async fn 배열이_아닌_인자의_jira_호출도_서비스_검증이_거부한다() {
+    // 토큰을 담은 객체 인자가 다른 처리기로 가지 않게 — 서비스 검증이 거부한다(보안 리뷰)
     let r = router_with_both();
     let bad = json!({"kind": "cloud", "siteUrl": "https://x.atlassian.net", "email": "a@b.c", "token": "SECRET"});
     for ch in ["jira:connect", "jira:issue", "jira:auth"] {
-        let Routed::Done(env) = r.route(ch, &bad).await else { panic!("{ch} 가 사이드카로 갔다") };
+        let Routed::Done(env) = r.route(ch, &bad).await else { panic!("{ch} 를 풀지 못했다") };
         assert!(!env.to_string().contains("SECRET"), "{ch}");
     }
 }
@@ -501,11 +440,11 @@ async fn 배열이_아닌_인자의_jira_호출도_사이드카로_보내지_않
 #[tokio::test]
 async fn 등록_전에_온_cancel_은_조회를_취소하지만_전환은_취소하지_않는다() {
     let r = router_with_both();
-    assert!(matches!(r.route("req:cancel", &json!(["early"])).await, Routed::Sidecar));
+    assert!(matches!(r.route("req:cancel", &json!(["early"])).await, Routed::Done(_)));
     let Routed::Done(env) = r.route("jira:issue", &json!(["ABC-1", "early"])).await else { panic!() };
     assert_eq!(env["code"], "ABORTED");
     // 전환은 requestId 를 받지 않는다 — 같은 id 를 덧붙여도 취소되지 않고 서비스의 결과(연결 없음)가 나온다
-    assert!(matches!(r.route("req:cancel", &json!(["early2"])).await, Routed::Sidecar));
+    assert!(matches!(r.route("req:cancel", &json!(["early2"])).await, Routed::Done(_)));
     let Routed::Done(env) = r.route("jira:transition", &json!(["ABC-1", "31", "early2"])).await else { panic!() };
     assert_eq!(env["code"], "JIRA_AUTH");
     // 빈 문자열·문자열이 아닌 requestId 는 없는 것이다
@@ -518,9 +457,9 @@ async fn 등록_전에_온_cancel_은_조회를_취소하지만_전환은_취소
 #[tokio::test]
 async fn 다른_채널은_영향을_받지_않는다() {
     let r = router_with_both();
-    // gh:repo 는 미러에 없는 저장소라 사이드카다(미러가 맡는 저장소는 위 시험이 본다)
+    // gh:repo 는 미러에 없는 저장소라 풀 수 없다(미러가 맡는 저장소는 위 시험이 본다). config:get 은 설정 소유자가, 나머지는 처리기가 없다
     for ch in ["gh:repo", "config:get", "repos:list", "app:version"] {
-        assert!(matches!(r.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
+        assert!(matches!(r.route(ch, &json!([])).await, Routed::Unserved), "{ch}");
     }
     assert_eq!(r.rust_handled(), 0);
 }

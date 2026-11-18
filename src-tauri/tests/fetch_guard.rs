@@ -329,7 +329,7 @@ fn 확인_창_표시가_ts_와_같고_특수_문자_표가_골든과_같다() {
     }
 }
 
-/// 확인 창 인자: TS `fetchConfirmOptions` 의 옵션과, 사이드카 shim 이 그것으로 만든 MessageBoxArg(본문 = message + 빈 줄 + detail)
+/// 확인 창 인자: TS `fetchConfirmOptions` 의 옵션과, 옛 사이드카 shim 이 만들던 MessageBoxArg(본문 = message + 빈 줄 + detail)
 #[test]
 fn 확인_창_인자가_ts_shim_이_만든_것과_같다() {
     use antler_lib::git::fetch::confirm_text::fetch_confirm_plan;

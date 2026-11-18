@@ -32,7 +32,7 @@ pub struct JiraHost {
     pub opener: Opener,
 }
 
-/// 서비스 호출의 결과. `None` 은 TS 의 `void`(봉투에 `data` 가 없다 — 사이드카의 JSON 직렬화와 같다)
+/// 서비스 호출의 결과. `None` 은 TS 의 `void`(봉투에 `data` 가 없다)
 type Outcome = Result<Option<Value>, JiraError>;
 
 const OPEN_DENIED: &str = "연결한 Jira 사이트의 주소만 열 수 있습니다";
@@ -156,7 +156,7 @@ fn gh_envelope_of(outcome: GhOutcome) -> Value {
     }
 }
 
-/// `gh:*` 채널 하나를 처리해 IpcEnvelope 를 돌려준다(`gh:repo` 는 git 채널이라 오지 않는다 — Rust 가 맡는 저장소는 라우터가, 나머지는 사이드카가 처리한다). `args` 는 표식을 되돌린 인자 배열이다.
+/// `gh:*` 채널 하나를 처리해 IpcEnvelope 를 돌려준다(`gh:repo` 는 git 채널이라 오지 않는다 — Rust 가 맡는 저장소는 라우터가, 캐시 실행기가 없는 github kind·미러에 없는 id 는 풀 수 없다). `args` 는 표식을 되돌린 인자 배열이다.
 /// 취소는 서비스가 requestId 로 직접 한다(`req:cancel` → `GitHubService::cancel`) — 로그인·아바타처럼 도중에 끊으면 상태가 어정쩡해지는 호출이 있어 future 를 버리지 않는다
 pub async fn gh_envelope(host: GithubHost, channel: String, args: Vec<Option<Value>>) -> Value {
     let (a0, a1, a2) = (slot(&args, 0), slot(&args, 1), slot(&args, 2));

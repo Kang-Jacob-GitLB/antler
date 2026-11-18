@@ -28,7 +28,6 @@ pub mod router;
 pub mod routed_repos;
 // 토큰 보관(Phase 4 PR 4) — Jira(PR 6)·GitHub(PR 9) 서비스가 같은 Vault 를 쓴다
 pub mod secret;
-mod sidecar;
 mod platform;
 mod single_instance;
 mod snap;
@@ -127,7 +126,7 @@ fn pick_exe_port(app: tauri::AppHandle) -> config_host::PickExe {
     })
 }
 
-/// 설정 파일을 연다(Rust 가 설정을 소유할 때만 — `ANTLER_RUST_GIT=0` 이면 부르지 않는다. 그 실행은 사이드카가 파일의 유일한 작성자다).
+/// 설정 파일을 연다(Rust 가 설정 파일의 유일한 작성자다).
 /// Tauri 설정이 **없을 때마다** Electron 판의 설정을 읽어 가져온다(사용자 결정 D1 — `config::import`: Electron 파일은 읽기만, `trustedConfigs`·창 위치·GitHub 캐시·토큰은 가져오지 않는다. 설정 파일을 지우면 다시 가져온다 — 의도).
 /// `ANTLER_USER_DATA` 로 도는 측정·자동화 실행은 가져오지 않는다(실사용 설정을 건드리지 않는다) — 판정은 `config::import::should_import` 한 곳이다
 fn open_config(user_data: &Path, cache_dir: &str) -> Arc<ConfigStore> {
@@ -200,40 +199,35 @@ pub fn run() {
                 None => app.path().app_data_dir()?,
             };
             std::fs::create_dir_all(&user_data)?;
-            // 라우터와 사이드카가 같은 미러를 본다(Rust 가 설정이 바뀔 때 채우고(`ConfigSync`) 라우터가 읽는다. `ANTLER_RUST_GIT=0` 이면 사이드카가 채운다)
+            // 라우터가 읽는 미러(Rust 가 설정이 바뀔 때 채운다 — `ConfigSync`)
             let mirror = mirror::RepoMirror::default();
             let router = router::Router::from_env(mirror.clone());
-            // Rust 가 맡는 저장소의 감시(Phase 6a PR 7b)가 ref 변화를 알리는 곳 — 사이드카의 `repo:changed` 와 같은 모양의 renderer 이벤트
+            // Rust 가 맡는 저장소의 감시(Phase 6a PR 7b)가 ref 변화를 알리는 곳 — renderer 의 `repo:changed` 이벤트
             router.set_change_sink(fetch_host::change_sink(app.handle().clone()));
-            // 설정이 필요 없는 앱 채널(Phase 6b PR 5)의 포트: 폴더 선택(dialogs.rs)·클립보드(플러그인)·링크 열기(open_https). 스위치가 꺼져 있으면 주입하지 않는다
+            // 설정이 필요 없는 앱 채널(Phase 6b PR 5)의 포트: 폴더 선택(dialogs.rs)·클립보드(플러그인)·링크 열기(open_https)
             router.set_app(app_host::AppHost {
                 pick_folder: pick_folder_port(app.handle().clone()),
                 clipboard: clipboard_port(app.handle().clone()),
                 open_link: std::sync::Arc::new(open_https),
             });
-            // SSH 풀(Phase 5 PR 3). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — ssh 저장소는 사이드카가 전부 맡는다. 하위 스위치 ANTLER_RUST_SSH 는 은퇴했다(Phase 6b PR 9, 결정 D5).
-            // 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(설정을 소유한 실행에서는 Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다).
+            // SSH 풀(Phase 5 PR 3). 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다).
             // **fetch 서비스보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓴다
-            // 홈은 Node `os.homedir()`(libuv)와 같은 순서로 정한다 — 환경변수(Windows `USERPROFILE`·그 밖 `HOME`)가 있으면 그것, 없으면 Tauri 의 `home_dir`.
-            // 그래야 사이드카와 Rust 가 같은 `~/.ssh` 를 읽는다
+            // 홈은 환경변수(Windows `USERPROFILE`·그 밖 `HOME`)가 있으면 그것, 없으면 Tauri 의 `home_dir` 이다
             let env_home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|v| !v.is_empty()).map(PathBuf::from);
             let home: Option<PathBuf> = env_home.or_else(|| app.path().home_dir().ok());
-            if router.ssh_enabled() {
-                match &home {
-                    Some(home) => router.set_ssh_pool(SshPool::for_home(&home.to_string_lossy())),
-                    None => eprintln!("[ssh] 홈 디렉터리를 알 수 없다 — 사이드카가 SSH 를 처리한다"),
-                }
+            match &home {
+                Some(home) => router.set_ssh_pool(SshPool::for_home(&home.to_string_lossy())),
+                None => eprintln!("[ssh] 홈 디렉터리를 알 수 없다 — SSH 저장소는 \"SSH 를 사용할 수 없습니다\" 로 답한다"),
             }
             // 저장소 추가 창의 환경 채널(Phase 6b PR 8)의 포트: WSL 목록(레지스트리 관문 뒤의 `list_distros` — `wsl.exe` 를 직접 부르지 않는다)·`~/.ssh/config` 별칭(홈을 모르면 빈 목록)·
-            // 설정에 없는 SSH 호스트의 확인 창(dialogs.rs)·local/wsl 실행기. ssh 연결은 위의 풀이 맡는다(풀이 없으면 ssh 종류는 Rust 가 오류로 답한다). 스위치가 꺼져 있으면 주입하지 않는다
+            // 설정에 없는 SSH 호스트의 확인 창(dialogs.rs)·local/wsl 실행기. ssh 연결은 위의 풀이 맡는다(풀이 없으면 ssh 종류는 Rust 가 오류로 답한다)
             let env_host = env_host_port(app.handle().clone(), home.map(|h| h.to_string_lossy().into_owned()));
             router.set_env(env_host.clone());
-            // 설정 소유(Phase 6b PR 9): **Rust 가 설정 파일의 유일한 작성자다**. 스위치가 켜져 있을 때만(`router.enabled()` 하나가 소유 술어다) 파일을 열고 — 꺼져 있으면(`ANTLER_RUST_GIT=0`)
-            // 열지도 쓰지도 않고 사이드카가 전부 맡는다. 변경 알림이 미러(`RepoMirror`)·fetch 설정을 직접 맞춘다 — 사이드카가 보내던 `repos`·`fetchPrefs` 줄을 대신한다.
+            // 설정 소유(Phase 6b PR 9): **Rust 가 설정 파일의 유일한 작성자다**. 변경 알림이 미러(`RepoMirror`)·fetch 설정을 직접 맞춘다.
             // 반영 뒤 할 일(`on_mirror_changed`·`apply_fetch_prefs`)은 라우터가 managed 된 뒤에 찾는다(알림은 어느 스레드에서 오든 앱 런타임에 들어가서 부른다)
             let cache_dir = user_data.join("remote-repos").to_string_lossy().into_owned();
-            let config_store: Option<Arc<ConfigStore>> = router.enabled().then(|| open_config(&user_data, &cache_dir));
-            let config_sync: Option<Arc<ConfigSync>> = config_store.as_ref().map(|store| {
+            let config_store: Arc<ConfigStore> = open_config(&user_data, &cache_dir);
+            let config_sync: Arc<ConfigSync> = {
                 let (mirror_app, prefs_app) = (app.handle().clone(), app.handle().clone());
                 let sync = Arc::new(ConfigSync::new(
                     mirror.clone(),
@@ -249,29 +243,24 @@ pub fn run() {
                     }),
                 ));
                 let listener = sync.clone();
-                store.set_on_change(Box::new(move |gen, config| listener.push(Some(gen), config)));
+                config_store.set_on_change(Box::new(move |gen, config| listener.push(Some(gen), config)));
                 sync
-            });
+            };
             // 프로세스·파일 관리자를 건드리는 운영 실행기는 이 한 인스턴스다 — 설정의 외부 열기와 업데이트의 수동 경로(검증한 설치 파일 열기)가 나눠 쓴다
             let system_deps = Arc::new(external::launch::SystemDeps);
-            let config_host: Option<Arc<config_host::ConfigHost>> = config_store.as_ref().map(|store| {
-                Arc::new(config_host::ConfigHost::new(store.clone(), env_host.clone(), cache_dir.clone(), pick_exe_port(app.handle().clone()), system_deps.clone()))
-            });
-            if let Some(host) = &config_host {
-                router.set_config(host.clone());
-            }
-            // Jira·GitHub 서비스(PR 6·9). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다(하위 스위치 ANTLER_RUST_API 는 은퇴했다).
-            // 켜져 있으면 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결·로그인은 여기서 복원한다.
-            // **둘 다** 만들어졌을 때만 둘 다 주입한다. 하나라도 만들지 못하면(키체인 오류 등) Rust 가 설정을 소유하므로 jira:*·gh:* 는 오류로 답한다 — 사이드카는 설정·토큰을 모른다
-            // github 캐시 실행기의 복제(라우터가 받은 것과 같은 `LiveProcs` 를 본다) — 아래 fetch 서비스의 github 실행기가 된다. 라우터가 받지 않았으면(서비스 없음·스위치 꺼짐) 없다
+            let config_host = Arc::new(config_host::ConfigHost::new(config_store.clone(), env_host.clone(), cache_dir.clone(), pick_exe_port(app.handle().clone()), system_deps.clone()));
+            router.set_config(config_host.clone());
+            // Jira·GitHub 서비스(PR 6·9). 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결·로그인은 여기서 복원한다.
+            // **둘 다** 만들어졌을 때만 둘 다 주입한다. 하나라도 만들지 못하면(키체인 오류 등) jira:*·gh:* 는 오류로 답한다
+            // github 캐시 실행기의 복제(라우터가 받은 것과 같은 `LiveProcs` 를 본다) — 아래 fetch 서비스의 github 실행기가 된다. 라우터가 받지 않았으면(서비스 없음) 없다
             let mut github_exec: Option<GithubExecutor> = None;
             // 위 실행기가 읽는 네트워크 설정 칸(읽기 완료 신호를 fetch 서비스가 기다린다)
             let mut github_net: Option<git::exec::NetConfig> = None;
-            // 서비스는 설정을 소유한 Rust 에서만 만든다(`config_store` 가 있다 = 스위치가 켜져 있다). 하위 스위치 `ANTLER_RUST_API` 는 은퇴했다(결정 D5)
-            if let (true, Some(store)) = (router.api_enabled(), config_store.clone()) {
+            {
+                let store = config_store.clone();
                 let vault = std::sync::Arc::new(secret::Vault::new(secret::open_store(std::env::var_os("ANTLER_USER_DATA").as_deref())));
                 let jira = jira::service::JiraService::new(vault.clone());
-                // 저장소 정보: Rust 가 git 을 맡는 저장소(local·WSL·SSH·github)는 라우터가 직접 답하고, 나머지와 설정 읽기는 설정(`ConfigRepos`)에서 답한다 — 사이드카에 묻지 않는다.
+                // 저장소 정보: Rust 가 git 을 맡는 저장소(local·WSL·SSH·github)는 라우터가 직접 답하고, 나머지와 설정 읽기는 설정(`ConfigRepos`)에서 답한다.
                 // 라우터는 이 서비스보다 늦게 만들어지므로 호출 때 찾는다
                 let repos = std::sync::Arc::new(routed_repos::RoutedRepos::new(routed_repos::AppRouter(app.handle().clone()), std::sync::Arc::new(routed_repos::ConfigRepos::new(store))));
                 let cli: std::sync::Arc<dyn github::ports::ExternalTokenProvider> = std::sync::Arc::new(github::gh_cli::GhCli::new());
@@ -283,8 +272,8 @@ pub fn run() {
                         router.set_github(api_host::GithubHost { service: gh.clone(), opener: std::sync::Arc::new(open_https) });
                         // GitHub 원격 전용 저장소의 조회(Phase 6b PR 6): 토큰은 이 서비스의 것이 호출 때마다 읽혀 실행기의 환경 변수로만 간다(로그인·로그아웃이 바로 반영된다).
                         // 사용자 git 설정의 네트워크 키(프록시·인증서)는 앱 시작 때 한 번 읽는다 — 읽는 동안·읽지 못하면 빈 목록이다(TS 의 `netConfig` 와 같다).
-                        // fetch·감시도 같은 스위치로 Rust 가 맡는다(PR 7 — `rust_fetch_kinds` 의 github). 서비스가 없거나 스위치가 꺼져 있으면 주입이 무시되고 github 는 사이드카가 전부 처리한다
-                        if router.enabled() {
+                        // fetch·감시도 같은 조건으로 Rust 가 맡는다(PR 7 — `rust_fetch_kinds` 의 github)
+                        {
                             // 읽기가 끝나면 신호가 선다 — fetch 서비스가 첫 fetch 앞에서 그것을 기다린다(TS `githubReady`, 상한 5초)
                             let net_config = git::exec::NetConfig::default();
                             let (slot, reader, token_svc) = (net_config.clone(), net_config.clone(), gh.clone());
@@ -302,8 +291,8 @@ pub fn run() {
                             router.set_github_cache(exec.clone());
                             github_exec = router.github_cache_active().then_some(exec);
                         }
-                        // 토큰이 바뀌면(로그인·로그아웃·폐기) 인증 문제로 멈춘 원격 전용 저장소의 fetch 를 다시 연다(TS `onAuthChanged` → `resumeGithubAuth`). 토큰은 사이드카로 보내지 않는다 —
-                        // Rust 가 GitHub 토큰의 유일한 쥔 쪽이다(Phase 6b PR 9 부터 `ghToken` 줄도 없다). 서비스가 자기 자신을 쥐는 고리라 앱이 끝날 때까지 산다.
+                        // 토큰이 바뀌면(로그인·로그아웃·폐기) 인증 문제로 멈춘 원격 전용 저장소의 fetch 를 다시 연다(TS `onAuthChanged` → `resumeGithubAuth`).
+                        // Rust 가 GitHub 토큰의 유일한 쥔 쪽이다. 서비스가 자기 자신을 쥐는 고리라 앱이 끝날 때까지 산다.
                         // 서비스가 어느 스레드에서 부르는지 모르므로 앱 런타임에 들어가서 라우터를 부른다
                         let handle = app.handle().clone();
                         gh.set_on_auth_changed(move || {
@@ -314,19 +303,19 @@ pub fn run() {
                     }
                     (jira, gh) => {
                         if let Err(e) = jira {
-                            eprintln!("[api] Jira 서비스를 만들지 못했다({e}) — jira:*·gh:* 는 오류로 답한다(사이드카는 설정·토큰을 모른다)");
+                            eprintln!("[api] Jira 서비스를 만들지 못했다({e}) — jira:*·gh:* 는 오류로 답한다");
                         }
                         if let Err(e) = gh {
-                            eprintln!("[api] GitHub 서비스를 만들지 못했다({e}) — jira:*·gh:* 는 오류로 답한다(사이드카는 설정·토큰을 모른다)");
+                            eprintln!("[api] GitHub 서비스를 만들지 못했다({e}) — jira:*·gh:* 는 오류로 답한다");
                         }
                     }
                 }
             }
-            // fetch 서비스(local·wsl 저장소, 그리고 Rust 가 푸는 ssh·github). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — 사이드카가 전부 맡는다.
+            // fetch 서비스(local·wsl 저장소, 그리고 Rust 가 푸는 ssh·github).
             // **SSH 풀·GitHub 캐시 실행기보다 뒤다** — 실행기 공장이 둘을 쓰고, 미러의 fetch 소유 판정(`ssh_active`·`github_cache_active`)이 같은 값을 따른다
-            if let (true, Some(store)) = (router.enabled(), config_store.clone()) {
+            {
                 let ssh_pool = router.ssh_pool();
-                let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone(), router.note_sink(), store);
+                let host = fetch_host::AppFetchHost::new(app.handle().clone(), mirror.clone(), router.note_sink(), config_store.clone());
                 let no_hooks_dir = user_data.join("no-hooks").to_string_lossy().into_owned();
                 let runner_mirror = mirror.clone();
                 let github_runner = github_exec.clone();
@@ -363,9 +352,10 @@ pub fn run() {
                 }
                 router.set_fetch(std::sync::Arc::new(service));
             }
-            // 앱 업데이트(Phase 6c PR 4): 설정을 소유한 실행(스위치가 켜져 있다)에서 Rust 가 `update:*` 7채널을 처리한다. 만들지 못하면(TLS 초기화 실패) 주입하지 않고 사이드카가 맡는다(되돌리기).
+            // 앱 업데이트(Phase 6c PR 4): Rust 가 `update:*` 7채널을 처리한다. 만들지 못하면(TLS 초기화 실패) 주입하지 않고 `update:*` 는 오류로 답한다.
             // 설치 프로그램을 띄운 뒤 `Update::install` 이 `exit(0)` 으로 끝나 `RunEvent::Exit` 을 건너뛰므로, 그 직전에 같은 종료 정리를 한다
-            if let (true, Some(store)) = (router.enabled(), config_store.clone()) {
+            {
+                let store = config_store.clone();
                 let exit_app = app.handle().clone();
                 let before_exit: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
                     exit_cleanup(&exit_app);
@@ -378,22 +368,17 @@ pub fn run() {
                         router.set_update(Arc::new(service.clone()));
                         service.start(tauri::async_runtime::handle().inner());
                     }
-                    Err(e) => eprintln!("[update] 업데이트 서비스를 만들지 못했다({e}) — update:* 는 사이드카가 처리한다"),
+                    Err(e) => eprintln!("[update] 업데이트 서비스를 만들지 못했다({e}) — update:* 는 오류로 답한다"),
                 }
             }
-            // jira·gh 의 소유를 기록한다(두 서비스가 실제로 만들어졌을 때만 켜진다 — 만들지 못했으면 서비스 없는 채널은 Rust 가 오류로 답한다). 사이드카에 알릴 값이 아니다(PR 10)
-            router.claim_api();
-            let config_owned = router.config_owned();
             app.manage(router);
             // 설정의 첫 반영(미러·fetch 설정): 라우터가 managed 된 뒤여야 한다(반영 뒤 할 일이 라우터를 찾는다 — 서비스는 위에서 주입했으므로 예약된 주기·승인이 바로 들어간다).
-            // 렌더러의 첫 호출·사이드카 기동보다 먼저다
-            if let (Some(sync), Some(store)) = (&config_sync, &config_store) {
-                sync.push(None, &store.get());
-            }
-            app.manage(sidecar::Sidecar::spawn(app.handle(), &user_data, mirror, config_owned)?);
+            // 렌더러의 첫 호출보다 먼저다
+            config_sync.push(None, &config_store.get());
             // 시작 때 한 번: 어떤 레코드도 가리키지 않는 원격 전용 저장소 캐시 폴더(삭제에 실패했거나 로드 때 버려진 레코드·중단된 추가)를 지우고, 폴더가 없는 레코드(Electron 설정 가져오기)의 빈 캐시를 다시 만든다.
             // 설정을 읽지 못한 채 시작했으면 지우지 않는다(`load_failed`). 앱 시작을 막지 않게 따로 돌린다
-            if let Some(host) = config_host {
+            {
+                let host = config_host;
                 let exec = app.try_state::<router::Router>().and_then(|r| r.github_executor());
                 tauri::async_runtime::spawn(async move {
                     let removed = repos::manage::cleanup_github_cache(host.store(), host.cache_dir(), host.locks()).await;
@@ -436,9 +421,6 @@ pub fn run() {
         .on_window_event(|window, event| {
             // 창이 뒤에 있을 때는 원격 폴링을 늦춘다(src/main/index.ts 의 focus·blur 처리와 같다)
             if let WindowEvent::Focused(focused) = event {
-                if let Some(s) = window.app_handle().try_state::<sidecar::Sidecar>() {
-                    s.set_focus(*focused);
-                }
                 if let Some(r) = window.app_handle().try_state::<router::Router>() {
                     // Rust 가 맡는 저장소의 감시(포커스를 얻으면 바로 확인하고, 잃으면 폴링을 늦춘다). 플래그와 `Notify` 만 만지므로 런타임 밖 스레드에서 불러도 된다
                     r.watch_focus(*focused);
@@ -466,7 +448,4 @@ fn exit_cleanup(app: &tauri::AppHandle) {
     }
     // 폴백 taskkill 이 진행 중이면 기다린다(Job 으로 끝나는 보통의 경로에는 없다). 종료 때 CreateProcess 가 끊기면 정지된 고아가 남는다
     git::exec::shutdown_kills(std::time::Duration::from_secs(2));
-    if let Some(s) = app.try_state::<sidecar::Sidecar>() {
-        s.kill();
-    }
 }

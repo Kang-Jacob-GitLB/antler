@@ -16,7 +16,7 @@ use antler_lib::git::exec::ssh::win32_path;
 use antler_lib::git::exec::ssh::SshPool;
 use antler_lib::git::exec::{GitExecutor, LocalExecutor};
 use antler_lib::mirror::RepoMirror;
-use antler_lib::router::{Routed, Router, API_CHANNELS, API_SIDECAR_CHANNELS, APP_CHANNELS, ENV_CHANNELS, RUST_CHANNELS};
+use antler_lib::router::{Routed, Router, API_CHANNELS, APP_CHANNELS, ENV_CHANNELS, RUST_CHANNELS};
 use serde_json::{json, Value};
 
 #[path = "ssh/common.rs"]
@@ -96,8 +96,8 @@ fn host(calls: &Arc<Calls>, installed: &[&str]) -> EnvHost {
     host_with(calls, installed, Arc::new(Vec::new), &Arc::new(AtomicBool::new(true)))
 }
 
-fn router(enabled: bool, host: Option<EnvHost>) -> Router {
-    let r = Router::new(enabled, false, RepoMirror::default());
+fn router(host: Option<EnvHost>) -> Router {
+    let r = Router::new(false, RepoMirror::default());
     if let Some(h) = host {
         r.set_env(h);
     }
@@ -107,7 +107,7 @@ fn router(enabled: bool, host: Option<EnvHost>) -> Router {
 async fn done(r: &Router, channel: &str, args: Value) -> Value {
     match r.route(channel, &args).await {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("{channel} 가 사이드카로 갔다"),
+        Routed::Unserved => panic!("{channel} 를 풀지 못했다"),
     }
 }
 
@@ -120,57 +120,50 @@ fn 환경_채널은_ipc_채널의_부분집합이고_다른_소유_목록과_겹
     for ch in ENV_CHANNELS {
         assert!(all.iter().any(|c| c == ch), "{ch} 가 IPC_CHANNELS 에 없다(tests/golden/exec/channels.json)");
         assert!(
-            !RUST_CHANNELS.contains(ch) && !APP_CHANNELS.contains(ch) && !API_CHANNELS.contains(ch) && !API_SIDECAR_CHANNELS.contains(ch),
+            !RUST_CHANNELS.contains(ch) && !APP_CHANNELS.contains(ch) && !API_CHANNELS.contains(ch),
             "{ch} 가 다른 Rust 채널 목록에도 있다"
         );
     }
 }
 
 #[tokio::test]
-async fn 풀이_없으면_ssh_종류만_사이드카로_가고_나머지는_rust_가_처리한다() {
+async fn 풀이_없으면_ssh_종류는_ssh_를_사용할_수_없다고_답하고_나머지는_정상_처리한다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &["Ubuntu"])));
+    let r = router(Some(host(&calls, &["Ubuntu"])));
     assert!(!r.ssh_active());
-    // Rust: env:wslDistros·env:sshHosts·local·wsl 종류
+    // env:wslDistros·env:sshHosts·local·wsl 종류는 풀과 무관하다
     assert_eq!(done(&r, "env:wslDistros", json!([])).await, json!({ "ok": true, "data": ["Ubuntu"] }));
     assert_eq!(done(&r, "env:sshHosts", json!([])).await, json!({ "ok": true, "data": [] }));
     assert_eq!(done(&r, "env:test", json!([{ "kind": "local" }])).await["ok"], true);
     assert_eq!(done(&r, "env:test", json!([{ "kind": "wsl", "distro": "Ubuntu" }])).await["ok"], true);
     assert_eq!(r.rust_handled(), 4);
-    // 사이드카: ssh 종류(`env:listDir` 는 항상 ssh) — 검증도 확인 창도 연결도 하지 않는다
-    let before = calls.confirms.lock().unwrap().len();
+    // ssh 종류(`env:listDir` 는 항상 ssh) — 풀이 없으면 연결하지 않고 오류다
     for (ch, args) in [
         ("env:test", json!([{ "kind": "ssh", "sshHost": "h" }])),
         ("repos:scan", json!([{ "kind": "ssh", "sshHost": "h", "path": "~" }])),
         ("env:listDir", json!([{ "sshHost": "h", "path": "" }])),
-        ("env:listDir", json!([])),
-        ("env:test", json!([{ "kind": "ssh" }])),
     ] {
-        assert!(matches!(r.route(ch, &args).await, Routed::Sidecar), "{ch} {args}");
+        let env = done(&r, ch, args.clone()).await;
+        assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch} {args}");
     }
-    assert_eq!(calls.confirms.lock().unwrap().len(), before);
-    assert_eq!(r.rust_handled(), 4);
+    assert_eq!(r.rust_handled(), 7);
 }
 
 #[tokio::test]
-async fn 스위치가_꺼졌거나_포트가_없으면_전부_사이드카다() {
+async fn 포트가_없으면_환경_채널은_풀_수_없다() {
     let calls = Arc::new(Calls::default());
-    // ANTLER_RUST_GIT=0: 포트를 달아도(주입 자체를 무시한다) 사이드카다
-    let off = router(false, Some(host(&calls, &["Ubuntu"])));
-    let none = router(true, None);
-    for r in [&off, &none] {
-        for ch in ENV_CHANNELS {
-            assert!(matches!(r.route(ch, &json!([{ "kind": "local", "path": "C:\\x" }])).await, Routed::Sidecar), "{ch}");
-        }
-        assert_eq!(r.rust_handled(), 0);
+    let none = router(None);
+    for ch in ENV_CHANNELS {
+        assert!(matches!(none.route(ch, &json!([{ "kind": "local", "path": "C:\\x" }])).await, Routed::Unserved), "{ch}");
     }
+    assert_eq!(none.rust_handled(), 0);
     assert!(calls.quiet(), "포트가 불렸다");
 }
 
 #[tokio::test]
-async fn 배열이_아닌_인자도_사이드카로_보내지_않고_검증이_거부한다() {
+async fn 배열이_아닌_인자도_빈_인자로_보고_검증이_거부한다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &[])));
+    let r = router(Some(host(&calls, &[])));
     for args in [json!("x"), json!(null), json!({ "kind": "local" })] {
         assert_eq!(done(&r, "env:test", args.clone()).await, err("잘못된 입력입니다"), "{args}");
         assert_eq!(done(&r, "repos:scan", args).await, err("잘못된 입력입니다"));
@@ -183,7 +176,7 @@ async fn 배열이_아닌_인자도_사이드카로_보내지_않고_검증이_�
 #[tokio::test]
 async fn 잘못된_종류와_경로와_그룹은_확인_창_목록_실행기_없이_거부한다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &["Ubuntu"])));
+    let r = router(Some(host(&calls, &["Ubuntu"])));
     let bad_kind = err("잘못된 입력입니다");
     for input in [json!(null), json!(5), json!("local"), json!([]), json!({}), json!({ "kind": "github", "path": "C:\\x" }), json!({ "kind": "x" }), json!({ "kind": 5 }), json!({ "kind": null })] {
         assert_eq!(done(&r, "env:test", json!([input.clone()])).await, bad_kind, "env:test {input}");
@@ -219,7 +212,7 @@ async fn 잘못된_종류와_경로와_그룹은_확인_창_목록_실행기_없
 #[tokio::test]
 async fn wsl_은_설치된_배포판만_통과하고_없으면_실행기를_만들지_않는다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &["Ubuntu", "Debian"])));
+    let r = router(Some(host(&calls, &["Ubuntu", "Debian"])));
     let missing = |n: &str| err(&format!("설치된 WSL 배포판이 아닙니다: {n}"));
     assert_eq!(done(&r, "env:test", json!([{ "kind": "wsl", "distro": "Arch" }])).await, missing("Arch"));
     assert_eq!(done(&r, "env:test", json!([{ "kind": "wsl" }])).await, missing("(없음)"));
@@ -241,7 +234,7 @@ async fn wsl_은_설치된_배포판만_통과하고_없으면_실행기를_만�
     assert_eq!(*calls.execs.lock().unwrap(), [("wsl".to_string(), Some("Ubuntu".to_string()))]);
     // 설치된 배포판이 하나도 없으면(WSL 이 없는 PC) 어떤 이름도 통과하지 못하고 실행기도 없다 — 운영 포트는 레지스트리 관문 뒤에서만 `wsl.exe` 를 부른다
     let calls2 = Arc::new(Calls::default());
-    let none = router(true, Some(host(&calls2, &[])));
+    let none = router(Some(host(&calls2, &[])));
     assert_eq!(done(&none, "env:test", json!([{ "kind": "wsl", "distro": "Ubuntu" }])).await, missing("Ubuntu"));
     assert_eq!(done(&none, "env:wslDistros", json!([])).await, json!({ "ok": true, "data": [] }));
     assert!(calls2.execs.lock().unwrap().is_empty() && calls2.confirms.lock().unwrap().is_empty());
@@ -257,7 +250,7 @@ async fn ssh_별칭은_config_의_구체_별칭만_ts_모양으로_돌려준다(
     fs::write(ssh.join("config"), "Host a\n  HostName h1\n  User u1\n  Port 2200\n  ProxyJump b\nHost b\n  HostName h2\nHost *.wild !skip\n  User w\n").unwrap();
     let home_str = home.path().to_string_lossy().into_owned();
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host_with(&calls, &[], Arc::new(move || ssh_hosts_for_home(&home_str)), &Arc::new(AtomicBool::new(true)))));
+    let r = router(Some(host_with(&calls, &[], Arc::new(move || ssh_hosts_for_home(&home_str)), &Arc::new(AtomicBool::new(true)))));
     assert_eq!(
         done(&r, "env:sshHosts", json!([])).await,
         json!({ "ok": true, "data": [
@@ -291,7 +284,7 @@ fn make_parent() -> TempDir {
 #[tokio::test]
 async fn 로컬_찾기는_하위_저장소를_이름순으로_찾고_숨김과_일반_폴더는_뺀다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &[])));
+    let r = router(Some(host(&calls, &[])));
     let parent = make_parent();
     let root = parent.path().to_string_lossy().into_owned();
     let v = done(&r, "repos:scan", json!([{ "kind": "local", "path": root }])).await;
@@ -319,7 +312,7 @@ async fn 로컬_찾기는_하위_저장소를_이름순으로_찾고_숨김과_�
 #[tokio::test]
 async fn 고른_폴더가_저장소이거나_저장소_안의_하위_폴더면_is_repo_로_알리고_하위는_보지_않는다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &[])));
+    let r = router(Some(host(&calls, &[])));
     let repo = make_repo(0);
     let root = repo.path().to_string_lossy().into_owned();
     let v = done(&r, "repos:scan", json!([{ "kind": "local", "path": root }])).await;
@@ -361,7 +354,7 @@ impl Drop for Junctions {
 #[tokio::test]
 async fn 로컬_찾기는_정션_사슬을_따라가_저장소를_찾는다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &[])));
+    let r = router(Some(host(&calls, &[])));
     let outside = TempDir::new("outside");
     let real = outside.path().join("real");
     let plain = outside.path().join("plain");
@@ -389,7 +382,7 @@ async fn 로컬_찾기는_정션_사슬을_따라가_저장소를_찾는다() {
 #[tokio::test]
 async fn 로컬_찾기의_루트가_링크_사슬_상한을_넘으면_git_을_돌리기_전에_거부한다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &[])));
+    let r = router(Some(host(&calls, &[])));
     let base = TempDir::new("rootchain");
     let real = base.path().join("real");
     fs::create_dir_all(real.join("repo")).unwrap();
@@ -417,7 +410,7 @@ async fn 로컬_찾기의_루트가_링크_사슬_상한을_넘으면_git_을_�
 #[tokio::test]
 async fn 로컬_연결_테스트는_git_버전을_돌려준다() {
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &[])));
+    let r = router(Some(host(&calls, &[])));
     let v = done(&r, "env:test", json!([{ "kind": "local" }])).await;
     assert_eq!(v["ok"], true);
     let text = v["data"].as_str().unwrap();
@@ -430,7 +423,7 @@ async fn 로컬_연결_테스트는_git_버전을_돌려준다() {
 async fn wsl_공유_경로로_고른_local_은_설치_확인을_거치고_통과하기_전에_실행하지_않는다() {
     // 설치 목록이 비면 UNC(wsl.localhost) 를 읽지도 git 을 돌리지도 않는다
     let calls = Arc::new(Calls::default());
-    let r = router(true, Some(host(&calls, &[])));
+    let r = router(Some(host(&calls, &[])));
     let v = done(&r, "repos:scan", json!([{ "kind": "local", "path": "\\\\wsl.localhost\\Ubuntu\\home\\me" }])).await;
     assert_eq!(v, err("설치된 WSL 배포판이 아닙니다: Ubuntu"));
     assert_eq!(calls.distros.load(Ordering::SeqCst), 1);
@@ -477,7 +470,7 @@ impl Rig {
         let allow = Arc::new(AtomicBool::new(true));
         let hh = home.clone();
         let env_host = host_with(&calls, &[], Arc::new(move || ssh_hosts_for_home(&hh.home_str())), &allow);
-        let router = Router::new(true, false, RepoMirror::default());
+        let router = Router::new(false, RepoMirror::default());
         router.set_ssh_pool(pool.clone());
         router.set_env(env_host);
         Rig { server, home, pool, repo: make_repo(0), calls, allow, router }
@@ -560,7 +553,7 @@ async fn 설정에_없는_호스트는_한_번만_묻고_승인을_기억하며_
         assert_eq!(rig.confirms(), n);
     }
     assert_eq!(rig.server.connections(), 0);
-    // 확인 창 인자: 사이드카 모양·취소가 기본·호스트 이름이 본문에 든다
+    // 확인 창 인자: 네이티브 대화상자 모양·취소가 기본·호스트 이름이 본문에 든다
     let arg = rig.calls.confirms.lock().unwrap()[0].clone();
     assert_eq!((arg["kind"].as_str(), arg["title"].as_str(), arg["cancelId"].as_i64()), (Some("info"), Some("SSH 연결 확인"), Some(1)));
     assert_eq!(arg["buttons"], json!(["연결", "취소"]));
@@ -677,7 +670,7 @@ fn 환경_모듈은_프로세스를_띄우지_않고_known_hosts_에_쓰지_않�
 }
 
 #[test]
-fn 앱은_운영_포트를_스위치가_켜진_경우에만_주입하고_wsl_목록은_레지스트리_관문의_함수다() {
+fn 앱은_운영_포트를_주입하고_wsl_목록은_레지스트리_관문의_함수다() {
     let lib = prod_code("src/lib.rs");
     assert_eq!(lib.matches("router.set_env(").count(), 1);
     // 운영 WSL 목록 포트는 `list_distros`(레지스트리 관문 뒤에서만 wsl.exe)이고 `wsl.exe` 를 직접 부르지 않는다
@@ -685,12 +678,12 @@ fn 앱은_운영_포트를_스위치가_켜진_경우에만_주입하고_wsl_목
     assert!(!lib.contains("wsl.exe"));
     // 확인 창은 취소가 기본 버튼인 `dialogs::message_box`(응답 0 = 연결)다
     assert!(lib.contains("dialogs::message_box(&app, arg)") && lib.contains("== Some(0)"));
-    // 풀 주입(`ssh_enabled` 분기) 뒤·사이드카 기동 전이다
+    // 풀 주입 뒤·라우터 등록 전이다
     let pool = lib.find("router.set_ssh_pool(").unwrap();
     let env = lib.find("router.set_env(").unwrap();
-    assert!(pool < env && env < lib.find("Sidecar::spawn(").unwrap());
+    assert!(pool < env && env < lib.find("app.manage(router)").unwrap());
     let router = read_src("src/router.rs");
     assert!(router.contains("pub fn set_env(&self, host: EnvHost)"));
-    // 라우터의 환경 가로채기는 git 채널 처리(`RUST_CHANNELS`)와 `repos:*` 특수 처리보다 앞이다
-    assert!(router.find("ENV_CHANNELS.contains(&channel)").unwrap() < router.find("channel == \"req:cancel\"").unwrap());
+    // 라우터의 환경 가로채기는 git 채널 처리(`RUST_CHANNELS`)보다 앞이다
+    assert!(router.find("ENV_CHANNELS.contains(&channel)").unwrap() < router.find("if !RUST_CHANNELS.contains(&channel)").unwrap());
 }

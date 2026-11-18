@@ -15,7 +15,7 @@ tauri-build = { version = "2.7.4", features = [] }
 tauri = { version = "2.12.5", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 사이드카 응답 대기표(id → oneshot) + git 실행기(process·io-util: 자식 파이프, time: 테스트·유휴 정리, macros: select!/test)
+# git 실행기(sync: 큐·알림, process·io-util: 자식 파이프, time: 테스트·유휴 정리, macros: select!/test)
 tokio = { version = "1", features = ["sync", "process", "io-util", "time", "macros", "rt", "rt-multi-thread", "net"] }
 # 취소 신호(CancellationToken) — 실행기·큐가 요청 취소를 받는다. tauri 가 이미 끌어오는 판(0.7)
 tokio-util = "0.7"
@@ -135,9 +135,9 @@ required-features = ["test-hooks"]
 name = "config_route"
 required-features = ["test-hooks"]
 
-# 사이드카 범위 불변식(Phase 6b PR 10): 설정 소유 실행에서 사이드카로 가는 채널은 update:* 7개뿐 — `ConfigStore::open_for_test` 가 test-hooks 뒤에 있다
+# 채널 범위 불변식(Phase 6c PR 5): IPC 채널 전부를 Rust 가 처리한다(합집합 강제)·사이드카 흔적 없음 — `ConfigStore::open_for_test` 가 test-hooks 뒤에 있다
 [[test]]
-name = "sidecar_scope"
+name = "channel_scope"
 required-features = ["test-hooks"]
 
 # 앱 업데이트 보안 시험(Phase 6c PR 4): 루프백 서버·시험 키 서명·진짜 플러그인 검증. 시험용 HTTP 클라이언트 주입(`new_for_test`·`new_download_for_test`)이 test-hooks 뒤에 있다

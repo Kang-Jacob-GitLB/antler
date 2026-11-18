@@ -466,7 +466,7 @@ async fn run_reader(mut reader: Reader, mut rx: mpsc::UnboundedReceiver<Req>, me
 
 // ── 서비스 ────────────────────────────────────────────
 
-/// 사이드카에 알리는 일(`{t:'note',op,repoId}`). 사이드카의 `RepoService.noteLog` 가 받는다
+/// 알림 길(`Router::note_sink`)로 알리는 일(첫 페이지·이력 변경). TS `RepoService.noteLog` 와 같은 모양이다
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NoteOp {
     /// 첫 로그 페이지가 나갔다(성공·실패·취소 모두) — 백그라운드 조회를 푼다
@@ -673,7 +673,7 @@ impl LogService {
         });
     }
 
-    /// 활성 저장소가 아닌 저장소의 커서를 모두 닫는다(`repos:watch` 를 사이드카로 넘기기 전). `None` 이면 전부 닫는다
+    /// 활성 저장소가 아닌 저장소의 커서를 모두 닫는다(`repos:watch` 처리의 앞). `None` 이면 전부 닫는다
     pub fn close_others(&self, active: Option<&str>) {
         let mut st = lock(&self.inner.state);
         let keys: Vec<String> = st.cursors.iter().filter(|(_, e)| Some(e.repo_id.as_str()) != active).map(|(k, _)| k.clone()).collect();

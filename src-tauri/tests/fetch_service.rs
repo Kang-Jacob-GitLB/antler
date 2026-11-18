@@ -101,7 +101,7 @@ fn 운영_코드는_플랫폼을_주입하지_않는다() {
     let guard = prod_code("src/git/fetch/guard.rs");
     assert!(guard.contains("hooks_path_for_test(local, no_hooks_dir, cfg!(windows), is_empty_dir)"));
     // 그 밖의 운영 소스(앱 코드)도 주입 버전을 부르지 않는다
-    for rel in ["src/lib.rs", "src/router.rs", "src/sidecar.rs", "src/commands.rs", "src/git/log_service.rs", "src/git/file_channels.rs", "src/git/commit.rs"] {
+    for rel in ["src/lib.rs", "src/router.rs", "src/commands.rs", "src/git/log_service.rs", "src/git/file_channels.rs", "src/git/commit.rs"] {
         let code = prod_code(rel);
         for banned in ["_for_test", "run_fetch(", "hooks_path_for("] {
             assert!(!code.contains(banned), "{rel} 에 {banned}");
@@ -122,7 +122,7 @@ fn 승인을_보내는_곳은_서비스의_두_지점뿐이고_줄을_만드는_
     let always_at = service.find("self.send_approval(ApprovalKind::Trusted").expect("항상 허용 뒤");
     assert!(service[..always_at].rfind("decision == Decision::Always").is_some_and(|p| always_at - p < 200), "항상 허용 응답일 때만");
     // 설정 쓰기(Phase 6b PR 9): 승인 변경자(`set_fetch_approval`·`set_trusted_config`)를 부르는 곳은 호스트 구현(`fetch_host.rs`) 한 곳이고,
-    // 사이드카로 승인을 부탁하는 줄(`fetchApprove`)은 Rust 에 더는 없다
+    // 승인을 다른 프로세스에 부탁하는 줄(`fetchApprove`)은 Rust 에 없다
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     collect(&dir, &mut files);
@@ -1005,7 +1005,7 @@ async fn 자동_fetch_는_위험_설정을_묻지_않고_막는다() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn 항상_허용은_같은_실행에서는_다시_묻지_않고_지우면_사라지며_사이드카가_돌려준_지문으로_다시_통한다() {
+async fn 항상_허용은_같은_실행에서는_다시_묻지_않고_지우면_사라지며_설정이_돌려준_지문으로_다시_통한다() {
     let f = fx();
     f.local.set(|s| s.config = DANGEROUS.into());
     f.host.on_confirm(|_| Reply::Now(Some(1)));
@@ -1016,7 +1016,7 @@ async fn 항상_허용은_같은_실행에서는_다시_묻지_않고_지우면_
     // 저장소를 지우면 이번 실행의 허용도 지워진다 — 다음 자동 fetch 는 다시 막힌다
     f.svc.forget("r1");
     assert_eq!(f.svc.fetch("r1", false).await.blocked.map(|b| b.confirmable), Some(true));
-    // 사이드카가 저장한 신뢰 지문을 fetchPrefs 로 받으면(다시 켠 앱의 첫 prefs) 확인 없이 통한다
+    // 설정에 저장된 신뢰 지문을 fetchPrefs 로 받으면(다시 켠 앱의 첫 prefs) 확인 없이 통한다
     f.svc.apply_prefs(prefs(1, 5.0, &[], &[("r1", &trusted_fp)]));
     assert_eq!(f.svc.fetch("r1", false).await.blocked, None);
     // 지문이 다르면(설정이 바뀌었거나 다른 값이 저장됐다) 통하지 않는다
@@ -1033,15 +1033,15 @@ async fn 항상_허용은_같은_실행에서는_다시_묻지_않고_지우면_
 async fn 방금_부탁한_승인은_되돌아오기_전까지_오버레이로_통하고_다른_값이_오거나_저장소를_지우면_사라진다() {
     let helper_off = |g: &FakeGit| g.fetch_calls().last().unwrap().windows(2).any(|w| w[0] == "-c" && w[1] == "credential.helper=");
     let f = fx();
-    f.svc.fetch("r1", true).await; // 수동 성공 → 승인 부탁(아직 사이드카가 되돌려 주지 않았다)
+    f.svc.fetch("r1", true).await; // 수동 성공 → 승인 부탁(아직 설정이 되돌려 주지 않았다)
     let (_, _, fp) = f.host.approvals().into_iter().next().expect("승인 부탁");
     f.svc.fetch("r1", false).await;
     assert!(!helper_off(&f.local), "오버레이로 승인된 remote 의 자동 fetch 는 도우미를 쓴다");
-    // 사이드카가 같은 값을 돌려주면 오버레이는 정리되고 스냅샷이 같은 판정을 한다
+    // 설정이 같은 값을 돌려주면 오버레이는 정리되고 스냅샷이 같은 판정을 한다
     f.svc.apply_prefs(prefs(1, 5.0, &[("r1", &fp)], &[]));
     f.svc.fetch("r1", false).await;
     assert!(!helper_off(&f.local));
-    // 사이드카가 되돌려 주기 전의 스냅샷(값이 없다)은 오버레이를 지우지 않는다
+    // 설정이 되돌려 주기 전의 스냅샷(값이 없다)은 오버레이를 지우지 않는다
     let g = fx();
     g.svc.fetch("r1", true).await;
     g.svc.apply_prefs(prefs(1, 5.0, &[], &[]));
@@ -1296,7 +1296,7 @@ async fn 실제_git_항상_허용은_앱을_다시_켜도_묻지_않고_설정�
     first.forget("r");
     assert_eq!(first.fetch("r", false).await.blocked.map(|b| b.confirmable), Some(true));
 
-    // 다시 켠 앱: 사이드카가 저장한 지문을 fetchPrefs 로 받는다. 확인 없이 자동 fetch 까지 통과한다(file remote 라 자동 fetch 는 전송 정책에서만 실패한다)
+    // 다시 켠 앱: 설정에 저장된 지문을 fetchPrefs 로 받는다. 확인 없이 자동 fetch 까지 통과한다(file remote 라 자동 fetch 는 전송 정책에서만 실패한다)
     let (second, host2, rec2) = real_again(&c, &mirror);
     assert!(second.apply_prefs(prefs(1, 5.0, &[], &[("r", &ins.fingerprint)])));
     let sha = c.push_commit("second");
@@ -1362,7 +1362,7 @@ async fn 실제_git_수동_fetch_가_성공하면_그_remote_가_승인되고_�
     let st = svc.fetch("r", true).await;
     assert!(st.error.is_some());
     assert_eq!(host.approvals().len(), 1, "승인이 늘지 않는다");
-    // 사이드카가 되돌려 준 승인만이 자동 fetch 의 근거다: 서비스 밖에서 승인 맵을 바꿀 길은 apply_prefs 뿐이다(gen 이 앞서야 한다)
+    // 설정이 되돌려 준 승인만이 자동 fetch 의 근거다: 서비스 밖에서 승인 맵을 바꿀 길은 apply_prefs 뿐이다(gen 이 앞서야 한다)
     assert!(svc.apply_prefs(prefs(5, 5.0, &[("r", &ins.remotes_fingerprint)], &[])));
     assert!(!svc.apply_prefs(prefs(5, 5.0, &[("r", FP_A)], &[])));
     assert!(!svc.apply_prefs(prefs(4, 5.0, &[("r", FP_A)], &[])));

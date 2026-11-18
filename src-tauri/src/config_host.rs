@@ -1,13 +1,14 @@
-//! 설정 소유 채널 11개(Phase 6b PR 9)의 Rust 쪽 처리: `config:get`·`config:setUi`·`repos:add`·`repos:addMany`·`repos:addGithub`·`repos:update`·`repos:remove`·`repos:watch`·`external:open`·`external:pickEditorExe`·`req:cancel`.
+//! 설정 소유 채널 9개(Phase 6b PR 9)의 Rust 쪽 처리: `config:get`·`config:setUi`·`repos:add`·`repos:addMany`·`repos:addGithub`·`repos:update`·`repos:remove`·`external:open`·`external:pickEditorExe`.
+//! (`repos:watch`·`req:cancel` 은 라우터 상태만 만지므로 Phase 6c PR 5 부터 라우터가 직접 처리한다 — `ROUTER_CHANNELS`.)
 //! 라우터가 `CONFIG_CHANNELS`(router.rs)를 이 모듈로 넘기면 `src/main/ipc/handlers.ts`·`external.ts` 와 `RepoService` 의 같은 입력 검증·결과·오류 봉투(`{ok:false,error,code}`, void 는 `data` 없는 `{ok:true}`)를 돌려준다.
 //!
-//! **Rust 가 설정 파일의 유일한 작성자다**(`ConfigStore`). 한 실행 동안 쓰는 쪽은 하나다 — 이 호스트가 주입되면(`Router::set_config`, `ANTLER_RUST_GIT≠0`) 사이드카는 설정을 읽기 전용 빈 값으로만 안다.
+//! **Rust 가 설정 파일의 유일한 작성자다**(`ConfigStore`). 한 실행 동안 쓰는 쪽은 하나다 — 이 호스트가 주입되면(`Router::set_config`) 라우터가 설정 소유 채널을 모두 이 호스트로 응답한다.
 //! 변경은 모두 `ConfigStore` 의 변경자를 거치고, 변경 알림이 **응답보다 먼저** 미러·fetch 설정을 맞춘다(`config::sync`).
 //!
 //! 입력은 renderer 가 보낸 값이다 — 환경·경로·호스트는 `EnvHost::check_env_input`(TS `checkEnvInput` — 확인 창·승인 기억 포함)을 거치고, 저장소 루트·환경은 **설정에서만** 읽는다(`external:open`).
 //! 승인 기억은 `EnvHost` 하나다(`env:test`·`repos:scan`·`repos:add` 가 같은 `EnvHost` 를 쓴다 — PR 8 의 확인 창 중복이 사라진다).
 //! 대화상자·프로그램 실행은 **포트로 주입**한다([`ConfigHost`]) — 시험은 가짜를 달아 실제 창·프로세스를 건드리지 않는다.
-//! 이 모듈은 `Sidecar`·`AppHandle` 에 기대지 않는다 — 통합 테스트(`tests/config_route.rs`)가 그대로 돌릴 수 있다.
+//! 이 모듈은 `AppHandle` 에 기대지 않는다 — 통합 테스트(`tests/config_route.rs`)가 그대로 돌릴 수 있다.
 
 use std::sync::Arc;
 
@@ -121,19 +122,8 @@ pub async fn config_envelope(router: &Router, host: &Arc<ConfigHost>, channel: &
         "repos:addGithub" => add_github(router, host, a(0)).await.map(Some),
         "repos:update" => update_repo(router, host, a(0), a(1)).await.map(Some),
         "repos:remove" => remove_repo(router, host, a(0)).await.map(Some),
-        "repos:watch" => {
-            // renderer 는 응답을 기다리지 않는다(`void`). 활성 저장소가 아니면(null) 전부 멈춘다
-            router.watch_repo(a(0).and_then(Value::as_str));
-            Ok(None)
-        }
         "external:open" => external_open(host, a(0), a(1)).await.map(|()| None),
         "external:pickEditorExe" => pick_editor_exe(host).await,
-        "req:cancel" => {
-            if let Some(id) = a(0).and_then(Value::as_str) {
-                router.cancel_request(id);
-            }
-            Ok(None)
-        }
         other => Err(Fail::from(format!("알 수 없는 채널: {other}"))),
     };
     match result {

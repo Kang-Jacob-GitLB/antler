@@ -1085,13 +1085,13 @@ mod service {
     fn done(r: Routed) -> Value {
         match r {
             Routed::Done(v) => v,
-            Routed::Sidecar => panic!("사이드카로 갔다"),
+            Routed::Unserved => panic!("Rust 가 풀지 못했다"),
         }
     }
 
     #[tokio::test]
     async fn 업데이트_채널_일곱_개를_서비스가_있으면_러스트가_처리한다() {
-        let router = Router::new(true, false, RepoMirror::default());
+        let router = Router::new(false, RepoMirror::default());
         let (port, be) = service_port(&json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }] }));
         router.set_update(port);
         let st = |v: &Value| v["data"]["status"].as_str().map(str::to_string);
@@ -1104,7 +1104,7 @@ mod service {
         let notes = done(router.route("update:releaseNotes", &json!([])).await);
         assert_eq!(notes["ok"], true);
         assert_eq!(notes["data"]["version"], "0.1.0");
-        // 입력 검증 실패도 봉투(code ERROR)다 — 사이드카로 가지 않는다
+        // 입력 검증 실패도 봉투(code ERROR)다
         for (ch, args) in [
             ("update:dismiss", json!([])),
             ("update:dismiss", json!({ "x": 1 })),
@@ -1120,16 +1120,11 @@ mod service {
     }
 
     #[tokio::test]
-    async fn 서비스가_없거나_스위치가_꺼지면_사이드카가_처리한다() {
-        // 서비스 없음
-        let none = Router::new(true, false, RepoMirror::default());
-        // 스위치 꺼짐(ANTLER_RUST_GIT=0): 주입해도 무시한다
-        let off = Router::new(false, false, RepoMirror::default());
-        off.set_update(service_port(&json!({})).0);
-        for router in [&none, &off] {
-            for ch in UPDATE_CHANNELS {
-                assert!(matches!(router.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
-            }
+    async fn 서비스가_없으면_처리하지_못함_오류다() {
+        let none = Router::new(false, RepoMirror::default());
+        for ch in UPDATE_CHANNELS {
+            assert!(matches!(none.route(ch, &json!([])).await, Routed::Unserved), "{ch}");
+            assert_eq!(none.invoke(ch, &json!([])).await, json!({ "ok": false, "error": "이 기능을 사용할 수 없습니다", "code": "ERROR" }), "{ch}");
         }
     }
 

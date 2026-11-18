@@ -68,19 +68,20 @@ fn watched(router: Router, dirs: &NotifyDirs) -> (Router, Changes) {
 }
 
 fn local_router(mirror: &RepoMirror, dirs: &NotifyDirs) -> (Router, Changes) {
-    watched(Router::new(true, false, mirror.clone()), dirs)
+    watched(Router::new(false, mirror.clone()), dirs)
 }
 
-fn is_sidecar(r: &Routed) -> bool {
-    matches!(r, Routed::Sidecar)
+/// `repos:watch` 의 응답(라우터가 `{ok:true}` 로 답한다)
+fn is_acked(r: &Routed) -> bool {
+    matches!(r, Routed::Done(v) if v == &json!({ "ok": true }))
 }
 
-/// 저장소를 활성화한다(`repos:watch` — 응답은 사이드카가 하므로 `Sidecar`) 그리고 첫 로그 페이지를 읽어 첫 페이지 문을 연다(기준 시그니처가 바로 잡히게)
+/// 저장소를 활성화한다(`repos:watch` — 라우터가 `{ok:true}` 로 답한다) 그리고 첫 로그 페이지를 읽어 첫 페이지 문을 연다(기준 시그니처가 바로 잡히게)
 async fn activate(router: &Router, id: &str) {
-    assert!(is_sidecar(&router.route("repos:watch", &json!([id])).await));
+    assert!(is_acked(&router.route("repos:watch", &json!([id])).await));
     let env = match router.route("git:log", &json!([id, { "skip": 0, "count": 5 }])).await {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("log 는 Rust 경로여야 한다"),
+        Routed::Unserved => panic!("log 는 Rust 경로여야 한다"),
     };
     assert_eq!(env["ok"], true, "{env}");
 }
@@ -91,7 +92,7 @@ async fn activity_total(router: &Router, id: &str) -> u64 {
             assert_eq!(v["ok"], true, "{v}");
             v["data"]["total"].as_u64().unwrap()
         }
-        Routed::Sidecar => panic!("activity 는 Rust 경로여야 한다"),
+        Routed::Unserved => panic!("activity 는 Rust 경로여야 한다"),
     }
 }
 
@@ -129,7 +130,7 @@ async fn 외부에서_커밋_브랜치를_만들면_알리고_git_안의_다른_
     assert_eq!(seen(&changes), ["a", "a", "a"], "커밋·브랜치·커밋 세 번뿐이다(.git 안의 다른 변화로는 알리지 않는다)");
 
     // 감시를 멈추면(다른 저장소 없이 null) 감시자도 notify 핸들·스레드도 없다
-    assert!(is_sidecar(&router.route("repos:watch", &json!([Value::Null])).await));
+    assert!(is_acked(&router.route("repos:watch", &json!([Value::Null])).await));
     assert_eq!(router.watching(), None);
     wait_for("notify 스레드 0", || dirs.live() == 0).await;
     commit(repo.path(), "after-stop");
@@ -210,9 +211,8 @@ async fn 활성_저장소를_바꾸면_이전_감시는_닫히고_새_저장소�
 // ── 소유 판정 ────────────────────────────────────────────
 
 /// Rust 는 fetch 와 같은 술어(종류 대조)로 맡는 저장소만 감시한다. github·미러에 없는 id·검사에 걸린 경로·ssh(풀 없음)는 감시하지 않고 이전 감시도 멈춘다.
-/// 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 감시자가 만들어지지 않는다
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn rust_가_맡는_저장소만_감시하고_스위치가_꺼지면_감시기가_없다() {
+async fn rust_가_맡는_저장소만_감시한다() {
     let repo = make_repo(0);
     let github = MirrorRepo { id: "g".into(), kind: "github".into(), path: repo.path().to_string_lossy().into_owned(), distro: None, ssh_host: None };
     let ssh = MirrorRepo { id: "s".into(), kind: "ssh".into(), path: "/srv/r".into(), distro: None, ssh_host: Some("h".into()) };
@@ -221,34 +221,27 @@ async fn rust_가_맡는_저장소만_감시하고_스위치가_꺼지면_감시
     let dirs = NotifyDirs::new();
     let (router, _changes) = local_router(&mirror, &dirs);
 
-    assert!(is_sidecar(&router.route("repos:watch", &json!(["a"])).await));
+    assert!(is_acked(&router.route("repos:watch", &json!(["a"])).await));
     assert_eq!(router.watching().as_deref(), Some("a"));
     wait_for("a 감시 디렉터리", || dirs.live() == 1).await;
-    // 사이드카가 맡는 저장소로 바꾸면 Rust 감시는 멈춘다(두 쪽이 동시에 감시하지 않는다)
+    // Rust 가 맡지 않는 저장소로 바꾸면 Rust 감시는 멈춘다(두 쪽이 동시에 감시하지 않는다)
     for id in ["g", "s", "u", "nope"] {
-        assert!(is_sidecar(&router.route("repos:watch", &json!(["a"])).await));
+        assert!(is_acked(&router.route("repos:watch", &json!(["a"])).await));
         assert_eq!(router.watching().as_deref(), Some("a"), "{id}");
-        assert!(is_sidecar(&router.route("repos:watch", &json!([id])).await));
+        assert!(is_acked(&router.route("repos:watch", &json!([id])).await));
         assert_eq!(router.watching(), None, "{id} 는 Rust 가 감시하지 않는다");
         wait_for("이전 감시의 notify 핸들 닫힘", || dirs.live() == 0).await;
     }
     // 인자가 저장소 id 가 아니면 멈춘다
-    assert!(is_sidecar(&router.route("repos:watch", &json!(["a"])).await));
-    assert!(is_sidecar(&router.route("repos:watch", &json!([5])).await));
+    assert!(is_acked(&router.route("repos:watch", &json!(["a"])).await));
+    assert!(is_acked(&router.route("repos:watch", &json!([5])).await));
     assert_eq!(router.watching(), None);
     router.shutdown();
-
-    // 스위치 끔: 어떤 저장소도 감시하지 않는다(사이드카가 전부 감시한다 — env 가 없다)
-    let off_dirs = NotifyDirs::new();
-    let (off, _c) = watched(Router::new(false, false, mirror), &off_dirs);
-    assert!(is_sidecar(&off.route("repos:watch", &json!(["a"])).await));
-    assert_eq!(off.watching(), None);
-    assert_eq!(off_dirs.live(), 0);
 }
 
-/// Rust 가 감시를 맡는 종류 = 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)의 종류 — 같은 한 술어(`rust_fetch_kinds`)다. 이중 감시도 무감시도 없다
+/// Rust 가 감시를 맡는 종류 = 조회·fetch 소유 종류 — 같은 한 술어(`rust_fetch_kinds`)다. 이중 감시도 무감시도 없다
 #[test]
-fn 감시_소유는_사이드카_env_의_종류와_같은_술어다() {
+fn 감시_소유는_fetch_소유_종류와_같은_술어다() {
     let kinds = |ssh: bool, github: bool| -> Vec<&'static str> { rust_fetch_kinds(ssh, github).split(',').collect() };
     for (ssh_active, github_active) in [(false, false), (true, false), (false, true), (true, true)] {
         let mirror = RepoMirror::default();
@@ -267,20 +260,16 @@ fn 감시_소유는_사이드카_env_의_종류와_같은_술어다() {
         mirror.apply(1, repos);
         for kind in ["local", "wsl", "ssh", "github"] {
             if kind == "wsl" && !cfg!(windows) {
-                continue; // WSL 은 Windows 에서만 연다(미러가 그 밖의 OS 에서는 사이드카로 보낸다)
+                continue; // WSL 은 Windows 에서만 연다(미러가 그 밖의 OS 에서는 풀지 않는다)
             }
             let rust_watches = matches!(mirror.resolve_fetch(kind), Resolved::Rust(_));
             assert_eq!(rust_watches, kinds(ssh_active, github_active).contains(&kind), "{kind} ssh_active={ssh_active} github_active={github_active}");
         }
     }
-    // 소유하는 실행의 사이드카는 감시자를 만들지 않는다(PR 10 — 소유 판정 env·`fetchOwner` 는 없다). 감시자를 만드는 곳은 되돌리기 전용 조립(legacy.ts)뿐이다
-    let ts = read_src("../src/sidecar/index.ts");
-    assert!(!ts.contains("RepoWatcher") && !ts.contains("fetchOwner") && !ts.contains("ANTLER_RUST_FETCH_KINDS"));
-    assert!(read_src("../src/sidecar/legacy.ts").contains("new RepoWatcher(repos, (repoId) => emit('repo:changed', { repoId }))"));
 }
 
 #[test]
-fn 앱은_변화_싱크를_사이드카_기동_전에_달고_포커스를_감시에_알린다() {
+fn 앱은_변화_싱크를_라우터_등록_전에_달고_포커스를_감시에_알린다() {
     let lib = read_src("src/lib.rs");
     let sink = lib.find("router.set_change_sink(").expect("변화 싱크");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
@@ -289,7 +278,7 @@ fn 앱은_변화_싱크를_사이드카_기동_전에_달고_포커스를_감시
     assert_eq!(lib.matches("r.watch_focus(*focused)").count(), 1);
     // (설정 알림의 미러·fetch 설정 반영 둘(Phase 6b PR 9), 창 포커스의 fetch, 그리고 GitHub 로그인 변경 콜백 — Phase 6b PR 7)
     assert_eq!(lib.matches("in_runtime_of(").count(), 4);
-    // 감시 이벤트는 사이드카의 `repo:changed` 와 같은 모양이다
+    // 감시 이벤트는 renderer 의 `repo:changed` 이벤트 모양이다
     assert!(read_src("src/fetch_host.rs").contains("evt(\"repo:changed\", json!({ \"repoId\": repo_id }))"));
 }
 
@@ -389,7 +378,7 @@ async fn ssh_저장소는_폴링으로_감시하고_연결은_호스트당_하�
     let mirror = rig.mirror();
     let dirs = NotifyDirs::new();
     let polls = PollTimes { local: Duration::from_secs(60), wsl: Duration::from_secs(4), ssh: Duration::from_millis(300) };
-    let router = Router::new(true, false, mirror.clone()).with_watch_poll(polls);
+    let router = Router::new(false, mirror.clone()).with_watch_poll(polls);
     router.set_ssh_pool(rig.pool.clone());
     let (router, changes) = watched(router, &dirs);
     assert!(router.ssh_active());
@@ -416,7 +405,7 @@ async fn ssh_저장소는_폴링으로_감시하고_연결은_호스트당_하�
 async fn ssh_저장소는_포커스를_얻으면_바로_확인한다() {
     let rig = Rig::new().await;
     let dirs = NotifyDirs::new();
-    let router = Router::new(true, false, rig.mirror());
+    let router = Router::new(false, rig.mirror());
     router.set_ssh_pool(rig.pool.clone());
     let (router, changes) = watched(router, &dirs);
     activate(&router, "s").await;

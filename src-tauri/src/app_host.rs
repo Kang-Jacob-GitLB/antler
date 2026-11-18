@@ -1,6 +1,6 @@
 //! 설정이 필요 없는 앱 채널 4개(Phase 6b PR 5)의 Rust 쪽 처리: `dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`.
 //! 라우터([`crate::router::Router`])가 `APP_CHANNELS`(router.rs)를 이 모듈로 넘기면 `src/main/ipc/handlers.ts`·`external.ts` 의 핸들러와 같은 입력 검증·결과·오류 봉투
-//! (`handle()` 과 같은 `{ok:false,error,code:"ERROR"}`, void 는 `data` 없는 `{ok:true}` — 사이드카의 JSON 직렬화와 같다)를 돌려준다.
+//! (`handle()` 과 같은 `{ok:false,error,code:"ERROR"}`, void 는 `data` 없는 `{ok:true}`)를 돌려준다.
 //!
 //! 대화상자·클립보드·브라우저 열기는 **포트로 주입**한다([`AppHost`]). 운영 구현은 `lib.rs` 가 달고(대화상자는 `dialogs.rs`, 클립보드는 플러그인, 열기는 `open_https`),
 //! 시험은 가짜를 달아 실제 창·사용자 클립보드·브라우저를 건드리지 않는다. 포트는 막는 호출이라 `spawn_blocking` 으로 부른다.
@@ -97,7 +97,7 @@ pub async fn app_envelope(host: AppHost, channel: &str, args: Vec<Option<Value>>
             }
         }
         "win:setTitleBarTheme" => {
-            // 값 허용 목록: `{dark: bool, dim?: bool}`. 창 버튼은 앱이 그리므로(bridge.ts) 검증 뒤에 할 일이 없다(사이드카 판도 창이 없어 아무것도 하지 않는다)
+            // 값 허용 목록: `{dark: bool, dim?: bool}`. 창 버튼은 앱이 그리므로(bridge.ts) 검증 뒤에 할 일이 없다(Electron 판도 창이 CSS 로 그려 아무것도 하지 않는다)
             let valid = a0.and_then(Value::as_object).is_some_and(|t| t.get("dark").is_some_and(Value::is_boolean) && t.get("dim").is_none_or(Value::is_boolean));
             if valid {
                 ok_void()

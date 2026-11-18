@@ -4861,7 +4861,7 @@ mod live {
     // ── GitHub 서비스(PR 7) ─────────────────────────────────────────────────
     //
     // 루프백 목 서버(127.0.0.1)와 메모리 보관소만 쓴다. `start_paused` 는 쓰지 않는다. "응답이 오기 전/후"는 시간이 아니라 `Gate`·`wait_for` 로 만든다.
-    // 사이드카가 쥔 정보(`RepoQuery`)는 가짜(`FakeRepos`)로 채운다 — 실제 구현은 PR 9 다.
+    // 대체 질의가 쥔 정보(`RepoQuery`)는 가짜(`FakeRepos`)로 채운다 — 실제 구현은 PR 9 다.
     mod github_service {
         use std::collections::BTreeMap;
 
@@ -4923,7 +4923,7 @@ mod live {
             Hang,
         }
 
-        /// 사이드카가 쥔 저장소 정보의 가짜. `hold` 를 켜면 `gh_repo` 가 `gate` 가 열릴 때까지 멈춘다(세대 교체와 겹치는 경합을 만들 때)
+        /// 대체 질의가 쥔 저장소 정보의 가짜. `hold` 를 켜면 `gh_repo` 가 `gate` 가 열릴 때까지 멈춘다(세대 교체와 겹치는 경합을 만들 때)
         #[derive(Clone)]
         struct FakeRepos {
             repo: Arc<Mutex<Option<GhRepoRef>>>,

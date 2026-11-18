@@ -1,5 +1,5 @@
 //! `git:log` 의 커서·서비스 통합 테스트(실제 git). `tests/logCursor.test.ts`·`tests/repoService.test.ts` 의 log 케이스를 옮기고,
-//! Rust 에서 새로 생긴 약속(커서를 버리면 git 프로세스가 끝난다·유휴 정리·`repos:watch`·미러 변경·사이드카 알림)을 본다.
+//! Rust 에서 새로 생긴 약속(커서를 버리면 git 프로세스가 끝난다·유휴 정리·`repos:watch`·미러 변경·관찰자 알림)을 본다.
 //! 채널 패리티(TS 골든)는 `tests/channels.rs` 가 맡는다.
 //!
 //! 격리: 다른 통합 테스트와 같다 — 시작할 때 `GIT_CONFIG_GLOBAL`(커밋된 `tests/gitconfig`)·`GIT_CONFIG_NOSYSTEM` 을 넣는다.
@@ -471,12 +471,12 @@ async fn 이미_취소된_요청은_커서를_만들지_않는다() {
     assert_eq!(svc.cursor_count(), 0);
 }
 
-// ── 라우터(repos:watch · 미러 · 사이드카 알림) ───────────────────────
+// ── 라우터(repos:watch · 미러 · 알림) ───────────────────────
 
 fn envelope(r: Routed) -> Value {
     match r {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("Rust 경로를 타야 하는데 사이드카로 갔다"),
+        Routed::Unserved => panic!("Rust 경로를 타야 하는데 풀지 못했다"),
     }
 }
 
@@ -485,22 +485,22 @@ async fn log_page(router: &Router, id: &str, skip: u64, count: usize) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn repos_watch_는_사이드카로_넘기기_전에_다른_저장소의_커서를_닫는다() {
+async fn repos_watch_는_다른_저장소의_커서를_닫고_응답한다() {
     let tmp = TempDir::new("watch");
     let (a, b) = (tmp.join("a"), tmp.join("b"));
     linear_repo(&a, 2500);
     linear_repo(&b, 2500);
     // 프로세스 목록을 읽는 동안(느릴 수 있다) 유휴 정리가 먼저 닫지 않게 유휴 시간을 길게 둔다
-    let router = Router::new(true, false, mirror_of(&[("a", &a), ("b", &b)])).with_log_timing(Duration::from_secs(3600), Duration::from_secs(3600));
+    let router = Router::new(false, mirror_of(&[("a", &a), ("b", &b)])).with_log_timing(Duration::from_secs(3600), Duration::from_secs(3600));
     assert_eq!(log_page(&router, "a", 0, 50).await["ok"], true);
     assert_eq!(router.log_cursor_count(), 1);
     #[cfg(windows)]
     let tree = live_tree(router.log_cursor_pids()[0]);
     // 같은 저장소를 보는 중이면 그대로 둔다
-    assert!(matches!(router.route("repos:watch", &json!(["a"])).await, Routed::Sidecar));
+    assert!(matches!(router.route("repos:watch", &json!(["a"])).await, Routed::Done(_)));
     assert_eq!(router.log_cursor_count(), 1);
-    // 다른 저장소로 옮기면 닫는다 — 응답은 여전히 사이드카의 몫이다
-    assert!(matches!(router.route("repos:watch", &json!(["b"])).await, Routed::Sidecar));
+    // 다른 저장소로 옮기면 닫는다
+    assert!(matches!(router.route("repos:watch", &json!(["b"])).await, Routed::Done(_)));
     assert_eq!(router.log_cursor_count(), 0);
     #[cfg(windows)]
     assert_tree_dies(&tree).await;
@@ -509,14 +509,11 @@ async fn repos_watch_는_사이드카로_넘기기_전에_다른_저장소의_�
     assert_eq!(p["ok"], true);
     assert_eq!(p["data"]["commits"].as_array().unwrap().len(), 50);
     // null(활성 저장소 없음)이나 모양이 틀린 인자는 모두 닫는다
-    assert!(matches!(router.route("repos:watch", &json!([null])).await, Routed::Sidecar));
+    assert!(matches!(router.route("repos:watch", &json!([null])).await, Routed::Done(_)));
     assert_eq!(router.log_cursor_count(), 0);
     log_page(&router, "a", 100, 10).await;
-    assert!(matches!(router.route("repos:watch", &json!([])).await, Routed::Sidecar));
+    assert!(matches!(router.route("repos:watch", &json!([])).await, Routed::Done(_)));
     assert_eq!(router.log_cursor_count(), 0);
-    // 스위치가 꺼져 있어도 사이드카로 간다
-    let off = Router::new(false, false, RepoMirror::default());
-    assert!(matches!(off.route("repos:watch", &json!(["a"])).await, Routed::Sidecar));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -526,7 +523,7 @@ async fn 미러에서_사라지거나_바뀐_저장소의_커서와_앵커를_�
     linear_repo(&a, 300);
     linear_repo(&b, 300);
     let mirror = mirror_of(&[("a", &a), ("b", &b)]);
-    let router = Router::new(true, false, mirror.clone());
+    let router = Router::new(false, mirror.clone());
     log_page(&router, "a", 0, 50).await;
     assert_eq!(router.log_cursor_count(), 1);
     // 변화 없는 미러는 건드리지 않는다
@@ -552,11 +549,11 @@ async fn 미러에서_사라지거나_바뀐_저장소의_커서와_앵커를_�
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn 사이드카_알림은_첫_페이지와_이력_변경에만_간다() {
+async fn 싱크_알림은_첫_페이지와_이력_변경에만_간다() {
     let tmp = TempDir::new("notes");
     let dir = tmp.join("branchy");
     fixture_repo(&dir, "branchy");
-    let router = Router::new(true, false, mirror_of(&[("a", &dir)]));
+    let router = Router::new(false, mirror_of(&[("a", &dir)]));
     let notes: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
     let sink = notes.clone();
     router.set_note_sink(Arc::new(move |op: NoteOp, id: &str| sink.lock().unwrap().push((op.as_str().to_string(), id.to_string()))));
@@ -583,7 +580,7 @@ async fn 사이드카_알림은_첫_페이지와_이력_변경에만_간다() {
     log_page(&router, "a", 0, 5).await;
     assert_eq!(take(), first());
     // git 이 실패해도(저장소가 사라졌다) 첫 페이지 알림은 간다 — 오류 화면에서 다른 조회가 막히면 안 된다
-    let gone = Router::new(true, false, mirror_of(&[("g", &tmp.join("nope"))]));
+    let gone = Router::new(false, mirror_of(&[("g", &tmp.join("nope"))]));
     let sink = notes.clone();
     gone.set_note_sink(Arc::new(move |op: NoteOp, id: &str| sink.lock().unwrap().push((op.as_str().to_string(), id.to_string()))));
     let env = log_page(&gone, "g", 0, 5).await;
@@ -596,7 +593,7 @@ async fn 이미_끝까지_읽은_커서는_다시_열어_그_뒤에_생긴_커�
     let tmp = TempDir::new("grow");
     let dir = tmp.join("r");
     init(&dir);
-    let router = Router::new(true, false, mirror_of(&[("a", &dir)]));
+    let router = Router::new(false, mirror_of(&[("a", &dir)]));
     assert_eq!(log_page(&router, "a", 0, 50).await["data"]["commits"].as_array().unwrap().len(), 0);
     let g = |args: &[&str]| assert!(raw_git(&dir).args(["-c", "user.name=t", "-c", "user.email=t@t"]).args(args).status().unwrap().success(), "{args:?}");
     g(&["commit", "-q", "--allow-empty", "-m", "first"]);

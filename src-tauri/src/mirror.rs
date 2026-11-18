@@ -1,6 +1,6 @@
-//! 저장소 미러. 라우터가 저장소 경로·환경을 얻는 **유일한** 출처다. Phase 6b PR 9 부터 Rust 가 설정을 소유하므로 `config::sync` 가 설정이 바뀔 때마다 [`RepoMirror::apply_message`] 로 채운다(`ANTLER_RUST_GIT=0` 이면 라우터가 꺼져 있어 쓰지 않는다),
-//! 같은 모양 `{t:"repos", gen, repos:[{id,kind,path,name,distro?,sshHost?,github?}]}` 의 메시지다(`src/sidecar/protocol.ts`·`mirror.ts` — 이전에는 사이드카가 보냈다. 링크·기본 브랜치·경로 검증이 이 한 경로다)
-//! — Rust 가 설정을 소유하지 않는 실행(`ANTLER_RUST_GIT=0`)에서는 사이드카가 보낸 줄이 채운다. renderer 가 보낸 경로·kind·배포판은 어디서도 쓰지 않는다.
+//! 저장소 미러. 라우터가 저장소 경로·환경을 얻는 **유일한** 출처다. Rust 가 설정을 소유하므로 `config::sync` 가 설정이 바뀔 때마다 [`RepoMirror::apply_message`] 로 채운다.
+//! 메시지는 `{t:"repos", gen, repos:[{id,kind,path,name,distro?,sshHost?,github?}]}` 모양이다(링크·기본 브랜치·경로 검증이 이 한 경로다).
+//! renderer 가 보낸 경로·kind·배포판은 어디서도 쓰지 않는다.
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, PoisonError, RwLock};
@@ -79,11 +79,11 @@ impl Target {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolved {
-    /// 미러에 있고 kind 가 local·wsl(ssh·github 는 스위치가 켜져 있을 때만)이며 검증을 통과했다
+    /// 미러에 있고 kind 가 local·wsl(ssh·github 는 풀·캐시 실행기가 주입돼 있을 때만)이며 검증을 통과했다
     Rust(Target),
-    /// 미러에 없거나 Rust 가 다루지 않는 kind(스위치가 꺼진 ssh·github) — 사이드카가 처리한다(오류 문구도 사이드카가 만든다)
-    Sidecar,
-    /// 미러에 있는 값이 경로·배포판 검사에 걸렸다 — 이 메시지를 ERROR 로 돌려준다(사이드카로 넘기지 않는다)
+    /// 미러에 없거나 이 실행에서 풀 수 없는 kind(풀·실행기가 없는 ssh·github) — 호출자가 "처리하지 못함" 오류를 만든다(`Router::invoke`)
+    Unserved,
+    /// 미러에 있는 값이 경로·배포판 검사에 걸렸다 — 이 메시지를 ERROR 로 돌려준다
     Invalid(String),
 }
 
@@ -103,10 +103,10 @@ struct Inner {
 #[derive(Clone, Default)]
 pub struct RepoMirror {
     inner: Arc<RwLock<Inner>>,
-    /// ssh 저장소를 Rust 로 풀어도 되는가. 꺼져 있으면(기본) ssh 는 사이드카다. 라우터가 SSH 풀을 주입할 때 켠다(`Router::ssh_active`) —
+    /// ssh 저장소를 Rust 로 풀어도 되는가. 꺼져 있으면(기본) ssh 는 풀 수 없다(`Unserved`). 라우터가 SSH 풀을 주입할 때 켠다(`Router::ssh_active`) —
     /// 해석이 이 한 곳에서만 갈려야 로그 커서·fetch 서비스·라우터가 같은 답을 본다
     ssh: Arc<AtomicBool>,
-    /// github 소스 저장소를 Rust 로 풀어도 되는가(조회: Phase 6b PR 6, fetch·감시: PR 7). 꺼져 있으면(기본) github 는 사이드카다. 라우터가 GitHub 서비스(토큰)와 캐시 실행기를 주입할 때 켠다 —
+    /// github 소스 저장소를 Rust 로 풀어도 되는가(조회: Phase 6b PR 6, fetch·감시: PR 7). 꺼져 있으면(기본) github 는 풀 수 없다(`Unserved`). 라우터가 GitHub 서비스(토큰)와 캐시 실행기를 주입할 때 켠다 —
     /// `resolve`(조회·로그 커서·`gh:*` 질의)와 fetch·감시의 소유(`resolve_fetch` — 종류 목록 `rust_fetch_kinds` 가 이 값을 입력으로 받는다)가 **같은 플래그 하나**를 본다
     github: Arc<AtomicBool>,
 }
@@ -180,12 +180,12 @@ impl RepoMirror {
         self.inner.read().unwrap_or_else(PoisonError::into_inner).repos.get(repo_id).map(|r| r.kind.clone())
     }
 
-    /// 저장소 이름(사이드카가 `name` 을 보냈을 때만)
+    /// 저장소 이름(미러 메시지가 `name` 을 담았을 때만)
     pub fn name(&self, repo_id: &str) -> Option<String> {
         self.inner.read().unwrap_or_else(PoisonError::into_inner).names.get(repo_id).cloned()
     }
 
-    /// 사이드카의 `repos` 메시지(JSON)를 받아 적용한다. 모양이 틀린 메시지는 버리고, 틀린 항목은 그 항목만 뺀다
+    /// `repos` 메시지(JSON)를 받아 적용한다. 모양이 틀린 메시지는 버리고, 틀린 항목은 그 항목만 뺀다
     pub fn apply_message(&self, msg: &Value) -> bool {
         let Some(gen) = msg.get("gen").and_then(Value::as_u64) else { return false };
         let Some(list) = msg.get("repos").and_then(Value::as_array) else { return false };
@@ -210,13 +210,13 @@ impl RepoMirror {
 
     pub fn resolve(&self, repo_id: &str) -> Resolved {
         let inner = self.inner.read().unwrap_or_else(PoisonError::into_inner);
-        let Some(repo) = inner.repos.get(repo_id) else { return Resolved::Sidecar };
+        let Some(repo) = inner.repos.get(repo_id) else { return Resolved::Unserved };
         match repo.kind.as_str() {
             "local" => match check_path(&repo.kind, &repo.path) {
                 Ok(()) => Resolved::Rust(Target::Local { path: repo.path.clone() }),
                 Err(m) => Resolved::Invalid(m),
             },
-            // WSL 은 Windows 에서만 연다(TS createExecutor 와 같다) — 그 밖의 OS 는 사이드카가 오류를 만든다
+            // WSL 은 Windows 에서만 연다(TS createExecutor 와 같다) — 그 밖의 OS 는 풀 수 없다(`Unserved`)
             "wsl" if cfg!(windows) => {
                 let checked = check_path(&repo.kind, &repo.path).and_then(|()| check_distro(repo.distro.as_deref()));
                 match checked {
@@ -224,7 +224,7 @@ impl RepoMirror {
                     Err(m) => Resolved::Invalid(m),
                 }
             }
-            // 라우터가 SSH 풀을 주입하지 않았거나 스위치가 꺼져 있으면 사이드카다
+            // 라우터가 SSH 풀을 주입하지 않았으면 풀 수 없다
             "ssh" if self.ssh.load(Ordering::SeqCst) => {
                 let checked = check_path(&repo.kind, &repo.path).and_then(|()| check_ssh_host(repo.ssh_host.as_deref()));
                 match checked {
@@ -238,14 +238,14 @@ impl RepoMirror {
                 Ok(()) => Resolved::Rust(Target::Github { path: repo.path.clone(), link: inner.links.get(repo_id).cloned() }),
                 Err(m) => Resolved::Invalid(m),
             },
-            _ => Resolved::Sidecar,
+            _ => Resolved::Unserved,
         }
     }
 
     /// fetch 를 Rust 서비스가 맡는 저장소만 거른 해석. **소스 종류(`rust_fetch_kinds`)가 먼저다** — 해석 결과(`Resolved::Rust`)가 아니라 종류로 소유를 정해야
-    /// 조회·감시와 같은 술어를 쓴다(ssh·github 는 각 스위치가 켜졌을 때만 포함).
-    /// fetch·감시의 서비스·라우터·자동 예약은 모두 이 함수만 쓴다. 종류가 맡는 것이 아니면(꺼진 github·ssh) 검증보다 먼저 `Sidecar` 다 —
-    /// 호스트가 잘못된 ssh 저장소의 fetch 는 켜져 있으면 Rust 가 `Invalid` 로, 꺼져 있으면 사이드카가 오류를 만든다
+    /// 조회·감시와 같은 술어를 쓴다(ssh·github 는 풀·캐시 실행기가 주입됐을 때만 포함).
+    /// fetch·감시의 서비스·라우터·자동 예약은 모두 이 함수만 쓴다. 종류가 맡는 것이 아니면(풀·실행기 없는 github·ssh) 검증보다 먼저 `Unserved` 다 —
+    /// 호스트가 잘못된 ssh 저장소의 fetch 는 풀이 있으면 `Invalid` 로, 없으면 `Unserved` 로 끝난다
     pub fn resolve_fetch(&self, repo_id: &str) -> Resolved {
         let kinds = rust_fetch_kinds(self.ssh.load(Ordering::SeqCst), self.github.load(Ordering::SeqCst));
         let owned = {
@@ -255,7 +255,7 @@ impl RepoMirror {
         if owned {
             self.resolve(repo_id)
         } else {
-            Resolved::Sidecar
+            Resolved::Unserved
         }
     }
 
@@ -275,7 +275,7 @@ fn parse_repo(v: &Value) -> Option<MirrorRepo> {
     })
 }
 
-/// 미러 항목의 `github: {owner, repo}`. 링크 규칙(`validate_github_link`)을 통과하지 못하면 없다 — 사이드카가 이미 검증한 값이지만 `gh:repo` 의 답이 되기 전에 한 번 더 본다
+/// 미러 항목의 `github: {owner, repo}`. 링크 규칙(`validate_github_link`)을 통과하지 못하면 없다 — 설정 저장소가 이미 검증한 값이지만 `gh:repo` 의 답이 되기 전에 한 번 더 본다
 fn parse_link(v: &Value) -> Option<GhLink> {
     let (owner, repo) = (v.get("owner")?.as_str()?, v.get("repo")?.as_str()?);
     let json = Json::Obj(vec![("owner".to_string(), Json::Str(owner.to_string())), ("repo".to_string(), Json::Str(repo.to_string()))]);
@@ -329,7 +329,7 @@ pub fn check_listdir_path(path: &str) -> Result<(), String> {
 /// SSH 호스트 검사. `src/main/ipc/handlers.ts` 의 `checkEnvInput` 과 같은 규칙이다 — 앞뒤 공백을 지운 값이 비지 않고, 255 UTF-16 단위 이하이고,
 /// 공백(JS `\s`)·NUL 이 없고, `-` 로 시작하지 않는다(옵션으로 읽힐 수 있다). **TS 보다 엄격한 점**: 제어 문자 전체를 거부한다(TS 는 NUL 과 공백류만).
 /// 검사한 값(앞뒤 공백을 지운 것)을 돌려주고 호출자는 이 값만 쓴다 — 검사한 값과 실행기에 넘기는 값이 다르면 ` -x` 같은 값이 `-` 검사를 빠져나간다.
-/// 호스트가 `~/.ssh/config` 에 있는지·known_hosts 에 있는지는 연결할 때 실행기가 본다(확인 창은 저장소를 추가할 때만 뜬다 — 사이드카 몫)
+/// 호스트가 `~/.ssh/config` 에 있는지·known_hosts 에 있는지는 연결할 때 실행기가 본다(확인 창은 저장소를 추가할 때만 뜬다 — 설정 소유자 몫)
 pub fn check_ssh_host(host: Option<&str>) -> Result<String, String> {
     let bad = || "잘못된 SSH 호스트입니다".to_string();
     let h = js_trim(host.ok_or_else(bad)?);
@@ -340,7 +340,7 @@ pub fn check_ssh_host(host: Option<&str>) -> Result<String, String> {
 }
 
 /// WSL 배포판 이름 검사. TS 는 저장소를 **추가할 때** 설치된 목록(`wsl.exe -l -q`)과 대조해 소스에 저장하고, 쓸 때는 다시 확인하지 않는다.
-/// Rust 는 사이드카가 보낸(= 그렇게 검증돼 저장된) 값이라도 `wsl.exe -d <이름>` 에 넣기 전에 형식을 본다 —
+/// Rust 는 설정에 저장된(= 그렇게 검증된) 값이라도 `wsl.exe -d <이름>` 에 넣기 전에 형식을 본다 —
 /// 비었거나 길거나 제어 문자가 있거나 `-` 로 시작하면(옵션으로 읽힐 수 있다) 거부한다. 설치 여부는 `wsl.exe` 가 실행할 때 알려 준다.
 pub fn check_distro(distro: Option<&str>) -> Result<String, String> {
     let bad = || "설치된 WSL 배포판이 아닙니다".to_string();
@@ -408,17 +408,17 @@ mod tests {
     }
 
     #[test]
-    fn 미러에_없으면_사이드카_ssh_github_도_사이드카() {
+    fn 미러에_없거나_풀_수_없는_종류는_unserved() {
         let m = RepoMirror::default();
         assert!(m.apply(1, vec![repo("a", "local", "/r", None), repo("s", "ssh", "/srv", None), repo("g", "github", "/cache", None)]));
         assert_eq!(m.resolve("a"), Resolved::Rust(Target::Local { path: "/r".into() }));
-        assert_eq!(m.resolve("nope"), Resolved::Sidecar);
-        assert_eq!(m.resolve("s"), Resolved::Sidecar);
-        assert_eq!(m.resolve("g"), Resolved::Sidecar);
+        assert_eq!(m.resolve("nope"), Resolved::Unserved);
+        assert_eq!(m.resolve("s"), Resolved::Unserved);
+        assert_eq!(m.resolve("g"), Resolved::Unserved);
     }
 
     #[test]
-    fn github_는_스위치가_켜졌을_때만_조회와_fetch_소유를_rust_가_맡는다() {
+    fn github_는_캐시_실행기가_있을_때만_조회와_fetch_소유를_rust_가_맡는다() {
         let m = RepoMirror::default();
         let msg = json!({ "t": "repos", "gen": 1, "repos": [
             { "id": "g", "kind": "github", "path": "C:\\c\\o\\r.git", "name": "r", "github": { "owner": "o", "repo": "r" } },
@@ -428,9 +428,9 @@ mod tests {
             { "id": "a", "kind": "local", "path": "/r", "name": "a", "github": { "owner": "o", "repo": "r" } }
         ]});
         assert!(m.apply_message(&msg));
-        // 기본(꺼짐)은 사이드카다
+        // 기본(꺼짐)은 풀 수 없다
         for id in ["g", "nolink", "unc", "nt"] {
-            assert_eq!(m.resolve(id), Resolved::Sidecar, "{id}");
+            assert_eq!(m.resolve(id), Resolved::Unserved, "{id}");
         }
         m.set_github(true);
         let link = Some(GhLink { owner: "o".into(), repo: "r".into() });
@@ -442,7 +442,7 @@ mod tests {
         }
         // github 소스가 아닌 저장소에 붙은 링크는 버린다
         assert_eq!(m.resolve("a"), Resolved::Rust(Target::Local { path: "/r".into() }));
-        // fetch·감시의 소유도 같은 스위치 하나다(종류 목록 `rust_fetch_kinds` 가 이 플래그를 입력으로 받는다 — 사이드카 env 와 같은 술어). 검증은 소유 판정 뒤다: 경로가 잘못된 것은 사이드카가 아니라 오류
+        // fetch·감시의 소유도 같은 플래그 하나다(종류 목록 `rust_fetch_kinds` 가 이 플래그를 입력으로 받는다). 검증은 소유 판정 뒤다: 경로가 잘못된 것은 풀 수 없음이 아니라 오류
         assert_eq!(m.resolve_fetch("g"), m.resolve("g"));
         assert_eq!(m.resolve_fetch("nolink"), m.resolve("nolink"));
         for id in ["unc", "nt"] {
@@ -450,7 +450,7 @@ mod tests {
         }
         m.set_github(false);
         for id in ["g", "nolink", "unc", "nt"] {
-            assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}: 스위치가 꺼지면 fetch 도 사이드카다");
+            assert_eq!(m.resolve_fetch(id), Resolved::Unserved, "{id}: 실행기가 없으면 fetch 도 풀 수 없다");
         }
         m.set_github(true);
         let t = Target::Github { path: "/p".into(), link: None };
@@ -526,15 +526,15 @@ mod tests {
     }
 
     #[test]
-    fn ssh_는_스위치가_켜졌을_때만_rust_로_풀린다() {
+    fn ssh_는_풀이_있을_때만_rust_로_풀린다() {
         let m = RepoMirror::default();
         assert!(m.apply(
             1,
             vec![ssh_repo("s", Some(" devbox "), "/srv/r"), ssh_repo("nohost", None, "/srv/r"), ssh_repo("dash", Some("-x"), "/srv/r"), ssh_repo("nt", Some("h"), "\\??\\C:\\x")]
         ));
-        // 기본(꺼짐)은 사이드카다 — 호스트가 잘못돼도 사이드카가 오류를 만든다
+        // 기본(꺼짐)은 풀 수 없다
         for id in ["s", "nohost", "dash", "nt"] {
-            assert_eq!(m.resolve(id), Resolved::Sidecar, "{id}");
+            assert_eq!(m.resolve(id), Resolved::Unserved, "{id}");
         }
         assert!(m.ssh_hosts().is_empty());
         m.set_ssh(true);
@@ -548,20 +548,20 @@ mod tests {
     }
 
     #[test]
-    fn fetch_소유는_해석이_아니라_소스_종류로_정하고_ssh_는_스위치가_켜졌을_때만_포함한다() {
+    fn fetch_소유는_해석이_아니라_소스_종류로_정하고_ssh_는_풀이_있을_때만_포함한다() {
         let m = RepoMirror::default();
         m.apply(1, vec![repo("a", "local", "/r", None), ssh_repo("s", Some("devbox"), "/srv/r"), ssh_repo("bad", Some("-x"), "/srv/r"), repo("g", "github", "/c", None)]);
-        // 스위치가 꺼져 있으면(기본) ssh 의 fetch 는 사이드카다
+        // 풀이 없으면(기본) ssh 의 fetch 는 풀 수 없다
         for id in ["s", "bad", "g", "nope"] {
-            assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}");
+            assert_eq!(m.resolve_fetch(id), Resolved::Unserved, "{id}");
         }
         assert_eq!(m.resolve_fetch("a"), Resolved::Rust(Target::Local { path: "/r".into() }));
         m.set_ssh(true);
-        // 켜지면 ssh 도 Rust 가 맡는다(사이드카 env 의 ssh 포함과 같은 술어). 호스트가 잘못되면 사이드카가 아니라 오류다
+        // 켜지면 ssh 도 Rust 가 맡는다. 호스트가 잘못되면 풀 수 없음이 아니라 오류다
         assert_eq!(m.resolve_fetch("s"), Resolved::Rust(Target::Ssh { host: "devbox".into(), path: "/srv/r".into() }));
         assert!(matches!(m.resolve_fetch("bad"), Resolved::Invalid(_)));
         for id in ["g", "nope"] {
-            assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}");
+            assert_eq!(m.resolve_fetch(id), Resolved::Unserved, "{id}");
         }
     }
 
@@ -591,7 +591,7 @@ mod tests {
         assert!(!m.apply(1, vec![]));
         assert_eq!(m.count(), 1);
         assert!(m.apply(3, vec![]));
-        assert_eq!(m.resolve("a"), Resolved::Sidecar);
+        assert_eq!(m.resolve("a"), Resolved::Unserved);
     }
 
     #[test]

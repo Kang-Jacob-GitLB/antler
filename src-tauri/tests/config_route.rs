@@ -32,7 +32,7 @@ use antler_lib::github::service::{GitHubService, ServiceOptions};
 use antler_lib::mirror::{RepoMirror, Resolved, Target};
 use antler_lib::net::json::{parse, Json};
 use antler_lib::repos::manage::{add_github_repos, cleanup_github_cache, github_target_of, restore_missing_github_caches};
-use antler_lib::router::{Routed, Router, API_CHANNELS, APP_CHANNELS, CONFIG_CHANNELS, ENV_CHANNELS, RUST_CHANNELS};
+use antler_lib::router::{Routed, Router, API_CHANNELS, APP_CHANNELS, CONFIG_CHANNELS, ENV_CHANNELS, ROUTER_CHANNELS, RUST_CHANNELS};
 use antler_lib::secret::memory::MemoryStore;
 use antler_lib::secret::Vault;
 use futures_util::future::{BoxFuture, FutureExt};
@@ -189,7 +189,7 @@ impl Rig {
         }
         let store = Arc::new(ConfigStore::open_for_test(dir.path().join("antler.config.json"), Some(cache.to_string_lossy().into_owned()), seq_ids(), || 1_700_000_000_000));
         let mirror = RepoMirror::default();
-        let router = Arc::new(Router::new(true, false, mirror.clone()));
+        let router = Arc::new(Router::new(false, mirror.clone()));
         let exec = cache_exec(dir.path());
         if github {
             router.set_github(gh_host());
@@ -233,10 +233,8 @@ impl Rig {
     }
 
     async fn call(&self, ch: &str, args: Value) -> Value {
-        match self.router.route(ch, &args).await {
-            Routed::Done(v) => v,
-            Routed::Sidecar => panic!("{ch} {args} 가 사이드카로 갔다"),
-        }
+        // 앱 경계 그대로: 풀지 못한 호출(서비스 없음)도 오류 봉투다
+        self.router.invoke(ch, &args).await
     }
 
     /// 임시 폴더 아래에 git 저장소를 만든다(커밋 없음 — `rev-parse --show-toplevel` 만 필요하다)
@@ -279,64 +277,47 @@ fn names(c: &Json, key: &str) -> Vec<String> {
 #[test]
 fn 설정_소유_채널_목록은_ipc_허용_목록의_부분집합이고_다른_목록과_겹치지_않는다() {
     let ipc = ipc_channels();
-    assert_eq!(CONFIG_CHANNELS.len(), 11);
+    assert_eq!(CONFIG_CHANNELS.len(), 9);
     for ch in CONFIG_CHANNELS {
         assert!(ipc.iter().any(|c| c == ch), "{ch} 가 IPC_CHANNELS 에 없다");
-        for (name, list) in [("RUST_CHANNELS", RUST_CHANNELS), ("APP_CHANNELS", APP_CHANNELS), ("ENV_CHANNELS", ENV_CHANNELS), ("API_CHANNELS", API_CHANNELS)] {
+        for (name, list) in [("RUST_CHANNELS", RUST_CHANNELS), ("APP_CHANNELS", APP_CHANNELS), ("ENV_CHANNELS", ENV_CHANNELS), ("API_CHANNELS", API_CHANNELS), ("ROUTER_CHANNELS", ROUTER_CHANNELS)] {
             assert!(!list.contains(ch), "{ch} 가 {name} 와 겹친다");
         }
     }
-    // 사이드카의 TS 목록(`configOwns.ts`)과 같다 — 사이드카는 이 채널을 받지 않는다
-    let ts = read_src("../src/sidecar/configOwns.ts");
-    let block = &ts[ts.find("export const RUST_CONFIG_CHANNELS").expect("RUST_CONFIG_CHANNELS")..];
-    let block = &block[..block.find("] as const").expect("목록 끝")];
-    let listed: Vec<&str> = block.lines().filter_map(|l| l.trim().strip_prefix('\'')).filter_map(|l| l.split('\'').next()).filter(|c| c.contains(':')).collect();
-    assert_eq!(listed, CONFIG_CHANNELS, "src/sidecar/configOwns.ts 의 RUST_CONFIG_CHANNELS 와 router.rs 의 CONFIG_CHANNELS 가 같아야 한다");
 }
 
 #[tokio::test]
-async fn 소유자가_없거나_스위치가_꺼져_있으면_모두_사이드카가_처리한다() {
-    let bare = Router::new(true, false, RepoMirror::default());
+async fn 소유자가_없으면_설정_채널은_풀_수_없고_파일을_만들지_않는다() {
+    let bare = Router::new(false, RepoMirror::default());
     let dir = TempDir::new("cfgroute-off");
-    let store = Arc::new(ConfigStore::open_for_test(dir.path().join("c.json"), None, seq_ids(), || 0));
-    let env = EnvHost::new(Arc::new(|| async { Vec::new() }.boxed()), Arc::new(Vec::new), Arc::new(|_| false), Arc::new(|_, _| GitExecutor::Local(LocalExecutor::default())));
-    let host = Arc::new(ConfigHost::new(store, env, String::new(), Arc::new(|| Ok(None)), Arc::new(FakeDeps::default())));
-    // 스위치가 꺼진 라우터(ANTLER_RUST_GIT=0)는 소유자를 받지 않는다 — 그 실행은 사이드카가 파일의 유일한 작성자다
-    let off = Router::new(false, false, RepoMirror::default());
-    off.set_config(host.clone());
-    assert!(!off.config_owned());
     for ch in CONFIG_CHANNELS {
-        assert!(matches!(bare.route(ch, &json!(["x"])).await, Routed::Sidecar), "{ch} (소유자 없음)");
-        assert!(matches!(off.route(ch, &json!(["x"])).await, Routed::Sidecar), "{ch} (스위치 꺼짐)");
+        assert!(matches!(bare.route(ch, &json!(["x"])).await, Routed::Unserved), "{ch} (소유자 없음)");
+        assert_eq!(bare.invoke(ch, &json!(["x"])).await, json!({ "ok": false, "error": "이 기능을 사용할 수 없습니다", "code": "ERROR" }), "{ch}");
     }
-    assert_eq!((bare.rust_handled(), off.rust_handled()), (0, 0));
+    assert_eq!(bare.rust_handled(), 0);
     assert!(!dir.path().join("c.json").exists(), "소유하지 않으면 파일을 만들지 않는다");
 }
 
 #[tokio::test]
-async fn 설정을_소유한_실행에서_서비스가_없으면_jira_gh_채널은_토큰_인자를_사이드카로_보내지_않고_오류로_답한다() {
-    // 서비스를 만들지 못한 경우(키체인 오류 등): 사이드카는 설정·토큰을 모르므로 `gh:loginPat` 의 토큰이 그쪽으로 가면 안 된다
+async fn 설정을_소유한_실행에서_서비스가_없으면_jira_gh_채널은_오류로_답한다() {
+    // 서비스를 만들지 못한 경우(키체인 오류 등): `gh:loginPat` 의 토큰이 어디로도 가지 않고 오류다
     let rig = Rig::new(false);
     let unavailable = json!({ "ok": false, "error": "연결 서비스를 사용할 수 없습니다", "code": "ERROR" });
     for (ch, args) in [("gh:loginPat", json!(["ghp_secret_token"])), ("gh:auth", json!([])), ("jira:connect", json!([{ "site": "https://x.atlassian.net", "email": "a@b.c", "token": "jira_secret" }])), ("gh:pulls", json!("x"))] {
         assert_eq!(rig.call(ch, args).await, unavailable, "{ch}");
     }
-    // 설정 소유자가 없는 실행(`ANTLER_RUST_GIT=0` — 사이드카가 서비스도 맡는다)은 지금처럼 사이드카다
-    let bare = Router::new(true, false, RepoMirror::default());
-    assert!(matches!(bare.route("gh:loginPat", &json!(["x"])).await, Routed::Sidecar));
 }
 
 #[tokio::test]
-async fn 소유자가_있으면_11채널을_모두_rust_가_응답하고_배열이_아닌_인자도_사이드카로_가지_않는다() {
+async fn 소유자가_있으면_설정_채널을_모두_rust_가_응답하고_배열이_아닌_인자도_다른_곳으로_가지_않는다() {
     let rig = Rig::new(false);
-    assert!(rig.router.config_owned());
-    for ch in CONFIG_CHANNELS {
+    for ch in CONFIG_CHANNELS.iter().chain(ROUTER_CHANNELS) {
         for args in [json!(["x"]), json!("x"), json!({ "a": 1 }), json!(null), json!([])] {
             let r = rig.call(ch, args.clone()).await;
             assert!(r["ok"].is_boolean(), "{ch} {args}: {r}");
         }
     }
-    assert_eq!(rig.router.rust_handled(), (CONFIG_CHANNELS.len() * 5) as u64);
+    assert_eq!(rig.router.rust_handled(), ((CONFIG_CHANNELS.len() + ROUTER_CHANNELS.len()) * 5) as u64);
     // void 채널은 data 없는 `{ok:true}`
     assert_eq!(rig.call("repos:watch", json!(["nope"])).await, json!({ "ok": true }));
     assert_eq!(rig.call("repos:watch", json!([null])).await, json!({ "ok": true }));
@@ -536,7 +517,7 @@ async fn 이름과_그룹을_바꾸고_삭제하면_설정과_미러에서_함�
     // 삭제: 설정·미러에서 사라지고 모르는 id 도 던지지 않는다
     let r = rig.call("repos:remove", json!(["id-1"])).await;
     assert_eq!(names(&cfg(&r), "repos"), ["b"]);
-    assert!(matches!(rig.mirror.resolve("id-1"), Resolved::Sidecar));
+    assert!(matches!(rig.mirror.resolve("id-1"), Resolved::Unserved));
     assert_eq!(rig.call("repos:remove", json!(["nope"])).await["ok"], true);
     assert_eq!(rig.call("repos:remove", json!([5])).await["ok"], true);
     // 마지막 저장소를 지워도 로컬 소스는 남는다
@@ -743,7 +724,7 @@ async fn 삭제는_캐시_폴더와_빈_owner_폴더를_지우고_다른_저장�
     // 같은 owner 의 다른 저장소가 남아 있으면 owner 폴더는 남는다
     ok(&rig.call("repos:remove", json!(["id-1"])).await);
     assert!(!cache.join("octo").join("hello.git").exists() && cache.join("octo").join("world.git").exists());
-    assert!(matches!(rig.mirror.resolve("id-1"), Resolved::Sidecar));
+    assert!(matches!(rig.mirror.resolve("id-1"), Resolved::Unserved));
     // 삭제 직후 같은 저장소를 다시 추가할 수 있다
     let again = rig.call("repos:addGithub", json!([{ "repos": [{ "owner": "octo", "repo": "hello" }] }])).await;
     assert_eq!(ok(&again)["added"].as_array().unwrap().len(), 1);
@@ -870,7 +851,7 @@ async fn 폴더를_지우지_못해도_레코드는_지우고_던지지_않는�
         let r = rig.call("repos:remove", json!(["id-1"])).await;
         assert_eq!(names(&cfg(&r), "repos").len(), 0, "폴더를 못 지워도 레코드는 지운다");
         assert!(dir.exists(), "쥐고 있는 폴더는 남는다");
-        assert!(matches!(rig.mirror.resolve("id-1"), Resolved::Sidecar));
+        assert!(matches!(rig.mirror.resolve("id-1"), Resolved::Unserved));
         drop(held);
         // 남은 폴더는 다음 시작 때 고아 정리가 지운다
         assert_eq!(cleanup_github_cache(rig.host.store(), rig.host.cache_dir(), rig.host.locks()).await, 1);
@@ -1082,42 +1063,26 @@ async fn wsl_저장소_추가는_대소문자만_다른_기존_소스를_재사�
 }
 
 #[test]
-fn 설정_파일을_여는_곳은_스위치가_켜진_분기_하나이고_사이드카_중계는_설정을_모른다() {
-    // 배선 순서: 변경 알림을 단 뒤에 첫 반영을 하고, 첫 반영은 라우터 등록 뒤·사이드카 기동 앞이다. D1 가져오기 판정은 `should_import` 한 곳이다
+fn 설정_파일을_여는_곳은_앱_시작의_한_곳이다() {
+    // 배선 순서: 변경 알림을 단 뒤에 라우터를 등록하고, 첫 반영은 라우터 등록 뒤다. D1 가져오기 판정은 `should_import` 한 곳이다
     let lib = prod_code("src/lib.rs");
-    let listen = lib.find("store.set_on_change(").expect("변경 알림");
+    let listen = lib.find("config_store.set_on_change(").expect("변경 알림");
     let manage = lib.find("app.manage(router)").expect("라우터 등록");
-    let first = lib.find("sync.push(None,").expect("첫 반영");
-    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(listen < manage && manage < first && first < spawn);
+    let first = lib.find("config_sync.push(None,").expect("첫 반영");
+    assert!(listen < manage && manage < first);
     assert!(lib.contains("config::import::should_import(std::env::var_os(\"ANTLER_USER_DATA\").as_deref(), &file)"));
     assert_eq!(lib.matches("import_electron_config(").count(), 1);
-    let lib = prod_code("src/lib.rs");
-    // ConfigStore 를 만드는 호출은 `open_config` 안 한 곳이고, 그 함수는 `router.enabled()` 분기에서만 부른다(`ANTLER_RUST_GIT=0` 이면 Rust 가 파일을 열지 않는다)
+    // ConfigStore 를 만드는 호출은 `open_config` 안 한 곳이고, 그 함수는 앱 시작에서 한 번만 부른다
     assert_eq!(lib.matches("ConfigStore::open(").count(), 1);
     assert_eq!(lib.matches("open_config(").count(), 2, "정의 하나 + 호출 하나");
-    assert!(lib.contains("router.enabled().then(|| open_config("), "소유 술어는 router.enabled() 하나다");
     assert!(lib.contains("Some(cache_dir.to_string())"), "계약: ConfigStore::open 의 cache_dir 는 반드시 Some");
-    for rel in ["src/sidecar.rs", "src/router.rs", "src/env_host.rs", "src/app_host.rs", "src/watch_host.rs", "src/api_host.rs"] {
+    for rel in ["src/router.rs", "src/env_host.rs", "src/app_host.rs", "src/watch_host.rs", "src/api_host.rs"] {
         assert!(!prod_code(rel).contains("ConfigStore::open"), "{rel} 가 설정 파일을 연다");
     }
-    // 사이드카 기동: 소유 여부를 env 로 알리고 사이드카가 보낸 설정 줄은 버린다
-    let sidecar = prod_code("src/sidecar.rs");
-    assert!(sidecar.contains("cmd.env(\"ANTLER_RUST_CONFIG\", \"1\")") && sidecar.contains("cmd.env_remove(\"ANTLER_RUST_CONFIG\")"));
-    assert!(sidecar.contains("config_owned && is_config_line(t)"));
-    assert!(lib.contains("mirror, config_owned)?"));
-    // 사이드카 쪽(PR 10): Rust 가 소유하면 설정·저장소 서비스를 조립하지 않는다(조립은 되돌리기 전용 legacy.ts 한 곳). update:* 밖의 채널은 거부한다
-    let ts = read_src("../src/sidecar/index.ts");
-    assert!(ts.contains("const legacy = rustConfig ? null : assembleLegacy("));
-    assert!(ts.contains("if (rustConfig) registerUpdateIpc(updates)"));
-    assert!(ts.contains("sidecarAccepts(ch, rustConfig)"));
-    assert!(!ts.contains("ConfigStore") && !ts.contains("RepoService") && !ts.contains("registerIpc("), "소유 실행의 조립은 UpdateService 뿐이다");
-    let legacy = read_src("../src/sidecar/legacy.ts");
-    assert!(legacy.contains("new ConfigStore(join(userData, 'antler.config.json'), { cacheDir })"), "되돌리기에서만 설정을 연다");
-    // 설정 소유 채널의 가로채기는 배열이 아닌 인자를 사이드카로 보내는 `as_array() else` 보다 앞이다
+    // 설정 소유 채널의 가로채기는 배열이 아닌 인자를 거르는 `as_array() else` 보다 앞이다
     let router = prod_code("src/router.rs");
     let intercept = router.find("CONFIG_CHANNELS.contains(&channel)").expect("가로채기");
-    let array_guard = router.find("let Some(raw) = args.as_array() else { return Routed::Sidecar };").expect("배열 검사");
+    let array_guard = router.find("let Some(raw) = args.as_array() else { return Routed::Unserved };").expect("배열 검사");
     assert!(intercept < array_guard);
 }
 
