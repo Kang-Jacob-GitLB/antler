@@ -75,6 +75,7 @@ jobs:
       # tests/fetch.test.ts 의 각 it 이 어느 Rust 테스트로 옮겨졌는지는 tests/golden/fetch/test-map.json(vitest 가 누락을 강제)
       # fetch_service: fetch 상태 기계(주기·백오프·승인 저장 프로토콜). fetch_route: git:fetch 라우팅·소유권·앱 배선 순서·승인 경로의 소스 검사(git 을 띄우지 않는다)
       # api_route: jira:*·gh:* 라우팅(스위치 ANTLER_RUST_API·서비스/키체인 생성 위치·사이드카 env·열기 경로의 소스 검사). 네트워크를 쓰지 않는다.
+      # app_route: 앱 채널 4개(dialog:pickFolder·clipboard:writeText·code:openLink·win:setTitleBarTheme)의 라우팅·검증. 대화상자·클립보드·브라우저는 가짜 포트다(실제 창·사용자 클립보드를 쓰지 않는다)
       # channels 는 test-hooks 가 켜져 있으면 jira:*·gh:* 채널 골든(tests/golden/channels/jira.json·github.json — 127.0.0.1 목 서버)도 돈다
       # lib 에는 repoq(Rust→Node 질의·ghToken 줄)·local_time(한도 해제 시각) 단위 테스트가 있다
       # net: GitHub·Jira 순수 로직(검증·URL 판정·응답 해석·Device Flow·ghEnv·토큰 가리기)이 tests/golden/net 골든과 같은지 + Rust 허용 ⇒ TS 허용 위반 0(네트워크·git 을 쓰지 않는다).
@@ -95,7 +96,7 @@ jobs:
       # 에디터·터미널·탐색기·wsl.exe 를 띄우지 않는다. TS 테스트 대응표는 tests/golden/external/test-map.json(vitest 가 누락을 강제)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy

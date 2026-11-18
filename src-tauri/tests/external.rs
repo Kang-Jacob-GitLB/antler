@@ -676,8 +676,9 @@ fn 에디터와_터미널_프로세스는_launch_rs_한_곳에서만_띄운다()
 }
 
 #[test]
-fn 외부_열기는_앱에_연결되어_있지_않다() {
-    // PR 9 가 `external:open` 을 연결하기 전까지 lib.rs 의 `pub mod external;` 선언 말고는 이 모듈을 쓰는 곳이 없다
+fn 외부_열기는_링크_허용_판정만_앱에_연결되어_있다() {
+    // PR 9 가 `external:open` 을 연결하기 전까지 `external::link`(code:openLink 의 주소 허용, PR 5)를 `app_host.rs` 가 쓰는 것 말고는 이 모듈을 쓰는 곳이 없다.
+    // 에디터·터미널·파일 관리자 실행(plan·opener·launch)은 앱에 닿지 않는다
     let src = root().join("src-tauri/src");
     let mut files = Vec::new();
     rs_files(&src, &mut files);
@@ -686,7 +687,14 @@ fn 외부_열기는_앱에_연결되어_있지_않다() {
             continue;
         }
         let code = production_code(&f);
-        assert!(!code.contains("external::"), "{} 가 external 을 쓴다", f.display());
+        let name = f.file_name().unwrap().to_string_lossy().into_owned();
+        let uses = code.matches("external::").count();
+        if name == "app_host.rs" {
+            assert_eq!(uses, code.matches("external::link::allowed_link_url").count(), "app_host.rs 는 링크 판정만 쓴다");
+            assert_eq!(uses, 1);
+        } else {
+            assert_eq!(uses, 0, "{} 가 external 을 쓴다", f.display());
+        }
     }
     let lib = fs::read_to_string(src.join("lib.rs")).unwrap();
     assert_eq!(lib.matches("pub mod external;").count(), 1);

@@ -1681,7 +1681,7 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 | 2 | GitHub 캐시 실행 기반: `GithubEnv` 닫힌 타입·`GitExecutor::Github`·init·정확 일치 검사·HEAD 맞추기·fetch 의 github 모드·사용자 네트워크 설정 읽기 | 없음 | B(1 뒤) | |
 | 3 | external 순수 로직·실행기(plan·opener·link, spawn 예외 지점 하나, 파일 관리자) | 없음 | A | **완료** |
 | 4a / 4b | 4a: WSL 목록(레지스트리 관문)·`resolve_env`·로컬 폴더 찾기·`SshPool` 임시 잡기. 4b: SFTP 폴더 목록(D4) | 없음 | A(4b 는 D4 뒤) | **4a 완료**(4b 는 D4 뒤) |
-| 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | |
+| 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | **완료(코드)** — 아래 "PR 5" |
 | 6 | github kind 의 git **조회**를 Rust 로(미러에 `github` 링크·모든 git 채널의 github 분기·`repos:remove` 가로채기). 감시는 PR 7 | 있음 | 직렬(6a 7b·8, PR 2 뒤) | |
 | 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | |
 | 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | |
@@ -1743,12 +1743,12 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 
 ### PR 3 — 외부 열기 계획과 실행기(`src-tauri/src/external/`, 앱에 연결하지 않는다 — 연결은 PR 9)
 
-`external:open` 의 판정과 실행을 Rust 로 옮겼다(새 크레이트 없음, `Cargo.toml` 변경 없음). `lib.rs` 에는 `pub mod external;` 한 줄뿐이고 **Electron·사이드카 동작은 그대로**다(소스 검사가 `external::` 을 쓰는 곳이 없음을 강제한다).
+`external:open` 의 판정과 실행을 Rust 로 옮겼다(새 크레이트 없음, `Cargo.toml` 변경 없음). `lib.rs` 에는 `pub mod external;` 한 줄뿐이고 **Electron·사이드카 동작은 그대로**다(소스 검사가 `external::` 을 쓰는 곳이 없음을 강제한다 — PR 5 이후로는 `app_host.rs` 가 `external::link::allowed_link_url` 만 쓰는 것을 예외로 둔다).
 - **`plan.rs`**(순수, `plan.ts` 1:1): `rel_segments`·`absolute_target`·`check_real_containment`·`assert_safe_name`(배포판 `^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`·호스트 `…{0,199}` 에 `@:` 허용)·`build_editor_launch`·`build_terminal_launch`·`has_dot_component`·`clsid_component`·`build_reveal_plan`. 정규식 크레이트가 없어 손으로 풀었고(모두 ASCII 부류), 길이 상한(4096)은 JS `length` 와 같은 **UTF-16 단위**다. 플랫폼(`Platform::{Win32, Darwin, Linux}`)은 cfg 가 아니라 **인자**라 리눅스·맥 사례도 Windows 에서 시험한다.
 - **`paths.rs`**: `path.posix` 전부와 `path.win32.relative`(Node `lib/path.js` 이식 — `git::exec::ssh::win32_path` 에 없던 것). 그 파일은 건드리지 않았다. 절대 경로만 받고, 상대 경로는 `None`(= 저장소 밖으로 취급)이다. Node 는 cwd 를 쓰지만 cwd 에 기대면 판정이 저장소가 정한 경로에 흔들린다.
 - **`opener.rs`**: `ExternalOpener`·`find_editor_exe`·`check_chosen_exe`·`resolve_editor_exe`·`terminal_tools`. 파일 시스템·환경변수·프로세스 실행·파일 관리자는 모두 **`OpenerDeps` 트레이트로 주입**한다. 실행기는 **판단이 끝난 `LaunchRequest`(file·args·cwd·지울 환경변수)** 를 받아 그대로 실행할 뿐이라 시험의 가짜는 argv 만 기록한다.
 - **`launch.rs`**: `SystemDeps`(운영 구현). **에디터·터미널 프로세스를 띄우고 opener 플러그인(`open_path`·`reveal_item_in_dir`)을 부르는 유일한 곳**이다. 분리 프로세스(Windows `DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP`, Node `detached` 와 같다)·셸 없음(`.args()` 만, `raw_arg` 금지)·stdio 없음·`ELECTRON_RUN_AS_NODE` 제거. `Command::new` 는 한 번뿐이고 `#[allow(clippy::disallowed_methods)]` 와 이유를 단다. 소스 검사(`tests/external.rs`)가 `src/external/` 의 다른 파일에서 `Command::new`·`std::process`·`tauri_plugin_opener`·`raw_arg` 가 쓰이지 않음, plan·opener·paths·link 가 `std::fs`·`std::env` 를 직접 읽지 않음을 강제한다.
-- **`link.rs`**: `allowed_link_url`(https·사용자 정보 없음·4096 UTF-16 단위). 해석은 `net::url_rules::parse_url`(TS 보다 IDN 이 엄격 — 그 문서의 알려진 차이). 연결(`code:openLink`)은 PR 5.
+- **`link.rs`**: `allowed_link_url`(https·사용자 정보 없음·4096 UTF-16 단위). 해석은 `net::url_rules::parse_url`(TS 보다 IDN 이 엄격 — 그 문서의 알려진 차이). 연결(`code:openLink`)은 PR 5(아래).
 - **realpath 정규화**: Windows 의 `canonicalize` 는 `\\?\C:\x`·`\\?\UNC\…` 접두를 붙인다. `normalize_canonical`(순수)이 이를 벗기고, **벗긴 결과가 WSL 공유가 아닌 UNC 이거나 `\\?\`·`\\.\` 의 다른 모양(볼륨 GUID·장치 경로)이면 거부**한다(= 없는 경로). 임의의 SMB 공유가 열 대상이 되거나 NTLM 이 새지 않게 한다. 운영 `realpath` 가 이것을 거친다. **다만 이것은 결과를 거를 뿐이다** — `canonicalize` 가 링크를 따라가는 순간 SMB/WebDAV 인증(NTLM)이 이미 나간다(저장소 안의 `docs/x -> //attacker/share/x`·`\\host@SSL\DavWWWRoot\…` 를 "열기" 하면 해시가 샌다). 그래서 Windows 의 운영 `realpath` 는 `canonicalize` **전에** `launch.rs::links_stay_local` 로 경로의 구성 요소마다 `symlink_metadata` 로 링크(심볼릭 링크·정션)인지 보고 `read_link` 대상을 순수 판정 `opener.rs::is_remote_link_target`(`\\host\…`·`//host/…`·`\\?\UNC\…`·정션의 `\??\UNC\…`·`\\.\`·볼륨 GUID 는 원격, WSL 공유는 허용)에 건다. 원격이면 따라가지 않고 없는 경로(None)로 취급하며, 상대·로컬 대상은 이어서 확인한다(링크 사슬, 상한 16 — 순환 포함 넘으면 거부). 읽을 수 없는 링크도 거부한다. 시험: 판정 함수 표(`opener.rs`)와 로컬 대상 링크 사슬·순환·상한(`tests/external.rs`, 링크를 만들 권한이 없으면 건너뜀 — 원격 대상 링크는 실제로 만들지 않았다). **TS 판에도 같은 문제가 있다(별도 fix 예정).**
 - **WSL**: 배포판 이름은 UNC 를 만들기 전에 `assert_safe_name` 으로 검증한다. `wsl.exe` 는 `%SystemRoot%\System32\wsl.exe` 절대 경로이고 `-d <distro> --cd <path>` 인자 배열로만 넘긴다(`start ""` 의 빈 창 제목 인자 유지 — 시험이 단언한다). 배포판이 꺼져 UNC 를 풀 수 없으면 어휘 검사만 하되 폴더로 취급하지 않는다(openPath 안 함).
 
@@ -1799,6 +1799,33 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 - 호스트 키 안내 문구는 TS 에 없다(TS 는 `ssh CLI` 안내만). 실행기의 오류 문구(골든 대상)는 바꾸지 않고 `test_ssh_env` 가 덧붙인다.
 
 **남은 위험**: 레지스트리 열거는 `windows` API 를 직접 부르는 `unsafe` 다(키 이름·값 버퍼 크기와 256개 열거 상한으로 막았다). 이 PC 는 WSL 이 제거돼 **등록된 배포판이 있는 레지스트리를 실제로 읽는 경로는 확인하지 못했다**(시험은 읽기가 패닉 없이 정리된 이름 목록을 돌려주는지만 본다). 앱 연결(PR 8·9)에서 WSL 이 있는 PC 로 사람이 확인한다.
+
+### PR 5 — 폴더 선택·클립보드·링크 열기·타이틀바 테마를 Rust 가 처리한다(`src-tauri/src/app_host.rs`, 앱에 연결한다)
+
+새 크레이트·IPC 채널 없음(채널은 이미 `IPC_CHANNELS` 에 있다). 설정이 필요 없는 채널 4개라 라우터가 **`APP_CHANNELS`** 분기에서 처리하고 사이드카로 보내지 않는다. `RUST_CHANNELS`(저장소 id 로 미러를 푸는 git 채널)·`API_CHANNELS` 와 섞지 않는다.
+
+| 채널 | 입력 검증(TS 와 같다) | 결과 | 포트 |
+|---|---|---|---|
+| `dialog:pickFolder` | 시작 위치는 문자열·비어 있지 않음·NT 네임스페이스(`[\\/]??[\\/]`) 없음·(UNC 아님 또는 WSL 공유)일 때만 쓴다. 아니면 버리고 대화상자는 시작 위치 없이 뜬다 | 고른 폴더 또는 `null`(취소·창 없음) | `PickFolder`(운영: `dialogs::pick_path`) |
+| `clipboard:writeText` | 문자열이고 1,000,000 UTF-16 단위 이하. NUL 은 걸러내지 않고 그대로 넘긴다. 아니면 `복사할 수 없는 내용입니다` | void | `ClipboardWrite`(운영: 클립보드 플러그인 `write_text` 한 곳. 읽기 포트 없음) |
+| `code:openLink` | `allowed_link_url`(https·사용자 정보 없음·4096 UTF-16 단위). 아니면 `https 주소만 열 수 있습니다` | void | `Opener`(운영: `lib.rs` 의 `open_https`, 정규화된 href 만 간다) |
+| `win:setTitleBarTheme` | `{dark: bool, dim?: bool}` 만(값 허용 목록). 아니면 `잘못된 입력입니다` | void(검증 뒤 할 일 없음 — 창 버튼은 앱이 그린다, `bridge.ts` 가 renderer 에서 이미 처리한다) | 없음 |
+
+- **봉투**: 오류는 `{ok:false,error,code:"ERROR"}`, void 는 `data` 없는 `{ok:true}`(사이드카의 JSON 직렬화와 같다). 배열이 아닌 인자도 사이드카로 보내지 않고 빈 인자로 검증한다(복사할 텍스트가 사이드카 stdin 으로 가지 않게).
+- **포트 주입**: `AppHost { pick_folder, clipboard, open_link }`. 라우터는 `AppHandle` 에 기대지 않고 `lib.rs` 가 운영 포트를 단다. 막는 호출이라 `spawn_blocking` 으로 부른다. **시험(`tests/app_route.rs`)은 가짜 포트라 실제 창을 띄우지 않고 사용자 클립보드를 읽거나 쓰지 않으며 브라우저를 열지 않는다.**
+- **시작 위치 관문은 `is_dir` 보다 앞이다**: `dialogs::pick_path` 는 `Path::is_dir()` 로 존재를 확인하는데, UNC 시작 위치로는 그 확인 자체가 SMB 접속(NTLM 유출)이다. 관문(`app_host::safe_default_path`)이 포트 호출 전에 거른다 — 포트에 넘어간 `defaultPath` 기록으로 시험한다.
+- **열기 지점은 늘리지 않았다**: `code:openLink` 는 jira·github 의 `openExternal` 과 같은 `open_https`(https 이중 확인 → `tauri_plugin_opener::open_url`)를 쓴다. `external/launch.rs`(에디터·터미널 프로세스)는 이 PR 이 건드리지 않았고 `app_host.rs` 에는 `Command`·프로세스·opener 플러그인 호출이 없다(소스 검사).
+- **스위치**: `ANTLER_RUST_GIT=0` 이면 포트를 주입하지 않아 4개 채널이 모두 사이드카로 간다(사이드카의 Electron 호환 핸들러가 그대로 처리한다). 사이드카에 알릴 env 는 없다 — 라우터가 가로채면 사이드카에 닿지 않는다.
+- **시험**: `--lib`(`safe_default_path` 표), `tests/app_route.rs`(10개 — 채널 목록이 `IPC_CHANNELS` 의 부분집합이고 다른 목록과 겹치지 않음·Rust 로 가고 사이드카 몫 채널(`config:get`·`repos:add`·`external:open` 등)은 계속 사이드카로 감·스위치 꺼짐/포트 없음·시작 위치 관문·길이 경계(UTF-16 단위)·URL 사례·테마 인자·소스 검사), `tests/external.rs`(`외부_열기는_링크_허용_판정만_앱에_연결되어_있다` — 기존 "앱에 연결되어 있지 않다" 시험을 의도대로 바꿨다). `tauri.yml` 목록에 `--test app_route` 를 더했다.
+
+**TS 와 다른 점**
+- 클립보드·열기·대화상자 포트가 실패했을 때의 문구는 Electron 이 던지는 문구가 아니라 앱 고정 문구다(`복사하지 못했습니다`·`주소를 열지 못했습니다`). 폴더 선택의 포트가 실패하면 그 문구가 그대로 오류가 되고, `main` 창을 못 찾으면 TS 는 부모 없는 대화상자를 띄우지만 Rust(`dialogs::pick_path`)는 띄우지 않고 취소(`null`)로 돌려준다(실제 앱에서는 창이 항상 있다).
+- 링크 해석은 `net::url_rules::parse_url` 이라 TS(`new URL`)보다 IDN 이 엄격하다(PR 3 와 같다). 대화상자 제목은 TS 와 같은 `Git 저장소 선택` 이다.
+- TS 는 `typeof defaultPath === 'string'` 이 아닌 값을 조용히 버린다 — 같다. 공백으로 시작하는 UNC(` \\host\share`)는 TS 의 `^[\\/]{2}` 검사를 빠져나가 Rust 도 그대로 통과시키지만 `is_dir` 은 상대 경로로 본다(SMB 접속 없음).
+
+**사람 확인**: 폴더 선택 대화상자가 `Git 저장소 선택` 제목으로 뜨고 시작 위치가 이어지는지(저장소 추가 대화상자), 코드 탭 README 링크가 기본 브라우저로 열리는지, 복사 버튼이 클립보드에 쓰는지(사람이 직접 — 자동 시험은 클립보드를 건드리지 않는다), `ANTLER_RUST_GIT=0` 으로 되돌렸을 때 같은 동작인지.
+
+**남은 위험**: `blocking_pick_folder` 를 tokio blocking 스레드에서 부른다(사이드카 경로는 일반 스레드에서 불렀다). 플러그인은 메인 스레드로 보내고 기다리므로 막히지 않는다고 본다 — **앱에서 확인하지 못했다**(대화상자 금지).
 
 ### PR 7b — 실제 저장소 감시를 Rust 가 맡는다
 
