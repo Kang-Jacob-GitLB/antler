@@ -135,7 +135,8 @@ describe('C. index 쓰기와 post-index-change 훅', () => {
     writeFileSync(join(repo, 'b.txt'), 'one\n')
     gitIn(repo, 'add', '.')
     gitIn(repo, 'commit', '-q', '-m', 'init')
-    writeFileSync(join(repo, '.git', 'hooks', 'post-index-change'), `#!/bin/sh\nnode "${script}"\n`)
+    // 리눅스는 실행 비트가 없으면 훅을 건너뛴다(대조군이 재현되지 않는다)
+    writeFileSync(join(repo, '.git', 'hooks', 'post-index-change'), `#!/bin/sh\nnode "${script}"\n`, { mode: 0o755 })
   })
 
   it('대조군: porcelain git diff 는 stat 만 바뀐 파일이 있으면 index 를 쓰고 훅을 실행한다', () => {
