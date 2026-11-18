@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget)·PR 3(external)·PR 4b(SFTP)·PR 5(앱 채널 4개)·PR 8(환경 채널)·PR 9(설정 소유 전환)·PR 10(사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만) 완료 — **Phase 6b 코드 완료**(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget)·PR 3(external)·PR 4b(SFTP)·PR 5(앱 채널 4개)·PR 8(환경 채널)·PR 9(설정 소유 전환)·PR 10(사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만) 완료 — **Phase 6b 코드 완료**(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)"). 6c: PR 1(판정 로직)·PR 2(패키징 워크플로)·PR 3(단일 인스턴스)·PR 4(`update:*` 7채널 — 업데이트 공개 키 대기) 완료(아래 "업데이터·패키징·Electron 사용자 이관(Phase 6c)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -2257,7 +2257,7 @@ Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가
 | 1 | `refactor:` | 업데이트 판정 순수 로직 Rust 이식 + TS↔Rust 골든: semver·`isOfferable`·URL 허용 목록·매니페스트 검사·정책·입력 검증·오류 정화·릴리스 노트 해석 | 없음 | A(지금) | **완료** — 아래 "PR 1" |
 | 2 | `ci:` | Tauri 패키징 워크플로(**발행 없음**): NSIS 설정·서명·`latest.json`·이관용 `latest.yml`·Electron 정리 NSIS 훅·배포 빌드 가드. 첫 단계는 go/no-go 스파이크 | 없음 | A(서명 키 결정 뒤) | **완료(워크플로 실행 전)** — 아래 "PR 2" |
 | 3 | `refactor:` | 단일 인스턴스(`tauri-plugin-single-instance` — 새 크레이트) | 있음 | A | **완료** — 아래 "PR 3" |
-| 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | |
+| 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | **완료(공개 키 대기)** — 아래 "PR 4". 운영 공개 키(`UPDATE_PUBKEY`)가 비어 있어 확인만 동작하고 내려받기·설치는 fail-closed |
 | 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | |
 | R | (PR 아님) | 리허설: PR 6 브랜치 머리에 `v2.0.0-rc.N` 태그로 프리릴리스를 발행해 사람이 이관·자기 업데이트를 확인 | — | 5 뒤, 6 머지 전 | |
 | 6 | `feat!:` | Electron 제거 + 릴리스 전환(`release.yml` 을 Tauri 로, 골든 동결, 메이저 노트, 초안 발행 게이트·공개 전 릴리스 동결 가드) | 있음 | 직렬(R 뒤) | |
@@ -2315,7 +2315,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 | `tests/updateManifests.test.ts` · `tests/releaseFeatureGuard.test.ts` · `tests/fixtures/update/latest.json` · `src-tauri/tests/update.rs`(시험 하나) | 매니페스트를 electron-updater 의 `parseUpdateInfo`·`resolveFiles` 와 우리 파서로 되읽고, 표본을 실제 `check_manifest` 에 먹이고, 훅·워크플로의 정적 불변식을 본다 |
 
 **핵심 결정**
-- **계획과 다른 점(이유)**: ① `mainBinaryName: "Antler"` 를 넣지 않았다 — Cargo 바이너리는 `antler` 이고 CLI 가 이름을 바꿔 주는지(특히 대소문자를 구분하는 macOS·Linux)를 확인하지 못했다. Windows 는 대소문자를 구분하지 않아 `Antler.exe` 와 실질 차이가 없다(바로가기·방화벽 규칙·작업 관리자 이름). 다만 Electron 제거기가 이름으로 `Antler.exe` 를 종료시키므로 훅은 제거기를 앱 실행보다 먼저 돌린다. ② 기본 설정에 `plugins.updater` 를 넣지 않았다 — CLI 는 "공개 키가 있는데 개인 키가 없음"을 오류로 보고(바이너리 문자열 확인), 빈 `pubkey` 가 "있음"으로 읽히는지 알 수 없다. 공개 키는 사용자가 줄 때 PR 4 가 플러그인과 함께 넣는다. 서명은 빌드에 넣지 않고 사후 단계로 분리했다(보안 리뷰: 빌드 중 도는 코드가 키를 읽지 못하게). 그래서 `createUpdaterArtifacts` 와 덮어쓰기 설정 파일(`tauri.updater.conf.json`)도 없다 — `tauri signer sign` 은 공개 키 설정과 무관하게 `.sig` 를 만든다(`--app-version` 으로 서명에 버전을 묶는다). ③ PR 트리거 드라이런을 두지 않았다 — `environment: release` 잡은 PR 에서 시크릿을 못 받고, macOS·Linux 갈래가 실패할 가능성이 커 PR 을 빨갛게 만든다.
+- **계획과 다른 점(이유)**: ① `mainBinaryName: "Antler"` 를 넣지 않았다 — Cargo 바이너리는 `antler` 이고 CLI 가 이름을 바꿔 주는지(특히 대소문자를 구분하는 macOS·Linux)를 확인하지 못했다. Windows 는 대소문자를 구분하지 않아 `Antler.exe` 와 실질 차이가 없다(바로가기·방화벽 규칙·작업 관리자 이름). 다만 Electron 제거기가 이름으로 `Antler.exe` 를 종료시키므로 훅은 제거기를 앱 실행보다 먼저 돌린다. ② 기본 설정에 `plugins.updater` 를 넣지 않았다 — CLI 는 "공개 키가 있는데 개인 키가 없음"을 오류로 보고(바이너리 문자열 확인), 빈 `pubkey` 가 "있음"으로 읽히는지 알 수 없다. 공개 키는 사용자가 줄 때 `update::host::UPDATE_PUBKEY` 한 곳에 넣는다(PR 4 가 플러그인을 달면서 정했다 — 설정은 conf 가 아니라 `lib.rs` 가 만든다. 아래 "PR 4"). 서명은 빌드에 넣지 않고 사후 단계로 분리했다(보안 리뷰: 빌드 중 도는 코드가 키를 읽지 못하게). 그래서 `createUpdaterArtifacts` 와 덮어쓰기 설정 파일(`tauri.updater.conf.json`)도 없다 — `tauri signer sign` 은 공개 키 설정과 무관하게 `.sig` 를 만든다(`--app-version` 으로 서명에 버전을 묶는다). ③ PR 트리거 드라이런을 두지 않았다 — `environment: release` 잡은 PR 에서 시크릿을 못 받고, macOS·Linux 갈래가 실패할 가능성이 커 PR 을 빨갛게 만든다.
 - **macOS 는 x64·arm64 두 개**(universal 아님): Electron 과 같은 이름 규칙(`Antler-<v>-<arch>.dmg`)을 유지해 수동 업데이트 경로의 자산 선택이 그대로 맞는다. **이 이름 선택의 결과**: 지금 Electron 판 mac 사용자의 수동 경로는 같은 이름의 Tauri dmg 를 집을 수 있다(`latest-mac.yml` 은 만들지 않으므로 sha512 검증은 API 의 sha256 digest 로 떨어진다). 이 이관 동작은 계획이 분석하지 않았고 릴리스 전환 PR 에서 정해야 한다. deb(`antler_<v>_amd64.deb`)도 마찬가지다.
 - **업데이트 서명은 Windows 만**: dmg·deb 는 수동 경로라 서명이 필요 없다. `latest.json` 도 Windows 항목만 담는다.
 - **훅의 제거기 경로 검증**(계획 C6): `UninstallString` 의 따옴표 안 경로를 읽어 `InstallLocation` 바로 아래의 `.exe` 인지·실제 파일인지·드라이브 경로인지(UNC·`\\?\` 거부)·새 설치 폴더와 다른지 본다. 하나라도 어긋나면 아무것도 하지 않는다. 지우는 것은 검증한 제거기 파일과 비어 있는 `InstallLocation` 뿐이다(재귀 삭제·`%APPDATA%` 접근·레지스트리 쓰기 없음). 인자는 `/currentuser /S /KEEP_APP_DATA --updated --keep-shortcuts _?=<InstallLocation>`(electron-builder 가 옛 판을 지울 때와 같다 — `/currentuser` 는 사용자별 설치라 붙였다). 모든 사용자용(HKLM, 32·64비트 뷰)은 남기고 조용한 모드가 아니면 안내 창을 띄운다(한국어/영어). GUID 는 `UUID.v5("com.antler.app", electron-builder 네임스페이스)` 로 시험이 대조한다.
@@ -2336,7 +2336,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 8. Environment `release` 의 시크릿이 이 워크플로의 `windows-sign` 잡에 실제로 전달되는지, 그리고 새 러너에서 `--ignore-scripts` 로 설치한 Tauri CLI 의 `tauri signer sign` 이 동작하는지(로컬에서는 `--help` 로 서브커맨드·`--app-version`·env 이름만 확인했다).
 9. `nsis_tauri_utils::RunAsUser` 가 스택에 값을 남기지 않는지(템플릿 사용례를 따라 `Pop` 하지 않았다 — 로컬에 템플릿 원문이 없어 확인 못 함).
 
-**사람 확인(머지 뒤)**: 먼저 Settings > Environments > `release` 를 설정한다 — Deployment branches and tags 를 `main` 만(태그를 허용해야 하면 tag ruleset 으로 `v*` 생성 제한), Required reviewers 를 소유자 1명으로. 다른 브랜치의 워크플로 파일로 dispatch 하면 시크릿이 그 파일로 전달되고 파일 안의 `if:` 가드는 무효이기 때문이다(build.md "업데이트 서명"). 그다음 Actions 에서 `tauri-package` 를 `workflow_dispatch` 로 한 번 실행해 세 갈래의 로그·아티팩트를 확인한다. 사용자가 서명 키를 시크릿에 등록하면 한 번 더 실행해 `.sig`·`latest.json` 을 확인한다. 공개 키가 오면 PR 4 가 설정에 넣는다.
+**사람 확인(머지 뒤)**: 먼저 Settings > Environments > `release` 를 설정한다 — Deployment branches and tags 를 `main` 만(태그를 허용해야 하면 tag ruleset 으로 `v*` 생성 제한), Required reviewers 를 소유자 1명으로. 다른 브랜치의 워크플로 파일로 dispatch 하면 시크릿이 그 파일로 전달되고 파일 안의 `if:` 가드는 무효이기 때문이다(build.md "업데이트 서명"). 그다음 Actions 에서 `tauri-package` 를 `workflow_dispatch` 로 한 번 실행해 세 갈래의 로그·아티팩트를 확인한다. 사용자가 서명 키를 시크릿에 등록하면 한 번 더 실행해 `.sig`·`latest.json` 을 확인한다. 공개 키가 오면 `UPDATE_PUBKEY` 한 줄을 채운다(아래 "PR 4"·[updates.md](updates.md)).
 
 ### PR 3 — 단일 인스턴스(`src/single_instance.rs`, 사용자 결정 U7: 세 OS 함께)
 
@@ -2379,7 +2379,83 @@ macOS·Linux 는 이 PR 에서 빌드하지 않았다(Windows 에서 `cargo buil
 **남은 위험**
 - 개발 중 `pnpm tauri dev` 로 띄운 인스턴스가 있으면(`ANTLER_USER_DATA` 없이) 설치본 실행이 그 창을 앞으로 가져오고 종료한다. 같은 identifier 를 쓰는 한 의도된 결과다.
 - 첫 인스턴스가 응답하지 않으면 Windows 의 두 번째 실행은 10초(플러그인 상수) 기다린 뒤 종료한다.
-- 업데이트 설치 후 재실행(PR 4 의 NSIS `/R`)이 옛 프로세스의 종료와 겹치면 새 프로세스가 옛 프로세스에 포커스만 주고 종료할 수 있다 — PR 4 가 종료 후 실행 순서(플러그인은 `cleanup_before_exit` 에서 잠금을 푼다)를 확인해야 한다.
+- 업데이트 설치 후 재실행(PR 4 의 NSIS `/R`)이 옛 프로세스의 종료와 겹치면 새 프로세스가 옛 프로세스에 포커스만 주고 종료할 수 있다 — PR 4 가 종료 후 실행 순서(플러그인은 `cleanup_before_exit` 에서 잠금을 푼다)를 확인해야 한다 → PR 4 에서 플러그인 쪽은 소스로 확인했고 NSIS 쪽 순서는 추정으로 남겼다(아래 "PR 4"의 "종료 정리" — 리허설 R7).
+
+### PR 4 — `update:*` 7채널을 Rust 로(앱에 연결한다 · 업데이트 공개 키 대기)
+
+`update:get`·`check`·`download`·`cancel`·`install`·`dismiss`·`releaseNotes` 를 Rust 가 처리한다(`ANTLER_RUST_GIT` 이 `0` 이 아닌 실행 — 서비스가 주입되면 이 7채널은 **사이드카로 가지 않는다**). `ANTLER_RUST_GIT=0` 이면 예전처럼 사이드카의 `UpdateService` 가 맡는다(삭제는 PR 5).
+renderer·`UpdateState` 타입·IPC 채널 목록은 바뀌지 않았다. **지금은 공개 키가 비어 있어 확인은 되지만 내려받기·설치는 하지 않는다(fail-closed)** — 키를 넣는 방법은 아래 "공개 키 넣는 곳"과 [updates.md](updates.md).
+
+| 파일 | 내용 |
+|---|---|
+| `src/update/service.rs` | 상태 기계(`UpdateService<B: Backend>` — `UpdateService.ts` 의 auto 갈래 1:1)·`Backend` 포트(확인·내려받기(진행·취소)·설치·릴리스 노트)·`UpdateControl`(라우터가 쥐는 객체 안전 형태)·`update_envelope`(7채널 봉투) |
+| `src/update/host.rs` | 운영 `Backend`(`HostBackend`: `net::http` 로 받고 `Engine` 으로 검증·설치)·`PluginEngine`(플러그인의 `restore_update`→`verify`→`install`)·`UpdateNet`(HTTP 클라이언트 셋)·**`UPDATE_PUBKEY`**·`updater_plugin_config`·`bundle_is_nsis`·건너뛴 버전 읽기/쓰기·`update:state` 이벤트·`build_service` |
+| `src/net/http.rs` | `Redirects::ReleaseAssets`(닫힌 변형)·`HttpClient::get_release_asset`(매 홉 `is_allowed_download_url`·5번까지)·내려받기 프로필(`production_download` — 연결 15초·읽기 정지 30초, 전체 시간 제한 없음)·`read_capped_progress`·`AssetError` |
+| `src/update/logic.rs` | `MAX_INSTALLER_BYTES`(300MB)·`is_manifest_url`(매니페스트 첫 요청 허용) 추가. 나머지는 PR 1 그대로 |
+| `src/router.rs`·`src/lib.rs` | `set_update`·`UPDATE_CHANNELS` 가로채기(서비스가 있으면 Rust)·`update` 서비스 조립·플러그인 등록·`exit_cleanup`(종료 정리 한 함수) |
+| `Cargo.toml`·`build.rs`·`windows-test-manifest.xml` | `tauri-plugin-updater`·시험 전용 `tauri` `test` 기능·Windows 시험 실행 파일의 매니페스트 |
+| `tests/update.rs`(서비스 절)·`tests/update_security.rs`(새 시험 바이너리)·`tests/fixtures/update.scenarios.json`·`tests/golden/update/scenarios.json`·`tests/fixtures/updateScenarios.ts`·`src-tauri/tests/fixtures/update_keys/` | 시험(아래) |
+
+**흐름**(무결성의 한 줄기 — `host.rs` 머리 주석과 같다)
+1. 확인: 정식 판은 고정 주소 `…/releases/latest/download/latest.json`, 프리릴리스 판은 API `releases?per_page=10` 의 첫 비초안 태그의 `latest.json`(PR 1 의 `prerelease_manifest_url`). 클라이언트는 `ReleaseAssets`(리다이렉트는 매 홉 허용 목록·5번까지, 응답 1MB 상한). `check_manifest` 가 새 버전·URL(이 저장소의 **그 태그** 자산)·서명 형식을 검사한다.
+2. 내려받기: 같은 정책의 내려받기 클라이언트로 스트리밍(상한 300MB, 진행률은 Content-Length 가 있을 때만). **검증 전에는 디스크에 쓰지 않는다**(메모리 바이트).
+3. 검증: 검사를 통과한 `ManifestOffer` 로 **매니페스트를 다시 만든다**(고른 플랫폼 키 하나만 담는다) → `Updater::restore_update`(`target` 을 그 키로 고정·`require_signed_version` 강제) → `Update::verify`(minisign + 서명된 버전 = 매니페스트 버전). 실패하면 바이트를 버린다.
+4. 설치: `[다시 시작하여 설치]` → `Update::install` 이 **다시 검증한 뒤** 임시 파일을 만들고 NSIS 를 passive(`/P /R`)로 띄운 다음 `exit(0)`.
+5. 사용 가능 판정은 번들러가 실행 파일에 심은 표식(`tauri::utils::platform::bundle_type()` 이 NSIS)뿐이다. `--no-bundle` 개발·측정 빌드는 확인 0회(수동 확인은 `not-available`). 환경 변수는 믿지 않는다.
+
+**공개 키 넣는 곳(사용자가 키를 주면)** — **`src-tauri/src/update/host.rs` 의 `UPDATE_PUBKEY` 한 줄만** 바꾼다:
+```rust
+pub const UPDATE_PUBKEY: Option<&str> = Some("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6…");   // `tauri signer generate` 가 만든 `<키>.pub` 파일 내용(한 줄)
+```
+- `tauri.conf.json` 에는 `plugins` 를 **넣지 않는다**(시험이 거부한다). 플러그인 설정은 `lib.rs` 가 같은 상수로 만들어 `Context` 에 넣는다 — conf 에 키를 두면 믿는 키가 두 곳이 되고, Tauri CLI 가 "공개 키는 있는데 개인 키가 없다"며 서명 키 없는 `--no-bundle` 빌드를 막는지 확인하지 못했다.
+- `tauri-package.yml` 의 서명 키(Environment `release` 의 `TAURI_SIGNING_PRIVATE_KEY`)가 **그 공개 키의 쌍**이어야 한다 — 어긋나면 모든 업데이트가 "업데이트 서명이 올바르지 않습니다"로 거부된다(안전한 쪽). 키를 잃으면 기존 설치본은 앱 안에서 영영 업데이트되지 않는다(계획 U1).
+- 확인: `cargo test --features test-hooks --test update_security`(키가 있으면 형식을 본다 — `키_없는_배포_빌드는_업데이트를_설치하지_못한다`)와 `pnpm exec vitest run tests/releaseFeatureGuard.test.ts`. 키가 `None` 인 동안은 두 시험이 "내려받기는 네트워크를 열기 전에, 설치는 설치 포트 앞에서 키 없음으로 끝난다"를 강제한다.
+- 키가 없을 때의 문구: **"업데이트 서명 키가 설정되지 않았습니다. 이 빌드는 업데이트를 설치할 수 없습니다"** — 내려받기를 누르면 스낵바가 오류로 바뀐다(다시 시도 가능). renderer 문구는 추가하지 않았다(`error` 는 main 이 만든 문자열을 그대로 보인다).
+
+**새 크레이트(사용자 승인)**: `tauri-plugin-updater = { version = "2.14", default-features = false, features = ["native-tls"] }`(2.14.1 — rustls·zip·system-proxy 끔, TLS 는 이미 쓰는 SChannel). `cargo tree`·`Cargo.lock` diff 로 확인한 **실제로 늘어난 크레이트**:
+- 확인 방법: 6b PR 10 머리(`79d4700`)와 HEAD 에서 `cargo tree --target <OS> -e normal,build --prefix none | sort -u` 를 비교했다(Windows·Linux·macOS 세 타깃). `Cargo.lock` 은 7개 항목이 늘었다(`tauri-plugin-updater`·`minisign-verify`·`tar`·`filetime`·`xattr`·`osakit`·`objc2-osa-kit`).
+- **Windows·Linux 트리에서 새로 들어온 것: 2개** — `tauri-plugin-updater`·`minisign-verify 0.3.0`. 그 밖에 `tempfile 3.27` 이 정상 의존 트리에 처음 들어온다(이미 `Cargo.lock` 에 있던 판 — 새 크레이트는 아니다). 나머지 전이 의존(`infer`·`semver`·`time`·`base64`·`http`·`percent-encoding`·`thiserror 2`·`dirs`·`windows-sys 0.61` 등)과 `reqwest` 의 `json`·`stream` 기능은 새 크레이트를 끌어오지 않는다.
+- **macOS 트리에서만 더 늘어나는 것(이 PR 은 macOS 를 빌드하지 않았다 — `cargo tree` 로만 확인)**: `osakit`·`objc2-osa-kit`·`tar`·`filetime`·`xattr`(플러그인의 macOS 의존). Windows·Linux 트리에는 `tar`·`filetime`·`xattr`·`osakit`·`objc2-osa-kit` 가 없다(`zip` 기능을 껐다).
+- 시험에만: `tauri` 의 `test` 기능(`[dev-dependencies]` — 빈 기능 플래그라 새 크레이트 없음).
+
+**시험**
+- `tests/update.rs`(서비스 절): **TS `UpdateService` 와 상태가 나간 순서가 같다**(`서비스_상태_순서가_ts_골든과_같다` — 입력 `tests/fixtures/update.scenarios.json` 20개를 TS(가짜 `AutoBackend`)와 Rust(가짜 `Backend`)가 돌려 `sent`·단계 결과·호출 횟수를 비교한다. 골든 `tests/golden/update/scenarios.json` 은 `UPDATE_GOLDEN=1 pnpm exec vitest run tests/goldenUpdate.test.ts` 로 TS 가 만든다) + 시계(10초·6시간·dispose)·겹친 확인·릴리스 노트 10분 캐시(성공만)·라우터(7채널 Rust 처리·서비스 없음/스위치 꺼짐이면 사이드카)·`UPDATE_CHANNELS` = IPC 의 `update:` 7개.
+- `tests/update_security.rs`(**127.0.0.1 만**, 29개): 리다이렉트(허용 호스트 안에서 따라감·밖/http/포트/사용자 정보/상대·`//`·`file:` 거부·5번까지·첫 주소 판정·`ReleaseAssets` 가 아닌 클라이언트 거부·취소)·매니페스트(다른 저장소·다른 태그·다른 호스트·http·포트·사용자 정보·`..`·인코딩된 점·쿼리·태그 폴더 밖 거부, 서명 없음/깨짐 거부, 1MB 상한)·설치본(300MB 상한은 Content-Length 로 받기 전에, 읽기 정지·응답 헤더가 안 오는 정지, 취소)·**서명**(시험 키로 서명한 가짜 바이트: 변조·다른 키·서명된 버전 불일치·서명에 버전 없음·깨진 서명에서 `install` 포트 미호출 + 진짜 플러그인 엔진은 서명이 틀리면 설치 프로그램을 띄우지 않는다)·키 없음 fail-closed(확인 동작·설치본 요청 0건·`install` 미호출)·NSIS 표식 없으면 확인 요청 0건·프리릴리스 판 경로·토큰 없는 요청·소스 검사(건너뛴 버전 쓰기 한 곳·capability 에 `updater` 권한 없음·conf 에 `plugins` 없음·`configure_client`·플러그인 다운로드·`check()` 미사용·`Update::install` 은 host.rs 한 곳·`ANTLER_UPDATE_FAKE` 는 개발·cdp 코드에만).
+- 서명 표본: `src-tauri/tests/fixtures/update_keys/TEST-ONLY-*`(공개 키 2·서명 4 — `tauri signer sign` 실물). **비밀 키는 저장소에 없다**(생성해 서명한 뒤 버렸다). 운영 키 상수와 무관하며 시험 키는 생성자 인자로만 들어간다.
+- `tests/releaseFeatureGuard.test.ts`: 기존 "공개 키 대기"(conf 에 `plugins`·`createUpdaterArtifacts` 없음)는 그대로 참이고(`lib.rs` 가 같은 상수로 설정을 만든다는 단언을 더했다), **공개 키가 비어 있는 동안 배포 빌드는 내려받지도 설치하지도 않는다**는 불변식 시험을 더했다.
+- 대응표 `tests/golden/update/test-map.json` 의 `N/A: PR 4` 는 전부 바꿨다 — Rust 시험에 연결했거나, macOS·Linux 수동 경로(dmg·deb)는 **이 PR 의 범위 밖**이라고 사유를 고쳤다(아래).
+
+**TS 와 다른 점**
+- **macOS dmg·Linux deb 수동 경로(`manual.ts`·`pickAsset`)와 `manual-dmg`·`manual-file` 모드는 이 PR 에서 옮기지 않았다.** `UpdateMode` 는 항상 `auto` 이고 Windows NSIS 만 업데이트한다. 계획(PR 4 범위)은 NSIS 였지만 사용자 결정(U4: 세 OS 함께)은 이 경로를 PR 4 에서 옮긴다고 적었다 — **후속 PR(또는 PR 4 확장)이 필요하다**: 호출자의 결정 사항.
+- 무결성이 `latest*.yml` sha512·API digest → **minisign 서명 + 서명된 버전 일치**다. 파일 해시 계산·`.part`·"다시 열기 전 해시 재확인" 대신 `install` 이 항상 다시 검증한다.
+- 사용 가능 판정은 `bundle_type()`(환경 변수·`ANTLER_UPDATE_DEV`·`ANTLER_UPDATE_FEED`·`ANTLER_UPDATE_FAKE_MODE` 없음). 가짜 상태(`ANTLER_UPDATE_FAKE`)만 개발·cdp 빌드에서 남는다. 피드 주소를 바꾸는 개발 장치는 없다 — 시험이 `UpdateNet::from_clients` 로 루프백 클라이언트를 주입한다.
+- 정식 판 확인은 API 가 아니라 고정 주소의 `latest.json` 한 번이다. 프리릴리스 판만 API 목록을 본다.
+- 업데이트 HTTP 는 프록시를 따르지 않는다(`net::http` 의 `no_proxy` — 계획 U8). 오류 문구는 reqwest 의 `Display` 가 아니라 고정 문구다(요청 주소가 섞이지 않게). 내려받기 클라이언트는 전체 15초 제한이 아니라 연결 15초·읽기 정지 30초다.
+- 릴리스 노트의 동시 요청 합치기는 같은 키의 진행 중 future 공유(TS 는 같은 `Promise`). 설치(`install`)는 프로세스를 끝내는 동기 호출이라 블로킹 스레드에서 돈다.
+- 취소는 `CancellationToken` 으로 연결을 닫는다(TS 는 `AbortController`). 취소로 끝난 내려받기는 오류가 아니라 `available` 로 돌아간다.
+
+**종료 정리**: `Update::install` 은 설치 프로그램을 띄운 뒤 `process::exit(0)` 이라 `RunEvent::Exit` 을 건너뛴다. 그래서 `on_before_exit` 에 `exit_cleanup`(라우터 종료 → git 프로세스 트리 정리 `shutdown_kills(2s)` → 사이드카 종료)과 `cleanup_before_exit()`(플러그인이 단일 인스턴스 잠금 등을 푼다)를 달았다. `RunEvent::Exit` 도 같은 `exit_cleanup` 을 부른다.
+PR 3 이 남긴 "재실행이 옛 프로세스 종료와 겹치는가"는 **절반만 소스로 확인했다**. 확인한 것: `tauri-plugin-single-instance 2.5.5` 의 Windows 잠금은 이름 있는 뮤텍스(`<identifier>-sim`) + 숨은 창이고 `InstanceLock::drop`(= `cleanup_before_exit`)이 뮤텍스를 풀고 창을 없앤다 — 우리의 `on_before_exit` 가 `cleanup_before_exit()` 를 부르므로 설치 프로그램을 띄우기 전에 풀리고, 안 불려도 프로세스가 끝나면 커널이 핸들을 닫는다. 확인하지 않은 것(추정): NSIS 템플릿이 실행 중인 앱이 끝나기를 기다린 뒤 파일을 교체하고 마지막에 `/R` 로 앱을 띄운다는 순서(템플릿 원문은 이 세션에서 열지 않았다 — 계획서의 설명) — **리허설 R7 에서 확인한다**.
+
+**build.rs — 시험 실행 파일의 매니페스트**: 가짜 앱(`tauri::test`)으로 진짜 플러그인 검증을 돌리는 시험 바이너리는 tauri 를 통째로 끌어와 `comctl32` 의 `TaskDialogIndirect` 를 가져오는데, tauri-build 는 앱 실행 파일에만 Common Controls v6 매니페스트를 넣어 시험 바이너리가 `STATUS_ENTRYPOINT_NOT_FOUND`(0xc0000139)로 죽었다. `build.rs` 가 MSVC 의 통합 시험 실행 파일에만 `windows-test-manifest.xml` 을 넣는다(`rustc-link-arg-tests` — 앱·라이브러리 빌드는 그대로).
+
+**사람 확인(리허설 R7 — 이 PR 로는 확인할 수 없다)**
+- 키를 넣은 뒤 `tauri-package.yml` 로 만든 설치본(`bundle_type()` 이 NSIS 여야 업데이트가 켜진다)에서: 시작 10초 뒤 스낵바 → [업데이트] 진행률 → [다시 시작하여 설치](passive 진행 창) → 새 버전으로 다시 뜬다. 서명 키와 공개 키가 한 쌍이어야 통과한다.
+- 번들된 exe 에서 `bundle_type()` 이 실제로 `Nsis` 를 돌려주는지(PR 2 스파이크 7번 — 이 PR 이 업데이트를 켜는 유일한 조건).
+- [나중에]·[이 버전 건너뛰기](재시작 뒤 유지·더 새 버전이면 다시 알림)·다운로드 중 취소·네트워크를 끈 수동 확인의 오류 문구.
+- 업데이트 중 앱이 끝날 때 git 고아 프로세스가 없는지(작업 관리자), 단일 인스턴스 잠금이 설치기의 `/R` 재실행을 막지 않는지.
+- 회사망(프록시 필수)에서 업데이트 확인(R10 — 프록시를 따르지 않는다).
+- 스낵바 모양(`node scripts/drive.mjs . --tauri … --update-fake <상태>` — cdp 릴리스 빌드가 필요해 이 PR 에서는 돌리지 않았다).
+
+**자동으로 확인하지 못한 것**: 앱을 띄워 보지 않았다(`lib.rs` 의 조립 — 플러그인 등록·`Context` 설정 주입·서비스 주입·`exit_cleanup`·`start` 타이머는 컴파일·소스 검사·가짜 앱의 플러그인 초기화로만 본다). "전체 시간 제한이 없다"는 소스 검사뿐이다(이 환경의 루프백은 조금씩 보낸 쓰기를 마지막에 한꺼번에 전달해 간격 시험을 못 했다). `drive.mjs --update-fake` 스크린샷도 돌리지 않았다.
+
+**남은 위험**
+- 내려받기에는 전체 시간 상한이 없다(연결 15초·읽기 정지 30초만). 아주 느리지만 멈추지 않는 서버는 300MB 상한까지 계속 받을 수 있다(보안 리뷰 INFO — 받아들였다).
+- 설치 프로그램 실행이 실패해도 `on_before_exit` 의 종료 정리(git 프로세스 트리·사이드카·플러그인 잠금)는 이미 돌았다(되돌릴 수 없다). 서비스는 설치를 한 번만 통과시키고(`installing` 표식 — 동시 호출 방지), 정리가 돈 뒤 실패하면 "앱을 완전히 종료한 뒤 다시 실행하세요" 오류로 바꾸고 같은 세션의 재설치를 막는다. 앱을 스스로 재시작하지는 않는다(실패 원인을 모르는 채 재시작하면 같은 실패를 되풀이할 수 있다).
+- 공개 키가 비어 있는 동안 업데이트는 동작하지 않는다(의도 — fail-closed). 키를 넣기 전에 발행한 Tauri 판은 앱 안 업데이트를 받을 수 없다.
+- 플러그인이 임시 폴더에 쓴 설치본과 실행 사이의 TOCTOU 는 같은 사용자 권한 범위다(계획 §7).
+- `Update::verify` 는 서명의 trusted comment 에서 버전을 읽는다 — CI 는 `tauri signer sign --app-version` 으로 서명해야 한다(`tauri-package.yml` 이 그렇게 한다). 버전 없는 서명은 거부된다(시험으로 확인).
+- 진짜 `Update::install` 의 설치 프로그램 실행·`exit(0)` 은 시험하지 못했다(설치 프로그램을 띄울 수 없다) — 설치 직전 경로(서명이 틀리면 거부·형식이 틀리면 거부·종료 정리가 불리지 않음)까지만 자동으로 확인한다.
 
 ## Phase 0 에서 확인한 것
 

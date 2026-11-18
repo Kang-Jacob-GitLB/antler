@@ -110,11 +110,15 @@ jobs:
       # 임시 폴더·네트워크 없는 git init 만 쓴다(사용자 설정·대화상자·GitHub 에 닿지 않는다). TS 대응표의 `N/A: PR 9` 17개와 `N/A: 6b` 7개가 이 바이너리·config·external 을 가리킨다
       # Phase 6b PR 10 — sidecar_scope: Rust 가 설정을 소유한 실행에서 사이드카로 가는 채널이 update:* 7개뿐인지(IPC_CHANNELS 전수 × 인자 모양 표 — 포트가 없는 라우터 포함),
       # ANTLER_RUST_GIT=0 라우터는 전부 사이드카인지, Rust 가 풀지 못한 호출의 오류 문구가 TS RepoService 와 같은지, 없앤 사이드카 메시지의 송수신 코드가 없는지. 임시 폴더만 쓴다
-      # update: 업데이트 판정 로직(Phase 6c PR 1 — semver·URL 허용 목록·매니페스트 검사·정책·오류 정화·릴리스 노트)이 tests/golden/update 골든과 같은지 + 소스 검사(입출력 없음·앱 미연결).
+      # update: 업데이트 판정 로직(Phase 6c PR 1 — semver·URL 허용 목록·매니페스트 검사·정책·오류 정화·릴리스 노트)이 tests/golden/update 골든과 같은지 + 소스 검사(logic.rs 는 입출력 없음·업데이트 모듈은 라우터·lib.rs 만 쓴다) +
+      # PR 4: 서비스 상태 순서가 TS UpdateService 와 같은지(tests/golden/update/scenarios.json — 같은 입력 tests/fixtures/update.scenarios.json)·시계(10초·6시간)·릴리스 노트 캐시·update:* 7채널의 라우팅(서비스가 없거나 스위치가 꺼지면 사이드카).
       # 네트워크를 쓰지 않는다. TS 테스트 대응표는 tests/golden/update/test-map.json(vitest 가 누락을 강제)
+      # update_security: 앱 업데이트 보안(Phase 6c PR 4) — 127.0.0.1 서버만 쓴다. 리다이렉트 허용 목록(밖·http·포트·사용자 정보·6단)·다른 저장소/태그 매니페스트·크기 상한·읽기 정지·
+      # 시험 키로 서명한 가짜 바이트(변조·다른 키·서명된 버전 불일치·버전 없음)에서 설치 포트가 불리지 않음·키 없음 fail-closed·NSIS 표식 없으면 확인 0회·소스 검사(건너뛴 버전 쓰기 한 곳·capability·플러그인은 복원/검증/설치만).
+      # 진짜 플러그인 검증은 가짜 앱(tauri::test)에 달아 돈다 — Windows 는 시험 실행 파일에 Common Controls v6 매니페스트가 필요해 build.rs 가 넣는다. 설치 프로그램을 띄우지 않는다
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route --test update --test single_instance --test env_route --test github_cache_exec --test github_cache_isolation --test github_cache_env --test github_route --test github_cache_pin --test github_fetch --test config_route --test sidecar_scope
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route --test update --test update_security --test single_instance --test env_route --test github_cache_exec --test github_cache_isolation --test github_cache_env --test github_route --test github_cache_pin --test github_fetch --test config_route --test sidecar_scope
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy

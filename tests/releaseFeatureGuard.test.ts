@@ -146,10 +146,37 @@ describe('tauri-package.yml', () => {
     expect(check).not.toContain('grep -E')
   })
 
-  it('업데이트 서명은 빌드가 아니라 사후 서명이다: 덮어쓰기 설정이 없고 기본 설정에도 업데이터 설정이 없다(공개 키 대기)', () => {
+  it('업데이트 서명은 빌드가 아니라 사후 서명이다: 덮어쓰기 설정이 없고 conf 에도 업데이터 설정이 없다(플러그인 설정·공개 키는 lib.rs 가 UPDATE_PUBKEY 한 곳으로 만든다)', () => {
     expect(existsSync(join(root, 'src-tauri', 'tauri.updater.conf.json'))).toBe(false)
     const base = JSON.parse(read('src-tauri', 'tauri.conf.json')) as { plugins?: unknown; bundle: Record<string, unknown> }
+    // 6c PR 4: 앱이 플러그인을 단다. 그러나 설정(공개 키 포함)은 conf 가 아니라 Rust 가 넣는다 — conf 에 공개 키가 생기면 두 곳이 되고, CLI 가 개인 키를 요구하는지도 알 수 없다
     expect(base.plugins).toBeUndefined()
     expect(base.bundle.createUpdaterArtifacts).toBeUndefined()
+    expect(read('src-tauri', 'src', 'lib.rs')).toContain('updater_plugin_config(update::host::UPDATE_PUBKEY)')
+  })
+
+  it('공개 키가 비어 있는 동안 배포 빌드는 업데이트를 내려받지도 설치하지도 않는다(fail-closed)', () => {
+    const host = read('src-tauri', 'src', 'update', 'host.rs')
+    // 키는 상수 한 곳이다. 비었거나(None) minisign 공개 키 한 줄(base64)이다
+    const m = /pub const UPDATE_PUBKEY: Option<&str> = (None|Some\("([A-Za-z0-9+/=]+)"\));/.exec(host)
+    expect(m, 'UPDATE_PUBKEY 상수의 모양').not.toBeNull()
+    // 내려받기는 네트워크를 열기 **전에** 키를 확인하고, 설치도 키가 없으면 설치 포트(Engine::install)에 닿지 않는다
+    const download = host.slice(host.indexOf('async fn download('), host.indexOf('fn install(&self)'))
+    expect(download.indexOf('key_ready()')).toBeGreaterThan(-1)
+    expect(download.indexOf('key_ready()')).toBeLessThan(download.indexOf('download_installer('))
+    const install = host.slice(host.indexOf('fn install(&self)'), host.indexOf('async fn release_notes('))
+    expect(install.indexOf('key_ready()')).toBeGreaterThan(-1)
+    expect(install.indexOf('key_ready()')).toBeLessThan(install.indexOf('engine.install('))
+    expect(host).toContain('업데이트 서명 키가 설정되지 않았습니다')
+    // 키가 있을 때 형식: 두 줄(설명·`RW…` 56자)의 minisign 공개 키를 base64 로 감싼 값
+    if (m![2]) {
+      const text = Buffer.from(m![2], 'base64').toString('utf8')
+      expect(text.split('\n')[0]).toMatch(/^untrusted comment: minisign public key/)
+      expect(text.split('\n')[1]).toMatch(/^RW[A-Za-z0-9+/]{54}$/)
+    }
+    // 서명 시험 표본은 이름으로 시험 전용임이 드러나고, 비밀 키 파일은 저장소에 없다
+    const keys = readdirSync(join(root, 'src-tauri', 'tests', 'fixtures', 'update_keys'))
+    expect(keys.length).toBeGreaterThan(0)
+    for (const f of keys) expect(f).toMatch(/^TEST-ONLY-.*\.(pub|sig)$/)
   })
 })

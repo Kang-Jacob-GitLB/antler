@@ -66,7 +66,7 @@ impl Diffs {
     }
 }
 
-const HANDLED: [&str; 7] = ["dismiss.json", "manifest.json", "notes.json", "policy.json", "sanitize.json", "semver.json", "url.json"];
+const HANDLED: [&str; 8] = ["dismiss.json", "manifest.json", "notes.json", "policy.json", "sanitize.json", "scenarios.json", "semver.json", "url.json"];
 
 #[test]
 fn 골든_파일마다_처리기가_있다() {
@@ -518,28 +518,34 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// 주석(`//` 줄)을 뺀 소스
+fn code_of(path: &Path) -> String {
+    fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display())).replace("\r\n", "\n").lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n")
+}
+
 #[test]
 fn 판정_로직은_네트워크_파일_프로세스를_쓰지_않는다() {
-    let mut files = Vec::new();
-    rust_sources(&root().join("src-tauri/src/update"), &mut files);
-    assert!(files.len() >= 2);
-    for f in files {
-        // 주석(`//` 줄)은 빼고 본다
-        let text: String = fs::read_to_string(&f).expect("소스").lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
-        for bad in ["reqwest", "std::fs", "tokio::fs", "std::net", "tokio::net", "Command", "std::env", "SystemTime", "Instant::now", "tauri::", "net::http"] {
-            assert!(!text.contains(bad), "{}: `{bad}` — 순수 로직에는 입출력이 없다", f.display());
-        }
+    // 순수 로직은 logic.rs 하나다(PR 4 부터 같은 폴더의 service.rs·host.rs 는 연결을 맡는다 — 그쪽 소스 검사는 tests/update_security.rs)
+    let text = code_of(&root().join("src-tauri/src/update/logic.rs"));
+    for bad in ["reqwest", "std::fs", "tokio::fs", "std::net", "tokio::net", "Command", "std::env", "SystemTime", "Instant::now", "tauri::", "net::http"] {
+        assert!(!text.contains(bad), "logic.rs: `{bad}` — 순수 로직에는 입출력이 없다");
     }
 }
 
 #[test]
-fn 판정_로직은_앱에_연결되지_않았다() {
-    // PR 4(채널 연결)에서 이 시험을 바꾼다
+fn 업데이트_모듈은_라우터와_앱_진입점만_쓴다() {
+    // PR 4: 연결 지점은 라우터(채널)·lib.rs(조립·종료 정리)·net/http.rs(리다이렉트 허용 판정) 셋이다. 다른 모듈이 업데이트에 기대면 소유가 흩어진다
     let mut files = Vec::new();
     rust_sources(&root().join("src-tauri/src"), &mut files);
+    let allowed = ["router.rs", "lib.rs", "http.rs"];
     for f in files.into_iter().filter(|f| !f.starts_with(root().join("src-tauri/src/update"))) {
-        let text = fs::read_to_string(&f).expect("소스");
-        assert!(!text.contains("update::logic") && !text.contains("crate::update"), "{}: 아직 앱에 연결하지 않는다", f.display());
+        let text = code_of(&f);
+        let name = f.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let uses = text.contains("update::") || text.contains("crate::update");
+        if allowed.contains(&name) {
+            continue;
+        }
+        assert!(!uses, "{}: 업데이트 모듈은 router.rs·lib.rs·net/http.rs 만 쓴다", f.display());
     }
 }
 
@@ -560,4 +566,425 @@ fn ci_가_만드는_latest_json_표본을_검사가_받는다() {
     assert_eq!(doc["platforms"]["windows-x86_64-nsis"], doc["platforms"]["windows-x86_64"]);
     // 이미 이 버전이면 제안하지 않는다
     assert_eq!(check_manifest(&text, "2.0.0"), Ok(None));
+}
+
+// ── 서비스(Phase 6c PR 4): 상태 순서 골든·시계·라우터 ─────────────────────────────
+//
+// 가짜 백엔드(`Script`)만 쓴다 — 네트워크·서명·설치·설정 파일에 닿지 않는다. 골든은 TS `UpdateService` 를 같은 입력(`tests/fixtures/update.scenarios.json`)으로 돌린 출력이다.
+// 호스트(HTTP·서명·설치)의 시험은 tests/update_security.rs.
+mod service {
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use antler_lib::mirror::RepoMirror;
+    use antler_lib::router::{Routed, Router, UPDATE_CHANNELS};
+    use antler_lib::update::logic::ReleaseNotes;
+    use antler_lib::update::service::{Backend, Deps, UpdateControl, UpdateService, UpdateState};
+    use serde_json::{json, Value};
+    use tokio_util::sync::CancellationToken;
+
+    use super::{golden, norm, root, s, Diffs};
+
+    /// 호출 순서대로 하나씩 쓰고 마지막 것을 반복한다(TS `pick`)
+    fn pick(list: &Value, i: usize, fallback: Value) -> Value {
+        match list.as_array() {
+            Some(a) if !a.is_empty() => a[i.min(a.len() - 1)].clone(),
+            _ => fallback,
+        }
+    }
+
+    struct Script {
+        script: Value,
+        checks: AtomicUsize,
+        downloads: AtomicUsize,
+        installs: AtomicUsize,
+        notes: AtomicUsize,
+        /// 릴리스 노트 요청이 실패하는가(시험이 바꾼다)
+        notes_fail: Mutex<bool>,
+    }
+
+    impl Script {
+        fn new(script: &Value) -> Arc<Self> {
+            Arc::new(Self {
+                script: script.clone(),
+                checks: AtomicUsize::new(0),
+                downloads: AtomicUsize::new(0),
+                installs: AtomicUsize::new(0),
+                notes: AtomicUsize::new(0),
+                notes_fail: Mutex::new(false),
+            })
+        }
+    }
+
+    impl Backend for Script {
+        fn check(&self) -> impl Future<Output = Result<Option<String>, String>> + Send {
+            let step = pick(&self.script["checks"], self.checks.fetch_add(1, Ordering::SeqCst), json!({ "none": true }));
+            async move {
+                // 실제 확인은 네트워크를 기다린다 — 겹친 호출이 서로 끼어들 수 있게 한 번 넘겨 준다
+                tokio::task::yield_now().await;
+                if let Some(e) = step.get("error") {
+                    return Err(s(e).to_string());
+                }
+                Ok(step.get("version").map(|v| s(v).to_string()))
+            }
+        }
+
+        fn download(&self, _version: &str, progress: &(dyn Fn(f64) + Sync), cancel: &CancellationToken) -> impl Future<Output = Result<(), String>> + Send {
+            let step = pick(&self.script["downloads"], self.downloads.fetch_add(1, Ordering::SeqCst), json!({}));
+            async move {
+                for p in step.get("progress").and_then(Value::as_array).into_iter().flatten() {
+                    progress(p.as_f64().expect("진행 숫자"));
+                }
+                if step.get("hang").is_some() {
+                    cancel.cancelled().await;
+                    return Err("cancelled".to_string());
+                }
+                match step.get("error") {
+                    Some(e) => Err(s(e).to_string()),
+                    None => Ok(()),
+                }
+            }
+        }
+
+        fn install(&self) -> Result<(), String> {
+            let step = pick(&self.script["installs"], self.installs.fetch_add(1, Ordering::SeqCst), json!({ "ok": true }));
+            // 실제 설치는 설치 프로그램을 띄우는 동안 걸린다 — 겹친 호출이 끼어들 수 있게 한다
+            if let Some(ms) = step.get("delayMs").and_then(Value::as_u64) {
+                std::thread::sleep(Duration::from_millis(ms));
+            }
+            match step.get("error") {
+                Some(e) => Err(s(e).to_string()),
+                None => Ok(()),
+            }
+        }
+
+        fn cleanup_ran(&self) -> bool {
+            self.script["cleanup"].as_bool().unwrap_or(false)
+        }
+
+        fn release_notes(&self, version: &str) -> impl Future<Output = Result<ReleaseNotes, String>> + Send {
+            self.notes.fetch_add(1, Ordering::SeqCst);
+            let fail = *self.notes_fail.lock().unwrap();
+            let version = version.to_string();
+            async move {
+                if fail {
+                    return Err("한도".to_string());
+                }
+                Ok(ReleaseNotes { version, exact: true, title: None, body: "본문".to_string(), truncated: None, published_at: None, url: "https://github.com/Kang-Jacob-GitLB/antler/releases".to_string() })
+            }
+        }
+    }
+
+    struct Harness {
+        svc: UpdateService<Script>,
+        be: Arc<Script>,
+        sent: Arc<Mutex<Vec<Value>>>,
+        skipped: Arc<Mutex<Option<String>>>,
+    }
+
+    fn harness(script: &Value, current: &str, enabled: bool, fake: Option<&str>, skipped: Option<&str>) -> Harness {
+        let be = Script::new(script);
+        let sent: Arc<Mutex<Vec<Value>>> = Arc::default();
+        let skipped = Arc::new(Mutex::new(skipped.map(str::to_string)));
+        let (sink, read, write) = (sent.clone(), skipped.clone(), skipped.clone());
+        let svc = UpdateService::new(
+            be.clone(),
+            Deps {
+                current_version: current.to_string(),
+                enabled,
+                fake: fake.map(str::to_string),
+                skipped: Arc::new(move || read.lock().unwrap().clone()),
+                set_skipped: Arc::new(move |v| {
+                    *write.lock().unwrap() = Some(v.to_string());
+                    Ok(())
+                }),
+                send: Arc::new(move |state: &UpdateState| sink.lock().unwrap().push(serde_json::to_value(state).expect("직렬화"))),
+            },
+        );
+        Harness { svc, be, sent, skipped }
+    }
+
+    fn state(s: &UpdateState) -> Value {
+        serde_json::to_value(s).expect("직렬화")
+    }
+
+    async fn run_scenario(sc: &Value) -> Value {
+        let fake = sc.get("fake").and_then(Value::as_str);
+        let enabled = sc.get("enabled").and_then(Value::as_bool).unwrap_or(fake.is_none());
+        let current = sc.get("current").and_then(Value::as_str).unwrap_or("0.1.0");
+        let h = harness(&sc["backend"], current, enabled, fake, sc.get("skipped").and_then(Value::as_str));
+        let mut results: Vec<Value> = Vec::new();
+        let mut started: Option<tokio::task::JoinHandle<UpdateState>> = None;
+        for st in sc["steps"].as_array().expect("steps") {
+            let op = s(&st["op"]);
+            match op {
+                "check" => results.push(json!({ "op": op, "state": state(&h.svc.check(st["manual"].as_bool().expect("manual")).await) })),
+                "download" => results.push(json!({ "op": op, "state": state(&h.svc.download().await) })),
+                "downloadStart" => {
+                    let svc = h.svc.clone();
+                    started = Some(tokio::spawn(async move { svc.download().await }));
+                    // 작업이 상태를 바꾸고 백엔드가 멈출 때까지 넘겨 준다
+                    for _ in 0..50 {
+                        tokio::task::yield_now().await;
+                    }
+                    results.push(json!({ "op": op }));
+                }
+                "downloadEnd" => {
+                    let end = match started.take() {
+                        Some(t) => state(&t.await.expect("내려받기 작업")),
+                        None => Value::Null,
+                    };
+                    results.push(json!({ "op": op, "state": end }));
+                }
+                "cancel" => {
+                    h.svc.cancel();
+                    results.push(json!({ "op": op, "state": state(&h.svc.get()) }));
+                }
+                "install" => {
+                    h.svc.install().await;
+                    results.push(json!({ "op": op, "state": state(&h.svc.get()) }));
+                }
+                "get" => results.push(json!({ "op": op, "state": state(&h.svc.get()) })),
+                "dismiss" => results.push(match h.svc.dismiss(&st["action"], &st["version"]) {
+                    Ok(v) => json!({ "op": op, "state": state(&v) }),
+                    Err(e) => json!({ "op": op, "error": e }),
+                }),
+                other => panic!("알 수 없는 단계: {other}"),
+            }
+        }
+        json!({
+            "name": s(&sc["name"]),
+            "sent": *h.sent.lock().unwrap(),
+            "results": results,
+            "skipped": h.skipped.lock().unwrap().clone().map_or(Value::Null, Value::String),
+            "calls": { "check": h.be.checks.load(Ordering::SeqCst), "download": h.be.downloads.load(Ordering::SeqCst), "install": h.be.installs.load(Ordering::SeqCst) },
+        })
+    }
+
+    fn scenarios_input() -> Vec<Value> {
+        let path = root().join("tests").join("fixtures").join("update.scenarios.json");
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let doc: Value = serde_json::from_str(&text).expect("json");
+        doc["scenarios"].as_array().expect("scenarios").clone()
+    }
+
+    #[tokio::test]
+    async fn 서비스_상태_순서가_ts_골든과_같다() {
+        let g = golden("scenarios.json");
+        let want = g["scenarios"].as_array().expect("골든");
+        let input = scenarios_input();
+        assert_eq!(want.len(), input.len(), "골든과 입력의 시나리오 수");
+        assert!(input.len() >= 20, "시나리오를 건너뛴 것과 같다");
+        let mut d = Diffs::default();
+        for (sc, expected) in input.iter().zip(want) {
+            let got = run_scenario(sc).await;
+            d.eq(|| s(&sc["name"]).to_string(), &got, expected);
+        }
+        d.finish("update.scenarios");
+    }
+
+    // ── TS 에 짝이 없는 서비스 단언 ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn 상태는_camel_case_json_이고_빈_필드는_싣지_않는다() {
+        let h = harness(&json!({ "checks": [{ "version": "0.2.0" }] }), "0.1.0", true, None, None);
+        let v = state(&h.svc.check(true).await);
+        assert_eq!(v, json!({ "status": "available", "mode": "auto", "currentVersion": "0.1.0", "version": "0.2.0", "notesUrl": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0" }));
+        let idle = state(&harness(&json!({}), "0.1.0", true, None, None).svc.get());
+        assert_eq!(idle, json!({ "status": "idle", "mode": "auto", "currentVersion": "0.1.0" }));
+    }
+
+    #[tokio::test]
+    async fn 동시에_설치를_눌러도_설치는_한_번만_시작한다() {
+        let script = json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "delayMs": 150, "error": "x" }] });
+        let h = harness(&script, "0.1.0", true, None, None);
+        h.svc.check(true).await;
+        h.svc.download().await;
+        tokio::join!(h.svc.install(), h.svc.install());
+        assert_eq!(h.be.installs.load(Ordering::SeqCst), 1, "겹친 설치 호출은 백엔드를 한 번만 부른다");
+    }
+
+    #[tokio::test]
+    async fn 정리가_돈_뒤_설치가_실패하면_재시작을_안내하고_다시_설치하지_않는다() {
+        let script = json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "error": "설치 프로그램을 시작하지 못했습니다" }], "cleanup": true });
+        let h = harness(&script, "0.1.0", true, None, None);
+        h.svc.check(true).await;
+        h.svc.download().await;
+        h.svc.install().await;
+        let st = h.svc.get();
+        assert_eq!(format!("{:?}", st.status), "Error");
+        let msg = st.error.expect("오류 문구");
+        assert!(msg.contains("다시 실행하세요") && msg.contains("설치 프로그램을 시작하지 못했습니다"), "{msg}");
+        // 정리가 돌았으니 같은 세션에서 설치를 다시 시작하지 않는다(내려받기부터 다시 해도 설치 표식이 남는다)
+        h.svc.download().await;
+        h.svc.install().await;
+        assert_eq!(h.be.installs.load(Ordering::SeqCst), 1);
+        // 정리 전에 실패했다면(표식 없음) 앱은 멀쩡하므로 재시작 안내 없이 일반 오류다
+        let h2 = harness(&json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "error": "형식" }] }), "0.1.0", true, None, None);
+        h2.svc.check(true).await;
+        h2.svc.download().await;
+        h2.svc.install().await;
+        assert_eq!(h2.svc.get().error.as_deref(), Some("형식"));
+    }
+
+    #[tokio::test]
+    async fn 확인이_진행_중이면_두_번째_확인은_백엔드를_다시_부르지_않는다() {
+        let h = harness(&json!({ "checks": [{ "version": "0.2.0" }] }), "0.1.0", true, None, None);
+        let (a, b) = tokio::join!(h.svc.check(true), h.svc.check(true));
+        assert_eq!(h.be.checks.load(Ordering::SeqCst), 1, "busy 가 겹친 확인을 막는다");
+        // 겹친 두 번째 호출은 지금 상태(확인 중)를 그대로 돌려준다
+        assert_eq!(h.sent.lock().unwrap().len(), 2, "checking, available 만 나간다");
+        assert_eq!((format!("{:?}", a.status), format!("{:?}", b.status)), ("Available".to_string(), "Checking".to_string()));
+    }
+
+    #[tokio::test]
+    async fn 건너뛴_버전은_서비스만_쓰고_더_새_버전이면_다시_알린다() {
+        let h = harness(&json!({ "checks": [{ "version": "0.2.0" }, { "version": "0.2.1" }] }), "0.1.0", true, None, None);
+        h.svc.check(true).await;
+        h.svc.dismiss(&json!("skip"), &json!("0.2.0")).expect("dismiss");
+        assert_eq!(h.skipped.lock().unwrap().as_deref(), Some("0.2.0"));
+        assert_eq!(h.svc.check(false).await.version.as_deref(), Some("0.2.1"));
+    }
+
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn 시작_10초_뒤_첫_자동_확인_이후_6시간마다_돈다() {
+        let h = harness(&json!({ "checks": [{ "none": true }] }), "0.1.0", true, None, None);
+        h.svc.start(&tokio::runtime::Handle::current());
+        // 타이머 작업이 시작 시각 기준으로 잠들게 먼저 한 번 돌린다
+        settle().await;
+        tokio::time::advance(Duration::from_secs(9)).await;
+        settle().await;
+        assert_eq!(h.be.checks.load(Ordering::SeqCst), 0, "10초 전");
+        tokio::time::advance(Duration::from_secs(2)).await;
+        settle().await;
+        assert_eq!(h.be.checks.load(Ordering::SeqCst), 1, "시작 10초 뒤");
+        tokio::time::advance(Duration::from_secs(6 * 60 * 60)).await;
+        settle().await;
+        assert_eq!(h.be.checks.load(Ordering::SeqCst), 2, "6시간 뒤");
+        h.svc.dispose();
+        tokio::time::advance(Duration::from_secs(12 * 60 * 60)).await;
+        settle().await;
+        assert_eq!(h.be.checks.load(Ordering::SeqCst), 2, "dispose 뒤에는 돌지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn 사용할_수_없는_빌드와_개발_장치는_타이머를_돌리지_않는다() {
+        for (enabled, fake) in [(false, None), (true, Some("available"))] {
+            let h = harness(&json!({ "checks": [{ "version": "0.2.0" }] }), "0.1.0", enabled, fake, None);
+            h.svc.start(&tokio::runtime::Handle::current());
+            tokio::time::advance(Duration::from_secs(7 * 60 * 60)).await;
+            settle().await;
+            assert_eq!(h.be.checks.load(Ordering::SeqCst), 0, "enabled={enabled} fake={fake:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn 릴리스_노트는_성공만_10분_재사용하고_잘못된_버전은_거부한다() {
+        let h = harness(&json!({}), "0.1.0", true, None, None);
+        for bad in [json!("; rm"), json!(5), Value::Null, json!("")] {
+            assert_eq!(h.svc.release_notes(Some(&bad)).await.unwrap_err(), "잘못된 버전입니다", "{bad}");
+        }
+        assert_eq!(h.be.notes.load(Ordering::SeqCst), 0);
+        // 버전 생략 = 현재 버전. v 는 뗀다
+        let a = h.svc.release_notes(None).await.expect("노트");
+        assert_eq!(a.version, "0.1.0");
+        h.svc.release_notes(Some(&json!("v0.1.0"))).await.expect("노트");
+        assert_eq!(h.be.notes.load(Ordering::SeqCst), 1, "같은 키는 합쳐진다");
+        tokio::time::advance(Duration::from_secs(9 * 60)).await;
+        h.svc.release_notes(None).await.expect("노트");
+        assert_eq!(h.be.notes.load(Ordering::SeqCst), 1, "10분 안");
+        tokio::time::advance(Duration::from_secs(2 * 60)).await;
+        h.svc.release_notes(None).await.expect("노트");
+        assert_eq!(h.be.notes.load(Ordering::SeqCst), 2, "10분 뒤 다시");
+        // 실패는 남기지 않는다
+        *h.be.notes_fail.lock().unwrap() = true;
+        assert!(h.svc.release_notes(Some(&json!("0.3.0"))).await.is_err());
+        *h.be.notes_fail.lock().unwrap() = false;
+        assert!(h.svc.release_notes(Some(&json!("0.3.0"))).await.is_ok());
+        assert_eq!(h.be.notes.load(Ordering::SeqCst), 4);
+    }
+
+    // ── 라우터 ──────────────────────────────────────────────────────────────────
+
+    fn service_port(script: &Value) -> (Arc<dyn UpdateControl>, Arc<Script>) {
+        let h = harness(script, "0.1.0", true, None, None);
+        (Arc::new(h.svc), h.be)
+    }
+
+    fn done(r: Routed) -> Value {
+        match r {
+            Routed::Done(v) => v,
+            Routed::Sidecar => panic!("사이드카로 갔다"),
+        }
+    }
+
+    #[tokio::test]
+    async fn 업데이트_채널_일곱_개를_서비스가_있으면_러스트가_처리한다() {
+        let router = Router::new(true, false, RepoMirror::default());
+        let (port, be) = service_port(&json!({ "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }] }));
+        router.set_update(port);
+        let st = |v: &Value| v["data"]["status"].as_str().map(str::to_string);
+        assert_eq!(st(&done(router.route("update:get", &json!([])).await)).as_deref(), Some("idle"));
+        assert_eq!(st(&done(router.route("update:check", &json!([])).await)).as_deref(), Some("available"));
+        assert_eq!(st(&done(router.route("update:download", &json!([])).await)).as_deref(), Some("downloaded"));
+        assert_eq!(done(router.route("update:cancel", &json!([])).await), json!({ "ok": true }), "void 는 data 가 없다");
+        assert_eq!(done(router.route("update:install", &json!([])).await), json!({ "ok": true }));
+        assert_eq!(be.installs.load(Ordering::SeqCst), 1);
+        let notes = done(router.route("update:releaseNotes", &json!([])).await);
+        assert_eq!(notes["ok"], true);
+        assert_eq!(notes["data"]["version"], "0.1.0");
+        // 입력 검증 실패도 봉투(code ERROR)다 — 사이드카로 가지 않는다
+        for (ch, args) in [
+            ("update:dismiss", json!([])),
+            ("update:dismiss", json!({ "x": 1 })),
+            ("update:dismiss", json!(["skip", "0.9.9"])),
+            ("update:releaseNotes", json!(["; rm"])),
+            ("update:releaseNotes", json!([null])),
+        ] {
+            let v = done(router.route(ch, &args).await);
+            assert_eq!((v["ok"].clone(), v["code"].clone()), (json!(false), json!("ERROR")), "{ch} {args}");
+        }
+        assert_eq!(done(router.route("update:dismiss", &json!([])).await)["error"], "잘못된 입력입니다");
+        assert!(router.rust_handled() >= 12);
+    }
+
+    #[tokio::test]
+    async fn 서비스가_없거나_스위치가_꺼지면_사이드카가_처리한다() {
+        // 서비스 없음
+        let none = Router::new(true, false, RepoMirror::default());
+        // 스위치 꺼짐(ANTLER_RUST_GIT=0): 주입해도 무시한다
+        let off = Router::new(false, false, RepoMirror::default());
+        off.set_update(service_port(&json!({})).0);
+        for router in [&none, &off] {
+            for ch in UPDATE_CHANNELS {
+                assert!(matches!(router.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
+            }
+        }
+    }
+
+    #[test]
+    fn 채널_목록은_ipc_채널의_update_접두_일곱_개와_같다() {
+        let text = std::fs::read_to_string(root().join("tests/golden/exec/channels.json")).expect("channels.json");
+        let v: Value = serde_json::from_str(&text).expect("json");
+        let mut ipc: Vec<&str> = v["channels"].as_array().expect("channels").iter().filter_map(Value::as_str).filter(|c| c.starts_with("update:")).collect();
+        ipc.sort_unstable();
+        let mut ours = UPDATE_CHANNELS.to_vec();
+        ours.sort_unstable();
+        assert_eq!(ours, ipc);
+        assert_eq!(ours.len(), 7);
+    }
+
+    #[test]
+    fn 진행_숫자는_정수와_실수를_같게_본다() {
+        // 골든 비교의 정규화(5 와 5.0)가 진행 숫자에 쓰인다
+        assert_eq!(norm(&json!({ "progress": 5 })), norm(&json!({ "progress": 5.0 })));
+    }
 }

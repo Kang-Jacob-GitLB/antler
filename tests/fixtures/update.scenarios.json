@@ -1,0 +1,138 @@
+{
+  "_doc": "업데이트 서비스 상태 순서 골든의 입력(Phase 6c PR 4). TS UpdateService(tests/fixtures/updateScenarios.ts — 가짜 AutoBackend)와 Rust update::service(src-tauri/tests/update.rs — 가짜 Backend)가 같은 입력을 돌려 상태가 나간 순서(sent)·단계 결과(results)·호출 횟수(calls)가 같은지 본다. 골든은 tests/golden/update/scenarios.json(UPDATE_GOLDEN=1 pnpm exec vitest run tests/goldenUpdate.test.ts). backend: checks/downloads/installs 는 호출 순서대로 하나씩 쓰고 마지막 것을 반복한다. checks: {version}|{none}|{error}, downloads: {progress:[..]}|{error}|{hang}(취소될 때까지 멈춤)|{progress,error}, installs: {ok}|{error}. steps: check{manual}|download|downloadStart|downloadEnd|cancel|install|dismiss{action,version}|get",
+  "scenarios": [
+    {
+      "name": "정상: 수동 확인 → 내려받기(진행) → 설치",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [10, 50, 50, 100] }], "installs": [{ "ok": true }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "install" }]
+    },
+    {
+      "name": "자동 확인 실패는 조용히, 수동 확인 실패는 오류로(URL·경로·토큰은 지워서)",
+      "backend": { "checks": [{ "error": "net::ERR_INTERNET_DISCONNECTED https://github.com/x?token=abc C:\\Users\\a\\b" }] },
+      "steps": [{ "op": "check", "manual": false }, { "op": "check", "manual": true }, { "op": "check", "manual": false }]
+    },
+    {
+      "name": "사용할 수 없는 빌드(번들 표식 없음)는 확인하지 않는다",
+      "enabled": false,
+      "backend": { "checks": [{ "version": "0.2.0" }] },
+      "steps": [{ "op": "check", "manual": false }, { "op": "check", "manual": true }, { "op": "download" }, { "op": "get" }]
+    },
+    {
+      "name": "나중에: 자동 확인은 숨기고 수동 확인은 다시 보여 준다",
+      "backend": { "checks": [{ "version": "0.2.0" }] },
+      "steps": [
+        { "op": "check", "manual": true },
+        { "op": "dismiss", "action": "later", "version": "0.2.0" },
+        { "op": "check", "manual": false },
+        { "op": "check", "manual": true }
+      ]
+    },
+    {
+      "name": "건너뛰기: 설정에 저장하고 더 새 버전은 알린다",
+      "backend": { "checks": [{ "version": "0.2.0" }, { "version": "0.2.0" }, { "version": "0.2.1" }] },
+      "steps": [
+        { "op": "check", "manual": true },
+        { "op": "dismiss", "action": "skip", "version": "v0.2.0" },
+        { "op": "check", "manual": false },
+        { "op": "check", "manual": false }
+      ]
+    },
+    {
+      "name": "이미 건너뛴 버전이 설정에 있으면 자동 확인이 숨기고 수동 확인은 보인다",
+      "skipped": "0.2.0",
+      "backend": { "checks": [{ "version": "0.2.0" }] },
+      "steps": [{ "op": "check", "manual": false }, { "op": "check", "manual": true }]
+    },
+    {
+      "name": "dismiss 는 지금 알리는 버전만 받는다",
+      "backend": { "checks": [{ "version": "0.2.0" }] },
+      "steps": [
+        { "op": "dismiss", "action": "skip", "version": "0.2.0" },
+        { "op": "check", "manual": true },
+        { "op": "dismiss", "action": "skip", "version": "999999.0.0" },
+        { "op": "dismiss", "action": "later", "version": "0.9.0" },
+        { "op": "dismiss", "action": "xx", "version": "0.2.0" },
+        { "op": "dismiss", "action": "skip", "version": "; rm -rf" },
+        { "op": "dismiss", "action": null, "version": null },
+        { "op": "get" },
+        { "op": "dismiss", "action": "skip", "version": "v0.2.0" }
+      ]
+    },
+    {
+      "name": "같은 버전·없음이면 not-available(수동) / idle(자동)",
+      "backend": { "checks": [{ "none": true }] },
+      "steps": [{ "op": "check", "manual": false }, { "op": "check", "manual": true }]
+    },
+    {
+      "name": "제안할 수 없는 버전(낮은 버전·정식 사용자의 프리릴리스)은 알리지 않는다",
+      "backend": { "checks": [{ "version": "0.0.9" }, { "version": "0.2.0-rc.1" }, { "version": "0.1.0" }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "check", "manual": true }, { "op": "check", "manual": false }]
+    },
+    {
+      "name": "프리릴리스 사용자는 더 새 프리릴리스를 알린다",
+      "current": "0.1.0-rc.1",
+      "backend": { "checks": [{ "version": "0.1.0-rc.2" }] },
+      "steps": [{ "op": "check", "manual": true }]
+    },
+    {
+      "name": "받아 둔 업데이트가 있으면 다시 확인하지 않는다",
+      "backend": { "checks": [{ "version": "0.2.0" }, { "version": "0.3.0" }], "downloads": [{ "progress": [100] }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "check", "manual": true }, { "op": "check", "manual": false }, { "op": "download" }]
+    },
+    {
+      "name": "내려받기 취소는 available 로 되돌린다",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "hang": true }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "downloadStart" }, { "op": "cancel" }, { "op": "downloadEnd" }, { "op": "cancel" }]
+    },
+    {
+      "name": "내려받기 오류 → error, 다시 시도 가능",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [30], "error": "boom" }, { "progress": [100] }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "download" }]
+    },
+    {
+      "name": "내려받기 오류 상태에서도 그 버전은 dismiss 할 수 있다",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "error": "boom" }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "dismiss", "action": "later", "version": "0.2.0" }]
+    },
+    {
+      "name": "받는 중에는 dismiss 가 상태를 바꾸지 않고, 확인은 새로 시작하지 않는다",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "hang": true }] },
+      "steps": [
+        { "op": "check", "manual": true },
+        { "op": "downloadStart" },
+        { "op": "dismiss", "action": "later", "version": "0.2.0" },
+        { "op": "check", "manual": true },
+        { "op": "download" },
+        { "op": "cancel" },
+        { "op": "downloadEnd" }
+      ]
+    },
+    {
+      "name": "확인 전에는 내려받을 것이 없고, 설치도 받아 둔 뒤에만 한다",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "ok": true }] },
+      "steps": [{ "op": "download" }, { "op": "install" }, { "op": "check", "manual": true }, { "op": "install" }, { "op": "download" }, { "op": "install" }]
+    },
+    {
+      "name": "설치를 시작하지 못하면 error 로 알린다",
+      "backend": { "checks": [{ "version": "0.2.0" }], "downloads": [{ "progress": [100] }], "installs": [{ "error": "설치 프로그램을 시작하지 못했습니다" }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "download" }, { "op": "install" }]
+    },
+    {
+      "name": "새 확인이 버전을 바꾸면 그 버전을 받는다",
+      "backend": { "checks": [{ "version": "0.2.0" }, { "version": "0.3.0" }], "downloads": [{ "progress": [100] }] },
+      "steps": [{ "op": "check", "manual": true }, { "op": "check", "manual": true }, { "op": "download" }]
+    },
+    {
+      "name": "개발 장치: 가짜 상태는 확인·내려받기·설치를 막고 dismiss 는 idle",
+      "fake": "downloading",
+      "backend": { "checks": [{ "version": "0.2.0" }] },
+      "steps": [{ "op": "get" }, { "op": "check", "manual": true }, { "op": "download" }, { "op": "cancel" }, { "op": "install" }, { "op": "dismiss", "action": "later", "version": "0.2.0" }, { "op": "dismiss", "action": "x", "version": "0.2.0" }]
+    },
+    {
+      "name": "개발 장치: 모르는 이름은 무시한다",
+      "fake": "bogus",
+      "backend": { "checks": [{ "version": "0.2.0" }] },
+      "steps": [{ "op": "get" }, { "op": "check", "manual": true }]
+    }
+  ]
+}
