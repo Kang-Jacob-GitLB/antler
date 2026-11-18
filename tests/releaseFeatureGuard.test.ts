@@ -115,7 +115,9 @@ describe('tauri-package.yml', () => {
     }
     const install = stepAt('Tauri CLI 설치')
     // 키가 주어지는 단계보다 앞에서 설치하고, 설치 스크립트는 돌리지 않는다. 이 잡에는 빌드가 없다
-    expect(install.run).toBe('pnpm install --frozen-lockfile --ignore-scripts')
+    expect(install.run).toBe('pnpm install --frozen-lockfile --ignore-scripts --store-dir "$RUNNER_TEMP/pnpm-store"')
+    // 빌드 잡이 저장한 pnpm 캐시를 키가 있는 잡이 복원하지 않는다
+    expect(JSON.stringify(sign)).not.toContain('cache')
     expect(idx('Tauri CLI 설치')).toBeLessThan(idx('서명 키 확인'))
     expect(idx('서명 키 확인')).toBeLessThan(idx('업데이트 서명'))
     expect(sign.steps.some((s) => /tauri build|cargo|rustup/.test(s.run ?? ''))).toBe(false)
