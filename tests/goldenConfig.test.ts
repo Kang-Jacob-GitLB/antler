@@ -13,8 +13,7 @@ import {
   validateGithubLink
 } from '../src/main/git/githubCache'
 import { ConfigStore } from '../src/main/services/ConfigStore'
-import { mirrorOf } from '../src/sidecar/mirror'
-import { fetchPrefsOf } from '../src/sidecar/fetchPrefs'
+import { fetchPrefsOf, mirrorOf } from './fixtures/rustPortSpecs'
 import { CACHE_BASES, LINK_INPUTS, BRANCH_INPUTS, MATCH_CASES, PATH_LINKS, SLUG_CASES, STORE_CASES, type ConfigCase, type Op } from './fixtures/configCases'
 import { itKeys } from './fixtures/itTitles'
 

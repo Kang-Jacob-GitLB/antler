@@ -3,8 +3,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { IPC_CHANNELS, IPC_EVENTS, type AntlerApi, type IpcEnvelope } from '@shared/ipc'
-import { UNDEFINED_ARG } from '../../sidecar/protocol'
+import { IPC_CHANNELS, IPC_EVENTS, UNDEFINED_ARG, type AntlerApi, type IpcEnvelope } from '@shared/ipc'
 import { resolvePlatform } from './platform'
 import './titlebar.css'
 

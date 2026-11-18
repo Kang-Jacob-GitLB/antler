@@ -4,8 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { AbortError, type GitExecutor } from '../src/main/executors/GitExecutor'
 import { display, fetchConfirmOptions, formatItem, MAX_CONFIRM_ITEMS, quoteForDisplay } from '../src/main/ipc/confirmText'
 import { itKeys } from './fixtures/itTitles'
-import { bindHost, dialog, resolveHost } from '../src/sidecar/electronShim'
-import type { FromSidecar, MessageBoxArg } from '../src/sidecar/protocol'
+import { messageBoxArgOf, type MessageBoxArg } from './fixtures/rustPortSpecs'
 import {
   ALLOWED_KEYS,
   ALLOWED_VALUES,
@@ -1068,7 +1067,7 @@ function listsGolden(): Record<string, unknown> {
 }
 
 // ── 확인 창 인자 ──────────────────────────────────────────────────────────
-// 사이드카 shim(src/sidecar/electronShim.ts)이 Rust 에 넘기는 MessageBoxArg 를 shim 을 실제로 불러 얻는다(변환을 여기서 다시 쓰지 않는다).
+// Node 사이드카의 shim 이 Rust 에 넘기던 MessageBoxArg 를 동결한 사양(fixtures/rustPortSpecs.ts 의 messageBoxArgOf)으로 얻는다.
 // Rust(confirm_text.rs 의 fetch_confirm_box)가 같은 인자를 만드는지 본다. options 는 shim 에 들어가기 전의 Electron 옵션(defaultId 포함)이다.
 
 type BoxCase = { name: string; items: { key: string; value: string }[] }
@@ -1127,16 +1126,9 @@ async function legacyConfirmDangerousConfig(
 }
 
 async function messageBoxArg(options: unknown): Promise<MessageBoxArg> {
-  let sent: FromSidecar | null = null
-  bindHost((m) => {
-    sent = m
-  })
-  const pending = dialog.showMessageBox(options)
-  const msg = sent as FromSidecar | null
-  if (!msg || msg.t !== 'host' || msg.op !== 'messageBox') throw new Error('shim 이 messageBox 를 보내지 않았다')
-  resolveHost(msg.id, true, { response: 0 })
-  await pending
-  return msg.arg as MessageBoxArg
+  const arg = messageBoxArgOf(options as Parameters<typeof messageBoxArgOf>[0])
+  if (!arg) throw new Error('확인 창 옵션이 MessageBoxArg 로 바뀌지 않았다')
+  return arg
 }
 
 async function confirmBoxGolden(): Promise<Record<string, unknown>> {
