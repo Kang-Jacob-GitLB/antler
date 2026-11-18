@@ -404,3 +404,29 @@ fn 쓴_파일을_다시_열면_같은_설정이다() {
     again.set_ui(&parse("{}").unwrap()).expect("쓰기");
     assert_eq!(fs::read(&file).expect("파일"), bytes);
 }
+
+// ── 쓰기도 읽기(로드)와 같은 JSON 깊이 상한을 지킨다 ───────────────────────────────────────────
+
+fn nested(n: usize) -> String {
+    format!("{}1{}", "[".repeat(n), "]".repeat(n))
+}
+
+#[test]
+fn set_ui_는_저장하면_다음_로드가_거부할_깊이를_받지_않는다() {
+    let tmp = TempDir::new();
+    let file = tmp.0.join("antler.config.json");
+    let store = ConfigStore::open_for_test(&file, None, || "id".to_string(), || FIXED_NOW);
+    // 값은 파일에서 루트 → ui 아래라 62 겹 + 스칼라가 정확히 64 다
+    store.set_ui(&parse(&format!(r#"{{"diffMode":"split","x":{}}}"#, nested(62))).unwrap()).expect("정확히 64 는 받는다");
+    let before = fs::read(&file).expect("파일");
+    let err = store.set_ui(&parse(&format!(r#"{{"x":{}}}"#, nested(63))).unwrap()).expect_err("65 는 거부한다");
+    assert!(err.starts_with("잘못된 UI 설정입니다"), "{err}");
+    assert_eq!(fs::read(&file).expect("파일"), before, "거부하면 파일이 그대로다");
+    assert_eq!(store.get().get("ui").and_then(|u| u.get("diffMode")).and_then(Json::as_str), Some("split"));
+    // 다시 열면 초기화되지 않고 같은 설정을 읽는다(로드 왕복)
+    let reopened = ConfigStore::open_for_test(&file, None, || "id".to_string(), || FIXED_NOW);
+    assert_eq!(reopened.get().get("ui").and_then(|u| u.get("diffMode")).and_then(Json::as_str), Some("split"));
+    assert!(reopened.get().get("ui").and_then(|u| u.get("x")).is_some());
+    let backups = fs::read_dir(&tmp.0).expect("폴더").filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().contains(".corrupt-")).count();
+    assert_eq!(backups, 0, "손상으로 보지 않았다");
+}

@@ -1728,6 +1728,8 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 - `github_cache_slug` 는 드라이브 절대·UNC 가 아닌 입력(`\foo`·상대 경로)을 `None` 으로 돌린다(TS 의 `resolve` 는 작업 디렉터리를 붙인다 — 캐시 기준 폴더와 레코드 경로는 항상 절대라 실제 차이는 없다). 대소문자 비교는 Rust `to_lowercase` 다(Node 도 `toLowerCase`).
 - 쓰기에 `sync_all` 을 더했고(전원 손실에도 빈 파일이 남지 않는다), rename 재시도 오류가 Windows `ERROR_ACCESS_DENIED`·`ERROR_SHARING_VIOLATION` 이다(TS 는 Node 가 옮긴 `EPERM`). 재시도 범위가 넓은 것은 보안 완화가 아니다. 이 매핑이 Node 와 정확히 같은지는 확인하지 못했다.
 - 변경 알림은 잠금을 놓은 뒤 `(세대, 설정)` 으로 간다(TS 는 동기). 알림이 패닉해도 저장된 변경은 성공이다(TS 는 `try/catch`).
+- 쓰기도 읽기와 같은 JSON 깊이 상한(`net/json.rs` 의 `MAX_DEPTH`=64)을 지킨다 — 넘는 `setUi` 값과 문서는 저장하지 않고 거부한다(TS 는 `JSON.parse` 무제한이라 받는다). 저장한 설정을 다음 실행의 로드가 손상으로 보고 초기화하는 일을 막으려는 것이다.
+- **PR 9 계약**: `ConfigStore::open(.., cache_dir)` 에는 반드시 `Some` 을 넘긴다(`None` 이면 github 저장소 path 를 캐시 폴더·링크로 다시 정하지 않는다).
 
 **시험**: 골든 2개(`store_골든이_ts_와_같다`·`link_골든이_ts_와_같다`)와 Rust 고유 동작(알림 순서·패닉·쓰기 실패 시 메모리 불변·8스레드 동시 쓰기·세대 번호·uuid v4 모양·재로드 바이트 안정) — `tests/config.rs`(`required-features = ["test-hooks"]`).
 `validate.rs`·`load.rs`·`save.rs`·`model.rs`·`github_link.rs` 단위 시험. 대응표(`tests/golden/repos/test-map.json`)는 configStore(8)·windowState(5)·githubRemote(72)를 덮고 `tests/goldenConfig.test.ts` 가 누락·가리키는 Rust 테스트를 강제한다.

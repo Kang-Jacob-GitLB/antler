@@ -7,13 +7,32 @@ use std::thread;
 use std::time::Duration;
 
 use crate::net::js_value::stringify_pretty;
-use crate::net::json::Json;
+use crate::net::json::{Json, MAX_DEPTH};
 
 use super::model::strip_undefined;
 
 /// 파일 내용: `JSON.stringify(config, null, 2)`(UTF-8, BOM 없음, LF, 끝 줄바꿈 없음)
 pub fn to_file_text(config: &Json) -> String {
     stringify_pretty(&strip_undefined(config))
+}
+
+/// 값 `v` 를 루트로 봤을 때 `parse`(`net/json.rs`) 가 받아들이는 깊이인가. `budget` 은 `v` 아래로 더 내려갈 수 있는 겹 수다
+/// (루트 객체 0, 그 안의 값 1 … — 비어 있지 않은 컨테이너의 자식은 한 겹 아래라 예산이 0 이면 거부). 읽기(로드)가 [`MAX_DEPTH`] 초과를 손상으로 보므로 쓰기도 같은 선을 지킨다
+pub fn within_depth(v: &Json, budget: usize) -> bool {
+    match v {
+        Json::Arr(a) => a.is_empty() || (budget > 0 && a.iter().all(|x| within_depth(x, budget - 1))),
+        Json::Obj(o) => o.is_empty() || (budget > 0 && o.iter().all(|(_, x)| within_depth(x, budget - 1))),
+        _ => true,
+    }
+}
+
+/// 저장할 문서 전체가 읽을 수 있는 깊이인가(쓰기 직전 방어 단언)
+pub fn check_document_depth(doc: &Json) -> Result<(), String> {
+    if within_depth(doc, MAX_DEPTH) {
+        Ok(())
+    } else {
+        Err(format!("설정이 너무 깊게 중첩돼 저장할 수 없습니다(최대 {MAX_DEPTH}겹)"))
+    }
 }
 
 /// `<file>` 에 덧붙인 경로(`antler.config.json` → `antler.config.json.tmp`)
@@ -58,6 +77,20 @@ pub fn write_atomic(file: &Path, text: &str) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::net::json::parse;
+
+    fn nested(n: usize) -> String {
+        format!("{}1{}", "[".repeat(n), "]".repeat(n))
+    }
+
+    #[test]
+    fn 깊이_경계는_해석기와_같다() {
+        // 배열 n 겹 + 스칼라는 스칼라가 깊이 n 이다. 해석기는 64 까지 받고 65 부터 거부한다
+        let deepest = parse(&nested(MAX_DEPTH)).expect("64 겹은 받는다");
+        assert!(check_document_depth(&deepest).is_ok());
+        let too_deep = Json::Arr(vec![deepest]);
+        assert!(check_document_depth(&too_deep).is_err());
+        assert!(parse(&nested(MAX_DEPTH + 1)).is_err());
+    }
 
     #[test]
     fn 파일_형식은_두_칸_들여쓰기이고_undefined_자리는_쓰지_않는다() {

@@ -15,11 +15,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::git::fetch::js_trim;
 use crate::git::github_link::is_safe_branch;
-use crate::net::json::Json;
+use crate::net::json::{Json, MAX_DEPTH};
 
 use super::load::{parse_config, Corrupt};
 use super::model::{self, defaults, get, js_get, remove, set, spread, strip_undefined, Obj, LOCAL_SOURCE_ID, UNDEFINED};
-use super::save::{to_file_text, with_suffix, write_atomic};
+use super::save::{check_document_depth, to_file_text, with_suffix, within_depth, write_atomic};
 use super::validate::{check_editor_exe_path, check_set_ui, is_version};
 
 /// 설정이 디스크에 쓰인 직후(메모리 상태를 바꾼 뒤) 세대 번호와 새 설정으로 불린다
@@ -163,6 +163,8 @@ impl ConfigStore {
             let mut st = lock(&self.state);
             let (next, out) = f(&st.config)?;
             let Some(next) = next else { return Ok(out) };
+            // 다음 실행의 로드가 손상으로 보는 깊이는 쓰지 않는다(변경 경로마다 검사하지 않아도 되는 마지막 방어선)
+            check_document_depth(&Json::Obj(next.clone()))?;
             // 디스크에 먼저 쓰고, 성공했을 때만 메모리 상태를 바꾼다
             write_atomic(&self.file, &to_file_text(&Json::Obj(next.clone()))).map_err(|e| format!("설정 파일을 쓰지 못했습니다: {e}"))?;
             st.config = next;
@@ -196,6 +198,10 @@ impl ConfigStore {
             _ => return Err(TYPE_ERROR.to_string()),
         };
         check_set_ui(&patch)?;
+        // 패치 값은 파일에서 루트 → `ui` 아래(2겹)에 놓인다. 로드가 받는 깊이를 넘기면 다음 실행에 설정이 초기화되므로 저장 전에 거부한다
+        if !patch.iter().all(|(_, v)| within_depth(v, MAX_DEPTH - 2)) {
+            return Err("잘못된 UI 설정입니다(중첩이 너무 깊습니다)".to_string());
+        }
         self.update_with(|config| {
             let mut ui = ui_of(config);
             for (k, v) in &patch {
