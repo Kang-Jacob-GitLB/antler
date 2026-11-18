@@ -692,6 +692,11 @@ fn 외부_열기는_링크_허용_판정만_앱에_연결되어_있다() {
         if name == "app_host.rs" {
             assert_eq!(uses, code.matches("external::link::allowed_link_url").count(), "app_host.rs 는 링크 판정만 쓴다");
             assert_eq!(uses, 1);
+        } else if name == "dialogs.rs" {
+            // 폴더 선택 시작 위치의 링크 확인만 쓴다(원격 UNC 링크를 stat 전에 거른다 — 실행은 하지 않는다)
+            let allowed = code.matches("external::launch::links_stay_local").count() + code.matches("external::opener::is_remote_link_target").count();
+            assert_eq!(uses, allowed, "dialogs.rs 는 링크 판정만 쓴다");
+            assert_eq!(uses, 2);
         } else {
             assert_eq!(uses, 0, "{} 가 external 을 쓴다", f.display());
         }

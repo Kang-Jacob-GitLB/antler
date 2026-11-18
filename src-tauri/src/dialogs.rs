@@ -98,8 +98,10 @@ pub fn pick_path(app: &AppHandle, arg: &Value) -> Option<Value> {
     if let Some(title) = arg.get("title").and_then(Value::as_str).filter(|t| !t.is_empty()) {
         dlg = dlg.set_title(title);
     }
-    // 시작 위치는 있는 폴더일 때만 쓴다(없는 경로를 줘도 대화상자는 뜨지만 OS 마다 동작이 다르다)
-    if let Some(dir) = arg.get("defaultPath").and_then(Value::as_str).filter(|d| Path::new(d).is_dir()) {
+    // 시작 위치는 있는 폴더일 때만 쓴다(없는 경로를 줘도 대화상자는 뜨지만 OS 마다 동작이 다르다).
+    // `is_dir` 은 링크를 따라가므로 그 전에 원격 UNC 를 가리키는 링크를 거른다 — stat 순간 SMB 인증(NTLM)이 새지 않게(#132 와 같은 판정)
+    let stays_local = |d: &str| !cfg!(windows) || crate::external::launch::links_stay_local(Path::new(d), crate::external::opener::is_remote_link_target);
+    if let Some(dir) = arg.get("defaultPath").and_then(Value::as_str).filter(|d| stays_local(d) && Path::new(d).is_dir()) {
         dlg = dlg.set_directory(dir);
     }
     let folder = match arg.get("mode").and_then(Value::as_str)? {
