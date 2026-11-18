@@ -80,8 +80,8 @@ async fn 앱_채널은_사이드카로_가지_않고_사이드카_몫_채널은_
     for ch in APP_CHANNELS {
         assert!(matches!(r.route(ch, &json!([])).await, Routed::Done(_)), "{ch}");
     }
-    // 아직 사이드카에 남는 채널(설정·저장소 관리·env·external·update)
-    for ch in ["config:get", "config:setUi", "repos:add", "repos:scan", "env:test", "external:open", "external:pickEditorExe", "update:get", "req:cancel"] {
+    // 아직 사이드카에 남는 채널(설정·저장소 관리·external·update — env·scan 은 PR 8 부터 Rust 다, tests/env_route.rs)
+    for ch in ["config:get", "config:setUi", "repos:add", "repos:addMany", "repos:addGithub", "external:open", "external:pickEditorExe", "update:get", "req:cancel"] {
         assert!(matches!(r.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
     }
     assert_eq!(r.rust_handled(), APP_CHANNELS.len() as u64);

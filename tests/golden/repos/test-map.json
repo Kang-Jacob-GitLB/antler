@@ -70,7 +70,7 @@
   "githubRemote > RepoService: 원격 전용 저장소 > init 이 실패하면 만든 폴더를 정리한다": "N/A: PR 9",
   "githubRemote > RepoService: 원격 전용 저장소 > 반쯤 만들다 남은 폴더(등록 안 됨)는 지우고 새로 만든다": "N/A: PR 9",
   "githubRemote > RepoService: 원격 전용 저장소 > 개수 상한과 입력 모양을 확인한다": "N/A: PR 9",
-  "githubRemote > RepoService: 원격 전용 저장소 > repos:add · scan · env:test 경로로는 github 환경을 만들 수 없다": "N/A: PR 8",
+  "githubRemote > RepoService: 원격 전용 저장소 > repos:add · scan · env:test 경로로는 github 환경을 만들 수 없다": "N/A: PR 9",
   "githubRemote > RepoService: 원격 전용 저장소 > 아직 받지 않은 저장소는 조회가 에러 대신 빈 결과다": "N/A: PR 6",
   "githubRemote > RepoService: 원격 전용 저장소 > 작업 트리 조회는 빈 결과이고 ghRepo 는 레코드에서 바로 돌려준다": "N/A: PR 6",
   "githubRemote > RepoService: 원격 전용 저장소 > github 환경(토큰)은 캐시 경로의 github 저장소에만 열린다": "N/A: PR 2",

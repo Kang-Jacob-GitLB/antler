@@ -1684,7 +1684,7 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 | 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | **완료(코드)** — 아래 "PR 5" |
 | 6 | github kind 의 git **조회**를 Rust 로(미러에 `github` 링크·모든 git 채널의 github 분기·`repos:remove` 가로채기). 감시는 PR 7 | 있음 | 직렬(6a 7b·8, PR 2 뒤) | |
 | 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | |
-| 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | |
+| 8 | `env:*`·`repos:scan` 을 Rust 로(환경 검사·SSH 확인 창·연결 테스트·폴더 탐색) | 있음 | B(4 뒤) | **완료(코드)** — 아래 "PR 8" |
 | 9 | **ConfigStore 소유 전환**: `config:*`·`repos:*`·`external:*`·`req:cancel` 응답, 미러·fetchPrefs·승인·repoq 내부화, Electron 설정 가져오기(D1) — 보안 리뷰 집중 | 있음 | 직렬(1·3·5·6·7·8 뒤) | |
 | 10 | 사이드카 정리: Rust 소유 실행에서 `update:*` 밖 채널·메시지 제거(강제 시험) | 있음 | 직렬(9 뒤) | |
 
@@ -1932,6 +1932,52 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 
 **남은 위험**: 실제 OpenSSH `sftp-server`·Windows OpenSSH·`internal-sftp` 와는 **붙여 보지 못했다**(루프백 가짜 서버뿐) — 앱 연결(PR 8)에서 사람이 실제 서버로 확인한다. `russh-sftp` 는 서버가 보내는 패킷을 해석하는 새 크레이트다(256KiB·시간 제한으로 막았지만 파서 자체는 신뢰한다).
 `request_subsystem` 의 clippy 금지가 실제로 걸리는 것은 확인했다(`open_sftp` 의 allow 를 잠시 떼자 `use of a disallowed method russh::channels::Channel::request_subsystem` 오류). 소스 검사(`tests/ssh.rs`)를 함께 둔다.
+
+### PR 8 — 환경 채널과 폴더 안 저장소 찾기를 Rust 가 처리한다(`src-tauri/src/env_host.rs`, 앱에 연결한다)
+
+새 크레이트·IPC 채널 없음. 채널 5개(`env:wslDistros`·`env:sshHosts`·`env:test`·`env:listDir`·`repos:scan`)를 라우터의 **`ENV_CHANNELS`** 분기(가로채기는 `req:cancel`·`repos:*` 특수 처리·`RUST_CHANNELS` 보다 앞)에서 처리하고, 처리하는 호출은 사이드카로 보내지 않는다.
+설정(ConfigStore)은 읽지도 쓰지도 않는다 — 입력과 `~/.ssh/config` 만 본다(설정을 쓰는 `repos:add*`·`repos:update`·`repos:remove` 는 PR 9). 포트는 `EnvHost`(확인 창·WSL 설치 목록·별칭 목록·local/wsl 실행기)로 주입한다.
+
+| 채널 | 입력 검증(TS `checkEnvInput`·핸들러와 같은 순서) | 결과 |
+|---|---|---|
+| `env:wslDistros` | 없음 | 설치된 배포판 이름 배열(레지스트리 관문 뒤의 `list_distros`) |
+| `env:sshHosts` | 없음 | `~/.ssh/config` 의 구체 별칭 `{alias,hostName,user,port,proxyJump?}[]` |
+| `env:test` | 객체이고 kind 가 local·wsl·ssh(아니면 `잘못된 입력입니다`) → WSL 설치 확인 / SSH 호스트 검사·확인 창 | `git --version` 문자열(25초 제한) |
+| `env:listDir` | **경로 검사가 먼저**(문자열이 아니면 `''`, 4096 UTF-16 단위·NUL) → SSH 호스트 검사·확인 창 | `RemoteDirListing`(SFTP, 25초 제한) |
+| `repos:scan` | kind → 경로(JS trim·4096·NUL·NT 네임스페이스·local/wsl 의 UNC) → 그룹(문자열·200) → WSL 설치 확인 / SSH 호스트 검사·확인 창 | `RepoScanResult` — 저장소 안이면 `isRepo:true`, 아니면 하위 저장소 |
+
+- **PR 4a·4b 의 함수만 쓴다**(계약): WSL 은 `resolve_env_checked_with`(= `resolve_env_checked` 의 설치 목록 주입형 — 형식 + 설치 목록 대조, 대소문자를 맞춰 설치된 표기로 바꾼다. 운영은 `list_distros`, `wsl.exe` 를 직접 부르지 않으므로 WSL 이 없는 PC 에서 스텁이 뜨지 않는다. 소스 검사가 `resolve_env(` 직접 호출을 막는다),
+  경로·호스트는 `mirror::{check_path,check_ssh_host,check_listdir_path}` 의 결과값(JS trim 한 값)만 쓴다, SSH 는 `SshPool::hold` 하나를 작업이 끝날 때까지 쥐고(저장 전 호스트라 다른 미러 변경이 끊지 않고, 끝나면 닫힌다) `test_ssh_env`·`list_dirs` 를 부른다, 로컬 찾기는 `scan_local_repos`(`spawn_blocking`, 호출 전 `check_path`).
+- **SSH 호스트 키는 `known_hosts` 로만 검증한다(TOFU 금지, D3)**: 모르는 호스트·바뀐 키는 실행기가 거부하고 오류에 지문이 든다. 호스트 문자열이 안전할 때만 `확인 명령: ssh <별칭>`(직접 입력 `user@host:port` 는 `ssh -p port user@host`)이 붙는다. 이 모듈은 `known_hosts` 를 쓰지 않는다(소스 검사).
+  `test_ssh_env` 뿐 아니라 `env:listDir`·`repos:scan`(ssh)의 오류에도 같은 안내를 붙인다.
+- **설정에 없는 SSH 호스트의 확인 창**: `check_ssh_host` 가 돌려준 값이 이번 실행의 승인 집합에도 `~/.ssh/config` 별칭에도 없으면 **연결하기 전에** `dialogs::message_box`(`[연결][취소]`, 취소가 기본 버튼 — 사이드카 확인 창과 같은 경로·같은 인자 모양)로 묻는다. 응답 "연결"만 승인이고 그때만 집합에 넣는다(취소·닫기·Esc·창 실패는 `연결을 취소했습니다`, 기억하지 않는다).
+  승인 기억은 프로세스 메모리이고 채널이 달라도(`env:test`·`env:listDir`·`repos:scan`) 같은 호스트는 한 번만 묻는다. 창에 찍는 호스트 이름의 서식 문자(bidi·제로폭)는 `\u{…}` 로 드러낸다(연결 값은 그대로).
+- **스위치·라우팅**: `ANTLER_RUST_GIT=0` 이거나 포트가 없으면 5개 모두 사이드카다. **ssh 종류**(`env:listDir` 는 항상)는 SSH 풀이 있을 때(`Router::ssh_active` — 미러·fetch 와 같은 판정)만 Rust 이고, 풀이 없으면(`ANTLER_RUST_SSH=0`) 검증·확인 창 없이 사이드카가 처리한다(계획 §13 C4).
+  배열이 아닌 인자도 사이드카로 보내지 않고 빈 인자로 검증한다. **사이드카가 이 채널을 받지 않음**은 라우터 가로채기와 라우트 시험으로 보장한다 — C4 때문에 사이드카의 처리기는 지우지 않는다(ssh 종류·`ANTLER_RUST_GIT=0`). 사이드카 쪽 거부는 PR 10 이다.
+- **확인 창 중복(PR 8~9 사이)**: Rust(`env:test` 등)와 사이드카(`repos:add`)의 승인 기억이 따로라 설정에 없는 호스트를 한 번씩 더 묻는다. PR 9 에서 사라진다(계획 §0 (b)).
+
+**시험**: 새 바이너리 `tests/env_route.rs`(21개, `tauri.yml` 목록에 추가) — 채널 목록(`IPC_CHANNELS` 의 부분집합·다른 목록과 겹치지 않음), 풀 없음·스위치 꺼짐·포트 없음의 라우팅, 배열이 아닌 인자, 잘못된 kind·경로(빈·공백·NUL·4097 단위·NT 네임스페이스·UNC)·그룹·SSH 호스트(공백·`-`·제어 문자·256자·비문자열)가 **확인 창·목록·실행기·연결 없이** 거부됨(가짜 포트 호출 0·루프백 서버의 연결 수 0),
+WSL(설치 목록 가짜 — 없는 배포판·형식 오류·UNC 의 배포판·대소문자 교정·설치된 배포판이 없으면 실행기 0), `~/.ssh/config` 별칭 모양(임시 홈), 로컬 찾기(숨김·파일·일반 폴더 제외·이름순·JS trim 경로·없는 폴더 오류·저장소 안/하위 폴더 `isRepo`·**정션 사슬** — `mklink /J` 로 만들고 Drop 에서 정션부터 지운다),
+루프백 SSH(설정 별칭은 확인 창 없이 연결·저장 전 연결이 끝나면 풀에서 빠지고 닫힘·설정 밖 호스트는 한 번만 묻고 기억·취소는 기억하지 않고 연결 없음·모르는 호스트 키는 지문 + `ssh -p` 안내 + `known_hosts` 불변·SFTP 목록·경로가 문자열이 아니면 홈·SFTP 를 막은 서버의 목록 오류/찾기 폴백·ssh 찾기의 `isRepo`/원격 목록), 소스 검사(프로세스·`known_hosts`·`resolve_env(` 직접 호출 없음, 앱 배선).
+`app_route.rs` 는 "사이드카에 남는 채널" 예시를 `repos:addMany`·`repos:addGithub` 로 바꿨다. 대응표: 6a 표의 `repoService > scanRepos` 2개를 `env_route.rs` 로, ssh 표의 `sshRemoteDir` 9개(`N/A: 저장소 추가 흐름(사이드카 유지)`)를 `ssh.rs::sftp_*` 로 옮겼고(`golden.rs`·`golden6a.test.ts` 의 소스 목록에 `env_route.rs` 를 더했다),
+repos 표의 `githubRemote > repos:add · scan · env:test 경로로는 github 환경을 만들 수 없다` 는 `repos:add` 가 PR 9 라 `N/A: PR 9` 로 옮겼다(env 쪽은 `resolveEnv` 골든과 `잘못된_종류…` 시험이 덮는다). **TS 쪽 핸들러 골든 하네스는 만들지 않았다**(electron 핸들러를 가짜 host 로 돌리는 구동기가 없고 PR 5 도 `app_route.rs` 의 손으로 쓴 기대값으로 갔다) — 기대값은 `handlers.ts`·`RepoService.ts` 를 읽고 적었다.
+
+**TS 와 다른 점**
+- **WSL**: 설치 확인이 **local 로 보낸 WSL 공유 경로(`\\wsl.localhost\…`)에도** 걸린다(TS 는 kind 가 wsl 일 때만 목록을 본다 — PR 4a 의 `resolve_env_checked` 계약). 배포판 이름 형식(서식 문자·`\`·`/`·`..`)도 거부한다. 오류 문구는 TS 처럼 `설치된 WSL 배포판이 아닙니다: <이름|(없음)>` 인데 형식이 틀린 이름은 되돌려 싣지 않는다(접미 없음). 이름을 비교하는 방식이 대소문자 무시라 `ubuntu` 도 통과해 설치된 표기로 실행한다.
+  설치된 배포판이 하나도 없는 PC(`docker-desktop` 만 있어도)는 `wsl.exe` 를 부르지 않는다(PR 4a).
+- **SSH 호스트**: 제어 문자 전체를 거부한다(TS 는 NUL·공백류만, PR 4a). 호스트 키 거부 오류에 `ssh <별칭>` 안내가 붙는다(TS 에 없음). 확인 창의 호스트 이름은 서식 문자를 드러낸다.
+- **실행**: `repos:scan`·`env:test` 의 `git` 은 소스별 큐(`ProcessQueue`) 없이 바로 돈다(저장 전 환경은 미러에 없어 라우터의 `Runtimes::get` 을 쓸 수 없다 — 미러에 없는 호스트를 거부한다). 동시에 열린 창에서도 호출 하나씩이라 문제는 없다고 본다.
+  `repos:scan` 의 `git rev-parse` 는 TS 처럼 제한 시간이 없다(ssh 는 연결 단계의 제한이 있다).
+- **링크 가드는 더하지 않았다**: 고른 폴더 자체(루트)가 정션이어도 TS 처럼 따라간다(하위 항목의 원격 링크 거부는 PR 4a 의 `scan_local_repos`). 루트에 `links_stay_local` 을 더할지는 보안 리뷰에서 정한다.
+- `env:sshHosts` 는 `user` 를 항상 싣는다(설정에 없으면 로컬 사용자 이름 — TS `resolveHost` 도 같다). 이름순은 `localeCompare` 근사(PR 4a 와 같다). 읽기 실패 문구는 Node 가 아니라 Rust `io::Error` 다.
+- 호출 시점의 홈은 `lib.rs` 가 정한다(PR 3 의 SSH 풀과 같은 순서: `USERPROFILE`/`HOME` → Tauri `home_dir`). 홈을 모르면 `env:sshHosts` 는 빈 목록이고 풀이 없어 ssh 종류는 사이드카가 처리한다.
+
+**사람 확인(자동화 불가·실환경)**
+- 저장소 추가 창: ① 설정에 없는 SSH 호스트를 입력했을 때 확인 창이 한 번만 뜨고 **Enter 가 취소**(기본 버튼)이며 Esc·닫기도 취소인지, 연결을 누르면 이후 폴더 탐색·찾기·추가에서 다시 묻지 않는지(추가 `repos:add` 는 사이드카라 한 번 더 묻는다). ② 폴더 탐색·`폴더 안 저장소 찾기`가 실제 sshd(OpenSSH `sftp-server`·Windows OpenSSH·`internal-sftp`)에서 되는지(루프백 가짜 서버만 확인했다), SFTP 를 막은 서버에서 경로 직접 입력 안내가 뜨는지.
+  ③ 모르는 호스트 키일 때 지문 + `ssh <별칭>` 안내가 보이고, 안내대로 터미널에서 한 번 접속하면 다음부터 통과하는지(앱은 `known_hosts` 를 쓰지 않는다). ④ **WSL 이 있는 PC**에서 배포판 목록·연결 테스트·WSL 경로 폴더 찾기(`\\wsl.localhost\…` 공유 읽기)가 되는지 — 이 PC 는 WSL 이 없어 실행해 보지 못했다(실행기는 가짜). ⑤ `ANTLER_RUST_GIT=0`·`ANTLER_RUST_SSH=0` 으로 되돌렸을 때 같은 화면이 사이드카로 동작하는지(`ANTLER_ROUTE_LOG=1` 로 `-> rust`/`-> sidecar` 확인).
+
+**남은 위험**: 설정 밖 호스트의 확인 창이 **막는 호출**이라 `spawn_blocking` 으로 부른다(대화상자 금지로 앱에서 띄워 보지 못했다 — 사이드카 경로와 같은 `dialogs::message_box` 를 쓴다). 같은 새 호스트를 동시에 두 창이 입력하면 확인 창이 둘 뜰 수 있다(TS 와 같다).
+SFTP 채널 닫기 순서가 실제 sshd 의 `MaxSessions` 에 걸릴 수 있다는 PR 4b 의 위험은 이 PR 이 앱에 연결했으므로 사람 확인 ②에서 본다.
 
 ## 업데이터·패키징·Electron 사용자 이관(Phase 6c, `src-tauri/src/update/`)
 

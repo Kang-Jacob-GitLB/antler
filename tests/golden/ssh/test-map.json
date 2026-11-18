@@ -51,11 +51,11 @@
   "sshExecutor > ProxyJump > 점프 호스트를 거쳐 대상에 접속한다(각 호스트 키를 따로 검증)": "ssh.rs::점프_호스트를_거쳐_대상에_접속한다_각_호스트_키를_따로_검증",
   "sshExecutor > ProxyJump > 점프 호스트 키가 틀리면 점프 단계에서 거부한다": "ssh.rs::점프_호스트_키가_틀리면_점프_단계에서_거부한다",
   "sshExecutor > listSshHosts > config 의 구체 별칭을 돌려준다(없는 파일은 빈 배열)": "ssh.rs::config_의_구체_별칭을_돌려준다_없는_파일은_빈_배열",
-  "sshRemoteDir > scanFromListing (SSH 폴더 안 저장소 찾기) > 원격 폴더 바로 아래의 저장소를 절대 경로로 돌려주고, 폴더 자체가 저장소면 하위는 비운다": "N/A: 저장소 추가 흐름(사이드카 유지)",
-  "sshRemoteDir > scanFromListing (SSH 폴더 안 저장소 찾기) > 저장소 여부를 확인하지 못한 폴더가 있으면 truncated 로 알린다": "N/A: 저장소 추가 흐름(사이드카 유지)",
-  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 빈 경로·~ 는 홈을 열고, 숨김 폴더와 파일은 빼고 폴더만 돌려준다": "N/A: 저장소 추가 흐름(사이드카 유지)",
-  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 하위 폴더의 git 저장소 여부를 표시하고 ~/ 경로를 홈 기준으로 푼다": "N/A: 저장소 추가 흐름(사이드카 유지)",
-  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 루트의 parent 는 null": "N/A: 저장소 추가 흐름(사이드카 유지)",
-  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 없는 폴더는 오류": "N/A: 저장소 추가 흐름(사이드카 유지)",
-  "sshRemoteDir > SshExecutor.listDirs (SFTP) > SFTP 를 막은 서버는 경로를 직접 입력하라고 안내한다": "N/A: 저장소 추가 흐름(사이드카 유지)"
+  "sshRemoteDir > scanFromListing (SSH 폴더 안 저장소 찾기) > 원격 폴더 바로 아래의 저장소를 절대 경로로 돌려주고, 폴더 자체가 저장소면 하위는 비운다": "ssh.rs::sftp_목록은_홈과_경로를_풀어_폴더만_이름순으로_돌려주고_셸_명령은_보내지_않는다",
+  "sshRemoteDir > scanFromListing (SSH 폴더 안 저장소 찾기) > 저장소 여부를 확인하지 못한 폴더가 있으면 truncated 로 알린다": "ssh.rs::sftp_truncated_경계는_ts_와_같다_점_항목은_세지_않고_파일도_센다",
+  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 빈 경로·~ 는 홈을 열고, 숨김 폴더와 파일은 빼고 폴더만 돌려준다": "ssh.rs::sftp_목록은_홈과_경로를_풀어_폴더만_이름순으로_돌려주고_셸_명령은_보내지_않는다",
+  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 하위 폴더의 git 저장소 여부를 표시하고 ~/ 경로를 홈 기준으로 푼다": "ssh.rs::sftp_목록은_홈과_경로를_풀어_폴더만_이름순으로_돌려주고_셸_명령은_보내지_않는다",
+  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 루트의 parent 는 null": "ssh.rs::sftp_목록은_홈과_경로를_풀어_폴더만_이름순으로_돌려주고_셸_명령은_보내지_않는다",
+  "sshRemoteDir > SshExecutor.listDirs (SFTP) > 없는 폴더는 오류": "ssh.rs::sftp_없는_폴더는_오류이고_채널과_슬롯은_돌아온다",
+  "sshRemoteDir > SshExecutor.listDirs (SFTP) > SFTP 를 막은 서버는 경로를 직접 입력하라고 안내한다": "ssh.rs::sftp_를_막은_서버는_unavailable_이고_같은_연결의_run_은_계속_된다"
 }

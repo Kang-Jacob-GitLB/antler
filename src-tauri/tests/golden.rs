@@ -324,7 +324,7 @@ fn phase6a_대응표가_가리키는_rust_테스트가_있다() {
         let tests = root.join("src-tauri/tests");
         let git = root.join("src-tauri/src/git");
         match file {
-            "golden.rs" | "exec.rs" | "channels.rs" | "watch_route.rs" => tests.join(file),
+            "golden.rs" | "exec.rs" | "channels.rs" | "watch_route.rs" | "env_route.rs" => tests.join(file),
             "refs.rs" | "submodule.rs" => git.join("parsers").join(file),
             "common.rs" => git.join("exec").join(file),
             "activity.rs" | "code_browse.rs" | "lfs.rs" | "link_guard.rs" | "refs_service.rs" | "repo_state.rs" | "search.rs" | "wip.rs" => git.join(file),

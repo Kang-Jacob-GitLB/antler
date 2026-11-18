@@ -60,7 +60,7 @@ pub fn check_wsl_distro_name(distro: &str) -> Result<(), String> {
 }
 
 /// 화면 표시를 바꾸는 서식 문자(bidi 제어·제로폭 등)
-fn is_format_char(c: char) -> bool {
+pub(crate) fn is_format_char(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 
@@ -91,6 +91,16 @@ pub async fn verify_wsl_target(resolved: ResolvedEnv) -> Result<ResolvedEnv, Str
 /// `resolve_env` 에 설치 확인을 더한 것 — **저장·실행 경로의 유일한 진입점**(PR 8·9)
 pub async fn resolve_env_checked(input: &EnvInput<'_>) -> Result<ResolvedEnv, String> {
     verify_wsl_target(resolve_env(input)?).await
+}
+
+/// [`resolve_env_checked`] 의 설치 목록 주입형(`env_host` 가 쓴다 — 운영은 `wsl::list_distros`, 시험은 가짜 목록이라 `wsl.exe` 를 부르지 않는다).
+/// `resolve_env` 와 `verify_wsl_target_with` 를 묶는 것 말고는 하는 일이 없다
+pub async fn resolve_env_checked_with<L, Fut>(input: &EnvInput<'_>, list: L) -> Result<ResolvedEnv, String>
+where
+    L: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Vec<String>>,
+{
+    verify_wsl_target_with(resolve_env(input)?, list).await
 }
 
 fn resolve_env_unchecked(input: &EnvInput<'_>) -> Result<ResolvedEnv, String> {
@@ -161,6 +171,29 @@ fn ssh_cli_command(host: &str) -> Option<String> {
         }
     }
     Some(format!("ssh {host}"))
+}
+
+/// local·WSL 연결 테스트(TS `testEnv` 의 local·wsl 갈래): 그 실행기로 `git --version` 을 돌린다. 시간이 지나면 취소 신호로 프로세스를 죽이고 제한 문구를 돌려준다.
+/// 0 이 아닌 종료는 stderr(없으면 `git 실행 실패(코드)`)가 오류다
+pub async fn test_git_env(exec: &crate::git::exec::GitExecutor) -> Result<String, String> {
+    let token = tokio_util::sync::CancellationToken::new();
+    let opts = RunOpts::with_cancel(token.clone());
+    let run = exec.run(".", &["--version"], &opts);
+    let result = match tokio::time::timeout(ENV_TEST_TIMEOUT, run).await {
+        Ok(r) => r,
+        Err(_) => {
+            token.cancel();
+            return Err(format!("{}초 안에 응답이 없습니다(네트워크·방화벽·WSL 상태를 확인하세요)", ENV_TEST_TIMEOUT.as_secs()));
+        }
+    };
+    match result {
+        Err(e) => Err(e.to_string()),
+        Ok(r) if r.code != 0 => {
+            let stderr = js_trim(&r.stderr);
+            Err(if stderr.is_empty() { format!("git 실행 실패({})", r.code) } else { stderr.to_string() })
+        }
+        Ok(r) => Ok(js_trim(&String::from_utf8_lossy(&r.stdout)).to_string()),
+    }
 }
 
 /// SSH 연결 테스트(TS `testEnv` 의 ssh 갈래): 그 호스트에서 git 버전을 돌려준다(인증·호스트 키 문제를 저장 전에 드러낸다).
