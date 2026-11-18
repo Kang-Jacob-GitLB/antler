@@ -1,0 +1,1854 @@
+{
+  "scenarios": [
+    {
+      "args": {
+        "area": "untracked",
+        "path": "untracked 파일.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 18
+    },
+    {
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 3,
+            "modified": 5,
+            "staged": 3,
+            "unstaged": 3,
+            "untracked": 3
+          },
+          "staged": [
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "both.txt",
+              "status": "M"
+            },
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "oldPath": "old name.ts",
+              "path": "new name.ts",
+              "status": "R"
+            },
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "staged me.txt",
+              "status": "M"
+            }
+          ],
+          "unstaged": [
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "a.txt",
+              "status": "M"
+            },
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "both.txt",
+              "status": "M"
+            },
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "docs/한글 문서.md",
+              "status": "M"
+            }
+          ],
+          "untracked": [
+            "bin.dat",
+            "dir/nested/deep.txt",
+            "untracked 파일.txt"
+          ],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 19
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "a.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "one"
+                },
+                {
+                  "o": 2,
+                  "t": "-",
+                  "text": "two"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "TWO"
+                },
+                {
+                  "n": 3,
+                  "o": 3,
+                  "t": " ",
+                  "text": "three"
+                },
+                {
+                  "n": 4,
+                  "t": "+",
+                  "text": "four"
+                }
+              ],
+              "newLines": 4,
+              "newStart": 1,
+              "oldLines": 3,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "a.txt",
+          "totalLines": 5,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 20
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "full": true,
+        "path": "a.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "one"
+                },
+                {
+                  "o": 2,
+                  "t": "-",
+                  "text": "two"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "TWO"
+                },
+                {
+                  "n": 3,
+                  "o": 3,
+                  "t": " ",
+                  "text": "three"
+                },
+                {
+                  "n": 4,
+                  "t": "+",
+                  "text": "four"
+                }
+              ],
+              "newLines": 4,
+              "newStart": 1,
+              "oldLines": 3,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "a.txt",
+          "totalLines": 5,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 21
+    },
+    {
+      "args": {
+        "area": "staged",
+        "path": "both.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "b1"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "b2"
+                }
+              ],
+              "newLines": 2,
+              "newStart": 1,
+              "oldLines": 1,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "both.txt",
+          "totalLines": 2,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 22
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "both.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "b1"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "b2"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "b3"
+                }
+              ],
+              "newLines": 3,
+              "newStart": 1,
+              "oldLines": 2,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "both.txt",
+          "totalLines": 3,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 23
+    },
+    {
+      "args": {
+        "area": "staged",
+        "oldPath": "old name.ts",
+        "path": "new name.ts"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [
+            "similarity index 100%",
+            "rename from old name.ts",
+            "rename to new name.ts"
+          ],
+          "oldPath": "old name.ts",
+          "path": "new name.ts",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 24
+    },
+    {
+      "args": {
+        "area": "staged",
+        "oldPath": "staged me.txt",
+        "path": "staged me.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "x"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "y"
+                }
+              ],
+              "newLines": 2,
+              "newStart": 1,
+              "oldLines": 1,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "oldPath": "staged me.txt",
+          "path": "staged me.txt",
+          "totalLines": 2,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 25
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "docs/한글 문서.md"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "안녕"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "하세요"
+                }
+              ],
+              "newLines": 2,
+              "newStart": 1,
+              "oldLines": 1,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "docs/한글 문서.md",
+          "totalLines": 2,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 26
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "untracked 파일.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "u1"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "u2"
+                }
+              ],
+              "newLines": 2,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "untracked 파일.txt",
+          "totalLines": 2,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 27
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "dir/nested/deep.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "deep"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "dir/nested/deep.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 28
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "bin.dat"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "data": {
+          "binary": true,
+          "hunks": [],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "bin.dat",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 29
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "a.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 30
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "UNTRACKED 파일.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 31
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "dir"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 32
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "dir/nested/../nested/deep.txt"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 33
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "GIT~1/config"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 34
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "git~1\\config"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 35
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "GIT~1/config"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 36
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "a/GIT~1./config"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 37
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "x\\GIT~12\\config"
+      },
+      "name": "작업 트리 상태와 영역별 diff",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 38
+    },
+    {
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 0,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 0
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": null,
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 2
+    },
+    {
+      "args": "x",
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 3
+    },
+    {
+      "args": 5,
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 4
+    },
+    {
+      "args": [],
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 5
+    },
+    {
+      "args": {},
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 6
+    },
+    {
+      "args": {
+        "area": 5,
+        "path": "a.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 7
+    },
+    {
+      "args": {
+        "area": "nope",
+        "path": "a.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 8
+    },
+    {
+      "args": {
+        "area": "nope",
+        "path": "../x"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 9
+    },
+    {
+      "args": {
+        "area": "Staged",
+        "path": "a.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid area",
+        "ok": false
+      },
+      "step": 10
+    },
+    {
+      "args": {
+        "area": "staged"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 11
+    },
+    {
+      "args": {
+        "area": "staged",
+        "path": null
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 12
+    },
+    {
+      "args": {
+        "area": "staged",
+        "path": 5
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 13
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": ""
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 14
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "a\u0000b"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 15
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "../outside.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 16
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "a/../../outside.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 17
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "../outside.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 18
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "C:\\Windows\\win.ini"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 19
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "/etc/passwd"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 20
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "\\\\host\\share\\x"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 21
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": ".git/config"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 22
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": ".GIT/config"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 23
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "a/.git/config"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 24
+    },
+    {
+      "args": {
+        "area": "staged",
+        "oldPath": null,
+        "path": "a.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 25
+    },
+    {
+      "args": {
+        "area": "staged",
+        "oldPath": 5,
+        "path": "a.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 26
+    },
+    {
+      "args": {
+        "area": "staged",
+        "oldPath": "../x",
+        "path": "a.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 27
+    },
+    {
+      "args": {
+        "area": "staged",
+        "oldPath": ".git/config",
+        "path": "a.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 28
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": {
+          "$": 1
+        }
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 29
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "-c"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "-c",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 30
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "--output=pwned.txt"
+      },
+      "name": "잘못된 요청은 거부한다",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "--output=pwned.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 31
+    },
+    {
+      "name": "깨끗한 작업 트리",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 0,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 0
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 0,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 0
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 2,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 2
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [
+            "a.txt",
+            "b.txt"
+          ],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "a.txt"
+      },
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "first"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "a.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 2,
+            "modified": 0,
+            "staged": 1,
+            "unstaged": 0,
+            "untracked": 1
+          },
+          "staged": [
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "a.txt",
+              "status": "A"
+            }
+          ],
+          "unstaged": [],
+          "untracked": [
+            "b.txt"
+          ],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": {
+        "area": "staged",
+        "path": "a.txt"
+      },
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "first"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "a.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "b.txt"
+      },
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "second"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "b.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "a.txt"
+      },
+      "name": "커밋이 없는 저장소는 전부 추적 안 됨·스테이지됨이다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 9
+    },
+    {
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 2,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 2
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [
+            "gone.txt",
+            "stay.txt"
+          ],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "gone.txt"
+      },
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "bye"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "gone.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "gone.txt"
+      },
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "code": "GIT",
+        "ok": false
+      },
+      "step": 5
+    },
+    {
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 1,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 1
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [
+            "stay.txt"
+          ],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 6
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "gone.txt"
+      },
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 7
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "stay.txt"
+      },
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "stay"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "stay.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "late.txt"
+      },
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 10
+    },
+    {
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 2,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 2
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [
+            "late.txt",
+            "stay.txt"
+          ],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 11
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "late.txt"
+      },
+      "name": "허용 목록은 마지막 wipStatus 의 보고로 바뀐다 · 못 여는 파일은 오류",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "late"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "late.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 12
+    },
+    {
+      "name": "중첩 저장소(폴더 항목)는 빈 diff 다",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 2,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 2
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": [
+            "nested/",
+            "top.txt"
+          ],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 3
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "nested/"
+      },
+      "name": "중첩 저장소(폴더 항목)는 빈 diff 다",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "nested/",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 4
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "nested"
+      },
+      "name": "중첩 저장소(폴더 항목)는 빈 diff 다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 5
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "nested/x.txt"
+      },
+      "name": "중첩 저장소(폴더 항목)는 빈 diff 다",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 6
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "top.txt"
+      },
+      "name": "중첩 저장소(폴더 항목)는 빈 diff 다",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "top"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "top.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "name": "추적 안 되는 파일은 5000개까지만 담고 나머지는 개수로 알린다(git 의 정렬 순서상 마지막 하나가 목록에서 빠진다)",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 5001,
+            "modified": 0,
+            "staged": 0,
+            "unstaged": 0,
+            "untracked": 5001
+          },
+          "staged": [],
+          "unstaged": [],
+          "untracked": {
+            "count": 5000,
+            "first": "bulk/f0",
+            "last": "bulk/f998"
+          },
+          "untrackedMore": 1
+        },
+        "ok": true
+      },
+      "step": 1
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "bulk/f0"
+      },
+      "name": "추적 안 되는 파일은 5000개까지만 담고 나머지는 개수로 알린다(git 의 정렬 순서상 마지막 하나가 목록에서 빠진다)",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "t": "+",
+                  "text": "0"
+                }
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
+          ],
+          "meta": [
+            "new file mode 100644"
+          ],
+          "path": "bulk/f0",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": {
+        "area": "untracked",
+        "path": "bulk/f999"
+      },
+      "name": "추적 안 되는 파일은 5000개까지만 담고 나머지는 개수로 알린다(git 의 정렬 순서상 마지막 하나가 목록에서 빠진다)",
+      "result": {
+        "code": "ERROR",
+        "error": "invalid path",
+        "ok": false
+      },
+      "step": 3
+    },
+    {
+      "name": "이름 변경·삭제·타입이 다른 변경과 공백·한글 경로",
+      "result": {
+        "data": {
+          "conflicted": 0,
+          "counts": {
+            "added": 0,
+            "modified": 3,
+            "staged": 1,
+            "unstaged": 3,
+            "untracked": 0
+          },
+          "staged": [
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "oldPath": "keep.txt",
+              "path": "kept.txt",
+              "status": "R"
+            }
+          ],
+          "unstaged": [
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "gone.txt",
+              "status": "D"
+            },
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "oldPath": "keep.txt",
+              "path": "kept.txt",
+              "status": "M"
+            },
+            {
+              "additions": null,
+              "binary": false,
+              "deletions": null,
+              "path": "폴더 이름/파일 이름.txt",
+              "status": "M"
+            }
+          ],
+          "untracked": [],
+          "untrackedMore": 0
+        },
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "gone.txt"
+      },
+      "name": "이름 변경·삭제·타입이 다른 변경과 공백·한글 경로",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "o": 1,
+                  "t": "-",
+                  "text": "to delete"
+                }
+              ],
+              "newLines": 0,
+              "newStart": 0,
+              "oldLines": 1,
+              "oldStart": 1
+            }
+          ],
+          "meta": [
+            "deleted file mode 100644"
+          ],
+          "path": "gone.txt",
+          "totalLines": 1,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "폴더 이름/파일 이름.txt"
+      },
+      "name": "이름 변경·삭제·타입이 다른 변경과 공백·한글 경로",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "가"
+                },
+                {
+                  "n": 2,
+                  "o": 2,
+                  "t": " ",
+                  "text": "나"
+                },
+                {
+                  "n": 3,
+                  "t": "+",
+                  "text": "다"
+                }
+              ],
+              "newLines": 3,
+              "newStart": 1,
+              "oldLines": 2,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "폴더 이름/파일 이름.txt",
+          "totalLines": 3,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 11
+    },
+    {
+      "args": {
+        "area": "staged",
+        "oldPath": "keep.txt",
+        "path": "kept.txt"
+      },
+      "name": "이름 변경·삭제·타입이 다른 변경과 공백·한글 경로",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [
+            "similarity index 100%",
+            "rename from keep.txt",
+            "rename to kept.txt"
+          ],
+          "oldPath": "keep.txt",
+          "path": "kept.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 12
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "kept.txt"
+      },
+      "name": "이름 변경·삭제·타입이 다른 변경과 공백·한글 경로",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [
+            {
+              "header": "",
+              "lines": [
+                {
+                  "n": 1,
+                  "o": 1,
+                  "t": " ",
+                  "text": "k"
+                },
+                {
+                  "n": 2,
+                  "t": "+",
+                  "text": "k2"
+                }
+              ],
+              "newLines": 2,
+              "newStart": 1,
+              "oldLines": 1,
+              "oldStart": 1
+            }
+          ],
+          "meta": [],
+          "path": "kept.txt",
+          "totalLines": 2,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 13
+    },
+    {
+      "args": {
+        "area": "unstaged",
+        "path": "nothing/here.txt"
+      },
+      "name": "이름 변경·삭제·타입이 다른 변경과 공백·한글 경로",
+      "result": {
+        "data": {
+          "binary": false,
+          "hunks": [],
+          "meta": [],
+          "path": "nothing/here.txt",
+          "totalLines": 0,
+          "truncated": false
+        },
+        "ok": true
+      },
+      "step": 14
+    }
+  ]
+}

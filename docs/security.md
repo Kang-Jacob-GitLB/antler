@@ -71,13 +71,13 @@
   확인과 git 의 읽기 사이 경쟁(TOCTOU)은 막지 못한다. **알려진 한계**: 정션이 순환(`mklink /J a .`)하면 status 의 재귀가 길어지는 로컬 DoS 가 가능하다 — 이 가드의 범위 밖이다.
   **`git diff --no-index` 도 필터를 돈다**(실측, git 2.49): "저장소 속성을 읽지 않는다"는 전제는 틀렸다. `-C` 저장소의 설정에 `filter.<이름>.clean|process` 가 있고 `.gitattributes`·`.git/info/attributes` 규칙이 읽는 파일에 맞으면
   그 명령이 실행된다. 그래서 `--no-index` 를 쓰는 모든 호출에 같은 가드를 건다 — untracked diff(`wipFileDiff`, 모든 area 공통)와 LFS 판정용 파일 읽기(`repoExtras.ts` `fileUsesLfs`: 작업 트리 `.gitattributes`·`info/attributes`, 저장소를 열 때마다 돈다.
-  가드 조회는 저장소당 한 번). 무력화할 수 없으면 wip 는 오류로 거부하고, repoExtras 는 그 파일을 읽지 않고 기존 실패 처리(`lfs: false`)와 같게 둔다. Tauri 판의 `repoExtras`(Rust `lfs.rs` `read_worktree_attributes`)도 `wip::filter_overrides`·`FilterGuard` 로 같은 가드를 건다(가드 없이는 `--no-index` argv 를 만들 수 없는 시그니처 — `docs/tauri.md` PR 5). Rust 의 untracked `wipDiff` 는 PR 6 에서 같게 건다.
+  가드 조회는 저장소당 한 번). 무력화할 수 없으면 wip 는 오류로 거부하고, repoExtras 는 그 파일을 읽지 않고 기존 실패 처리(`lfs: false`)와 같게 둔다. Tauri 판의 `repoExtras`(Rust `lfs.rs` `read_worktree_attributes`)도 `wip::filter_overrides`·`FilterGuard` 로 같은 가드를 건다(가드 없이는 `--no-index` argv 를 만들 수 없는 시그니처 — `docs/tauri.md` PR 5). Rust 의 `wipStatus`·`wipDiff`(`git/wip.rs` — status·staged·unstaged·untracked 모두)도 같은 가드를 전역 옵션 자리에 건다: argv 빌더가 `&FilterGuard` 를 필수 인자로 받아 가드 없이는 만들 수 없고, 소스 검사 시험이 `-c` 인자를 만드는 제품 코드를 `wip.rs`·상수만 쓰는 `exec/common.rs`·`fetch/guard.rs` 로 한정한다(`docs/tauri.md` PR 6). untracked 허용 목록은 `Router::untracked_allow`(저장소가 미러에서 빠지거나 대상이 바뀌면 지운다)가 보관하고, 링크 확인(`link_guard`)은 `.`·`..`·Windows 의 `:` 구성 요소를 TS 보다 엄격히 거부한다.
   **WIP staged·unstaged diff 는 plumbing 이다**(`wip.ts` `wipFileDiff`: `diff-index -p --cached <HEAD|빈 트리>`·`diff-files -p`). porcelain `git diff` 는 실측으로 두 가지가 샜다.
   (1) stat 만 바뀐 파일이 있으면 index 를 갱신해 **쓰고** `.git/hooks/post-index-change` 를 **실행**한다(`GIT_OPTIONAL_LOCKS=0` 이어도). plumbing 은 refresh 를 하지 않는다.
   (2) 상위 저장소 `diff.submodule=diff` + 인덱스에는 파일이고 작업 트리에는 중첩 저장소인 경로(status 가 `1 .T` 로 보고)면 서브모듈 안에서 자식 git diff 를 `--no-ext-diff` 없이 띄워 그 저장소의 `diff.external` 이 실행된다.
   plumbing 은 `diff.submodule`·`diff.external` 같은 ui 설정을 읽지 않는다. 그래도 `--no-ext-diff --no-textconv --ignore-submodules=all --submodule=short` 를 명시하고 filter 가드 `-c` 도 그대로 건다.
   출력 차이: 헤더·hunk 형식은 같다. stat 만 바뀐 파일(내용 동일)은 refresh 를 안 해 hunk 없이 나오므로 UI 에서 빈 diff 다. 커밋이 없는 저장소는 `HEAD` 대신 빈 트리(SHA-1·SHA-256 중 저장소가 아는 쪽)와 비교한다.
-  untracked(`diff --no-index`)는 index 를 읽지 않아 porcelain 그대로다. Rust 의 wip diff argv 는 PR 6 에서 같게 옮긴다.
+  untracked(`diff --no-index`)는 index 를 읽지 않아 porcelain 그대로다. Rust 의 wip diff argv(`git/wip.rs`)도 같은 plumbing 인자·같은 staged 기준 결정을 쓴다(`docs/tauri.md` PR 6).
   전역 인자에도 `-c diff.submodule=short`·`-c submodule.recurse=false` 를 더했다(`GIT_GLOBAL_ARGS`, Rust `exec/common.rs`) — 어떤 호출이 porcelain diff 를 부르더라도 서브모듈 재귀가 켜지지 않는 방어 심층이다.
   작업 트리를 읽지 않는 호출(`blame`·`cat-file blob`·`ls-files`·`stash list`·`check-attr`·`ls-tree`)은 필터를 돌리지 않아 가드 대상이 아니다.
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).

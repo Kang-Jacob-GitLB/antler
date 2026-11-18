@@ -2703,6 +2703,777 @@ async fn remote_질의는_취소와_제한_시간을_따른다() {
     assert_eq!(repos.gh_repo("a").await, Ok(None), "시간 초과 뒤에도 큐가 막히지 않는다");
 }
 
+// ── 작업 트리: git:wipStatus · git:wipDiff ──────────────
+
+/// wipStatus 결과의 untracked 가 20개를 넘으면 `{count, first, last}` 로 줄인다(`tests/goldenChannels.test.ts` 의 `summarizeWipStatus` 와 같다)
+fn summarize_wip_status(mut data: Value) -> Value {
+    let u = data["untracked"].as_array().expect("untracked").clone();
+    if u.len() > 20 {
+        data["untracked"] = json!({ "count": u.len(), "first": u[0], "last": u[u.len() - 1] });
+    }
+    data
+}
+
+async fn wip_scenarios(mode: &Mode) {
+    let all = read_json("tests/fixtures/repos/wip.scenarios.json");
+    let scenarios = all["scenarios"].as_array().expect("scenarios");
+    let golden = read_json("tests/golden/channels/wip.json");
+    let golden = golden["scenarios"].as_array().expect("golden");
+    let tmp = TempDir::new("wip");
+    let mut cursor = 0usize;
+    let mut diffs = Vec::new();
+    for (si, sc) in scenarios.iter().enumerate() {
+        let name = sc["name"].as_str().unwrap();
+        // 시나리오마다 새 디렉터리에 import 한다(작업 트리·인덱스가 다른 시나리오에 번지지 않게)
+        let dir = import_at(tmp.0.join(format!("s{si}")), sc["repo"].as_str().unwrap());
+        let id = format!("s{si}");
+        let router = mode.router(&[(id.as_str(), dir.as_path())]);
+        for (i, step) in sc["steps"].as_array().unwrap().iter().enumerate() {
+            if let Some(args) = step.get("git") {
+                let args: Vec<&str> = args.as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
+                assert!(refs_git(&dir).args(&args).status().unwrap().success(), "{name}: git {args:?}");
+                continue;
+            }
+            if let Some(w) = step.get("write") {
+                let target = dir.join(w[0].as_str().unwrap());
+                fs::create_dir_all(target.parent().unwrap()).unwrap();
+                fs::write(target, w[1].as_str().unwrap()).unwrap();
+                continue;
+            }
+            if let Some(p) = step.get("rm") {
+                fs::remove_file(dir.join(p.as_str().unwrap())).unwrap();
+                continue;
+            }
+            if let Some(b) = step.get("bulk") {
+                let (prefix, n) = (b[0].as_str().unwrap(), b[1].as_u64().unwrap());
+                fs::create_dir_all(dir.join(format!("{prefix}0")).parent().unwrap()).unwrap();
+                for k in 0..n {
+                    fs::write(dir.join(format!("{prefix}{k}")), format!("{k}\n")).unwrap();
+                }
+                continue;
+            }
+            let rid = json!(format!("req-{si}-{i}"));
+            let (env, args) = match step.get("wipDiff") {
+                Some(req) => (envelope(router.route("git:wipDiff", &json!([id, req, rid])).await), Some(req.clone())),
+                None => (envelope(router.route("git:wipStatus", &json!([id, rid])).await), None),
+            };
+            let msg = step.get("msg") == Some(&json!(true));
+            let got = if env["ok"] == true {
+                let data = env["data"].clone();
+                json!({ "ok": true, "data": if args.is_some() { summarize_diff(data) } else { summarize_wip_status(data) } })
+            } else if msg {
+                json!({ "ok": false, "code": env["code"], "error": env["error"] })
+            } else {
+                json!({ "ok": false, "code": env["code"] })
+            };
+            let g = golden.get(cursor).unwrap_or_else(|| panic!("{name}: 골든이 모자란다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다"));
+            cursor += 1;
+            assert_eq!((&g["name"], &g["step"]), (&json!(name), &json!(i)), "{name}: 골든의 순서가 다르다 — UPDATE_GOLDEN=1 로 골든을 다시 만든다");
+            if let Some(a) = &args {
+                assert_eq!(norm_numbers(&g["args"]), norm_numbers(a), "{name} 단계 {i}: 인자가 골든과 다르다");
+            }
+            if norm_numbers(&got) != norm_numbers(&g["result"]) {
+                diffs.push(format!("{name} 단계 {i} ({}): 골든과 다르다\n  Rust: {}\n  TS  : {}", args.as_ref().map_or("wipStatus".to_string(), short), short(&got), short(&g["result"])));
+            }
+        }
+    }
+    assert!(diffs.is_empty(), "{}", diffs.join("\n"));
+    assert_eq!(golden.len(), cursor, "골든 항목 수가 시나리오와 다르다");
+    mode.finish();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 작업_트리_시나리오가_ts_골든과_같다() {
+    wip_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 작업_트리_시나리오가_ssh_에서도_ts_골든과_같다() {
+    wip_scenarios(&Mode::ssh().await).await;
+}
+
+/// 같은 크기로 내용을 바꾸고 mtime 을 앞으로 옮긴다 — stat 이 달라야 git 이 내용을 해시하려고 clean 필터를 돈다(크기가 다르면 읽지 않고 "수정됨"으로 본다)
+fn dirty(path: &Path, body: &str, ahead_secs: u64) {
+    fs::write(path, body).unwrap();
+    let f = fs::OpenOptions::new().write(true).open(path).unwrap();
+    f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(ahead_secs)).unwrap();
+}
+
+async fn wip_status_of(router: &Router, id: &str) -> Value {
+    envelope(router.route("git:wipStatus", &json!([id])).await)
+}
+
+async fn wip_diff_of(router: &Router, id: &str, req: Value) -> Value {
+    envelope(router.route("git:wipDiff", &json!([id, req])).await)
+}
+
+/// 저장소가 심은 filter 가 `wipStatus`·`wipDiff`(staged·unstaged·untracked 모두)에서 실행되지 않는다. 표지 파일이 생기면 실행된 것이다.
+/// 시험마다 **대조군**(날 git 이 표지를 만든다)을 먼저 확인한다 — 대조군이 통과하지 못하면 본 시험은 의미가 없다.
+/// (시험 스레드의 스택이 작아 한 async 함수에 다 담으면 넘친다 — 경우마다 함수를 나누고 Box 로 부른다)
+async fn wip_filter_scenarios(mode: &Mode) {
+    let tmp = TempDir::new("wipfilter");
+    Box::pin(wip_filter_plain(mode, &tmp.0)).await;
+    Box::pin(wip_filter_lfs_like(mode, &tmp.0)).await;
+    Box::pin(wip_filter_equals(mode, &tmp.0)).await;
+    Box::pin(wip_filter_non_utf8(mode, &tmp.0)).await;
+    Box::pin(wip_filter_weird_name(mode, &tmp.0)).await;
+    mode.finish();
+}
+
+/// 1) required 인 일반 드라이버: 실행하지 않고 실패하지도 않는다
+async fn wip_filter_plain(mode: &Mode, tmp: &Path) {
+    let dir = import_at(tmp.join("evil"), "empty");
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    fs::write(dir.join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "init"]] {
+        assert!(refs_git(&dir).args(&args).status().unwrap().success());
+    }
+    let marker = plant_filter(tmp, &dir, "evil", "evil");
+    assert!(raw_git(&dir).args(["config", "filter.evil.required", "true"]).status().unwrap().success());
+    dirty(&dir.join("a.txt"), "jello\n", 5);
+    let _ = raw_git(&dir).args(["status", "--porcelain"]).output().unwrap();
+    assert!(marker.exists(), "대조군: 날 git status 가 표지 명령을 실행하지 않았다 — 시험이 의미가 없다");
+    fs::remove_file(&marker).unwrap();
+    let router = mode.router(&[("evil", dir.as_path())]);
+    let st = wip_status_of(&router, "evil").await;
+    assert_eq!(st["ok"], true, "{st}");
+    assert!(st["data"]["unstaged"].as_array().unwrap().iter().any(|f| f["path"] == "a.txt"), "{st}");
+    let d = wip_diff_of(&router, "evil", json!({ "area": "unstaged", "path": "a.txt" })).await;
+    assert_eq!(d["ok"], true, "{d}");
+    assert!(!d["data"]["hunks"].as_array().unwrap().is_empty(), "{d}");
+    assert_eq!(wip_diff_of(&router, "evil", json!({ "area": "staged", "path": "a.txt" })).await["ok"], true);
+    // untracked(`--no-index`)도 저장소의 설정·속성을 읽어 clean 을 돈다 — 내용은 그대로 나온다
+    fs::write(dir.join("u.txt"), "hello\n").unwrap();
+    assert!(wip_status_of(&router, "evil").await["data"]["untracked"].as_array().unwrap().iter().any(|p| p == "u.txt"));
+    let d = wip_diff_of(&router, "evil", json!({ "area": "untracked", "path": "u.txt" })).await;
+    assert_eq!(d["ok"], true, "{d}");
+    assert!(d["data"].to_string().contains("hello"), "{d}");
+    assert!(!marker.exists(), "wipStatus·wipDiff 가 저장소가 심은 filter 명령을 실행했다");
+}
+
+/// 2) git-lfs 처럼 보이게 뒤에 명령을 붙인 기본 값도 덮어 쓴다(값을 보지 않는다)
+async fn wip_filter_lfs_like(mode: &Mode, tmp: &Path) {
+    let dir = import_at(tmp.join("lfslike"), "empty");
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    fs::write(dir.join(".gitattributes"), "*.txt filter=lfs\n").unwrap();
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "init"]] {
+        assert!(refs_git(&dir).args(&args).status().unwrap().success());
+    }
+    let m = tmp.join("MARK-lfslike");
+    // `process` 가 있으면 git 은 clean 대신 그것을 쓴다 — 표지가 나오려면 clean 만 둔다(가드는 process 도 같이 비운다 — `wip.rs` 단위 시험)
+    let cmd = format!("git-lfs clean -- %f; echo x > '{}'", m.to_string_lossy().replace('\\', "/"));
+    for (k, v) in [("filter.lfs.clean", cmd.as_str()), ("filter.lfs.smudge", "git-lfs smudge -- %f")] {
+        assert!(raw_git(&dir).args(["config", k, v]).status().unwrap().success());
+    }
+    dirty(&dir.join("a.txt"), "jello\n", 5);
+    let _ = raw_git(&dir).args(["status", "--porcelain"]).output().unwrap();
+    assert!(m.exists(), "대조군: 날 git status 가 표지 명령을 실행하지 않았다");
+    fs::remove_file(&m).unwrap();
+    let router = mode.router(&[("lfslike", dir.as_path())]);
+    assert_eq!(wip_status_of(&router, "lfslike").await["ok"], true);
+    assert_eq!(wip_diff_of(&router, "lfslike", json!({ "area": "unstaged", "path": "a.txt" })).await["ok"], true);
+    assert!(!m.exists(), "git-lfs 이름의 드라이버가 예외로 실행됐다");
+}
+
+/// 3) 이름에 `=` 가 든 드라이버는 `-c filter.a=b.clean=` 로 덮이지 않는다 — 작업 트리를 읽지 않고 거부한다
+async fn wip_filter_equals(mode: &Mode, tmp: &Path) {
+    let msg_of = |env: &Value| env["error"].as_str().unwrap_or_default().to_string();
+    let dir = import_at(tmp.join("eq"), "empty");
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    fs::write(dir.join(".gitattributes"), "*.txt filter=a=b\n").unwrap();
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "init"]] {
+        assert!(refs_git(&dir).args(&args).status().unwrap().success());
+    }
+    let marker = plant_filter(tmp, &dir, "a=b", "eq");
+    dirty(&dir.join("a.txt"), "jello\n", 5);
+    let _ = raw_git(&dir).args(["-c", "filter.a=b.clean=", "status", "--porcelain"]).output().unwrap();
+    assert!(marker.exists(), "대조군: `-c filter.a=b.clean=` 가 덮어 쓰지 못해 명령이 실행돼야 한다");
+    fs::remove_file(&marker).unwrap();
+    fs::write(dir.join("u.txt"), "x\n").unwrap();
+    dirty(&dir.join("a.txt"), "hellp\n", 10);
+    let router = mode.router(&[("eq", dir.as_path())]);
+    let mut unsafe_msg = String::new();
+    for (ch, args) in [
+        ("git:wipStatus", json!(["eq"])),
+        ("git:wipDiff", json!(["eq", { "area": "unstaged", "path": "a.txt" }])),
+        ("git:wipDiff", json!(["eq", { "area": "staged", "path": "a.txt" }])),
+    ] {
+        let env = envelope(router.route(ch, &args).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("GIT")), "{ch}: {env}");
+        assert!(msg_of(&env).contains('='), "{env}");
+        unsafe_msg = msg_of(&env);
+    }
+    assert_eq!(unsafe_msg, antler_lib::git::wip::UNSAFE_FILTER_MSG);
+    assert!(!marker.exists(), "무력화할 수 없는 저장소인데 표지 명령이 실행됐다");
+
+    // untracked diff(`--no-index`)도 같다: 허용 목록은 성공한 wipStatus 가 채우므로, 드라이버를 심기 전에 보고를 받아 둔 뒤 심는다
+    let dir = import_at(tmp.join("eq2"), "empty");
+    fs::write(dir.join("u.txt"), "hello\n").unwrap();
+    let router = mode.router(&[("eq2", dir.as_path())]);
+    assert_eq!(wip_status_of(&router, "eq2").await["data"]["untracked"], json!(["u.txt"]));
+    fs::write(dir.join(".gitattributes"), "*.txt filter=a=b\n").unwrap();
+    let marker = plant_filter(tmp, &dir, "a=b", "eq2");
+    let env = wip_diff_of(&router, "eq2", json!({ "area": "untracked", "path": "u.txt" })).await;
+    assert_eq!((env["ok"].clone(), env["code"].clone(), msg_of(&env)), (json!(false), json!("GIT"), antler_lib::git::wip::UNSAFE_FILTER_MSG.to_string()), "{env}");
+    assert!(!marker.exists(), "무력화할 수 없는 저장소의 untracked diff 가 표지 명령을 실행했다");
+}
+
+/// 4) 잘못된 UTF-8 이름의 드라이버: 문자열로 바꾸면 U+FFFD 가 돼 `-c` 가 실제 드라이버를 덮지 못한다 — 작업 트리를 읽지 않고 거부한다
+async fn wip_filter_non_utf8(mode: &Mode, tmp: &Path) {
+    let dir = import_at(tmp.join("ff"), "empty");
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    let mut attrs = b"* filter=".to_vec();
+    attrs.extend_from_slice(&[0xff, b'\n']);
+    fs::write(dir.join(".gitattributes"), attrs).unwrap();
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "init"]] {
+        assert!(refs_git(&dir).args(&args).status().unwrap().success());
+    }
+    let m = tmp.join("MARK-ff");
+    // 설정 값은 따옴표로 감싸야 `;` 가 주석이 되지 않는다(안의 따옴표는 `\"`)
+    let mut cfg = b"[filter \"".to_vec();
+    cfg.extend_from_slice(&[0xff]);
+    cfg.extend_from_slice(format!("\"]\n\tclean = \"sh -c \\\"echo x > '{}'; cat\\\" --\"\n", m.to_string_lossy().replace('\\', "/")).as_bytes());
+    use std::io::Write as _;
+    fs::OpenOptions::new().append(true).open(dir.join(".git").join("config")).unwrap().write_all(&cfg).unwrap();
+    dirty(&dir.join("a.txt"), "jello\n", 5);
+    let _ = raw_git(&dir).args(["status", "--porcelain"]).output().unwrap();
+    assert!(m.exists(), "대조군: 날 git status 가 표지 명령을 실행하지 않았다");
+    fs::remove_file(&m).unwrap();
+    dirty(&dir.join("a.txt"), "hellp\n", 10);
+    let router = mode.router(&[("ff", dir.as_path())]);
+    for (ch, args) in [("git:wipStatus", json!(["ff"])), ("git:wipDiff", json!(["ff", { "area": "unstaged", "path": "a.txt" }]))] {
+        let env = envelope(router.route(ch, &args).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone(), env["error"].clone()), (json!(false), json!("GIT"), json!(antler_lib::git::wip::UNSAFE_FILTER_MSG)), "{ch}");
+    }
+    assert!(!m.exists(), "잘못된 UTF-8 이름의 드라이버 저장소에서 표지 명령이 실행됐다");
+}
+
+/// 5) 드라이버 이름에 셸 메타 문자·따옴표가 있어도 `-c` 값이 한 인자로 도착한다(ssh 는 원격 셸을 한 번 거치므로 인용이 어긋나면 주입된다).
+///    덮어쓰기가 이름 그대로 이뤄져 매칭되는 드라이버도 함께 막힌다
+async fn wip_filter_weird_name(mode: &Mode, tmp: &Path) {
+    let dir = import_at(tmp.join("quote"), "empty");
+    fs::write(dir.join("a.txt"), "hello\n").unwrap();
+    fs::write(dir.join(".gitattributes"), "*.txt filter=evil\n").unwrap();
+    for args in [vec!["add", "-A"], vec!["commit", "-q", "-m", "init"]] {
+        assert!(refs_git(&dir).args(&args).status().unwrap().success());
+    }
+    let marker = plant_filter(tmp, &dir, "evil", "quote");
+    let inj = tmp.join("INJECTED");
+    let weird = format!("x;sh -c \"echo y > '{}'\";$(echo z)`id`&|#", inj.to_string_lossy().replace('\\', "/"));
+    assert!(raw_git(&dir).args(["config", &format!("filter.{weird}.clean"), "cat"]).status().unwrap().success(), "이름이 이상한 드라이버를 심지 못했다");
+    dirty(&dir.join("a.txt"), "jello\n", 5);
+    let router = mode.router(&[("quote", dir.as_path())]);
+    let st = wip_status_of(&router, "quote").await;
+    assert_eq!(st["ok"], true, "{st}");
+    assert_eq!(wip_diff_of(&router, "quote", json!({ "area": "unstaged", "path": "a.txt" })).await["ok"], true);
+    assert!(!marker.exists(), "이름이 이상한 드라이버가 있는 저장소에서 evil 드라이버가 실행됐다");
+    assert!(!inj.exists(), "드라이버 이름이 셸에서 명령으로 실행됐다");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 악성_저장소의_filter_는_작업_트리_채널이_실행하지_않는다() {
+    wip_filter_scenarios(&Mode::Local).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 악성_저장소의_filter_는_ssh_에서도_작업_트리_채널이_실행하지_않는다() {
+    wip_filter_scenarios(&Mode::ssh().await).await;
+}
+
+/// 드라이버가 하나도 없으면(`git config` 종료 코드 1) 가드는 비어 있다(TS `filterOverrides` 의 "키가 없으면 빈 목록")
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn 필터_드라이버가_없으면_가드는_비어_있다() {
+    use antler_lib::git::exec::RunOpts;
+    use antler_lib::git::wip::filter_overrides;
+    let tmp = TempDir::new("wipnofilter");
+    let dir = import(&tmp.0, "basic");
+    let exec = GitExecutor::Local(LocalExecutor::default());
+    let g = filter_overrides(&exec, dir.to_str().unwrap(), &RunOpts::default()).await.expect("가드");
+    assert!(g.is_empty());
+    // 드라이버가 있으면 4쌍이 서고, `git config` 가 실패하는 저장소(경로 없음)는 오류다
+    assert!(raw_git(&dir).args(["config", "filter.x.clean", "cat"]).status().unwrap().success());
+    let g = filter_overrides(&exec, dir.to_str().unwrap(), &RunOpts::default()).await.expect("가드");
+    assert_eq!(g.args().len(), 8);
+    assert!(filter_overrides(&exec, "/nonexistent-antler-wip", &RunOpts::default()).await.is_err());
+}
+
+/// git-lfs 의 clean 은 기본 명령 그대로여도 저장소 설정의 `lfs.extension.<이름>.clean` 명령을 실행하고 `.git/lfs/objects` 에 쓴다(`tests/lfsFilterExemption.test.ts`).
+/// git-lfs 가 없으면 건너뛴다(표지 명령이 git-lfs 안에서 돌아야 의미가 있다)
+fn has_git_lfs() -> bool {
+    raw_git(Path::new(".")).args(["lfs", "version"]).output().is_ok_and(|o| o.status.success())
+}
+
+/// git-lfs 를 저장소 설정에 직접 연결한 저장소(`git lfs install --local` 과 같은 값). 표지 명령은 표지 파일을 만들고 stdin 을 그대로 내보내는 `sh` 스크립트다
+fn lfs_repo(tmp: &Path, name: &str) -> (PathBuf, PathBuf) {
+    let dir = import_at(tmp.join(name), "empty");
+    for (k, v) in [
+        ("core.autocrlf", "false"),
+        ("filter.lfs.clean", "git-lfs clean -- %f"),
+        ("filter.lfs.smudge", "git-lfs smudge -- %f"),
+        ("filter.lfs.process", "git-lfs filter-process"),
+        ("filter.lfs.required", "true"),
+    ] {
+        assert!(raw_git(&dir).args(["config", k, v]).status().unwrap().success());
+    }
+    (dir, tmp.join(format!("MARK-{name}")))
+}
+
+/// 커밋 뒤 `lfs.extension.x.clean` 을 심는다 — 공격은 커밋된 저장소의 설정에만 있다. git-lfs 는 명령을 직접 쪼개 실행하므로 따옴표를 쓰지 않는다(임시 경로에는 공백이 없다)
+fn plant_lfs_extension(tmp: &Path, dir: &Path, marker: &Path) {
+    let script = tmp.join(format!("mark-{}.sh", marker.file_name().unwrap().to_string_lossy()));
+    fs::write(&script, "echo x > \"$1\"\ncat\n").unwrap();
+    let fwd = |p: &Path| p.to_string_lossy().replace('\\', "/");
+    let _ = fs::remove_dir_all(dir.join(".git").join("lfs"));
+    for (k, v) in [
+        ("lfs.extension.x.clean", format!("sh {} {}", fwd(&script), fwd(marker))),
+        ("lfs.extension.x.smudge", "cat".to_string()),
+        ("lfs.extension.x.priority", "0".to_string()),
+    ] {
+        assert!(raw_git(dir).args(["config", k, &v]).status().unwrap().success());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn git_lfs_기본_filter_도_작업_트리_채널과_repo_extras_가_실행하지_않는다() {
+    if !has_git_lfs() {
+        eprintln!("git-lfs 가 없어 건너뜀");
+        return;
+    }
+    let tmp = TempDir::new("wiplfs");
+    let attrs = ".gitattributes filter=lfs\n*.bin filter=lfs diff=lfs merge=lfs -text\n";
+    let (dir, marker) = lfs_repo(&tmp.0, "attack");
+    fs::write(dir.join(".gitattributes"), attrs).unwrap();
+    fs::write(dir.join("a.bin"), "payload-1\n").unwrap();
+    for args in [vec!["add", "."], vec!["commit", "-q", "-m", "init"]] {
+        assert!(refs_git(&dir).args(&args).status().unwrap().success());
+    }
+    plant_lfs_extension(&tmp.0, &dir, &marker);
+    // 대조군: 가드 없이 --no-index 를 돌리면 lfs.extension 명령이 실행되고 .git/lfs 가 생긴다
+    let _ = raw_git(&dir).args(["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", "/dev/null", ".gitattributes"]).output().unwrap();
+    assert!(marker.exists(), "대조군: 날 --no-index 가 lfs.extension 명령을 실행하지 않았다 — 시험이 의미가 없다");
+    assert!(dir.join(".git/lfs/objects").exists(), "대조군: .git/lfs 가 생기지 않았다");
+    fs::remove_file(&marker).unwrap();
+    plant_lfs_extension(&tmp.0, &dir, &marker);
+
+    let router = Router::new(true, false, mirror_of(&[("a", dir.as_path())]));
+    // repoExtras: 표지도 .git/lfs 도 만들지 않고 LFS 판정은 그대로다
+    let ex = envelope(router.route("git:repoExtras", &json!(["a"])).await);
+    assert_eq!(ex["data"]["lfs"], true, "{ex}");
+    assert!(!marker.exists() && !dir.join(".git/lfs").exists(), "repoExtras 가 lfs.extension 명령을 실행했다");
+    // wipStatus·wipDiff(unstaged·untracked): 같은 크기로 내용을 바꾸고 mtime 을 옮긴다(해시하려면 clean 이 돈다)
+    dirty(&dir.join("a.bin"), "payload-2\n", 5);
+    fs::write(dir.join("u.bin"), "new\n").unwrap();
+    fs::write(dir.join(".gitattributes"), format!("{attrs}# edit\n")).unwrap();
+    let st = wip_status_of(&router, "a").await;
+    assert!(st["data"]["unstaged"].as_array().unwrap().iter().any(|f| f["path"] == "a.bin"), "{st}");
+    for p in ["a.bin", ".gitattributes"] {
+        assert_eq!(wip_diff_of(&router, "a", json!({ "area": "unstaged", "path": p })).await["ok"], true, "{p}");
+    }
+    assert_eq!(wip_diff_of(&router, "a", json!({ "area": "untracked", "path": "u.bin" })).await["ok"], true);
+    assert!(!marker.exists(), "wipStatus·wipDiff 가 lfs.extension 명령을 실행했다");
+    assert!(!dir.join(".git/lfs").exists(), "wipStatus·wipDiff 가 .git/lfs 에 썼다");
+}
+
+/// 화면 영향(`tests/lfsFilterExemption.test.ts`): clean 이 돌지 않으므로 stat 만 바뀐 LFS 파일은 원본과 비교돼 수정됨으로 보인다 — 알려진 한계
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn lfs_저장소의_작업_중_변경은_포인터가_아닌_원본과_비교된다() {
+    if !has_git_lfs() {
+        eprintln!("git-lfs 가 없어 건너뜀");
+        return;
+    }
+    let tmp = TempDir::new("wiplfsview");
+    // LFS 로 커밋한 뒤 파일을 지우고 다시 체크아웃한다 — 체크아웃 직후 수정 없는 LFS 파일
+    let checked_out = |name: &str| {
+        let (dir, _) = lfs_repo(&tmp.0, name);
+        fs::write(dir.join(".gitattributes"), "*.bin filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+        fs::write(dir.join("big.bin"), "binary-ish payload\n").unwrap();
+        for args in [vec!["add", "."], vec!["commit", "-q", "-m", "init"]] {
+            assert!(refs_git(&dir).args(&args).status().unwrap().success());
+        }
+        fs::remove_file(dir.join("big.bin")).unwrap();
+        assert!(raw_git(&dir).args(["checkout", "--", "big.bin"]).status().unwrap().success());
+        dir
+    };
+    // 체크아웃 직후 수정 없는 LFS 파일은 stat 캐시 덕분에 수정됨으로 보이지 않는다(파일이 인덱스보다 먼저 쓰인 상태로 만든다 — racy-git 회피)
+    let dir = checked_out("clean");
+    let f = fs::OpenOptions::new().write(true).open(dir.join("big.bin")).unwrap();
+    f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(10)).unwrap();
+    drop(f);
+    let _ = raw_git(&dir).args(["status", "--porcelain"]).output().unwrap();
+    let router = Router::new(true, false, mirror_of(&[("c", dir.as_path())]));
+    let st = wip_status_of(&router, "c").await;
+    assert_eq!((st["data"]["staged"].clone(), st["data"]["unstaged"].clone(), st["data"]["untracked"].clone()), (json!([]), json!([]), json!([])), "{st}");
+    // stat 만 바뀐 LFS 파일은 수정됨으로 보이고, diff 는 포인터가 아니라 실제 내용이다
+    let dir = checked_out("stat");
+    let f = fs::OpenOptions::new().write(true).open(dir.join("big.bin")).unwrap();
+    f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(7)).unwrap();
+    drop(f);
+    let router = Router::new(true, false, mirror_of(&[("s", dir.as_path())]));
+    let st = wip_status_of(&router, "s").await;
+    let paths: Vec<&str> = st["data"]["unstaged"].as_array().unwrap().iter().map(|f| f["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, ["big.bin"], "{st}");
+    let d = wip_diff_of(&router, "s", json!({ "area": "unstaged", "path": "big.bin" })).await;
+    assert!(d["data"].to_string().contains("binary-ish payload"), "{d}");
+}
+
+/// 작업 트리 채널의 링크·짧은 이름 방어(`tests/wip.test.ts` 의 정션·8.3). 링크 확인은 local 실행기만 하므로 골든이 아니라 전용 시험이다. Windows 에서만(정션은 `mklink /J`)
+#[cfg(windows)]
+struct WipLinks(Vec<PathBuf>);
+
+/// 정션은 대상을 따라가지 않고 링크만 지워야 한다(`rmdir` 은 링크만 지운다) — `TempDir` 보다 먼저 떨어지도록 뒤에 선언한다
+#[cfg(windows)]
+impl Drop for WipLinks {
+    fn drop(&mut self) {
+        for l in &self.0 {
+            let _ = fs::remove_dir(l);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[allow(clippy::disallowed_methods)] // 시험 준비용: std 에 정션 API 가 없다
+fn mklink_junction(link: &Path, target: &Path) {
+    let out = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(link).arg(target).output().expect("cmd");
+    assert!(out.status.success(), "mklink /J: {}", String::from_utf8_lossy(&out.stdout));
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 정션_아래_경로는_untracked_unstaged_diff_가_모두_거부하고_정상_파일은_열린다() {
+    let tmp = TempDir::new("wipjunction");
+    let dir = tmp.0.join("jrepo");
+    let outside = tmp.0.join("jout");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("secret.txt"), "secret\n").unwrap();
+    let dir = import_at(dir, "empty");
+    fs::write(dir.join("plain.txt"), "p\n").unwrap();
+    fs::create_dir_all(dir.join("sub")).unwrap();
+    fs::write(dir.join("sub").join("ok.txt"), "ok\n").unwrap();
+    let links = WipLinks(vec![dir.join("gitj"), dir.join("outj")]);
+    mklink_junction(&links.0[0], &dir.join(".git"));
+    mklink_junction(&links.0[1], &outside);
+    let router = Router::new(true, false, mirror_of(&[("j", dir.as_path())]));
+    let st = wip_status_of(&router, "j").await;
+    let reported: Vec<&str> = st["data"]["untracked"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
+    // 대조군: Git for Windows 의 status -uall 은 정션을 따라 들어가 `.git/config`·저장소 밖 파일을 untracked 로 보고한다 — 허용 목록만으로는 막지 못한다
+    assert!(reported.contains(&"gitj/config") && reported.contains(&"outj/secret.txt"), "대조군: 정션 아래 경로가 보고되지 않았다 — 시험이 의미가 없다: {reported:?}");
+    for p in ["gitj/config", "outj/secret.txt", "gitj\\config"] {
+        for area in ["untracked", "unstaged"] {
+            let env = wip_diff_of(&router, "j", json!({ "area": area, "path": p })).await;
+            assert_eq!((env["ok"].clone(), env["error"].clone()), (json!(false), json!("invalid path")), "{area} {p}: {env}");
+        }
+    }
+    // 정션 옆의 정상 파일·하위 디렉터리 파일은 계속 열린다
+    for p in ["plain.txt", "sub/ok.txt"] {
+        let env = wip_diff_of(&router, "j", json!({ "area": "untracked", "path": p })).await;
+        assert_eq!(env["data"]["hunks"].as_array().map(Vec::len), Some(1), "{p}: {env}");
+    }
+    drop(links);
+}
+
+/// NTFS 8.3 짧은 이름이 실제로 생기는 볼륨에서만 의미가 있다(`dir /x` 로 `.git` 의 짧은 이름을 찾는다 — 볼륨이 끄면 건너뛴다).
+/// 허용 목록 때문에 `GIT~1/config` 는 untracked 로 열리지 않는다
+#[cfg(windows)]
+#[allow(clippy::disallowed_methods)] // 시험 준비용: 8.3 이름을 `dir /x` 로 읽는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 짧은_이름으로_git_config_를_untracked_로_읽을_수_없다() {
+    let tmp = TempDir::new("wip83");
+    let dir = import_at(tmp.0.join("r83"), "empty");
+    let out = std::process::Command::new("cmd").args(["/C", "dir", "/x", "/a:h"]).arg(&dir).output().expect("cmd");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let short = text.lines().find_map(|l| {
+        let mut it = l.split_whitespace().rev();
+        (it.next()?.eq_ignore_ascii_case(".git")).then(|| it.next().filter(|s| s.contains('~')).map(str::to_string)).flatten()
+    });
+    let Some(short) = short else {
+        eprintln!("이 볼륨은 8.3 짧은 이름을 만들지 않아 건너뜀");
+        return;
+    };
+    fs::write(dir.join("plain.txt"), "p\n").unwrap();
+    let router = Router::new(true, false, mirror_of(&[("s", dir.as_path())]));
+    let st = wip_status_of(&router, "s").await;
+    assert_eq!(st["data"]["untracked"], json!(["plain.txt"]));
+    for p in [format!("{short}/config"), format!("{}/config", short.to_lowercase()), format!("{short}\\config")] {
+        let env = wip_diff_of(&router, "s", json!({ "area": "untracked", "path": p })).await;
+        assert_eq!((env["ok"].clone(), env["error"].clone()), (json!(false), json!("invalid path")), "{p}: {env}");
+    }
+}
+
+/// 라우팅: 소유 판정은 다른 git 채널과 같은 한 술어(`mirror.resolve`)다 — 미러에 없는 id·github·풀 없는 ssh 와 스위치가 꺼진 라우터는 사이드카, 미러 검사에 걸린 저장소는 ERROR
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 작업_트리_채널은_미러에_없거나_스위치가_꺼지거나_github_면_사이드카() {
+    let m = RepoMirror::default();
+    m.apply(
+        1,
+        vec![
+            MirrorRepo { id: "a".into(), kind: "local".into(), path: "/nonexistent-antler-wip".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "g".into(), kind: "github".into(), path: "/cache".into(), distro: None, ssh_host: None },
+            MirrorRepo { id: "s".into(), kind: "ssh".into(), path: "/srv".into(), distro: None, ssh_host: Some("devbox".into()) },
+            MirrorRepo { id: "unc".into(), kind: "local".into(), path: "\\\\evil\\share\\repo".into(), distro: None, ssh_host: None },
+        ],
+    );
+    let router = Router::new(true, false, m.clone());
+    let off = Router::new(false, false, m);
+    for (ch, tail) in [("git:wipStatus", json!([])), ("git:wipDiff", json!([{ "area": "unstaged", "path": "a.txt" }]))] {
+        let call = |id: &Value| {
+            let mut v = vec![id.clone()];
+            v.extend(tail.as_array().unwrap().iter().cloned());
+            Value::Array(v)
+        };
+        for id in ["nope", "g", "s"] {
+            assert!(matches!(router.route(ch, &call(&json!(id))).await, Routed::Sidecar), "{id} {ch}");
+        }
+        for id in [json!(null), json!(5)] {
+            assert!(matches!(router.route(ch, &call(&id)).await, Routed::Sidecar), "{ch} {id}");
+        }
+        assert!(matches!(router.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
+        assert!(matches!(off.route(ch, &call(&json!("a"))).await, Routed::Sidecar), "{ch}");
+        let env = envelope(router.route(ch, &call(&json!("unc"))).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
+    }
+    assert_eq!(router.rust_handled() + off.rust_handled(), 0);
+}
+
+/// 검증에 걸린 `wipDiff` 는 git 도(저장소 경로가 없는 곳 — 띄웠다면 GIT 오류가 난다) 취소 레지스트리도 건드리지 않고 `rust_handled` 에도 세지 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 적대적_wip_diff_요청은_git_을_띄우지_않는다() {
+    let router = Router::new(true, false, mirror_of(&[("a", Path::new("/nonexistent-antler-wip"))]));
+    for (args, want) in [
+        (json!(["a"]), "invalid area"),
+        (json!(["a", null]), "invalid area"),
+        (json!(["a", { UNDEFINED_ARG: true }]), "invalid area"),
+        (json!(["a", { "area": "untracked", "path": "x" }]), "invalid path"),
+        (json!(["a", { "area": "untracked", "path": ".git/config" }]), "invalid path"),
+        (json!(["a", { "area": "unstaged", "path": "GIT~1/config" }]), "invalid path"),
+        (json!(["a", { "area": "unstaged", "path": "../x" }]), "invalid path"),
+        (json!(["a", { "area": "staged", "path": "a", "oldPath": null }]), "invalid path"),
+    ] {
+        let env = envelope(router.route("git:wipDiff", &args).await);
+        assert_eq!((env["ok"].clone(), env["code"].clone(), env["error"].clone()), (json!(false), json!("ERROR"), json!(want)), "{args}");
+    }
+    assert_eq!(router.rust_handled(), 0, "거부된 요청은 처리한 것으로 세지 않는다");
+    // 검증을 통과한 요청은 git 이 실패한다(경로가 없다)
+    let env = envelope(router.route("git:wipDiff", &json!(["a", { "area": "unstaged", "path": "a.txt" }])).await);
+    assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("GIT")), "{env}");
+    let env = envelope(router.route("git:wipStatus", &json!(["a"])).await);
+    assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("GIT")), "{env}");
+    assert_eq!(router.rust_handled(), 2);
+}
+
+/// untracked diff 허용 목록의 수명: `wipStatus` 가 채우고, 저장소가 미러에서 빠지거나(저장소 제거) 대상이 바뀌면 지운다(TS `forgetWip`). 앱 종료(`shutdown`)에서도 비운다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn untracked_허용_목록은_저장소가_미러에서_빠지거나_대상이_바뀌면_지워진다() {
+    let tmp = TempDir::new("wipallow");
+    let dir = import_at(tmp.0.join("r"), "empty");
+    let other = import_at(tmp.0.join("other"), "empty");
+    fs::write(dir.join("u.txt"), "u\n").unwrap();
+    fs::write(other.join("u.txt"), "other\n").unwrap();
+    let m = mirror_of(&[("r", dir.as_path())]);
+    let router = Router::new(true, false, m.clone());
+    let untracked = json!({ "area": "untracked", "path": "u.txt" });
+    let denied = |env: &Value| (env["ok"].clone(), env["error"].clone()) == (json!(false), json!("invalid path"));
+    // wipStatus 전에는 거부하고, 이후엔 보고된 경로만 연다
+    assert!(denied(&wip_diff_of(&router, "r", untracked.clone()).await));
+    assert_eq!(wip_status_of(&router, "r").await["data"]["untracked"], json!(["u.txt"]));
+    assert_eq!(wip_diff_of(&router, "r", untracked.clone()).await["ok"], true);
+    assert!(denied(&wip_diff_of(&router, "r", json!({ "area": "untracked", "path": "GIT~1/config" })).await));
+    // 저장소를 지우면(미러에서 빠지면) 목록도 지워진다 — 같은 id 로 다시 추가돼도 wipStatus 전에는 거부다
+    assert!(m.apply(2, vec![]));
+    router.on_mirror_changed();
+    assert!(m.apply(3, vec![MirrorRepo { id: "r".into(), kind: "local".into(), path: dir.to_string_lossy().into_owned(), distro: None, ssh_host: None }]));
+    router.on_mirror_changed();
+    assert!(denied(&wip_diff_of(&router, "r", untracked.clone()).await), "미러에서 빠졌다 돌아온 저장소에 낡은 허용 목록이 남았다");
+    assert_eq!(wip_status_of(&router, "r").await["ok"], true);
+    assert_eq!(wip_diff_of(&router, "r", untracked.clone()).await["ok"], true);
+    // 같은 id 의 대상(경로)이 바뀌면 `on_mirror_changed` 가 불리기 전에도 낡은 목록을 쓰지 않는다(다른 저장소의 보고를 새 저장소에 적용하지 않는다)
+    assert!(m.apply(4, vec![MirrorRepo { id: "r".into(), kind: "local".into(), path: other.to_string_lossy().into_owned(), distro: None, ssh_host: None }]));
+    assert!(denied(&wip_diff_of(&router, "r", untracked.clone()).await), "대상이 바뀐 저장소에 낡은 허용 목록을 썼다");
+    assert_eq!(wip_status_of(&router, "r").await["ok"], true);
+    assert!(wip_diff_of(&router, "r", untracked.clone()).await["data"].to_string().contains("other"));
+    // 종료하면 비운다
+    router.shutdown();
+    assert!(denied(&wip_diff_of(&router, "r", untracked).await));
+}
+
+/// 실패한 `wipStatus` 는 허용 목록을 바꾸지 않는다(TS 는 성공했을 때만 `untrackedAllow.set`) — 이전 보고가 그대로다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 실패한_wip_status_는_허용_목록을_바꾸지_않는다() {
+    let tmp = TempDir::new("wipallowfail");
+    let dir = import_at(tmp.0.join("r"), "empty");
+    fs::write(dir.join("u.txt"), "u\n").unwrap();
+    let router = Router::new(true, false, mirror_of(&[("r", dir.as_path())]));
+    assert_eq!(wip_status_of(&router, "r").await["ok"], true);
+    // 이름에 `=` 가 든 드라이버를 심으면 다음 wipStatus 는 거부된다(GIT) — 이전 목록은 남지만 wipDiff 자체도 같은 가드에 막힌다
+    assert!(raw_git(&dir).args(["config", "filter.a=b.clean", "cat"]).status().unwrap().success());
+    fs::write(dir.join("v.txt"), "v\n").unwrap();
+    let env = wip_status_of(&router, "r").await;
+    assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("GIT")), "{env}");
+    // 가드를 풀면 이전(성공한) 보고 u.txt 만 열리고 v.txt 는 새 wipStatus 전까지 거부다
+    assert!(raw_git(&dir).args(["config", "--unset", "filter.a=b.clean"]).status().unwrap().success());
+    assert_eq!(wip_diff_of(&router, "r", json!({ "area": "untracked", "path": "u.txt" })).await["ok"], true);
+    let env = wip_diff_of(&router, "r", json!({ "area": "untracked", "path": "v.txt" })).await;
+    assert_eq!((env["ok"].clone(), env["error"].clone()), (json!(false), json!("invalid path")), "{env}");
+}
+
+/// `wipStatus` 는 첫 로그 페이지 문(`repos:watch` 가 닫는다)이 열릴 때까지 기다린다(TS `afterFirstPage`). `wipDiff` 는 기다리지 않는다
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wip_status_는_첫_페이지_문이_열릴_때까지_기다리고_wip_diff_는_기다리지_않는다() {
+    let tmp = TempDir::new("wipgate");
+    let dir = import_at(tmp.0.join("r"), "empty");
+    fs::write(dir.join("u.txt"), "u\n").unwrap();
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("b", dir.as_path())])));
+    assert_eq!(wip_status_of(&router, "b").await["ok"], true, "문이 없는 저장소는 바로 간다");
+    assert!(matches!(router.route("repos:watch", &json!(["b"])).await, Routed::Sidecar));
+    assert!(router.repo_state().is_armed("b"));
+    assert_eq!(wip_diff_of(&router, "b", json!({ "area": "untracked", "path": "u.txt" })).await["ok"], true, "diff 는 문과 무관하다(이미 보고된 경로)");
+    let r = router.clone();
+    let pending = tokio::spawn(async move { envelope(r.route("git:wipStatus", &json!(["b"])).await) });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(!pending.is_finished(), "문이 닫혀 있는 동안 wipStatus 가 끝났다");
+    router.note_sink()(NoteOp::FirstPage, "b");
+    let env = tokio::time::timeout(std::time::Duration::from_secs(60), pending).await.expect("문이 열리면 끝나야 한다").unwrap();
+    assert_eq!(env["ok"], true, "{env}");
+}
+
+/// 같은 저장소의 진행 중 `wipStatus` 는 하나로 합쳐진다 — 동시에 보내도 결과가 같고 서로 막지 않는다. 한쪽 취소가 다른 쪽을 죽이지 않는다(모두 떠났을 때만 프로세스에 닿는다)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 같은_저장소의_wip_status_는_합쳐지고_한쪽_취소가_다른_쪽을_죽이지_않는다() {
+    let tmp = TempDir::new("wipjoin");
+    let dir = import_at(tmp.0.join("r"), "empty");
+    fs::write(dir.join("u.txt"), "u\n").unwrap();
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("b", dir.as_path())])));
+    let calls: Vec<_> = (0..4)
+        .map(|i| {
+            let r = router.clone();
+            tokio::spawn(async move { envelope(r.route("git:wipStatus", &json!(["b", format!("join{i}")])).await) })
+        })
+        .collect();
+    // 첫 호출이 등록된 뒤 하나를 취소한다
+    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    assert!(matches!(router.route("req:cancel", &json!(["join1"])).await, Routed::Sidecar));
+    for (i, c) in calls.into_iter().enumerate() {
+        let env = tokio::time::timeout(std::time::Duration::from_secs(60), c).await.expect("끝나야 한다").unwrap();
+        if i == 1 {
+            // 타이밍에 따라 이미 끝났을 수도 있다
+            assert!(env["ok"] == true || env["code"] == "ABORTED", "{env}");
+        } else {
+            assert_eq!((env["ok"].clone(), env["data"]["untracked"].clone()), (json!(true), json!(["u.txt"])), "호출 {i}: {env}");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 등록_전에_온_cancel_은_작업_트리_요청을_git_없이_취소한다() {
+    let router = Router::new(true, false, mirror_of(&[("a", Path::new("/nonexistent-antler-wip"))]));
+    for (i, (ch, args)) in [("git:wipStatus", json!(["a"])), ("git:wipDiff", json!(["a", { "area": "unstaged", "path": "a.txt" }]))].into_iter().enumerate() {
+        let id = format!("early{i}");
+        assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+        let mut call = args.as_array().unwrap().clone();
+        call.push(json!(id));
+        // git 을 띄웠다면 경로가 없어 GIT 이 난다 — ABORTED 면 띄우지 않은 것이다
+        let env = envelope(router.route(ch, &Value::Array(call)).await);
+        assert_eq!(env["code"], "ABORTED", "{ch}: {env}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn 진행_중_작업_트리_요청을_취소해도_멈추지_않는다() {
+    let tmp = TempDir::new("wipcancel");
+    let dir = import_at(tmp.0.join("r"), "empty");
+    fs::create_dir_all(dir.join("bulk")).unwrap();
+    for k in 0..3_000 {
+        fs::write(dir.join("bulk").join(format!("f{k}")), format!("{k}\n")).unwrap();
+    }
+    // 8MB 를 넘는 untracked 파일(diff 가 오래 걸리도록)
+    fs::write(dir.join("big.txt"), "line of text\n".repeat(900_000)).unwrap();
+    let router = Arc::new(Router::new(true, false, mirror_of(&[("b", dir.as_path())])));
+    assert_eq!(wip_status_of(&router, "b").await["ok"], true);
+    for (i, (ch, args)) in [("git:wipStatus", json!(["b"])), ("git:wipDiff", json!(["b", { "area": "untracked", "path": "big.txt", "full": true }]))].into_iter().enumerate() {
+        let id = format!("slow{i}");
+        let mut call = args.as_array().unwrap().clone();
+        call.push(json!(id));
+        let r = router.clone();
+        let task = tokio::spawn(async move { envelope(r.route(ch, &Value::Array(call)).await) });
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+        let env = tokio::time::timeout(std::time::Duration::from_secs(60), task).await.expect("취소 뒤에도 끝나야 한다").unwrap();
+        // 타이밍에 따라 이미 끝났을 수도 있다 — 어느 쪽이든 형식이 맞아야 한다
+        match env["ok"].as_bool() {
+            Some(true) => {}
+            _ => assert_eq!(env["code"], "ABORTED", "{ch}: {env}"),
+        }
+    }
+    // 취소한 뒤에도 같은 요청을 다시 받을 수 있다(슬롯·합치기 표가 풀렸다)
+    assert_eq!(wip_status_of(&router, "b").await["data"]["counts"]["untracked"], 3_001);
+    assert_eq!(wip_diff_of(&router, "b", json!({ "area": "untracked", "path": "bulk/f7" })).await["data"]["hunks"].as_array().map(Vec::len), Some(1));
+}
+
+/// 소스 검사: ① git `-c` 인자(`"-c…` 리터럴)를 만드는 제품 코드는 `wip.rs`(저장소가 정한 값이 들어가는 유일한 곳)와 상수만 쓰는 `exec/common.rs`·`fetch/guard.rs` 뿐이다.
+/// ② `FilterGuard::none()` 의 제품 코드 사용은 `wip.rs` 뿐이다(가드를 건너뛰는 길이 없다). ③ wip 의 argv 빌더는 `&FilterGuard` 를 필수 인자로 받고, `--no-index` 는 한 곳에만 있으며,
+/// 파일·status 를 읽는 호출은 `filter_overrides` 로 만든 가드를 쓴다. 가드를 읽는 곳(`FilterGuard::args`)은 `wip.rs` 의 `guarded` 와 `lfs.rs` 의 `no_index_args` 둘뿐이다
+#[test]
+fn c_인자는_wip_밖에서_만들지_않고_작업_트리_읽기는_가드를_필수로_받는다() {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    walk(&src, &mut files);
+    let mut dash_c = Vec::new();
+    let mut none_users = Vec::new();
+    let mut args_readers = Vec::new();
+    for f in &files {
+        let rel = f.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+        let text = fs::read_to_string(f).unwrap().replace("\r\n", "\n");
+        // 파일 끝의 시험 모듈은 제외한다(적대적 입력 `"-c"` 등이 든다)
+        let body = text.split("\n#[cfg(test)]\nmod ").next().unwrap();
+        // jira 의 `orderBy=-created` 같은 git 과 무관한 문자열은 git 모듈이 아니다
+        if !rel.starts_with("jira/") && !rel.starts_with("github/") && body.contains("\"-c") {
+            dash_c.push(rel.clone());
+        }
+        if body.contains("FilterGuard::none()") {
+            none_users.push(rel.clone());
+        }
+        if body.contains("guard.args()") {
+            args_readers.push(rel.clone());
+        }
+    }
+    dash_c.sort();
+    assert_eq!(dash_c, ["git/exec/common.rs", "git/fetch/guard.rs", "git/wip.rs"], "`-c` 인자를 만드는 제품 코드가 늘었다 — 저장소가 정한 값이 전역 옵션 자리에 들어가는 곳은 wip.rs 뿐이어야 한다");
+    assert_eq!(none_users, ["git/wip.rs"], "FilterGuard::none() 을 wip.rs 밖에서 쓰면 가드를 건너뛴다");
+    args_readers.sort();
+    assert_eq!(args_readers, ["git/lfs.rs", "git/wip.rs"]);
+
+    let wip = fs::read_to_string(src.join("git/wip.rs")).unwrap().replace("\r\n", "\n");
+    let body = wip.split("\n#[cfg(test)]\nmod ").next().unwrap();
+    assert!(body.contains("pub fn wip_status_args(guard: &FilterGuard)"), "wip_status_args 는 가드를 필수 인자로 받아야 한다");
+    assert!(body.contains("pub fn wip_diff_args(guard: &FilterGuard, req: &WipDiffRequest)"), "wip_diff_args 는 가드를 필수 인자로 받아야 한다");
+    assert_eq!(body.matches("WIP_STATUS_ARGS").count(), 2, "status 인자 상수는 import 하나와 wip_status_args 한 곳에서만 쓴다");
+    assert_eq!(body.matches("\"--no-index\"").count(), 1, "--no-index 인자는 wip_diff_args 한 곳에만 있다");
+    assert_eq!(body.matches("\"--cached\"").count(), 1);
+    assert_eq!(body.matches("guard.args().to_vec()").count(), 1, "가드의 -c 를 argv 에 붙이는 곳은 guarded 하나다");
+    // git 을 부르는 읽기(pump)는 두 곳이고, 각각 filter_overrides 로 만든 가드를 만든 argv 로만 부른다
+    assert_eq!(body.matches("pump(exec,").count(), 2);
+    assert_eq!(body.matches("&wip_status_args(&guard)").count(), 1);
+    assert_eq!(body.matches("&wip_diff_args(&guard, req)").count(), 1);
+    assert_eq!(body.matches("filter_overrides(exec, repo_path, opts).await?").count(), 2, "status·diff 모두 가드를 조회한다");
+    // 가드 조회가 diff 의 git 호출보다 앞선다
+    let diff_fn = body.split("pub async fn wip_file_diff").nth(1).expect("wip_file_diff");
+    assert!(diff_fn.find("filter_overrides(").unwrap() < diff_fn.find("pump(exec,").unwrap());
+    assert!(diff_fn.find("assert_no_link_escape(").unwrap() < diff_fn.find("filter_overrides(").unwrap(), "링크 확인이 열기 전(가드 조회 앞)이다");
+    // 라우터는 인자를 만들지 않는다
+    let router = fs::read_to_string(src.join("router.rs")).unwrap().replace("\r\n", "\n");
+    let rbody = router.split("\n#[cfg(test)]\nmod ").next().unwrap();
+    assert!(!rbody.contains("wip_status_args(") && !rbody.contains("wip_diff_args("));
+}
+
 // ── git:fetch ──────────────────────────────────────────
 
 /// 확인 창 응답(`reply`)·확인 중 실행할 git(`during`)을 정하고, 확인 횟수·변경 알림·승인 요청을 세는 호스트
