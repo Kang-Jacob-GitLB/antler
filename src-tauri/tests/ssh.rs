@@ -16,7 +16,7 @@ use antler_lib::git::exec::ssh::config::{list_hosts, load_ssh_config, Ctx, RealF
 use antler_lib::git::exec::ssh::quote::build_remote_command;
 #[cfg(feature = "test-hooks")]
 use antler_lib::git::exec::ssh::is_read_ahead_exceeded;
-use antler_lib::git::exec::ssh::{SshExecutor, SshOptions, SshPool, SshStream, SHELL_PROBE};
+use antler_lib::git::exec::ssh::{SftpError, SshExecutor, SshOptions, SshPool, SshStream, SHELL_PROBE};
 use antler_lib::repos::env::test_ssh_env;
 use antler_lib::git::exec::{ExecError, GitExecutor, RunOpts, RunResult, GIT_ENV};
 #[cfg(feature = "test-hooks")]
@@ -37,6 +37,7 @@ mod server;
 mod spike;
 
 use common::{known_hosts_line, make_linear_repo, make_repo, openssh_no_comment, wait_for, Home, TempDir};
+use server::fake_sftp::{FakeTree, Sftp};
 use server::{new_key, unquote, ExecMode, Opts, Shell, TestServer};
 
 /// 테스트 프로세스 환경 격리(`tests/exec.rs` 의 `isolate` 와 같다). 서버 쪽 git 과 저장소 준비용 git 이 사용자의 전역 설정을 읽지 않게 한다
@@ -840,8 +841,10 @@ fn russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다() 
     let mut files = Vec::new();
     rust_sources(&src, &mut files);
     // (이름, 허용되는 파일 이름들) — 빈 목록이면 어디에도 쓰지 않는다
-    let rules: [(&str, &[&str]); 15] = [
+    let rules: [(&str, &[&str]); 16] = [
         ("connect_stream", &["connection.rs"]),
+        // SFTP 하위 시스템 요청은 한 곳(open_sftp)에서만
+        ("request_subsystem", &["connection.rs"]),
         ("client::connect(", &[]),
         ("channel_open_direct_tcpip", &["connection.rs"]),
         ("authenticate_password", &[]),
@@ -867,6 +870,14 @@ fn russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다() 
         }
         assert!(!imports_russh_connect(&text), "{} 가 russh 의 connect 를 이름으로 들여온다(`use russh::client::connect;` 후 `connect(` 로 clippy 규칙·위 검사를 피할 수 있다)", f.display());
     }
+}
+
+#[test]
+fn 하위_시스템_요청은_connection_rs_에서_한_번만_sftp_로_한다() {
+    let text = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/git/exec/ssh/connection.rs")).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with("//")).filter(|l| mentions(l, "request_subsystem(")).collect();
+    assert_eq!(lines.len(), 1, "request_subsystem( 출현: {lines:?}");
+    assert!(lines[0].contains("\"sftp\""), "하위 시스템 이름은 \"sftp\" 리터럴이어야 한다: {}", lines[0]);
 }
 
 /// 줄에 `api` 가 식별자 경계에서 시작하는가(핸들러 콜백 `server_channel_open_x11` 같은 이름은 `channel_open_x11` 호출로 보지 않는다)
@@ -1482,6 +1493,260 @@ async fn 잡은_연결은_다른_미러_변경_retain_에_끊기지_않고_놓�
     assert!(pool.retain(&std::collections::HashSet::new()).is_empty());
     assert_eq!(run(guard.executor(), &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0);
     assert_eq!(e.server.connections(), 1, "연결이 다시 맺어지지 않았다");
+    drop(guard);
+    assert!(pool.hosts().is_empty());
+    wait_for("연결 종료", || e.server.open_connections() == 0).await;
+}
+
+// ── 원격 폴더 목록(Phase 6b PR 4b): SFTP 하위 시스템 ─────────────────────────────────
+
+/// TS sshRemoteDir.test.ts 의 가상 원격과 같은 모양: /home/tester/{work/{app(.git), lib, 링크들, .hidden}, .hidden, notes.txt}
+fn work_tree() -> FakeTree {
+    let mut t = FakeTree::new("/home/tester");
+    t.dir("/home/tester/work/app/.git").dir("/home/tester/work/lib").dir("/home/tester/.hidden").file("/home/tester/notes.txt");
+    t.file("/home/tester/work/note.txt").dir("/home/tester/work/.hidden");
+    // 폴더를 가리키는 링크는 폴더로, 파일·끊어진 링크는 폴더가 아니다
+    t.link("/home/tester/work/zlink", "/home/tester/work/lib").link("/home/tester/work/filelink", "/home/tester/notes.txt").link("/home/tester/work/broken", "/nope");
+    t
+}
+
+async fn sftp_env(tree: &Arc<FakeTree>) -> Env {
+    let t = tree.clone();
+    Env::with(move |o| o.sftp = Sftp::Tree(t)).await
+}
+
+fn names(l: &antler_lib::repos::scan::RemoteDirListing) -> Vec<&str> {
+    l.dirs.iter().map(|d| d.name.as_str()).collect()
+}
+
+#[tokio::test]
+async fn sftp_목록은_홈과_경로를_풀어_폴더만_이름순으로_돌려주고_셸_명령은_보내지_않는다() {
+    let tree = Arc::new(work_tree());
+    let e = sftp_env(&tree).await;
+    let ex = e.ex();
+    for p in ["", "~", "  ~  "] {
+        let r = ex.list_dirs(p, None).await.unwrap();
+        assert_eq!((r.path.as_str(), r.parent.as_deref(), r.is_repo, r.truncated), ("/home/tester", Some("/home"), false, false), "{p:?}");
+        assert_eq!(names(&r), ["work"], "숨김 폴더와 파일은 뺀다");
+    }
+    let w = ex.list_dirs("~/work", None).await.unwrap();
+    assert_eq!(w.path, "/home/tester/work");
+    assert_eq!(
+        w.dirs.iter().map(|d| (d.name.as_str(), d.is_repo)).collect::<Vec<_>>(),
+        [("app", Some(true)), ("lib", Some(false)), ("zlink", Some(false))],
+        "폴더 링크는 폴더, 파일 링크·끊어진 링크는 제외"
+    );
+    let app = ex.list_dirs("/home/tester/work/app", None).await.unwrap();
+    assert!(app.is_repo && app.dirs.iter().all(|d| d.name != ".git"));
+    let root = ex.list_dirs("/", None).await.unwrap();
+    assert_eq!((root.path.as_str(), root.parent.as_deref()), ("/", None));
+    assert_eq!(names(&root), ["home"]);
+    // `..` 는 서버의 realpath 가 정리한다
+    assert_eq!(ex.list_dirs("~/work/lib/..", None).await.unwrap().path, "/home/tester/work");
+    // scan_from_listing(PR 4a)이 그대로 소비한다
+    let scan = antler_lib::repos::scan::scan_from_listing(&w);
+    assert_eq!(scan.repos.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(), ["/home/tester/work/app"]);
+    // 같은 연결 하나·셸 명령은 연결 직후의 셸 확인뿐·쓰기 계열 SFTP 요청 없음·채널은 닫혔다
+    assert_eq!(e.server.connections(), 1);
+    assert_eq!(e.server.exec_log().iter().filter(|c| c.as_str() != SHELL_PROBE && !c.starts_with("subsystem:")).count(), 0, "{:?}", e.server.exec_log());
+    assert_eq!(tree.counts.unsupported.load(std::sync::atomic::Ordering::SeqCst), 0);
+    wait_for("SFTP 채널 닫힘", || e.server.sftp_open() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_없는_폴더는_오류이고_채널과_슬롯은_돌아온다() {
+    let tree = Arc::new(work_tree());
+    let e = sftp_env(&tree).await;
+    let ex = e.ex();
+    let started = Instant::now();
+    let err = ex.list_dirs("/nope", None).await.unwrap_err();
+    assert!(matches!(err, SftpError::Failed(ref m) if m.contains("No such file")), "{err:?}");
+    // 파일을 열면 opendir 이 실패한다
+    assert!(matches!(ex.list_dirs("/home/tester/notes.txt", None).await, Err(SftpError::Failed(_))));
+    // 채널 닫힘 확인을 기다리느라 슬롯을 오래 쥐지 않는다(russh 는 우리가 보낸 close 뒤의 서버 close 응답을 알리지 않는다 — connection.rs 의 close_split)
+    assert!(started.elapsed() < Duration::from_millis(2500), "{:?}", started.elapsed());
+    wait_for("SFTP 채널 닫힘", || e.server.sftp_open() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_를_막은_서버는_unavailable_이고_같은_연결의_run_은_계속_된다() {
+    let e = Env::new().await;
+    let ex = e.ex();
+    let err = ex.list_dirs("~", None).await.unwrap_err();
+    assert!(matches!(err, SftpError::Unavailable(_)), "{err:?}");
+    assert!(err.to_string().contains("SFTP") && err.to_string().contains("직접 입력"), "{err}");
+    wait_for("거부된 채널이 서버에서 닫힘", || e.server.lingering_channels() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    assert_eq!(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap().code, 0);
+    assert_eq!(e.server.connections(), 1);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_목록은_2000개_상한과_앞_200개의_저장소_확인을_지킨다() {
+    let mut t = FakeTree::new("/home/tester");
+    for i in 0..2500 {
+        t.dir(&format!("/home/tester/big/d{i:04}"));
+    }
+    t.dir("/home/tester/big/d0007/.git");
+    let tree = Arc::new(t);
+    let e = sftp_env(&tree).await;
+    let ex = e.ex();
+    let r = ex.list_dirs("~/big", None).await.unwrap();
+    assert_eq!(r.dirs.len(), 2000);
+    assert!(r.truncated);
+    assert_eq!(r.dirs[0].name, "d0000");
+    assert_eq!(r.dirs[1999].name, "d1999", "서버 순서의 앞 2000개를 남긴다");
+    assert!(r.dirs[..200].iter().all(|d| d.is_repo.is_some()) && r.dirs[200..].iter().all(|d| d.is_repo.is_none()));
+    assert_eq!(r.dirs[7].is_repo, Some(true));
+    assert_eq!(tree.counts.stat.load(std::sync::atomic::Ordering::SeqCst), 200, "stat 은 확인 상한만큼만");
+    // 확인하지 못한 폴더가 있으면 scan_from_listing 이 truncated 로 알린다
+    assert!(antler_lib::repos::scan::scan_from_listing(&r).truncated);
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_점_항목만_끝없이_보내는_서버는_오류로_끝나고_채널과_슬롯은_돌아온다() {
+    let mut t = work_tree();
+    t.dots_only = true;
+    let e = sftp_env(&Arc::new(t)).await;
+    let ex = e.ex();
+    let started = Instant::now();
+    let err = ex.list_dirs("~/work", None).await.unwrap_err();
+    assert!(matches!(err, SftpError::Failed(ref m) if m.contains("새 항목 없는")), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(5), "연속 2회에서 끝나야 한다: {:?}", started.elapsed());
+    wait_for("SFTP 채널 닫힘", || e.server.sftp_open() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_truncated_경계는_ts_와_같다_점_항목은_세지_않고_파일도_센다() {
+    // ssh2 의 readdir 는 `.`·`..` 를 걷어내고, TS 의 truncated 는 `entries.length > 2000`(파일 포함)이다. 서버는 `.`·`..` 를 항상 보낸다
+    let mut t = FakeTree::new("/home/tester");
+    for i in 0..2000 {
+        t.dir(&format!("/home/tester/exact/d{i:04}"));
+    }
+    t.dir("/home/tester/files/d0").file("/home/tester/files/f0");
+    for i in 0..1999 {
+        t.file(&format!("/home/tester/files/f{:04}", i + 1));
+    }
+    let e = sftp_env(&Arc::new(t)).await;
+    let ex = e.ex();
+    let exact = ex.list_dirs("~/exact", None).await.unwrap();
+    assert_eq!((exact.dirs.len(), exact.truncated), (2000, false), "정확히 2000개면 잘리지 않는다");
+    // 폴더 1개 + 파일 2000개 = 항목 2001개: 폴더는 1개뿐이어도 TS 처럼 truncated
+    let files = ex.list_dirs("~/files", None).await.unwrap();
+    assert_eq!((files.dirs.len(), files.truncated), (1, true));
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_서버가_보낸_이름과_경로는_걸러낸다() {
+    let mut t = work_tree();
+    // 경로 조각이 아닌 이름·NUL·너무 긴 이름은 폴더 후보가 아니다. 정상 이름은 남는다
+    t.extra_entries = [("a/b", 0o040_755), ("../x", 0o040_755), ("x\0y", 0o040_755), (&"n".repeat(5000), 0o040_755), ("ok", 0o040_755)].map(|(n, p)| (n.to_string(), p)).into();
+    let e = sftp_env(&Arc::new(t)).await;
+    let ex = e.ex();
+    let r = ex.list_dirs("~/work", None).await.unwrap();
+    assert_eq!(names(&r), ["app", "lib", "ok", "zlink"]);
+    ex.dispose();
+
+    for bad in ["relative/path", "", "/a\0b", "../x"] {
+        let mut t = work_tree();
+        t.realpath_override = Some(bad.to_string());
+        let e = sftp_env(&Arc::new(t)).await;
+        let ex = e.ex();
+        let err = ex.list_dirs("~", None).await.unwrap_err();
+        assert!(matches!(err, SftpError::Failed(ref m) if m.contains("올바르지 않은 경로")), "{bad:?}: {err:?}");
+        ex.dispose();
+    }
+}
+
+#[tokio::test]
+async fn sftp_경로_검사는_연결하기_전에_거부한다() {
+    let tree = Arc::new(work_tree());
+    let e = sftp_env(&tree).await;
+    let ex = e.ex();
+    for bad in ["/a\0b".to_string(), "a".repeat(4097)] {
+        assert!(matches!(ex.list_dirs(&bad, None).await, Err(SftpError::Failed(_))));
+    }
+    assert_eq!(e.server.connections(), 0, "연결을 맺지 않았다");
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_응답이_없는_서버는_시간_제한에서_끝나고_채널을_닫는다() {
+    let e = Env::with(|o| o.sftp = Sftp::Silent).await;
+    let ex = e.home.executor_with("test", |o| o.timeouts.sftp = Duration::from_millis(800));
+    let started = Instant::now();
+    let err = ex.list_dirs("~", None).await.unwrap_err();
+    assert!(matches!(err, SftpError::Failed(ref m) if m.contains("안에 끝나지")), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    wait_for("SFTP 채널 닫힘", || e.server.sftp_open() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_취소하면_바로_끝나고_채널을_닫고_슬롯을_돌려준다() {
+    let e = Env::with(|o| o.sftp = Sftp::Silent).await;
+    let ex = e.ex();
+    let token = CancellationToken::new();
+    let t2 = token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        t2.cancel();
+    });
+    let started = Instant::now();
+    assert_eq!(ex.list_dirs("~", Some(&token)).await, Err(SftpError::Aborted));
+    assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+    wait_for("SFTP 채널 닫힘", || e.server.sftp_open() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    // 이미 취소된 토큰은 연결도 맺지 않는다
+    assert_eq!(ex.list_dirs("~", Some(&token)).await, Err(SftpError::Aborted));
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_잘못된_응답을_쏟아내는_서버도_같은_연결의_run_을_멈추지_않는다() {
+    // 패킷 길이가 상한을 넘으면 크레이트의 읽기 태스크가 끝난다. 서버는 그 뒤에도 계속 보낸다 — 채널을 비우지 않으면 세션 루프가 멈춘다(R1)
+    let e = Env::with(|o| o.sftp = Sftp::Garbage).await;
+    let ex = e.home.executor_with("test", |o| o.timeouts.sftp = Duration::from_secs(5));
+    let list = tokio::spawn({
+        let ex = ex.clone();
+        async move { ex.list_dirs("~", None).await }
+    });
+    // 서버가 쏟아내기 시작한 뒤에 같은 연결에서 git 을 돌린다
+    wait_for("서버가 쓰레기를 보내기 시작", || e.server.sftp_garbage() > 0).await;    let r = tokio::time::timeout(Duration::from_secs(10), run(&ex, &e.repo, &["rev-parse", "HEAD"])).await.expect("run 이 멈췄다").unwrap();
+    assert_eq!(r.code, 0);
+    let started = Instant::now();
+    let err = tokio::time::timeout(Duration::from_secs(20), list).await.expect("목록이 끝나지 않았다").unwrap().unwrap_err();
+    // 첫 응답(init)이 해석되지 않으니 SFTP 를 말하지 못하는 서버로 본다
+    assert!(matches!(err, SftpError::Unavailable(_)), "{err:?}");
+    println!("[spike] 쓰레기 서버: 목록이 {:?} 뒤 오류로 끝남, 서버가 보낸 바이트 {}", started.elapsed(), e.server.sftp_garbage());
+    // 채널 닫기 대기(3초)나 요청 시간 제한(15초)까지 매달리지 않는다
+    assert!(started.elapsed() < Duration::from_secs(2), "{:?}", started.elapsed());
+    wait_for("SFTP 채널 닫힘", || e.server.sftp_open() == 0).await;
+    wait_for("슬롯 반환", || ex.free_slots() == 6).await;
+    assert_eq!(e.server.connections(), 1, "run 과 목록이 같은 연결을 썼다");
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn sftp_는_풀에서_잡은_같은_연결을_쓴다() {
+    let tree = Arc::new(work_tree());
+    let e = sftp_env(&tree).await;
+    let (pool, _home) = pool_for(&e);
+    let guard = pool.hold("test");
+    let (version, listing) = tokio::join!(antler_lib::repos::env::test_ssh_env(&pool, "test"), guard.executor().list_dirs("~/work", None));
+    assert!(version.unwrap().starts_with("git version"));
+    assert_eq!(names(&listing.unwrap()), ["app", "lib", "zlink"]);
+    assert_eq!(e.server.connections(), 1, "연결 테스트와 폴더 목록이 한 연결을 나눠 쓴다");
     drop(guard);
     assert!(pool.hosts().is_empty());
     wait_for("연결 종료", || e.server.open_connections() == 0).await;

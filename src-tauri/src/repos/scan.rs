@@ -39,16 +39,16 @@ pub struct RepoScanResult {
 }
 
 /// TS `RemoteDirListing` 의 하위 폴더 항목. `is_repo` 가 `None` 이면 확인하지 않은 것이다
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDirEntry {
     pub name: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub is_repo: Option<bool>,
 }
 
-/// TS `RemoteDirListing`(SFTP 폴더 목록 — PR 4b 가 만든다)
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// TS `RemoteDirListing`(SFTP 폴더 목록 — `git/exec/ssh/sftp.rs` 가 만든다)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDirListing {
     pub path: String,
@@ -238,17 +238,15 @@ fn sort_keys(s: &str) -> Vec<SortKey> {
         .collect()
 }
 
-/// `a.localeCompare(b)` 의 근사(모듈 문서)
-fn locale_compare(a: &str, b: &str) -> Ordering {
-    sort_keys(a).cmp(&sort_keys(b)).then_with(|| {
-        // 1차가 같을 때만: 처음 다른 대소문자는 소문자가 앞
-        for (x, y) in a.chars().zip(b.chars()) {
-            if x != y && x.to_lowercase().eq(y.to_lowercase()) {
-                return if x.is_lowercase() { Ordering::Less } else { Ordering::Greater };
-            }
-        }
-        Ordering::Equal
-    })
+/// 2차 키: 키와 같은 필터(제어 문자 제외)를 거친 글자마다 소문자(0)·그 밖(1). 사전식으로 비교하면 처음 다른 대소문자는 소문자가 앞이다
+fn case_keys(s: &str) -> Vec<u8> {
+    s.chars().filter(|c| !c.is_ascii_control()).map(|c| u8::from(!c.is_lowercase())).collect()
+}
+
+/// `a.localeCompare(b)` 의 근사(모듈 문서). **전순서**다 — 1차 키 → 대소문자 키 → 원문 바이트순.
+/// 서버(SFTP)가 고른 이름도 정렬하므로 추이성이 깨지면 `sort_by` 가 패닉할 수 있다(`İ`·`i`·`I` 처럼 키가 같은 서로 다른 글자, 키에서 빠지는 제어 문자)
+pub(crate) fn locale_compare(a: &str, b: &str) -> Ordering {
+    sort_keys(a).cmp(&sort_keys(b)).then_with(|| case_keys(a).cmp(&case_keys(b))).then_with(|| a.cmp(b))
 }
 
 #[cfg(test)]
@@ -370,6 +368,31 @@ mod tests {
         let mut v = vec!["b", "A", "a", "_x", "1x", "-y", "B", "a10", "a2"];
         v.sort_by(|a, b| locale_compare(a, b));
         assert_eq!(v, ["_x", "-y", "1x", "a", "A", "a10", "a2", "b", "B"]);
+    }
+
+    #[test]
+    fn 이름순은_전순서다_키가_같은_다른_글자와_제어_문자가_있어도_추이적이고_패닉하지_않는다() {
+        // 키가 같은 서로 다른 글자(İ·i·I)·키에서 빠지는 제어 문자(\x01)·대소문자 변형이 섞인 반례들
+        let names = ["i", "I", "İ", "ı", "a\u{1}b", "ab", "aB", "Ab", "AB", "a\u{1}B", "\u{1}", "", "x\u{7f}", "x", "X", "İi", "iİ", "Ii", "iI", "ǅ", "ǆ", "Ǆ"];
+        for a in names {
+            assert_eq!(locale_compare(a, a), Ordering::Equal, "{a:?}");
+            for b in names {
+                assert_eq!(locale_compare(a, b), locale_compare(b, a).reverse(), "반대칭 {a:?} {b:?}");
+                for c in names {
+                    if locale_compare(a, b) != Ordering::Greater && locale_compare(b, c) != Ordering::Greater {
+                        assert_ne!(locale_compare(a, c), Ordering::Greater, "추이성 {a:?} {b:?} {c:?}");
+                    }
+                }
+            }
+        }
+        // 서로 다른 문자열은 절대 같지 않다(최종 결정자) — 어떤 순서로 섞어도 같은 결과
+        let mut forward: Vec<&str> = names.to_vec();
+        let mut backward: Vec<&str> = names.iter().rev().copied().collect();
+        forward.sort_by(|a, b| locale_compare(a, b));
+        backward.sort_by(|a, b| locale_compare(a, b));
+        assert_eq!(forward, backward);
+        forward.dedup();
+        assert_eq!(forward.len(), names.len());
     }
 
     fn listing(path: &str, is_repo: bool, dirs: &[(&str, Option<bool>)], truncated: bool) -> RemoteDirListing {

@@ -239,6 +239,15 @@ pub fn check_path(kind: &str, path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 원격 폴더 목록(`env:listDir`)의 경로 검사(handlers.ts:233-235). 비어 있어도 된다(홈을 연다). 4096 UTF-16 단위 이하·NUL 없음만 본다 —
+/// SFTP 는 셸을 거치지 않으므로 그 밖의 문자는 서버가 판정한다
+pub fn check_listdir_path(path: &str) -> Result<(), String> {
+    if utf16_len(path) > MAX_PATH_LEN || path.contains('\0') {
+        return Err("잘못된 경로입니다".to_string());
+    }
+    Ok(())
+}
+
 /// SSH 호스트 검사. `src/main/ipc/handlers.ts` 의 `checkEnvInput` 과 같은 규칙이다 — 앞뒤 공백을 지운 값이 비지 않고, 255 UTF-16 단위 이하이고,
 /// 공백(JS `\s`)·NUL 이 없고, `-` 로 시작하지 않는다(옵션으로 읽힐 수 있다). **TS 보다 엄격한 점**: 제어 문자 전체를 거부한다(TS 는 NUL 과 공백류만).
 /// 검사한 값(앞뒤 공백을 지운 것)을 돌려주고 호출자는 이 값만 쓴다 — 검사한 값과 실행기에 넘기는 값이 다르면 ` -x` 같은 값이 `-` 검사를 빠져나간다.

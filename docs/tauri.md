@@ -1680,7 +1680,7 @@ D3 SSH 추가 흐름의 호스트 키는 TOFU 금지 유지 · D4 SFTP 는 `russ
 | 1 | ConfigStore 코어(`config/`): 모델·로드·정화·원자적 저장·검증기·변경 연산 + GitHub 링크 순수 함수 + TS↔Rust 설정 파일 바이트 골든 | 없음 | A | **완료** |
 | 2 | GitHub 캐시 실행 기반: `GithubEnv` 닫힌 타입·`GitExecutor::Github`·init·정확 일치 검사·HEAD 맞추기·fetch 의 github 모드·사용자 네트워크 설정 읽기 | 없음 | B(1 뒤) | |
 | 3 | external 순수 로직·실행기(plan·opener·link, spawn 예외 지점 하나, 파일 관리자) | 없음 | A | **완료** |
-| 4a / 4b | 4a: WSL 목록(레지스트리 관문)·`resolve_env`·로컬 폴더 찾기·`SshPool` 임시 잡기. 4b: SFTP 폴더 목록(D4) | 없음 | A(4b 는 D4 뒤) | **4a 완료**(4b 는 D4 뒤) |
+| 4a / 4b | 4a: WSL 목록(레지스트리 관문)·`resolve_env`·로컬 폴더 찾기·`SshPool` 임시 잡기. 4b: SFTP 폴더 목록(D4, `russh-sftp` 3.0.1 — 스파이크 go) | 없음 | A(4b 는 D4 뒤) | **4a·4b 완료** |
 | 5 | 설정이 필요 없는 채널 4개(`dialog:pickFolder`·`clipboard:writeText`·`code:openLink`·`win:setTitleBarTheme`) | 있음 | B(6a 라우터 PR 뒤) | **완료(코드)** — 아래 "PR 5" |
 | 6 | github kind 의 git **조회**를 Rust 로(미러에 `github` 링크·모든 git 채널의 github 분기·`repos:remove` 가로채기). 감시는 PR 7 | 있음 | 직렬(6a 7b·8, PR 2 뒤) | |
 | 7 | github kind **fetch·감시**를 Rust 로(`runGithub`·첫 fetch 60분·`fetchIfEmpty`·인증 재개·`forgetAndWait`) — 보안 리뷰 집중 | 있음 | 직렬(6 뒤) | |
@@ -1885,6 +1885,53 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 - **감시 게이트가 링크·NT 경로를 따라가지 않는다.** `has_head` 는 `symlink_metadata`(디렉터리 자체가 실제 디렉터리, `HEAD` 가 실제 파일)로 본다 — `exists` 는 링크를 따라가 UNC 를 가리키는 링크면 stat 이 SMB 접속을 일으킨다. 거부 경로는 `is_unc` 에 NT 네임스페이스(`\??\UNC\…`, `fetch::guard::has_nt_namespace`)를 더한 `is_remote_path` 이고 stat **전에** 거른다. notify 는 `follow_symlinks(false)` 로 만든다. **Electron 동작도 같이 바꿨다**: `RepoWatcher.ts` 의 `isWatchableGitDir`(`lstatSync` · NT 접두 정규식 · 디렉터리 링크 거부). 시험 `tests/repoWatcherGate.test.ts`.
 - **`local_git_dirs` 에 취소와 20초 제한.** `DirWatch` 가 아니라 `WatchHost::local_git_dirs(repo_id, cancel)` 가 취소 신호를 받고, 감시가 `CHECK_TIMEOUT` 안에 끝나지 않으면 신호를 취소해 git 을 죽인다(감시 없이 안전망 폴링만 남는다). 저장소를 바꾸면 같은 신호가 취소된다.
 - **WSL 배포판 등록 관문(Electron 판 버그 수정 포함 — PR 설명에 적는다).** WSL 저장소가 활성이면 4초마다 `wsl.exe` 를 불렀는데 등록 확인이 없어, WSL 을 지운 PC 에서 system32 의 스텁이 "WSL 설치" 창을 띄운 일이 실제로 있었다. Rust: `exec::DistroGate`(레지스트리 `registered_distro_names` 의 기억된 답 — `docker-desktop*` 은 사용자 배포판이 아니다, 다시 읽기 `DISTRO_RECHECK` 1분, Windows 가 아니면 막지 않는다)를 `Runtimes::get` 의 WSL 분기에 둬 감시 폴링·`signature` 가 모두 지난다(등록이 없으면 실행기를 내주지 않아 `wsl.exe` 호출 0). **한계**: fetch 서비스의 실행기 생성(`lib.rs` `make_runner`)은 `Result` 를 돌려주지 않아 이번에 관문을 달지 않았다. TS: `hasRegisteredWslDistro` 의 1분 캐시판(`hasRegisteredWslDistroCached`·`cachedProbe`)을 `RepoWatcher`(기준·확인)와 `WslExecutor`(`run`·`stream`)가 쓴다 — 시험이 주입한다(`RepoWatcher` 4번째·`WslExecutor` 2번째 인자).
+### PR 4b — SSH 원격 폴더 목록(SFTP, 앱에 연결하지 않는다)
+
+`src-tauri/src/git/exec/ssh/sftp.rs`(새)·`connection.rs`(`open_sftp`·`sftp_bridge`·`sftp_job`·`Connection::list_dirs`)·`executor.rs`(`SshExecutor::list_dirs`)·`clippy.toml`·`tests/ssh/sftp.rs`(루프백 하네스의 가짜 SFTP 서버). 결과는 `RemoteDirListing`(PR 4a 의 `scan_from_listing` 이 소비하는 형식, 이제 `Serialize` 도 한다). **Electron·사이드카 동작은 그대로**다.
+
+**스파이크(첫 단계) — go.** 결정 D4 대로 `russh-sftp` 3.0.1 을 `russh` 0.65.2(ring) 위에서 돌렸다.
+- **호환**: `russh-sftp` 3.0.1 의 클라이언트는 `russh` 에 의존하지 않는다(`russh` 는 dev-dependency 0.63.2 뿐). `AsyncRead + AsyncWrite` 스트림만 받으므로 0.63 전용 타입에 묶일 일이 없다. 그래도 실제로 확인했다 —
+  루프백 하네스(`tests/ssh/server.rs`)에 `russh_sftp::server` 로 가짜 트리를 서비스하는 SFTP 하위 시스템을 붙여 0.65.2 채널 위에서 `init`→`realpath`→`opendir`→`readdir`→`stat`→`close` 를 돌렸다(`--test ssh` 의 `sftp_*` 11개).
+- **세션 정지(R1)**: 채널 읽기·쓰기는 `connection.rs` 의 `sftp_bridge` 가 **직접** 맡는다(`Channel::split` 의 읽기 반쪽을 항상 비운다 — 클라이언트 쪽 스트림이 죽거나 가득 차도 채널은 계속 비워 버린다).
+  크레이트의 `Channel::into_stream()` 을 넘기지 않은 이유는 둘이다: 스트림이 소유한 채널은 버려지면 비동기로 닫혀 **슬롯을 닫힘 확인 뒤에 돌려주는** 기존 규칙을 지킬 수 없고, 읽기 태스크가 오류로 끝나면 채널을 읽는 주체가 사라진다.
+  크레이트와 채널 사이는 `tokio::io::duplex` 다리다. 시험: 서버가 상한을 넘는 패킷 길이 머리 뒤에 끝없는 쓰레기를 보내(크레이트의 읽기 태스크가 오류로 끝난다) 목록이 실패하는 동안 같은 연결의 `run` 이 제때 끝나고, 목록은 2초 안에 오류로 끝난다.
+  이 시험이 **정리 단계의 R1 정지**를 잡았다 — 읽기를 멈춘 채 `close` 를 보내면 서버가 계속 보내는 중에는 채널 큐가 차서 세션 루프가 멈추고 `close` 요청도 처리되지 못한다(`close` 가 `KILL_TIMEOUT` 2초를 채웠다). 그래서 정리에서는 `close` 를 보내는 동안 **계속 비운다**.
+- **새 크레이트**(`Cargo.lock` 차이와 `cargo tree -i` 로 확인한 목록이다 — 빌드 트리 전체를 전후로 비교한 것은 아니다): `russh-sftp` 3.0.1 과 그 의존 중 새로 잠긴 `dashmap` 6.2.1·`serde_bytes` 0.11.19·`hashbrown` 0.14.5(`dashmap` 용 두 번째 판), 그리고 `wasm32` 전용이라 이 대상에서는 빌드되지 않는 `gloo-timers` 0.4.1.
+  `chrono`·`bytes`·`log`·`thiserror`(2)·`bitflags`·`num-traits` 등은 이미 잠겨 있던 것이다(`chrono` 는 이 크레이트의 일반 의존 트리에는 처음 들어온다). `tokio-util`·`tokio`·`serde` 는 이미 쓰는 판이다.
+
+**구현**
+- **한 연결 재사용**: 폴더 목록은 `run` 과 **같은 연결·같은 채널 슬롯 세마포어**를 쓴다(연결이 없으면 `run` 과 같은 경로로 맺고 셸 확인까지 마친다). `SshPool::hold`(PR 4a)가 잡은 같은 실행기로 부르므로 연결 테스트와 폴더 목록이 한 연결을 나눠 쓴다(시험: 연결 수 1).
+- **채널**: `open_session`(채널 열기 — `open_exec` 와 공용으로 뽑았다: 시간 제한·취소·늦게 열린 채널 정리) → `open_sftp`(**`request_subsystem("sftp")` 는 여기 한 곳에서만** — clippy `disallowed-methods` 에 `Channel::`·`ChannelWriteHalf::`·`client::Session::request_subsystem`(과 `Session::exec`·`request_shell`·`set_env`)을 넣고
+  이 지점만 allow, `tests/ssh.rs` 의 소스 검사에도 `request_subsystem` 규칙을 더했다). 서버가 요청을 거부하거나 응답이 없으면 채널을 정리하고 `SftpError::Unavailable`. 서버발 채널 거부(7종)는 그대로다.
+- **슬롯은 채널을 닫은 뒤에 돌려준다**: 작업 태스크가 채널·슬롯을 쥔다. 호출자가 취소하거나 future 를 버리면(드롭 가드) 취소 신호로 태스크가 다리를 멈추고, `close` 를 보낸 **뒤에** 슬롯을 돌려준다(`close_split`).
+  **서버의 close 응답은 기다리지 않는다** — 확인해 보니 russh 는 우리가 close 를 보낸 뒤 오는 서버의 close 응답을 무시한다(채널 장부에서 이미 지웠다). 그래서 기존 `kill_channel` → `drain_until_closed` 식으로 기다리면 읽기 쪽이 끝나지 않아 항상 `CLOSE_WAIT`(3초)을 채운다.
+  close 요청은 이 연결의 이후 요청보다 먼저 서버로 나가지만 **서버의 채널 해제는 비동기**다 — 이후 채널 열기가 서버의 해제보다 먼저 닿을 수 있어, 서버의 `MaxSessions` 를 넘지 않는 것은 close 순서가 아니라 **여유 슬롯**(연결당 채널 6 < 기본 10)에 의존한다. 실제 sshd 는 하위 시스템 프로세스가 끝나야 세션을 비울 수도 있어 `MaxSessions` 에 잠깐 걸릴 수 있다(루프백 서버에서만 봤다).
+  Phase 5 의 "닫힘 확인 뒤 슬롯 반환" 규칙에서 **벗어난** 부분이다. 대안: EOF 를 먼저 보내고 서버가 스스로 닫는 것(russh 가 알려 주는 쪽)을 잠깐 기다린 뒤 `close_split` 으로 넘어가는 것 — 앱 연결(PR 8)에서 실제 서버로 문제가 보이면 그쪽으로 간다. close 뒤에 서버가 보내는 데이터는 russh 가 큐에 넣지 않고 버린다. 시험: 성공·없는 폴더·거부·시간 초과·취소 뒤 `free_slots() == 6` 과 서버가 본 열린 SFTP 채널 0, 실패 두 번이 2.5초 안에 끝남.
+  (**발견만 하고 손대지 않은 것**: `run`·`stream` 의 취소·상한 초과 경로(`kill_channel` → `drain_until_closed`)도 같은 이유로 슬롯을 `CLOSE_WAIT` 만큼 더 쥐는 것으로 보인다 — 이 PR 범위 밖이라 실측·수정하지 않았다.)
+- **시간**: 전체 한도 `Timeouts::sftp`(기본 30초, 채널 열기 뒤부터 — 시험은 줄인다), 요청 하나 15초(크레이트 기본 10초에서 올림), 채널 열기·하위 시스템 응답 15초. 다리가 "클라이언트 쪽이 끝났다"를 알리면(크레이트의 읽기가 오류로 끝나 스트림이 버려짐) 기다리는 요청이 제 시간 제한까지 매달리지 않고 바로 실패한다.
+- **세션 타입**: 크레이트의 고수준 `SftpSession` 이 아니라 `RawSftpSession` 을 `sftp.rs` 안에서만 만든다. `SftpSession::read_dir` 은 EOF 까지 상한 없이 모으고 `new` 가 `limits@openssh.com` 왕복을 더 하기 때문이다. 쓰는 요청은 `init`·`realpath`·`opendir`·`readdir`·`close`·`stat` 여섯 가지뿐이고
+  쓰기 계열(`open`·`write`·`remove`·`rename` …)은 부르지 않는다(시험 서버는 그 요청에 `OpUnsupported` 로 답하며 횟수를 세고, 시험이 0 을 확인한다).
+- **TS 와 같은 결과**(`remoteDir.ts` `listRemoteDirs`): `~`·`~/x`·빈 문자열은 홈 기준(`.`·`./x`, 공백 제거는 **JS trim**), `realpath` → `readdir` → 숨김(`.` 시작) 제외 → 링크는 `stat` 으로 폴더인지 확인(실패는 폴더 아님) → 서버 순서의 앞 2000개 →
+  이름순(`scan.rs` 의 `locale_compare`) → **정렬 뒤 앞 200개**만 `.git` `stat`(`is_repo: Some`, 나머지 `None` 이라 `scan_from_listing` 이 `truncated` 로 알린다). 이 폴더 자체의 `isRepo` 는 `.git` 항목 유무, 루트면 `parent: null`.
+- **입력 검사**: 경로는 4096 UTF-16 단위 이하·NUL 없음(`mirror::check_listdir_path` — `env:listDir` 의 검사 이식)을 **연결 전에** 거른다(시험: 연결 수 0). **`..` 는 막지 않는다** — SFTP 에는 셸 해석이 없고 읽기만 하며 서버의 `realpath` 가 정리한다(TS 와 같다).
+- **서버 입력은 믿지 않는다**: `realpath` 결과는 절대 경로·NUL 없음·4096 이하여야 하고(UI 로 가서 저장되어 원격 git 명령의 경로가 된다), 폴더 후보 이름이 `/`·NUL 을 품거나 1024 바이트를 넘으면 건너뛴다(stat 경로·`scan_from_listing` 이 내는 저장소 경로에 이어 붙는다).
+  패킷 하나는 256KiB 이하(크레이트가 넘으면 읽기를 끝낸다), 읽는 항목은 20,000개까지(그 뒤는 `truncated`), 항목 없는 `readdir` 응답은 거부하고, `.`·`..` 만 있어 **센 항목이 없는 응답이 연속 2회**여도 같게 오류(끝없이 빈 응답·점 항목만 보내는 서버 방어). 서버 STATUS 문구는 제어 문자·방향/보이지 않는 서식 문자(U+200B–U+200F·U+2028–U+202E·U+2060–U+2069·U+061C·U+FEFF)를 지우고 300자로 잘라 오류에 싣는다. 이름순(`locale_compare`)은 키 → 대소문자 키 → 원문 순의 **전순서**다(서버가 고른 이름이라 추이성이 깨지면 `sort_by` 가 패닉할 수 있다; 로컬 스캔도 같은 함수).
+- **`SftpError`**: `Unavailable`(하위 시스템 거부·`init` 실패·SFTP 3 이 아닌 서버 — PR 8 의 `repos:scan` 은 이때 찾기 없이 그 경로를 받는다)·`Aborted`·`Failed`. 문구는 TS 와 같다("이 서버는 SFTP 를 쓸 수 없어 … 경로를 직접 입력하세요 (사유)").
+
+**시험**: `--lib`(`sftp.rs` 단위 7: 경로 변환·검사·realpath 검사·부모·이름 걸러내기·모드 비트·서버 문구 정리), `--test ssh`(`sftp_*` 13: TS sshRemoteDir.test.ts 의 홈·`~`·`~/work`·루트·없는 폴더·SFTP 거부 + 링크 폴더·파일 링크·끊어진 링크 + 2500개 폴더의 2000 상한·앞 200개 확인·`stat` 횟수 +
+적대 서버(이름·`realpath`)·응답 없음(시간 제한)·취소·쓰레기 쏟아내기(R1)·점 항목만 끝없이 보내는 서버·풀 `hold` 한 연결 공유; 소스 검사: `request_subsystem(` 은 `connection.rs` 에 정확히 1회·`"sftp"` 와 함께). 가짜 서버는 메모리 트리라 Windows 심볼릭 링크 권한이 필요 없다. 사용자의 `~/.ssh`·ssh-agent 는 읽지 않는다(임시 홈).
+
+**TS 와 다른 점**
+- 읽는 항목에 상한(20,000)이 있다 — TS 는 폴더 전체를 읽는다. 넘으면 `truncated`(`isRepo` 도 읽은 범위만 본다). 상한 안에서는 `truncated` 가 TS 와 같다(항목 수 > 2000, 파일·숨김 포함 — TS 의 규칙 그대로).
+- 이름에 `/`·NUL 이 있거나 너무 긴 항목은 건너뛴다(TS 는 그대로 싣는다).
+- 링크·`.git` 의 `stat` 을 32개씩 동시에 보낸다(TS 는 링크는 하나씩, `.git` 은 전부 동시에). 결과와 순서는 같다.
+- 이름순은 `localeCompare` 의 근사다(PR 4a 와 같다).
+- 오류 문구는 Node(`ssh2`)가 아니라 SFTP 서버의 상태 문구(`russh-sftp`)다.
+- `Unavailable` 의 범위: TS 는 `client.sftp()` 의 어떤 실패든 "SFTP 를 쓸 수 없다"로 알린다. Rust 는 채널 열기 실패를 `Failed`(연결·채널 문제)로, 하위 시스템 요청의 거부·시간 초과·전송 오류와 `init` 실패를 `Unavailable` 로 나눈다.
+- 항목 없는 `readdir` 응답은 오류다(ssh2 는 다시 읽는다). `.`·`..` 는 ssh2 처럼 항목 수에 세지 않는다(시험: 2000개 경계).
+
+**남은 위험**: 실제 OpenSSH `sftp-server`·Windows OpenSSH·`internal-sftp` 와는 **붙여 보지 못했다**(루프백 가짜 서버뿐) — 앱 연결(PR 8)에서 사람이 실제 서버로 확인한다. `russh-sftp` 는 서버가 보내는 패킷을 해석하는 새 크레이트다(256KiB·시간 제한으로 막았지만 파서 자체는 신뢰한다).
+`request_subsystem` 의 clippy 금지가 실제로 걸리는 것은 확인했다(`open_sftp` 의 allow 를 잠시 떼자 `use of a disallowed method russh::channels::Channel::request_subsystem` 오류). 소스 검사(`tests/ssh.rs`)를 함께 둔다.
 
 ## Phase 0 에서 확인한 것
 

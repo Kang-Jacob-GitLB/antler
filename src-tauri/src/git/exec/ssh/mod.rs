@@ -5,6 +5,7 @@
 //! - [`quote`]: 원격 명령 인용(`quote.ts`). 원격 로그인 셸에 문자열로 넘기므로 인용이 곧 주입 방어선이다 — 바이트 단위로 TS 와 같아야 한다.
 //!   환경변수는 닫힌 타입(`FetchEnv`)으로만 받는다.
 //! - [`SshExecutor`]: russh 로 원격 git 을 실행한다(`connection.rs` 의 모듈 문서에 방어 목록). 연결 수명·인증·원격 셸 확인.
+//! - `sftp`(비공개): 원격 폴더 목록(`remoteDir.ts`) — SFTP 하위 시스템으로 읽기만 한다(`russh-sftp`, Phase 6b PR 4b). 진입점은 [`SshExecutor::list_dirs`].
 //! - [`win32_path`]: Node `path.win32` 의 작은 이식(설정 값의 경로 정규화).
 //!
 //! 골든: `tests/golden/ssh/{config,knownHosts,quote}.json`·`tests/golden/exec/env.json`(`ssh` 절)을 `src-tauri/tests/ssh_golden.rs` 가 비교한다.
@@ -25,6 +26,7 @@ mod executor;
 mod pool;
 pub mod known_hosts;
 pub mod quote;
+mod sftp;
 mod stream;
 pub mod win32_path;
 
@@ -32,6 +34,7 @@ pub use auth::AgentSetting;
 pub use connection::{EnvFn, SshOptions, Timeouts, DEFAULT_MAX_CHANNELS, SHELL_PROBE};
 pub use executor::SshExecutor;
 pub use pool::SshPool;
+pub use sftp::SftpError;
 pub use stream::{is_read_ahead_exceeded, ReadAheadExceeded, SshStream, STREAM_AHEAD_LIMIT};
 
 /// JS `.` 가 맞추는 코드 단위인가(줄 끝 문자 제외)

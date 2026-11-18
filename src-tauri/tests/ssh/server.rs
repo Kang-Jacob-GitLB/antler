@@ -20,6 +20,10 @@ use russh::server::{self, Auth, Msg, Server as _, Session, VerifiedPublicKey};
 use russh::{Channel, ChannelId, Sig};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
+
+#[path = "sftp.rs"]
+pub mod fake_sftp;
+use fake_sftp::{FakeSftp, Sftp};
 use tokio_util::sync::CancellationToken;
 
 /// 서버 전용 런타임(프로세스 수명)
@@ -110,11 +114,13 @@ pub struct Opts {
     /// 결과는 [`TestServer::server_opens`] 로 본다(클라이언트가 거부해야 한다)
     pub open_server_channels: bool,
     pub exec: ExecMode,
+    /// SFTP 하위 시스템 요청에 답하는 방식(기본: 거부)
+    pub sftp: Sftp,
 }
 
 impl Opts {
     pub fn new(authorized: Vec<PublicKey>) -> Self {
-        Opts { authorized, host_key: None, shell: Shell::Posix, window: 2 * 1024 * 1024, open_server_channels: false, exec: ExecMode::Normal }
+        Opts { authorized, host_key: None, shell: Shell::Posix, window: 2 * 1024 * 1024, open_server_channels: false, exec: ExecMode::Normal, sftp: Sftp::Off }
     }
 }
 
@@ -149,6 +155,12 @@ struct Shared {
     held_opens: AtomicUsize,
     /// 열기 응답을 미룬 세션 채널 중 exec 를 받지 않았고 클라이언트도 닫지 않은 수
     idle_channels: AtomicUsize,
+    /// 지금 열려 있는 SFTP 채널 수(수락 +1, 클라이언트가 채널을 닫거나 연결이 끝나면 -1)
+    sftp_open: AtomicUsize,
+    /// 지금까지 수락한 SFTP 세션 수
+    sftp_sessions: AtomicUsize,
+    /// SFTP 쓰레기 모드가 지금까지 보낸 바이트
+    sftp_garbage: AtomicUsize,
 }
 
 /// 0 허가로 시작하는 세마포어(`Shared` 의 `Default` 를 위해 감싼다)
@@ -187,7 +199,7 @@ impl TestServer {
         let socket = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
         let port = socket.local_addr().expect("addr").port();
         let mut srv =
-            Srv { shared: shared.clone(), authorized: Arc::new(opts.authorized), shell: opts.shell, open_server_channels: opts.open_server_channels, exec: opts.exec };
+            Srv { shared: shared.clone(), authorized: Arc::new(opts.authorized), shell: opts.shell, open_server_channels: opts.open_server_channels, exec: opts.exec, sftp: opts.sftp };
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let running = srv.run_on_socket(Arc::new(config), &socket);
@@ -256,6 +268,21 @@ impl TestServer {
         self.shared.idle_channels.load(Ordering::SeqCst)
     }
 
+    /// 지금 열려 있는 SFTP 채널 수 — 목록이 끝난 뒤 클라이언트가 채널을 **실제로** 닫았는지 본다
+    pub fn sftp_open(&self) -> usize {
+        self.shared.sftp_open.load(Ordering::SeqCst)
+    }
+
+    /// 지금까지 수락한 SFTP 세션 수
+    pub fn sftp_sessions(&self) -> usize {
+        self.shared.sftp_sessions.load(Ordering::SeqCst)
+    }
+
+    /// 쓰레기 모드가 보낸 바이트
+    pub fn sftp_garbage(&self) -> usize {
+        self.shared.sftp_garbage.load(Ordering::SeqCst)
+    }
+
     /// 서버가 받은 direct-tcpip 목적지들
     pub fn tunnels(&self) -> Vec<String> {
         self.shared.tunnels.lock().unwrap().clone()
@@ -286,6 +313,7 @@ struct Srv {
     shell: Shell,
     open_server_channels: bool,
     exec: ExecMode,
+    sftp: Sftp,
 }
 
 impl server::Server for Srv {
@@ -299,6 +327,8 @@ impl server::Server for Srv {
             shell: self.shell,
             open_server_channels: self.open_server_channels,
             exec: self.exec,
+            sftp: self.sftp.clone(),
+            sftp_ids: HashSet::new(),
             auth_counted: false,
             opened: HashSet::new(),
             gated: HashSet::new(),
@@ -315,6 +345,9 @@ struct Conn {
     shell: Shell,
     open_server_channels: bool,
     exec: ExecMode,
+    sftp: Sftp,
+    /// SFTP 서비스 중인 채널 id(닫히면 `sftp_open` 을 줄인다)
+    sftp_ids: HashSet<ChannelId>,
     auth_counted: bool,
     /// exec 를 거부한 채널 id(`lingering_channels` 장부)
     opened: HashSet<ChannelId>,
@@ -332,6 +365,7 @@ impl Drop for Conn {
         self.shared.open.fetch_sub(1, Ordering::SeqCst);
         self.shared.lingering_channels.fetch_sub(self.opened.len(), Ordering::SeqCst);
         self.shared.idle_channels.fetch_sub(self.gated.len(), Ordering::SeqCst);
+        self.shared.sftp_open.fetch_sub(self.sftp_ids.len(), Ordering::SeqCst);
     }
 }
 
@@ -428,6 +462,65 @@ impl server::Handler for Conn {
         Ok(())
     }
 
+    /// SFTP 하위 시스템 요청. `Sftp::Off` 이거나 다른 이름이면 거부한다(채널은 클라이언트가 닫을 때까지 남는다)
+    async fn subsystem_request(&mut self, id: ChannelId, name: &str, session: &mut Session) -> Result<(), Self::Error> {
+        self.shared.exec_log.lock().unwrap().push(format!("subsystem:{name}"));
+        let mode = self.sftp.clone();
+        let channel = if name == "sftp" && !matches!(mode, Sftp::Off) { self.channels.remove(&id) } else { None };
+        let Some(channel) = channel else {
+            session.channel_failure(id)?;
+            if self.opened.insert(id) {
+                self.shared.lingering_channels.fetch_add(1, Ordering::SeqCst);
+            }
+            return Ok(());
+        };
+        if self.gated.remove(&id) {
+            self.shared.idle_channels.fetch_sub(1, Ordering::SeqCst);
+        }
+        session.channel_success(id)?;
+        self.sftp_ids.insert(id);
+        self.shared.sftp_open.fetch_add(1, Ordering::SeqCst);
+        self.shared.sftp_sessions.fetch_add(1, Ordering::SeqCst);
+        let token = self.conn.child_token();
+        self.tokens.insert(id, token.clone());
+        let shared = self.shared.clone();
+        tokio::spawn(async move {
+            match mode {
+                Sftp::Tree(tree) => russh_sftp::server::run(channel.into_stream(), FakeSftp::new(tree)).await,
+                Sftp::Silent => {
+                    let (read, channel) = channel.split();
+                    tokio::spawn(drain_incoming(read));
+                    token.cancelled().await;
+                    // 실제 sshd 처럼 클라이언트의 close 에 close 로 답한다
+                    let _ = channel.close().await;
+                }
+                Sftp::Garbage => {
+                    // 클라이언트가 보내는 것(요청·창 조정)은 비운다 — 안 비우면 서버 세션 루프가 이쪽 큐 때문에 멈춘다(시험 서버의 사정이지 시험 대상이 아니다)
+                    let (read, channel) = channel.split();
+                    tokio::spawn(drain_incoming(read));
+                    // 패킷 길이 머리가 상한(256KiB)을 크게 넘는다 — 클라이언트 파서는 여기서 읽기를 끝낸다. 서버는 그래도 계속 보낸다
+                    let mut chunk = vec![0xAAu8; 1024];
+                    chunk[..4].copy_from_slice(&0x7fff_ffffu32.to_be_bytes());
+                    loop {
+                        tokio::select! {
+                            () = token.cancelled() => break,
+                            r = channel.data(&chunk[..]) => {
+                                if r.is_err() {
+                                    break;
+                                }
+                                shared.sftp_garbage.fetch_add(chunk.len(), Ordering::SeqCst);
+                                chunk[..4].copy_from_slice(&[0xAA; 4]);
+                            }
+                        }
+                    }
+                    let _ = channel.close().await;
+                }
+                Sftp::Off => {}
+            }
+        });
+        Ok(())
+    }
+
     async fn signal(&mut self, id: ChannelId, _signal: Sig, _session: &mut Session) -> Result<(), Self::Error> {
         if let Some(t) = self.tokens.get(&id) {
             t.cancel();
@@ -440,6 +533,9 @@ impl server::Handler for Conn {
             t.cancel();
         }
         self.channels.remove(&id);
+        if self.sftp_ids.remove(&id) {
+            self.shared.sftp_open.fetch_sub(1, Ordering::SeqCst);
+        }
         if self.gated.remove(&id) {
             self.shared.idle_channels.fetch_sub(1, Ordering::SeqCst);
         }
@@ -477,6 +573,11 @@ impl server::Handler for Conn {
         });
         Ok(())
     }
+}
+
+/// 채널에서 클라이언트가 보낸 메시지를 끝까지 버린다
+async fn drain_incoming(mut read: russh::ChannelReadHalf) {
+    while read.wait().await.is_some() {}
 }
 
 /// 자식 수를 세는 가드(Drop 에서 줄인다)
