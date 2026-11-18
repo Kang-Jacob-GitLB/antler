@@ -16,4 +16,5 @@ pub mod repo_state;
 pub mod scope;
 pub mod search;
 pub mod signature;
+pub mod watcher;
 pub mod wip;

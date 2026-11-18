@@ -24,6 +24,12 @@ impl Signature {
         h.update(&parts.head_hash);
         Signature(h.finalize().into())
     }
+
+    /// 시험용 값(감시 상태 기계 시험이 git 없이 시그니처를 만든다)
+    #[cfg(test)]
+    pub(crate) fn for_test(n: u8) -> Signature {
+        Signature([n; 32])
+    }
 }
 
 struct RefsParts {
