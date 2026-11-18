@@ -39,7 +39,7 @@ pub enum GitExecutor {
     Wsl(WslExecutor),
     Ssh(SshExecutor),
     /// GitHub 원격 전용 저장소의 앱 캐시(로컬 git + 캐시 경로에서만 여는 github 환경). 종류는 `"github"` 다 — local 과 같게 다뤄야 하는 곳
-    /// (`kind() == "local"` 로 갈리는 조회·감시)은 연결 PR 이 github 도 함께 보게 고친다
+    /// (`kind() == "local"` 로 갈리는 `refs_service.rs`·`wip.rs`)은 `"github"` 도 함께 본다(Phase 6b PR 6 — TS 는 같은 `LocalExecutor` 라 둘 다 `local` 이다)
     Github(GithubExecutor),
 }
 

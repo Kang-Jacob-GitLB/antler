@@ -79,6 +79,11 @@ export interface MirrorRepo {
   name: string
   distro?: string
   sshHost?: string
+  /**
+   * github 소스(GitHub 원격 전용 저장소)의 owner/repo 링크. Rust 가 `gh:repo` 를 git 없이 이 값으로 답한다(RepoService.ghRepo 와 같다).
+   * 경로는 항상 앱 캐시 경로이고, Rust 는 캐시 모양(`<기준>/<owner>/<repo>.git`)을 통과한 경로에서만 토큰·lazy fetch 환경을 연다
+   */
+  github?: { owner: string; repo: string }
 }
 
 /** Node → Rust */

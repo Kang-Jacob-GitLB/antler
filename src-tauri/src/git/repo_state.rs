@@ -72,6 +72,8 @@ struct Inflight {
     /// 같은 저장소에서 나중에 시작한 계산과 구별한다(TS 는 Promise 의 동일성으로 본다)
     id: u64,
     fut: SharedSig,
+    /// 계산에 건네 준 취소 토큰 — [`RepoState::cancel_shared`] 가 제한 시간 전에 계산을 끊는다
+    token: CancellationToken,
 }
 
 #[derive(Default)]
@@ -270,9 +272,11 @@ impl RepoState {
         let id = g.inflight_ids;
         let seq = g.next_seq();
         let (state, repo, timeout) = (self.clone(), repo_id.to_string(), self.timeout);
+        let token = CancellationToken::new();
+        let task_token = token.clone();
         let handle = tokio::spawn(async move {
             let _cleanup = Cleanup { state: state.clone(), repo_id: repo.clone(), id };
-            let token = CancellationToken::new();
+            let token = task_token;
             let mut work = Box::pin(state.finish(repo, seq, compute(token.clone())));
             tokio::select! {
                 r = &mut work => r,
@@ -281,11 +285,23 @@ impl RepoState {
                     token.cancel();
                     work.await
                 }
+                // 밖에서 끊었다([`RepoState::cancel_shared`]) — 계산은 이미 취소 신호를 받았다. 끝나기를 기다린다
+                () = token.cancelled() => work.await,
             }
         });
         let fut: SharedSig = async move { handle.await.unwrap_or_else(|e| Err(SigError::Failed(e.to_string()))) }.boxed().shared();
-        g.inflight.insert(repo_id.to_string(), Inflight { id, fut: fut.clone() });
+        g.inflight.insert(repo_id.to_string(), Inflight { id, fut: fut.clone(), token });
         fut
+    }
+
+    /// 그 저장소의 진행 중인 공유 계산을 제한 시간 전에 끊는다(저장소를 지울 때 — 20초 동안 폴더를 쥐지 않게). 계산은 spawn 한 태스크라 기다리는 쪽이 떠나도 가므로
+    /// 취소 신호를 직접 보낸다. 진행 중인 계산이 없으면 `None`, 있으면 계산(git 프로세스 정리까지)이 끝나면 완료되는 future 를 준다. 이 뒤에 오는 호출은 새 계산을 시작한다
+    pub fn cancel_shared(&self, repo_id: &str) -> Option<impl Future<Output = ()> + Send + 'static> {
+        let running = self.lock().inflight.remove(repo_id)?;
+        running.token.cancel();
+        Some(async move {
+            let _ = running.fut.await;
+        })
     }
 
     /// 앱 종료: 기다리는 문을 모두 열고 기억을 비운다(TS `dispose`). 순번은 되돌리지 않는다
@@ -643,6 +659,39 @@ mod tests {
         assert_eq!(Instant::now() - t0, SIGNATURE_TIMEOUT);
         assert_eq!(s.known_signature("r"), None);
         // 실패한 계산은 진행 중 표에서 빠져 다음 호출이 새로 계산한다
+        assert_eq!(s.shared_signature("r", |_| async { Ok(sig(1)) }, None).await, Ok(sig(1)));
+    }
+
+    #[tokio::test]
+    async fn cancel_shared_는_제한_시간_전에_계산을_끊고_끝나기를_기다리게_한다() {
+        let s = RepoState::default();
+        assert!(s.cancel_shared("r").is_none(), "진행 중인 계산이 없으면 아무것도 없다");
+        let ended = Arc::new(AtomicUsize::new(0));
+        let waiter = {
+            let (s, ended) = (s.clone(), ended.clone());
+            tokio::spawn(async move {
+                s.shared_signature(
+                    "r",
+                    move |token| async move {
+                        token.cancelled().await;
+                        // 프로세스를 정리하는 데 걸리는 시간
+                        tokio::time::sleep(Duration::from_millis(30)).await;
+                        ended.fetch_add(1, Ordering::SeqCst);
+                        Err(SigError::Aborted)
+                    },
+                    None,
+                )
+                .await
+            })
+        };
+        flush().await;
+        let done = s.cancel_shared("r").expect("진행 중인 계산");
+        assert_eq!(ended.load(Ordering::SeqCst), 0);
+        done.await;
+        assert_eq!(ended.load(Ordering::SeqCst), 1, "계산이 끝난 뒤에 돌아온다");
+        assert_eq!(waiter.await.unwrap(), Err(SigError::Aborted));
+        assert_eq!(s.known_signature("r"), None);
+        // 끊긴 계산은 진행 중 표에서 빠져 다음 호출이 새로 계산한다
         assert_eq!(s.shared_signature("r", |_| async { Ok(sig(1)) }, None).await, Ok(sig(1)));
     }
 

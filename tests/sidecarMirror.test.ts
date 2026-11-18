@@ -34,6 +34,24 @@ describe('사이드카 저장소 미러', () => {
     expect(mirrorOf(cfg)).toEqual([])
   })
 
+  it('github 소스의 저장소는 owner/repo 링크(기본 브랜치 없이)를 담고 다른 소스에는 실리지 않는다', () => {
+    const c = new ConfigStore(tmp())
+    const link = { owner: 'octocat', repo: 'hello', defaultBranch: 'main' }
+    const g = c.addRepo({ sourceId: 'github', path: 'C:\\cache\\octocat\\hello.git', name: 'hello', github: link }, { id: 'github', kind: 'github', label: 'GitHub' })
+    const local = c.addRepo({ sourceId: 'local', path: 'C:\\work\\a', name: 'a' })
+    expect(mirrorOf(c.get())).toEqual([
+      { id: g.id, kind: 'github', path: 'C:\\cache\\octocat\\hello.git', name: 'hello', github: { owner: 'octocat', repo: 'hello' } },
+      { id: local.id, kind: 'local', path: 'C:\\work\\a', name: 'a' }
+    ])
+    // 기본 브랜치가 바뀌어도 미러는 바뀌지 않는다(Rust 는 브랜치를 쓰지 않는다)
+    const sent: Extract<FromSidecar, { t: 'repos' }>[] = []
+    const m = new MirrorSender((msg) => sent.push(msg))
+    m.push(c.get())
+    c.setGithubDefaultBranch(g.id, 'develop')
+    m.push(c.get())
+    expect(sent).toHaveLength(1)
+  })
+
   it('저장소 목록이 바뀔 때만 보내고 gen 은 1 부터 오른다', () => {
     const sent: Extract<FromSidecar, { t: 'repos' }>[] = []
     const c = new ConfigStore(tmp())

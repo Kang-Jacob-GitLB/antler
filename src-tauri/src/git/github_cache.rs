@@ -370,6 +370,56 @@ pub async fn ensure_github_head<R: GitRunner>(
     Ok(Some(branch))
 }
 
+/// 캐시 폴더 삭제를 다시 시도하는 횟수·간격(TS `REMOVE_RETRIES`·`REMOVE_RETRY_DELAY_MS`) — 백신·인덱서가 파일을 쥐고 있을 수 있다
+const REMOVE_RETRIES: u32 = 10;
+const REMOVE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// 캐시 폴더를 지운다(TS `removeCacheDir`). **`GithubCachePath` 만 받는다** — `<캐시 기준>/<owner>/<repo>.git` 모양을 통과한 경로라 다른 곳을 지울 수 없다.
+/// owner 폴더나 저장소 폴더가 링크(정션 포함)면 링크 너머의 실제 폴더를 지우게 되므로 아무것도 지우지 않고 `Ok(false)` 다. 폴더가 없어도 `Ok(false)`.
+/// 지웠으면 `Ok(true)` 이고 비게 된 owner 폴더도 정리한다(다른 저장소가 있으면 남는다). 파일을 쥔 프로세스가 있어 끝내 못 지우면 `Err`.
+///
+/// 읽기 전용 pack 이 든 폴더도 `remove_dir_all` 이 그대로 지운다(`github_cache_exec.rs` 시험). **연결은 PR 9** — 지금 `repos:remove` 의 삭제는 fetch·감시를 쥔 사이드카가
+/// 멈춘 뒤에 한다(TS `RepoService.removeGithubCache` — 레코드의 owner/repo 와 캐시 경로가 맞을 때만 부른다). 호출자는 이 함수를 부르기 전에 이 저장소의 git(조회·fetch·감시)을 모두 멈춰야 한다
+pub fn remove_github_cache(path: &GithubCachePath) -> Result<bool, String> {
+    let repo = std::path::Path::new(path.as_str());
+    let Some(owner) = repo.parent() else { return Ok(false) };
+    match (std::fs::symlink_metadata(owner), std::fs::symlink_metadata(repo)) {
+        (Ok(o), Ok(r)) => {
+            if o.file_type().is_symlink() || r.file_type().is_symlink() {
+                return Ok(false);
+            }
+        }
+        // 없다
+        _ => return Ok(false),
+    }
+    let mut last = None;
+    for attempt in 0..=REMOVE_RETRIES {
+        match std::fs::remove_dir_all(repo) {
+            Ok(()) => {
+                last = None;
+                break;
+            }
+            // 이미 지워졌다
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                last = None;
+                break;
+            }
+            Err(e) => {
+                last = Some(e);
+                if attempt < REMOVE_RETRIES {
+                    std::thread::sleep(REMOVE_RETRY_DELAY);
+                }
+            }
+        }
+    }
+    if let Some(e) = last {
+        return Err(e.to_string());
+    }
+    // 소유자 폴더가 비었으면 함께 정리한다(비어 있지 않으면 실패하므로 무시한다)
+    let _ = std::fs::remove_dir(owner);
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

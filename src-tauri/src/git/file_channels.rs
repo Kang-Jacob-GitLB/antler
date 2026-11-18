@@ -138,8 +138,9 @@ pub fn parse_compare(from: Option<&Value>, to: Option<&Value>) -> Result<(HexHas
 }
 
 /// 두 커밋 사이(from → to)의 변경 파일 목록. `git diff from to` 와 같은 트리 대 트리 비교이고 커밋 상세와 같은 파서·상한을 쓴다
-pub async fn compare(exec: &GitExecutor, repo_path: &str, from: &HexHash, to: &HexHash) -> Result<CompareResult, ExecError> {
-    let all = changed_files(exec, repo_path, &Range::From(from.clone(), to.clone())).await?;
+/// `lenient`: 통계를 못 읽어도 파일 목록만 돌려준다(GitHub 원격 전용 저장소 — `commit::changed_files`)
+pub async fn compare(exec: &GitExecutor, repo_path: &str, from: &HexHash, to: &HexHash, lenient: bool) -> Result<CompareResult, ExecError> {
+    let all = changed_files(exec, repo_path, &Range::From(from.clone(), to.clone()), lenient).await?;
     let (files, additions, deletions, truncated) = summarize(all);
     Ok(CompareResult { from: from.as_str().to_string(), to: to.as_str().to_string(), files, additions, deletions, truncated })
 }

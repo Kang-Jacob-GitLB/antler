@@ -11,7 +11,8 @@
 //! 캐시 경로에서는 부모 환경의 `GIT_*`(TLS 검증 끄기·trace·저장소 지정 등)를 물려주지 않는다([`inherited_env_to_remove`]).
 //! 훅 차단 디렉터리가 쓸 수 없으면 환경을 만들지 못하고 실패한다(보호 없이 실행하지 않는다).
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use super::common::{build_git_args, merged_env, to_strings, RunOpts, RunResult, Spec};
 use super::error::ExecError;
@@ -25,8 +26,48 @@ pub type TokenSource = Arc<dyn Fn() -> Option<SecretString> + Send + Sync>;
 /// 사용자 설정에서 가져온 네트워크 키(`read_network_config` 의 결과). 읽는 쪽이 준비가 끝났는지를 정한다
 pub type NetConfigSource = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
+/// 저장소 경로별로 진행 중인 git 프로세스 수(복제하면 같은 표를 본다). `repos:remove` 가 "그 저장소의 git 이 모두 끝났다"를 확인하는 데 쓴다 —
+/// 요청 단위의 수(라우터의 범위 가드)는 취소와 함께 곧바로 사라져 프로세스가 정리되기 전을 말해 주지 못한다
+#[derive(Clone, Default)]
+pub struct LiveProcs(Arc<Mutex<HashMap<String, usize>>>);
+
+/// 진행 중 표시 하나(버려지면 지운다). 결과를 모으는 `run` 은 future 가 끝나거나 버려질 때, 스트림은 트리를 죽인 뒤 풀린다
+pub struct LiveToken {
+    procs: LiveProcs,
+    key: String,
+}
+
+fn live_key(repo_path: &str) -> String {
+    repo_path.replace('\\', "/").trim_end_matches('/').to_ascii_lowercase()
+}
+
+impl LiveProcs {
+    fn enter(&self, repo_path: &str) -> LiveToken {
+        let key = live_key(repo_path);
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner).entry(key.clone()).or_insert(0) += 1;
+        LiveToken { procs: self.clone(), key }
+    }
+
+    fn count(&self, repo_path: &str) -> usize {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).get(&live_key(repo_path)).copied().unwrap_or(0)
+    }
+}
+
+impl Drop for LiveToken {
+    fn drop(&mut self) {
+        let mut map = self.procs.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(n) = map.get_mut(&self.key) {
+            *n -= 1;
+            if *n == 0 {
+                map.remove(&self.key);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct GithubExecutor {
+    live: LiveProcs,
     git_binary: String,
     cache_dir: String,
     no_hooks_dir: String,
@@ -41,6 +82,7 @@ impl GithubExecutor {
     /// `cache_dir`: 앱 캐시 기준 폴더. `no_hooks_dir`: 훅 차단용 앱 소유의 빈 디렉터리(드라이브 문자 경로)
     pub fn new(git_binary: impl Into<String>, cache_dir: impl Into<String>, no_hooks_dir: impl Into<String>, token: TokenSource, net_config: NetConfigSource) -> Self {
         GithubExecutor {
+            live: LiveProcs::default(),
             git_binary: git_binary.into(),
             cache_dir: cache_dir.into(),
             no_hooks_dir: no_hooks_dir.into(),
@@ -62,6 +104,11 @@ impl GithubExecutor {
     /// 실행 파일(캐시 키)
     pub fn git_binary(&self) -> &str {
         &self.git_binary
+    }
+
+    /// 이 경로에서 아직 끝나지 않은 git 프로세스 수(`run` 이 끝나지 않았거나 스트림이 살아 있다). 취소된 것은 트리를 죽이는 즉시 빠진다
+    pub fn live_processes(&self, repo_path: &str) -> usize {
+        self.live.count(repo_path)
     }
 
     #[cfg(feature = "test-hooks")]
@@ -95,6 +142,7 @@ impl GithubExecutor {
     pub async fn run<S: AsRef<str>>(&self, repo_path: &str, args: &[S], opts: &RunOpts) -> Result<RunResult, ExecError> {
         let (spec, token) = self.spec(repo_path, args)?;
         let token = token.as_ref().map(SecretString::expose);
+        let _live = self.live.enter(repo_path);
         match run_process(&spec, opts).await {
             Ok(r) => Ok(RunResult { stdout: redact_bytes(r.stdout, token), stderr: redact_token(&r.stderr, token), ..r }),
             Err(e) => Err(redact_error(e, token)),
@@ -104,7 +152,8 @@ impl GithubExecutor {
     /// stdout 을 바이트 스트림으로 준다. 같은 환경이다. 스트림이 내는 오류 문구(`finish`)에서는 토큰을 가린다
     pub fn stream<S: AsRef<str>>(&self, repo_path: &str, args: &[S], opts: &RunOpts) -> Result<GitStream, ExecError> {
         let (spec, token) = self.spec(repo_path, args)?;
-        Ok(stream_process(&spec, opts)?.redacting(token))
+        let live = self.live.enter(repo_path);
+        Ok(stream_process(&spec, opts)?.redacting(token).keeping(live))
     }
 }
 

@@ -9,7 +9,9 @@ use std::sync::{Arc, PoisonError, RwLock};
 use serde_json::Value;
 
 use crate::git::exec::wsl_paths::is_wsl_unc;
+use crate::git::github_link::sanitize_github_link;
 use crate::git::parsers::js_trim;
+use crate::net::json::Json;
 use crate::git::scope::is_js_space;
 use crate::router::rust_fetch_kinds;
 
@@ -29,6 +31,13 @@ pub struct MirrorRepo {
     pub ssh_host: Option<String>,
 }
 
+/// GitHub 원격 전용 저장소의 `owner/repo` 링크(레코드의 값). `gh:repo` 가 git 없이 이 값으로 답한다
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GhLink {
+    pub owner: String,
+    pub repo: String,
+}
+
 /// Rust 가 git 을 직접 돌려도 되는 저장소의 실행 대상(검증을 마친 값)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
@@ -36,12 +45,15 @@ pub enum Target {
     Wsl { distro: String, path: String },
     /// `host` 는 검사를 마친(앞뒤 공백을 지운) 값이고 실행기·큐·풀의 키가 모두 이 값이다
     Ssh { host: String, path: String },
+    /// GitHub 원격 전용 저장소(앱 캐시의 bare 저장소). 토큰·lazy fetch 환경은 **실행기가** 경로가 캐시 모양일 때만 연다(`GithubExecutor`) —
+    /// 이 값은 경로·링크만 담고 환경을 정하지 않는다. `link` 는 레코드에 링크가 없으면 없다(그때 `gh:repo` 는 git 으로 읽는다)
+    Github { path: String, link: Option<GhLink> },
 }
 
 impl Target {
     pub fn path(&self) -> &str {
         match self {
-            Target::Local { path } | Target::Wsl { path, .. } | Target::Ssh { path, .. } => path,
+            Target::Local { path } | Target::Wsl { path, .. } | Target::Ssh { path, .. } | Target::Github { path, .. } => path,
         }
     }
 
@@ -51,24 +63,26 @@ impl Target {
             Target::Local { .. } => "local",
             Target::Wsl { .. } => "wsl",
             Target::Ssh { .. } => "ssh",
+            Target::Github { .. } => "github",
         }
     }
 
-    /// 큐·실행기를 나누는 키. TS 는 소스(local 하나, wsl 은 배포판마다, ssh 는 호스트마다 하나)마다 큐를 둔다
+    /// 큐·실행기를 나누는 키. TS 는 소스(local 하나, wsl 은 배포판마다, ssh 는 호스트마다, github 하나)마다 큐를 둔다
     pub fn source_key(&self) -> String {
         match self {
             Target::Local { .. } => "local".to_string(),
             Target::Wsl { distro, .. } => format!("wsl:{distro}"),
             Target::Ssh { host, .. } => format!("ssh:{host}"),
+            Target::Github { .. } => "github".to_string(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolved {
-    /// 미러에 있고 kind 가 local·wsl(ssh 는 스위치가 켜져 있을 때만)이며 검증을 통과했다
+    /// 미러에 있고 kind 가 local·wsl(ssh·github 는 스위치가 켜져 있을 때만)이며 검증을 통과했다
     Rust(Target),
-    /// 미러에 없거나 Rust 가 다루지 않는 kind(github, 스위치가 꺼진 ssh) — 사이드카가 처리한다(오류 문구도 사이드카가 만든다)
+    /// 미러에 없거나 Rust 가 다루지 않는 kind(스위치가 꺼진 ssh·github) — 사이드카가 처리한다(오류 문구도 사이드카가 만든다)
     Sidecar,
     /// 미러에 있는 값이 경로·배포판 검사에 걸렸다 — 이 메시지를 ERROR 로 돌려준다(사이드카로 넘기지 않는다)
     Invalid(String),
@@ -80,6 +94,8 @@ struct Inner {
     repos: HashMap<String, MirrorRepo>,
     /// 저장소 id → 사용자가 붙인 이름(확인 창 제목에만 쓴다. 비밀이 아니고 경로·kind 판정에는 쓰지 않는다)
     names: HashMap<String, String>,
+    /// 저장소 id → github 소스 저장소의 owner/repo 링크(`gh:repo` 의 답에만 쓴다. 경로·kind·환경 판정에는 쓰지 않는다 — `names` 와 같은 자리)
+    links: HashMap<String, GhLink>,
 }
 
 #[derive(Clone, Default)]
@@ -88,15 +104,23 @@ pub struct RepoMirror {
     /// ssh 저장소를 Rust 로 풀어도 되는가. 꺼져 있으면(기본) ssh 는 사이드카다. 라우터가 SSH 풀을 주입할 때 켠다(`Router::ssh_active`) —
     /// 해석이 이 한 곳에서만 갈려야 로그 커서·fetch 서비스·라우터가 같은 답을 본다
     ssh: Arc<AtomicBool>,
+    /// github 소스 저장소의 **조회**를 Rust 로 풀어도 되는가(Phase 6b PR 6). 꺼져 있으면(기본) github 는 사이드카다. 라우터가 GitHub 서비스(토큰)와 캐시 실행기를 주입할 때 켠다 —
+    /// `resolve`(조회·로그 커서·`gh:*` 질의)만 이것을 보고, **fetch·감시의 소유(`resolve_fetch`)는 이것과 무관하게 종류 목록(`rust_fetch_kinds`)으로만** 정한다(PR 7 전까지 사이드카)
+    github: Arc<AtomicBool>,
 }
 
 impl RepoMirror {
     /// 미러를 통째로 바꾼다. 이미 받은 것보다 gen 이 작거나 같으면 버린다(뒤처진 메시지). 바꿨으면 true
     pub fn apply(&self, gen: u64, repos: Vec<MirrorRepo>) -> bool {
-        self.apply_named(gen, repos, HashMap::new())
+        self.apply_named(gen, repos, HashMap::new(), HashMap::new())
     }
 
-    fn apply_named(&self, gen: u64, repos: Vec<MirrorRepo>, names: HashMap<String, String>) -> bool {
+    /// github 링크가 있는 미러(시험·설정 소유 쪽이 쓴다). `links` 는 저장소 id → 링크
+    pub fn apply_with_links(&self, gen: u64, repos: Vec<MirrorRepo>, links: HashMap<String, GhLink>) -> bool {
+        self.apply_named(gen, repos, HashMap::new(), links)
+    }
+
+    fn apply_named(&self, gen: u64, repos: Vec<MirrorRepo>, names: HashMap<String, String>, links: HashMap<String, GhLink>) -> bool {
         let mut inner = self.inner.write().unwrap_or_else(PoisonError::into_inner);
         if gen <= inner.gen {
             return false;
@@ -104,12 +128,24 @@ impl RepoMirror {
         inner.gen = gen;
         inner.repos = repos.into_iter().map(|r| (r.id.clone(), r)).collect();
         inner.names = names;
+        // github 소스가 아닌 저장소에 붙은 링크는 버린다
+        inner.links = links.into_iter().filter(|(id, _)| inner.repos.get(id).is_some_and(|r| r.kind == "github")).collect();
         true
     }
 
     /// ssh 저장소를 Rust 로 풀지 정한다(라우터가 정한다)
     pub fn set_ssh(&self, on: bool) {
         self.ssh.store(on, Ordering::SeqCst);
+    }
+
+    /// github 소스 저장소의 조회를 Rust 로 풀지 정한다(라우터가 정한다)
+    pub fn set_github(&self, on: bool) {
+        self.github.store(on, Ordering::SeqCst);
+    }
+
+    /// 지금 github 저장소를 Rust 로 푸는가
+    pub fn github_resolved(&self) -> bool {
+        self.github.load(Ordering::SeqCst)
     }
 
     /// 지금 Rust 로 풀리는 ssh 저장소의 호스트 전부(풀의 연결을 정리할 때 "아직 쓰는 호스트")
@@ -141,7 +177,8 @@ impl RepoMirror {
             .filter_map(|v| Some((v.get("id")?.as_str()?.to_string(), v.get("name")?.as_str()?.to_string())))
             .filter(|(id, _)| repos.iter().any(|r| &r.id == id))
             .collect();
-        self.apply_named(gen, repos, names)
+        let links = list.iter().filter_map(|v| Some((v.get("id")?.as_str()?.to_string(), parse_link(v.get("github")?)?))).collect();
+        self.apply_named(gen, repos, names, links)
     }
 
     pub fn resolve(&self, repo_id: &str) -> Resolved {
@@ -168,6 +205,12 @@ impl RepoMirror {
                     Err(m) => Resolved::Invalid(m),
                 }
             }
+            // GitHub 원격 전용 저장소의 조회(Phase 6b PR 6): 라우터가 GitHub 서비스와 캐시 실행기를 주입했을 때만 Rust 다. 경로는 앱이 정한 캐시 경로이지만 local 과 같은 검사를 한다(UNC·NT 네임스페이스 거부).
+            // 환경(토큰·lazy fetch)은 여기서 정하지 않는다 — 실행기가 경로가 캐시 모양일 때만 연다
+            "github" if self.github.load(Ordering::SeqCst) => match check_path("local", &repo.path) {
+                Ok(()) => Resolved::Rust(Target::Github { path: repo.path.clone(), link: inner.links.get(repo_id).cloned() }),
+                Err(m) => Resolved::Invalid(m),
+            },
             _ => Resolved::Sidecar,
         }
     }
@@ -203,6 +246,14 @@ fn parse_repo(v: &Value) -> Option<MirrorRepo> {
         distro: v.get("distro").and_then(Value::as_str).map(str::to_string),
         ssh_host: v.get("sshHost").and_then(Value::as_str).map(str::to_string),
     })
+}
+
+/// 미러 항목의 `github: {owner, repo}`. 링크 규칙(`validate_github_link`)을 통과하지 못하면 없다 — 사이드카가 이미 검증한 값이지만 `gh:repo` 의 답이 되기 전에 한 번 더 본다
+fn parse_link(v: &Value) -> Option<GhLink> {
+    let (owner, repo) = (v.get("owner")?.as_str()?, v.get("repo")?.as_str()?);
+    let json = Json::Obj(vec![("owner".to_string(), Json::Str(owner.to_string())), ("repo".to_string(), Json::Str(repo.to_string()))]);
+    let link = sanitize_github_link(Some(&json))?;
+    Some(GhLink { owner: link.owner, repo: link.repo })
 }
 
 /// JS `string.length` — UTF-16 코드 단위 수
@@ -337,6 +388,55 @@ mod tests {
         assert_eq!(m.resolve("nope"), Resolved::Sidecar);
         assert_eq!(m.resolve("s"), Resolved::Sidecar);
         assert_eq!(m.resolve("g"), Resolved::Sidecar);
+    }
+
+    #[test]
+    fn github_는_스위치가_켜졌을_때만_조회를_rust_가_맡고_fetch_소유는_늘_사이드카다() {
+        let m = RepoMirror::default();
+        let msg = json!({ "t": "repos", "gen": 1, "repos": [
+            { "id": "g", "kind": "github", "path": "C:\\c\\o\\r.git", "name": "r", "github": { "owner": "o", "repo": "r" } },
+            { "id": "nolink", "kind": "github", "path": "C:\\c\\o\\x.git", "name": "x" },
+            { "id": "unc", "kind": "github", "path": "\\\\host\\share\\o\\r.git", "name": "u" },
+            { "id": "nt", "kind": "github", "path": "\\??\\UNC\\h\\s\\o\\r.git", "name": "n" },
+            { "id": "a", "kind": "local", "path": "/r", "name": "a", "github": { "owner": "o", "repo": "r" } }
+        ]});
+        assert!(m.apply_message(&msg));
+        // 기본(꺼짐)은 사이드카다
+        for id in ["g", "nolink", "unc", "nt"] {
+            assert_eq!(m.resolve(id), Resolved::Sidecar, "{id}");
+        }
+        m.set_github(true);
+        let link = Some(GhLink { owner: "o".into(), repo: "r".into() });
+        assert_eq!(m.resolve("g"), Resolved::Rust(Target::Github { path: "C:\\c\\o\\r.git".into(), link }));
+        assert_eq!(m.resolve("nolink"), Resolved::Rust(Target::Github { path: "C:\\c\\o\\x.git".into(), link: None }));
+        // local 과 같은 경로 검사(UNC·NT 네임스페이스는 git 을 돌리지 않는다)
+        for id in ["unc", "nt"] {
+            assert!(matches!(m.resolve(id), Resolved::Invalid(_)), "{id}");
+        }
+        // github 소스가 아닌 저장소에 붙은 링크는 버린다
+        assert_eq!(m.resolve("a"), Resolved::Rust(Target::Local { path: "/r".into() }));
+        // fetch·감시의 소유는 스위치와 무관하게 종류 목록이다 — github 는 PR 7 전까지 사이드카가 맡는다(둘 다 맡는 일도 아무도 안 맡는 일도 없다)
+        for id in ["g", "nolink", "unc", "nt"] {
+            assert_eq!(m.resolve_fetch(id), Resolved::Sidecar, "{id}");
+        }
+        let t = Target::Github { path: "/p".into(), link: None };
+        assert_eq!((t.source_key().as_str(), t.kind(), t.path()), ("github", "github", "/p"));
+    }
+
+    #[test]
+    fn 링크는_규칙을_통과한_것만_받는다() {
+        let m = RepoMirror::default();
+        m.set_github(true);
+        let bad = |owner: &str, repo: &str| json!({ "id": "g", "kind": "github", "path": "C:\\c\\o\\r.git", "github": { "owner": owner, "repo": repo } });
+        for (i, (o, r)) in [("", "r"), ("o", ""), ("-o", "r"), ("o/x", "r"), ("o", "r.git"), ("o", ".."), ("o", "con")].into_iter().enumerate() {
+            assert!(m.apply_message(&json!({ "gen": i + 1, "repos": [bad(o, r)] })));
+            assert_eq!(m.resolve("g"), Resolved::Rust(Target::Github { path: "C:\\c\\o\\r.git".into(), link: None }), "{o}/{r}");
+        }
+        assert!(m.apply_message(&json!({ "gen": 99, "repos": [bad("Octo-Cat", "Hello.js")] })));
+        assert_eq!(m.resolve("g"), Resolved::Rust(Target::Github { path: "C:\\c\\o\\r.git".into(), link: Some(GhLink { owner: "Octo-Cat".into(), repo: "Hello.js".into() }) }));
+        // 링크는 gen 과 함께 통째로 바뀐다
+        assert!(m.apply_message(&json!({ "gen": 100, "repos": [{ "id": "g", "kind": "github", "path": "C:\\c\\o\\r.git" }] })));
+        assert_eq!(m.resolve("g"), Resolved::Rust(Target::Github { path: "C:\\c\\o\\r.git".into(), link: None }));
     }
 
     #[test]

@@ -106,3 +106,8 @@ required-features = ["test-hooks"]
 [[test]]
 name = "github_cache_env"
 required-features = ["test-hooks"]
+
+# GitHub 원격 전용 저장소의 git 조회를 Rust 가 처리(Phase 6b PR 6): 토큰·실행기 주입(`with_protocol_for_test`)이 test-hooks 뒤에 있다
+[[test]]
+name = "github_route"
+required-features = ["test-hooks"]

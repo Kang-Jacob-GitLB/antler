@@ -379,6 +379,8 @@ pub struct ProcessStream {
     aborted: bool,
     /// 있으면 `finish` 의 오류 문구(message·stderr)에서 이 토큰을 가린다(GitHub 캐시 실행기)
     redact: Option<SecretString>,
+    /// 스트림이 사는 동안 쥐는 것(실행기의 진행 중 프로세스 표시). **마지막 필드**라 `guard` 가 트리를 죽인 **뒤에** 풀린다
+    keep: Option<Box<dyn std::any::Any + Send + Sync>>,
 }
 
 pub(super) fn stream_process(spec: &Spec, opts: &RunOpts) -> Result<GitStream, ExecError> {
@@ -398,6 +400,7 @@ pub(super) fn stream_process(spec: &Spec, opts: &RunOpts) -> Result<GitStream, E
         eof: false,
         aborted: false,
         redact: None,
+        keep: None,
     })))
 }
 
@@ -419,6 +422,14 @@ impl GitStream {
     pub(super) fn redacting(mut self, token: Option<SecretString>) -> Self {
         if let GitStream::Process(s) = &mut self {
             s.redact = token;
+        }
+        self
+    }
+
+    /// 스트림이 버려질 때(프로세스 트리를 죽인 뒤)까지 `held` 를 쥔다. 자식 프로세스 스트림에만 뜻이 있다
+    pub(super) fn keeping(mut self, held: impl std::any::Any + Send + Sync) -> Self {
+        if let GitStream::Process(s) = &mut self {
+            s.keep = Some(Box::new(held));
         }
         self
     }

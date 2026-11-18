@@ -26,7 +26,13 @@
 //! 단 ssh 종류(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만이고, 풀이 없으면(`ANTLER_RUST_SSH=0`) 사이드카가 처리한다(미러·fetch 와 같은 판정).
 //!
 //! `gh:repo`(Phase 6a PR 8)는 `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 위 git 채널과 같은 소유 술어(`RepoMirror::resolve`)를 쓴다 — Rust 가 맡는 저장소는 Rust 가 답하고
-//! (결과 캐시 60초), github kind·미러에 없는 id 는 사이드카가 답한다. GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
+//! (결과 캐시 60초), 캐시 실행기가 없는 github kind·미러에 없는 id 는 사이드카가 답한다. GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
+//!
+//! GitHub 원격 전용 저장소(github kind, Phase 6b PR 6)의 **조회**: 스위치가 켜져 있고 GitHub 서비스와 캐시 실행기가 주입돼 있으면(`Router::set_github_cache` — 토큰의 출처는 그 서비스 하나) 위 git 채널을 Rust 가 처리한다
+//! (`Target::Github` — 실행기 `GitExecutor::Github` 가 캐시 경로에서만 토큰·lazy fetch 환경을 연다). 아니면 사이드카가 전부 맡는다. **fetch·감시의 소유는 바꾸지 않는다** — `rust_fetch_kinds` 에 github 가 없어
+//! 둘 다 사이드카가 맡고(PR 7 에서 함께 넘긴다), 그래서 Rust 의 `activity` 는 github 저장소의 기억한 시그니처를 쓰지 않는다. github 갈래: refs 의 worktrees 를 비우고 refsDetails 는 서브모듈을 건너뛰며,
+//! commit·compare 는 오프라인에서 통계 없는 목록을 돌려주고(lenient) onRemote 는 항상 true, wip 은 빈 결과, `gh:repo` 는 레코드의 링크로 답한다.
+//! `repos:remove` 는 사이드카로 넘기기 전에 그 저장소의 진행 중 조회·열린 로그 커서를 끊고 끝나기를 기다린다 — 사이드카가 fetch·감시를 멈춘 뒤 캐시 폴더를 지울 때 이 쪽 핸들이 남아 있지 않게.
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
@@ -40,7 +46,7 @@
 //! 이 모듈은 `Sidecar`·`AppHandle` 에 기대지 않는다 — 통합 테스트(`tests/channels.rs`)가 그대로 돌릴 수 있다.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -50,14 +56,14 @@ use tokio_util::sync::CancellationToken;
 use crate::api_host::{self, GithubHost, JiraHost};
 use crate::app_host::{self, AppHost};
 use crate::env_host::{self, EnvHost};
-use crate::git::commit::{commit_detail, estimate_commit_bytes, HexHash};
+use crate::git::commit::{commit_detail, estimate_commit_bytes, has_line_stats, HexHash};
 use crate::git::activity::{commit_activity, now_secs, ActivityCache, ActivityRequest};
 use crate::git::code_browse::{
     blob_cost, is_on_remote, list_tree, parse_ref, parse_rev, read_blob, resolve_rev, tree_cost, BlobRequest, CommitId, TreeRequest, CODE_TREE_MAX_ENTRIES,
 };
 use crate::git::exec::queue::{ProcessQueue, LOCAL_LIMIT, SSH_LIMIT, WSL_LIMIT};
 use crate::git::exec::ssh::SshPool;
-use crate::git::exec::{DistroGate, ExecError, GitExecutor, LocalExecutor, RunOpts, WslExecutor};
+use crate::git::exec::{DistroGate, ExecError, GitExecutor, GithubExecutor, LocalExecutor, RunOpts, WslExecutor};
 use crate::git::fetch::service::{FetchControl, FetchPrefs};
 use crate::git::fs_watch::NotifyDirs;
 use crate::git::file_channels::{
@@ -72,7 +78,8 @@ use crate::git::repo_state::{RepoState, SigError};
 use crate::github::ports::GhRepoRef;
 use crate::github::remote_url::{pick_github_remote, pick_github_remotes, Remote};
 use crate::git::search::{search, SearchRequest};
-use crate::git::parsers::wip_status::WIP_UNTRACKED_LIMIT;
+use crate::git::parsers::diff::{DiffParseOpts, DiffParser};
+use crate::git::parsers::wip_status::{WipStatusParser, WIP_UNTRACKED_LIMIT};
 use crate::git::signature::{refs_signature_digest, Signature};
 use crate::git::wip::{wip_file_diff, wip_status, WipDiffRequest};
 use crate::git::watcher::{DirWatch, PollTimes, RepoWatcher};
@@ -102,7 +109,7 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:activity",
     "git:repoExtras",
     "git:lfsPaths",
-    // `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 다른 git 채널과 같은 소유 술어를 쓴다(Phase 6a PR 8). github kind·미러에 없는 id 는 사이드카가 답한다
+    // `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 다른 git 채널과 같은 소유 술어를 쓴다(Phase 6a PR 8). 캐시 실행기가 없는 github kind·미러에 없는 id 는 사이드카가 답한다
     "gh:repo",
     "git:wipStatus",
     "git:wipDiff",
@@ -158,7 +165,7 @@ pub const API_CHANNELS: &[&str] = &[
 ];
 
 /// `gh:` 접두어이지만 [`API_CHANNELS`] 가 아닌 채널(서비스가 아니라 저장소를 보는 `gh:repo`). Rust 는 이 채널을 [`RUST_CHANNELS`] 의 git 채널로서 **Rust 가 맡는 저장소(local·WSL·SSH)만** 처리하고
-/// (`Router::gh_repo`), github kind·미러에 없는 id·스위치가 꺼졌을 때는 사이드카의 `RepoService` 가 처리한다 — 그래서 사이드카는 이 채널을 계속 받는다.
+/// (`Router::gh_repo`), 캐시 실행기가 없는 github kind·미러에 없는 id·스위치가 꺼졌을 때는 사이드카의 `RepoService` 가 처리한다 — 그래서 사이드카는 이 채널을 계속 받는다.
 /// `src/sidecar/apiOwns.ts` 의 `SIDECAR_KEPT_CHANNELS` 와 같아야 한다
 pub const API_SIDECAR_CHANNELS: &[&str] = &["gh:repo"];
 
@@ -451,6 +458,8 @@ pub(crate) struct Runtimes {
     pool: Arc<Mutex<Option<Arc<SshPool>>>>,
     /// WSL 배포판 등록 관문 — 등록된 배포판이 없으면 WSL 실행기를 내주지 않는다(`wsl.exe` 스텁이 "WSL 설치" 창을 띄운다)
     wsl_gate: Arc<DistroGate>,
+    /// GitHub 원격 전용 저장소의 캐시 실행기(Phase 6b PR 6). 앱이 GitHub 서비스(토큰)와 함께 주입한다 — 없으면 github 저장소는 미러가 Rust 로 풀지 않는다
+    github: Arc<Mutex<Option<GithubExecutor>>>,
 }
 
 impl Runtimes {
@@ -460,7 +469,22 @@ impl Runtimes {
 
     /// 시험이 레지스트리 대신 가짜 프로브를 준다
     pub(crate) fn with_wsl_gate(mirror: RepoMirror, gate: DistroGate) -> Self {
-        Runtimes { mirror, sources: Arc::default(), pool: Arc::default(), wsl_gate: Arc::new(gate) }
+        Runtimes { mirror, sources: Arc::default(), pool: Arc::default(), wsl_gate: Arc::new(gate), github: Arc::default() }
+    }
+
+    /// github 캐시 실행기를 정한다. 이미 만든 github 실행기·큐는 버린다(새 실행기를 쓰게)
+    fn set_github(&self, exec: GithubExecutor) {
+        *self.github.lock().unwrap_or_else(PoisonError::into_inner) = Some(exec);
+        self.sources.lock().unwrap_or_else(PoisonError::into_inner).remove("github");
+    }
+
+    fn github_exec(&self) -> Option<GithubExecutor> {
+        self.github.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// 그 캐시 경로에서 진행 중인 git 프로세스 수(실행기가 없으면 0)
+    fn github_live_processes(&self, repo_path: &str) -> usize {
+        self.github_exec().map_or(0, |e| e.live_processes(repo_path))
     }
 
     fn ssh_pool(&self) -> Option<Arc<SshPool>> {
@@ -490,11 +514,41 @@ impl Runtimes {
                 let pool = self.ssh_pool().ok_or_else(|| ExecError::Other { message: "SSH 를 사용할 수 없습니다".to_string() })?;
                 SourceRuntime { exec: Arc::new(GitExecutor::Ssh(pool.get(host))), queue: ProcessQueue::new(SSH_LIMIT) }
             }
+            // 실행기 하나·큐 하나(TS 의 github 소스: 동시 6). 환경(토큰·lazy fetch)은 실행기가 경로마다 정한다
+            Target::Github { .. } => {
+                let exec = self.github_exec().ok_or_else(|| ExecError::Other { message: "GitHub 원격 저장소를 쓸 수 없는 환경입니다".to_string() })?;
+                SourceRuntime { exec: Arc::new(GitExecutor::Github(exec)), queue: ProcessQueue::new(LOCAL_LIMIT) }
+            }
         });
         sources.insert(key, rt.clone());
         Ok(rt)
     }
 }
+
+/// GitHub 원격 전용 저장소 하나의 조회가 공유하는 취소 범위(Phase 6b PR 6). `repos:remove` 가 진행 중인 조회(git 프로세스·로그 커서)를 끊고 끝나기를 기다린 뒤에야
+/// 사이드카가 캐시 폴더를 지운다 — Windows 는 pack 파일 핸들을 쥔 프로세스가 있으면 폴더를 지우지 못한다
+#[derive(Default)]
+struct GithubScope {
+    cancel: CancellationToken,
+    inflight: AtomicUsize,
+}
+
+/// 범위 안에서 도는 조회 하나(버려지면 진행 중 수가 줄어든다)
+struct ScopeGuard(Arc<GithubScope>);
+
+impl Drop for ScopeGuard {
+    fn drop(&mut self) {
+        self.0.inflight.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// `repos:remove` 가 진행 중인 조회가 끝나기를 기다리는 최대 시간(프로세스 트리는 동기 종료지만 핸들이 풀리는 데 짧은 틈이 있다)
+const SCOPE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// "삭제 중" 표식의 안전장치 시간 — 사이드카가 레코드를 지우지 못해 미러가 바뀌지 않아도 이 시간이 지나면 풀린다(그 저장소가 영영 막히지 않게)
+const REMOVING_TTL: Duration = Duration::from_secs(30);
+
+const REMOVING_MESSAGE: &str = "저장소를 삭제하는 중입니다";
 
 pub struct Router {
     enabled: bool,
@@ -552,6 +606,11 @@ pub struct Router {
     app: Mutex<Option<AppHost>>,
     /// 환경 채널 포트(앱이 주입한다). 없거나 `ANTLER_RUST_GIT=0` 이면 [`ENV_CHANNELS`] 는 사이드카가 처리한다
     env: Mutex<Option<EnvHost>>,
+    /// github 저장소별 조회 범위(저장소 id → 범위). 미러가 바뀌면 github 로 풀리지 않는 저장소 것을 치운다
+    github_scopes: Mutex<HashMap<String, Arc<GithubScope>>>,
+    /// "삭제 중"인 github 저장소(id → 만료 시각). `repos:remove` 가 정리를 시작한 뒤 사이드카가 레코드를 지우고 미러가 바뀌기 전까지, 그 id 의 새 조회가
+    /// 범위에 들어가 폴더를 다시 쥐지 못하게 한다. 미러가 바뀌어 github 로 풀리지 않게 되면 풀리고, 아니면 [`REMOVING_TTL`] 뒤에 풀린다
+    github_removing: Mutex<HashMap<String, Instant>>,
 }
 
 impl Router {
@@ -580,6 +639,8 @@ impl Router {
             api_owned: AtomicBool::new(false),
             app: Mutex::default(),
             env: Mutex::default(),
+            github_scopes: Mutex::default(),
+            github_removing: Mutex::default(),
             log,
             mirror: mirror.clone(),
             cancels: Arc::default(),
@@ -705,6 +766,21 @@ impl Router {
         if self.api_enabled {
             *self.github.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
         }
+    }
+
+    /// GitHub 원격 전용 저장소의 캐시 실행기를 주입한다(Phase 6b PR 6). **GitHub 서비스가 주입돼 있을 때만**(`github_active`) 받는다 — 토큰의 출처가 그 서비스 하나라서다.
+    /// 받으면 미러가 github 소스 저장소의 **조회**를 Rust 로 풀기 시작한다(fetch·감시는 PR 7 전까지 사이드카). 서비스가 없거나 스위치가 꺼져 있으면 아무것도 하지 않는다 — github 는 사이드카가 전부 맡는다.
+    /// 실행기가 토큰·사용자 네트워크 설정의 출처(`TokenSource`·`NetConfigSource`)와 캐시 기준 폴더를 쥔다. 호출은 `set_github` 뒤, 사이드카를 띄우기 전이다
+    pub fn set_github_cache(&self, exec: GithubExecutor) {
+        if self.enabled && self.github_active() {
+            self.runtimes.set_github(exec);
+            self.mirror.set_github(true);
+        }
+    }
+
+    /// github 소스 저장소의 조회를 Rust 가 맡는가(`set_github_cache` 가 받았다)
+    pub fn github_cache_active(&self) -> bool {
+        self.mirror.github_resolved()
     }
 
     /// Jira 서비스를 주입한다. 스위치가 꺼져 있으면 주입하지 않는다(서비스·키체인이 없어야 한다)
@@ -864,6 +940,11 @@ impl Router {
         let mirror = &self.mirror;
         let owned = |id: &String| matches!(mirror.resolve(id), Resolved::Rust(_));
         self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| owned(id));
+        // github 저장소별 조회 범위(진행 중인 조회는 자기 Arc 를 쥐고 있어 맵에서 빠져도 계속 돈다)
+        self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| matches!(mirror.resolve(id), Resolved::Rust(Target::Github { .. })));
+        // 지워진 저장소(더는 github 로 풀리지 않는다)의 "삭제 중" 표식을 푼다. 아직 풀리는 저장소는 만료 시각까지 둔다
+        let now = Instant::now();
+        self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, until| *until > now && matches!(mirror.resolve(id), Resolved::Rust(Target::Github { .. })));
         // Launchpad 의 remote 목록은 통째로 비운다 — `repos:update` 무효화(route 시점)와 미러 반영(비동기) 사이에 옛 경로로 채운 항목이
         // 소유만 보는 retain 으로는 남는다(10분 캐시라 다시 채우는 비용이 작다)
         self.invalidate_gh_remotes(None);
@@ -1014,6 +1095,11 @@ impl Router {
             // 응답은 사이드카가 한다. 사이드카 쪽 캐시는 그 핸들러가 직접 비운다
             if let Some(Value::String(id)) = raw.first() {
                 self.invalidate_gh_remotes(Some(id));
+                // GitHub 원격 전용 저장소를 지우면 사이드카의 핸들러가 fetch·감시를 멈춘 뒤 캐시 폴더를 지운다(`removeGithubCache`). 폴더를 지우려면 **이 쪽(Rust)이 쥔 핸들**
+                // (진행 중인 조회의 git 프로세스·열려 있는 로그 커서)이 먼저 풀려 있어야 한다 — 넘기기 전에 정리하고 끝나기를 기다린다
+                if channel == "repos:remove" && self.enabled {
+                    self.release_github_repo(id).await;
+                }
             }
             return Routed::Sidecar;
         }
@@ -1025,19 +1111,108 @@ impl Router {
             return Routed::Sidecar;
         }
         let args = decode_args(raw);
-        match channel {
-            "git:commit" => self.git_commit(&args).await,
-            "git:log" => self.git_log(&args).await,
-            "git:compare" | "git:fileDiff" | "git:fileHistory" | "git:blame" => self.git_file_channel(channel, &args).await,
-            "git:fetch" => self.git_fetch(&args).await,
-            "git:resolveRev" | "git:tree" | "git:blob" | "git:onRemote" => self.git_code_channel(channel, &args).await,
-            "git:refs" | "git:refsDetails" => self.git_refs_channel(channel, &args).await,
-            "git:search" | "git:activity" => self.git_history_channel(channel, &args).await,
-            "git:repoExtras" | "git:lfsPaths" => self.git_extras_channel(channel, &args).await,
-            "gh:repo" => self.gh_repo_channel(&args).await,
-            "git:wipStatus" | "git:wipDiff" => self.git_wip_channel(channel, &args).await,
-            _ => Routed::Sidecar,
+        // GitHub 원격 전용 저장소의 조회는 그 저장소의 범위 안에서 돈다(`repos:remove` 가 끊을 수 있게). `git:fetch` 는 소유가 사이드카라 범위에 들이지 않는다
+        let scope = if channel == "git:fetch" {
+            None
+        } else {
+            match self.enter_github_scope(&args) {
+                Ok(scope) => scope,
+                Err(e) => return Routed::Done(err_env(&e.to_string(), e.envelope_code())),
+            }
+        };
+        // 채널 처리기 future 는 크다 — 힙에 둔다(범위 안팎 어느 쪽이든 호출 스택에 그대로 쌓이지 않게)
+        let dispatch = Box::pin(async {
+            match channel {
+                "git:commit" => self.git_commit(&args).await,
+                "git:log" => self.git_log(&args).await,
+                "git:compare" | "git:fileDiff" | "git:fileHistory" | "git:blame" => self.git_file_channel(channel, &args).await,
+                "git:fetch" => self.git_fetch(&args).await,
+                "git:resolveRev" | "git:tree" | "git:blob" | "git:onRemote" => self.git_code_channel(channel, &args).await,
+                "git:refs" | "git:refsDetails" => self.git_refs_channel(channel, &args).await,
+                "git:search" | "git:activity" => self.git_history_channel(channel, &args).await,
+                "git:repoExtras" | "git:lfsPaths" => self.git_extras_channel(channel, &args).await,
+                "gh:repo" => self.gh_repo_channel(&args).await,
+                "git:wipStatus" | "git:wipDiff" => self.git_wip_channel(channel, &args).await,
+                _ => Routed::Sidecar,
+            }
+        });
+        match scope {
+            // 범위가 끊기면 기다리던 조회를 버린다 — future 가 버려지면 큐 슬롯의 git 프로세스 트리와 로그 커서의 스트림이 정리된다
+            Some((scope, _guard)) => {
+                tokio::select! {
+                    biased;
+                    () = scope.cancel.cancelled() => Routed::Done(err_env(&ExecError::Aborted.to_string(), ExecError::Aborted.envelope_code())),
+                    routed = dispatch => routed,
+                }
+            }
+            None => dispatch.await,
         }
+    }
+
+    /// github 소스 저장소의 조회면 그 저장소의 취소 범위에 들어간다(아니면 `Ok(None)`). 반환한 가드가 살아 있는 동안 진행 중으로 센다.
+    /// 삭제 중인 저장소(`repos:remove` 가 정리를 시작했다)면 들어가지 못하고 오류다
+    fn enter_github_scope(&self, args: &[Option<&Value>]) -> Result<Option<(Arc<GithubScope>, ScopeGuard)>, ExecError> {
+        let Some(Some(Value::String(id))) = args.first() else { return Ok(None) };
+        self.enter_github_scope_of(id)
+    }
+
+    fn enter_github_scope_of(&self, id: &str) -> Result<Option<(Arc<GithubScope>, ScopeGuard)>, ExecError> {
+        if !matches!(self.mirror.resolve(id), Resolved::Rust(Target::Github { .. })) {
+            return Ok(None);
+        }
+        // 표식 확인과 범위 등록이 범위 맵 잠금 안이다 — 정리(`release_github_repo`)가 표식을 먼저 달고 범위를 뺀 뒤이므로, 여기서 통과한 조회는 그 정리가 보는 범위에 든다
+        let mut scopes = self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).get(id).is_some_and(|until| *until > Instant::now()) {
+            return Err(ExecError::Other { message: REMOVING_MESSAGE.to_string() });
+        }
+        let scope = scopes.entry(id.to_string()).or_default().clone();
+        scope.inflight.fetch_add(1, Ordering::SeqCst);
+        Ok(Some((scope.clone(), ScopeGuard(scope))))
+    }
+
+    /// GitHub 서비스(`RoutedRepos`)가 채널을 거치지 않고 부르는 저장소 질의도 같은 범위 안에서 돌린다 — `repos:remove` 가 끊을 수 있게. github 저장소가 아니면 그대로 돌린다
+    async fn scoped<T>(&self, repo_id: &str, target: &Target, fut: impl std::future::Future<Output = Result<T, ExecError>>) -> Result<T, ExecError> {
+        let entered = if matches!(target, Target::Github { .. }) { self.enter_github_scope_of(repo_id)? } else { None };
+        let Some((scope, _guard)) = entered else { return fut.await };
+        tokio::select! {
+            biased;
+            () = scope.cancel.cancelled() => Err(ExecError::Aborted),
+            r = fut => r,
+        }
+    }
+
+    /// `repos:remove` 의 Rust 쪽 정리(Phase 6b PR 6): 이 저장소를 github 소스로 풀고 있으면 "삭제 중" 표식을 달고, 진행 중인 조회와 활동 공유 시그니처 계산을 끊고,
+    /// 열려 있는 로그 커서·앵커를 닫고, 그 저장소의 git 프로세스가 모두 끝나기를 기다린다
+    /// (실행기가 센다 — 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있어, 최대 [`SCOPE_DRAIN_TIMEOUT`] 까지만 기다린다). 이 뒤에 사이드카가 캐시 폴더를 지운다. 캐시 삭제 자체는 사이드카의 몫이다:
+    /// fetch·감시가 아직 사이드카의 소유라 "멈춘 뒤 지운다"는 순서를 한 프로세스가 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
+    async fn release_github_repo(&self, repo_id: &str) {
+        let Resolved::Rust(target @ Target::Github { .. }) = self.mirror.resolve(repo_id) else { return };
+        let path = target.path().to_string();
+        // "삭제 중" 표식을 **먼저** 단다 — 이 뒤에 들어오는 새 조회는 범위에 들지 못하고 거부된다(사이드카가 레코드를 지워 미러가 바뀔 때까지)
+        self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), Instant::now() + REMOVING_TTL);
+        let scope = self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
+        if let Some(scope) = &scope {
+            scope.cancel.cancel();
+        }
+        // 범위 취소가 닿지 않는 일: 활동 공유 시그니처 계산은 spawn 한 태스크라 기다리는 쪽이 떠나도 최대 20초 계속 간다 — 직접 끊고 끝나기를 기다린다
+        let signature = self.repo_state.cancel_shared(repo_id);
+        // 커서의 읽기 태스크 중단은 비동기로 끝난다(그때 git 스트림이 버려져 프로세스 트리가 종료된다) — 닫은 커서가 있으면 그것이 끝날 틈을 준다
+        if self.logs.close_repo(repo_id) > 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        self.untracked_allow.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
+        self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
+        // 끝나기를 기다린다: 취소된 시그니처 계산, 범위 안의 조회, 그리고 실행기가 센 이 저장소의 git 프로세스(범위 가드는 취소와 함께 곧바로 사라지지만
+        // 실행기의 표시는 프로세스 트리를 죽인 뒤에야 풀린다 — 시그니처·로그 커서처럼 범위 밖에서 도는 것도 센다)
+        let _ = tokio::time::timeout(SCOPE_DRAIN_TIMEOUT, async {
+            if let Some(signature) = signature {
+                signature.await;
+            }
+            while scope.as_ref().is_some_and(|s| s.inflight.load(Ordering::SeqCst) > 0) || self.runtimes.github_live_processes(&path) > 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
     }
 
     /// 서비스가 없는 `jira:*`·`gh:*` 채널의 행선지. Rust 가 소유(사이드카를 env=1 로 띄움)했는데 서비스가 없으면 사이드카는 받지 않으므로 오류다.
@@ -1222,9 +1397,11 @@ impl Router {
             // 해시 쌍 기준이라 불변: 캐시 + 같은 키 요청 합치기
             FileJob::Compare(from, to) => {
                 let key = format!("compare\0{repo_id}\0{}\0{}", from.lower(), to.lower());
+                // 원격 전용 저장소는 통계를 못 읽어도 목록을 돌려주고(lenient), 통계가 빠진 결과는 캐시하지 않는다
+                let lenient = matches!(target, Target::Github { .. });
                 self.cached_shared(&rt, &self.compare_cache, key, token, move || async move {
-                    let result = compare(&exec, &path, &from, &to).await?;
-                    let cost = estimate_compare_bytes(&result);
+                    let result = compare(&exec, &path, &from, &to, lenient).await?;
+                    let cost = (!lenient || has_line_stats(&result.files)).then(|| estimate_compare_bytes(&result));
                     Ok((to_value(&result)?, cost))
                 })
                 .await
@@ -1234,7 +1411,7 @@ impl Router {
                 let key = req.key(repo_id);
                 self.cached_shared(&rt, &self.diff_cache, key, token, move || async move {
                     let diff = file_diff(&exec, &path, &req).await?;
-                    let cost = estimate_diff_bytes(&diff);
+                    let cost = Some(estimate_diff_bytes(&diff));
                     Ok((to_value(&diff)?, cost))
                 })
                 .await
@@ -1252,7 +1429,7 @@ impl Router {
     }
 
     /// 코드 탐색기 채널: `git:resolveRev(repoId, ref)`·`git:tree(repoId, {rev, dir}, requestId?)`·`git:blob(repoId, {rev, path}, requestId?)`·`git:onRemote(repoId, rev)`.
-    /// 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다) 통과한 값만 `git::code_browse` 의 argv 빌더로 간다. github 소스는 미러가 사이드카로 보낸다
+    /// 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다) 통과한 값만 `git::code_browse` 의 argv 빌더로 간다. github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카)
     async fn git_code_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
         let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
         let target = match self.mirror.resolve(repo_id) {
@@ -1263,6 +1440,12 @@ impl Router {
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
+        // GitHub 원격 전용 저장소의 커밋은 항상 원격에 있다 — 인자 검증도 git 도 없이 true 다(TS `codeOnRemote` 가 `isGithub` 에서 먼저 돌려준다)
+        if channel == "git:onRemote" && matches!(target, Target::Github { .. }) {
+            self.note(channel, "rust");
+            self.rust_handled.fetch_add(1, Ordering::Relaxed);
+            return Routed::Done(ok_env(json!(true)));
+        }
         let arg = |i: usize| args.get(i).copied().flatten();
         let job = match channel {
             "git:resolveRev" => parse_ref(arg(1)).map(|r| CodeJob::Resolve(r.to_string())),
@@ -1355,7 +1538,7 @@ impl Router {
         }
     }
 
-    /// 사이드바 ref 채널: `git:refs(repoId)`·`git:refsDetails(repoId)`. 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), github 소스는 미러가 사이드카로 보낸다.
+    /// 사이드바 ref 채널: `git:refs(repoId)`·`git:refsDetails(repoId)`. 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카).
     /// TS `RepoService` 와 같다: 큐 슬롯 안에서 git(키 `refs:<id>`·`refsDetails:<id>` 로 같은 요청을 합친다 — 취소 신호가 없다). 캐시는 없다.
     /// `refsDetails` 만 첫 로그 페이지 문(`RepoState::after_first_page`)을 **큐에 들어가기 전에** 기다린다 — 비싼 조회가 첫 화면을 늦추지 않게(문이 없으면 바로 간다)
     async fn git_refs_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
@@ -1378,10 +1561,21 @@ impl Router {
             let rt = self.runtime(&target)?;
             let (exec, path) = (rt.exec.clone(), target.path().to_string());
             let key = format!("{}:{repo_id}", if details { "refsDetails" } else { "refs" });
+            // 원격 전용 저장소(작업 트리가 없는 bare 캐시): 서브모듈을 읽지 않고(.gitmodules blob 을 받으러 가지 않게) 작업 트리 목록은 비운다 —
+            // `git worktree list` 가 bare 캐시 자신을 'bare' 항목으로 내기 때문이다
+            let github = matches!(target, Target::Github { .. });
             rt.queue
                 .run(Some(&key), None, move || async move {
                     let opts = RunOpts::default();
-                    Ok(Arc::new(if details { to_value(&refs_details(&exec, &path, &opts, false).await?)? } else { to_value(&refs_snapshot(&exec, &path, &opts, true).await?)? }))
+                    Ok(Arc::new(if details {
+                        to_value(&refs_details(&exec, &path, &opts, github).await?)?
+                    } else {
+                        let mut snapshot = refs_snapshot(&exec, &path, &opts, true).await?;
+                        if github {
+                            snapshot.worktrees.clear();
+                        }
+                        to_value(&snapshot)?
+                    }))
                 })
                 .await
         }
@@ -1393,7 +1587,7 @@ impl Router {
     }
 
     /// 검색·활동 채널: `git:search(repoId, query, scope?, requestId?)`·`git:activity(repoId, scope?, requestId?)`. 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다)
-    /// 통과한 값만 `git::search`·`git::activity` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다(renderer 가 새 질의·범위를 보내면 이전 것을 취소한다). github 소스는 미러가 사이드카로 보낸다
+    /// 통과한 값만 `git::search`·`git::activity` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다(renderer 가 새 질의·범위를 보내면 이전 것을 취소한다). github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카)
     async fn git_history_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
         let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
         let target = match self.mirror.resolve(repo_id) {
@@ -1431,7 +1625,7 @@ impl Router {
     }
 
     /// LFS·gitflow 채널: `git:repoExtras(repoId)`·`git:lfsPaths(repoId, {rev?, paths}, requestId?)`. 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다)
-    /// 통과한 값만 `git::lfs` 의 argv 빌더로 간다. `lfsPaths` 만 requestId 로 취소할 수 있다. 캐시·합치기는 없다(TS 도 같다 — 설정이 바뀔 수 있다). github 소스는 미러가 사이드카로 보낸다
+    /// 통과한 값만 `git::lfs` 의 argv 빌더로 간다. `lfsPaths` 만 requestId 로 취소할 수 있다. 캐시·합치기는 없다(TS 도 같다 — 설정이 바뀔 수 있다). github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카)
     async fn git_extras_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
         let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
         let target = match self.mirror.resolve(repo_id) {
@@ -1477,7 +1671,7 @@ impl Router {
         }
     }
 
-    /// `gh:repo(repoId)` — 저장소의 GitHub remote(없으면 `null`). 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), github kind·미러에 없는 id 는 사이드카가 답한다
+    /// `gh:repo(repoId)` — 저장소의 GitHub remote(없으면 `null`). 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), 캐시 실행기가 없는 github kind·미러에 없는 id 는 사이드카가 답한다
     /// (원격 전용 저장소는 레코드가 어느 GitHub 저장소인지 안다 — git 을 부르지 않는다)
     async fn gh_repo_channel(&self, args: &[Option<&Value>]) -> Routed {
         let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
@@ -1513,7 +1707,7 @@ impl Router {
     /// GitHub 서비스의 `gh_repo` 질의(`RepoQuery`): Rust 가 맡는 저장소면 `Some`(결과 또는 오류), 아니면 `None`(호출자가 사이드카에 묻는다)
     pub async fn gh_repo(&self, repo_id: &str) -> Option<Result<Option<GhRepoRef>, ExecError>> {
         match self.rust_target(repo_id) {
-            Ok(Some(target)) => Some(self.gh_repo_of(repo_id, &target).await),
+            Ok(Some(target)) => Some(self.scoped(repo_id, &target, self.gh_repo_of(repo_id, &target)).await),
             Ok(None) => None,
             Err(e) => Some(Err(e)),
         }
@@ -1521,6 +1715,10 @@ impl Router {
 
     /// remote URL 에서 추론한 GitHub 저장소. TS `RepoService.ghRepo` 와 같은 순서: 60초 캐시(없음도) → 첫 로그 페이지 문 → 큐(키 `remotes:<id>`)
     async fn gh_repo_of(&self, repo_id: &str, target: &Target) -> Result<Option<GhRepoRef>, ExecError> {
+        // 원격 전용 저장소는 어느 GitHub 저장소인지 레코드가 안다 — 캐시·첫 페이지 문·git 없이 링크로 답한다(TS `ghRepo`). 링크 없는 github 레코드는 아래 일반 경로(git remote)로 간다
+        if let Target::Github { link: Some(link), .. } = target {
+            return Ok(Some(GhRepoRef { owner: link.owner.clone(), repo: link.repo.clone(), remote: "origin".to_string() }));
+        }
         if let Some((at, value)) = self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).get(repo_id) {
             if at.elapsed() < GH_REPO_TTL {
                 return Ok(value.clone());
@@ -1547,13 +1745,13 @@ impl Router {
             }
         }
         Some(
-            async {
+            self.scoped(repo_id, &target, async {
                 let list = self.remote_list(repo_id, &target, Some(cancel)).await?;
                 // 사이드카 경로(repoq)와 같은 응답 모양 상한 — remote 100개·이름 200자. 악성 `.git/config` 의 remote 수십만 개가 10분 캐시에 남지 않게
                 let value: Vec<GhRepoRef> = pick_github_remotes(&list).into_iter().filter(|r| r.remote.chars().count() <= GH_REMOTE_NAME_MAX).take(GH_REMOTES_MAX).collect();
                 self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), (Instant::now(), value.clone()));
                 Ok(value)
-            }
+            })
             .await,
         )
     }
@@ -1584,7 +1782,7 @@ impl Router {
             Err(e) => return Some(Err(e)),
         };
         Some(
-            async {
+            self.scoped(repo_id, &target, async {
                 check_pushed_request(email, limit).map_err(|m| ExecError::Other { message: m.to_string() })?;
                 let rt = self.runtime(&target)?;
                 let (exec, path, email, t) = (rt.exec.clone(), target.path().to_string(), email.to_string(), cancel.clone());
@@ -1593,7 +1791,7 @@ impl Router {
                     .run(None, Some(cancel.clone()), move || async move { Ok(Arc::new(json!(pushed_shas(&exec, &path, &email, limit, &RunOpts::with_cancel(t)).await?))) })
                     .await?;
                 serde_json::from_value((*data).clone()).map_err(|e| ExecError::Other { message: e.to_string() })
-            }
+            })
             .await,
         )
     }
@@ -1609,8 +1807,8 @@ impl Router {
         }
     }
 
-    /// 작업 트리 채널: `git:wipStatus(repoId, requestId?)`·`git:wipDiff(repoId, req, requestId?)`. 소유는 다른 git 채널과 같은 한 술어(`mirror.resolve`)다(github 소스는 미러가 사이드카로 보낸다 —
-    /// TS 의 빈 결과 분기는 옮기지 않는다). `wipDiff` 의 요청 검증은 untracked 허용 목록을 보므로 이 라우터가 목록을 쥔 채로 하고(실패하면 git·레지스트리를 건드리지 않는다),
+    /// 작업 트리 채널: `git:wipStatus(repoId, requestId?)`·`git:wipDiff(repoId, req, requestId?)`. 소유는 다른 git 채널과 같은 한 술어(`mirror.resolve`)다(github 소스는 Rust 가 풀 때 빈 결과를 라우터가 먼저 돌려준다 —
+    /// TS 의 `isGithub` 빈 결과 분기를 옮겼다). `wipDiff` 의 요청 검증은 untracked 허용 목록을 보므로 이 라우터가 목록을 쥔 채로 하고(실패하면 git·레지스트리를 건드리지 않는다),
     /// 통과한 값만 `git::wip` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다
     async fn git_wip_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
         let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
@@ -1622,6 +1820,25 @@ impl Router {
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
+        // 작업 트리가 없는 원격 전용 저장소: 변경 없음(빈 결과). 인자 검증·첫 페이지 문·큐·허용 목록이 없다 — TS 는 `isGithub` 에서 먼저 돌려준다
+        if matches!(target, Target::Github { .. }) {
+            self.note(channel, "rust");
+            self.rust_handled.fetch_add(1, Ordering::Relaxed);
+            let empty = if channel == "git:wipStatus" {
+                to_value(&WipStatusParser::new(WIP_UNTRACKED_LIMIT).finish())
+            } else {
+                // `typeof req?.path === 'string' ? req.path : ''`
+                let path = match args.get(1) {
+                    Some(Some(Value::Object(o))) => o.get("path").and_then(Value::as_str).unwrap_or(""),
+                    _ => "",
+                };
+                to_value(&DiffParser::new(path, None, &DiffParseOpts::default()).finish())
+            };
+            return Routed::Done(match empty {
+                Ok(data) => ok_env(data),
+                Err(e) => err_env(&e.to_string(), e.envelope_code()),
+            });
+        }
         let (job, request_id) = if channel == "git:wipStatus" {
             (WipJob::Status, 1)
         } else {
@@ -1694,7 +1911,7 @@ impl Router {
                 let t = token.clone();
                 rt.queue.run(None, Some(token.clone()), move || async move { search(&exec, &path, &req, &t).await.map(Arc::new) }).await
             }
-            HistoryJob::Activity(req) => self.activity_job(repo_id, &rt, path, req, token).await,
+            HistoryJob::Activity(req) => self.activity_job(repo_id, &rt, path, req, matches!(target, Target::Github { .. }), token).await,
         }
     }
 
@@ -1703,14 +1920,16 @@ impl Router {
     ///
     /// **기억한 시그니처(`known_signature`)를 먼저 쓴다**(TS `knownSigs.get(repoId) ?? sharedSignature`): 감시(PR 7b)가 확인마다 갱신하고 `logStale`·`fetchChanged`·재 `arm` 이 버린다.
     /// 기억이 없으면 `shared_signature`(진행 중인 계산에 합류, 제한 20초)로 얻는다. 감시하지 않는 저장소의 기억은 알림 없이 낡을 수 있다 — TS 도 같다
-    async fn activity_job(&self, repo_id: &str, rt: &SourceRuntime, path: String, req: ActivityRequest, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
+    ///
+    /// **github 저장소는 기억한 시그니처를 쓰지 않는다**(`github`): fetch·감시가 사이드카에 있어 ref 가 바뀌어도 Rust 에는 알림이 오지 않는다 — 매번 공유 계산을 한다(계획 §13 C2)
+    async fn activity_job(&self, repo_id: &str, rt: &SourceRuntime, path: String, req: ActivityRequest, github: bool, token: &CancellationToken) -> Result<Arc<Value>, ExecError> {
         let (state, cache, queue, exec) = (self.repo_state.clone(), self.activity_cache.clone(), rt.queue.clone(), rt.exec.clone());
         let repo = repo_id.to_string();
         let join_key = format!("activity\0{repo_id}\0{}", req.scope_key());
         let cache_key = format!("{repo_id}\0{}", req.scope_key());
         let run = self.joins.run(Some(&join_key), None, move || async move {
             state.after_first_page(&repo).await;
-            let sig = match state.known_signature(&repo) {
+            let sig = match state.known_signature(&repo).filter(|_| !github) {
                 Some(known) => known,
                 None => {
                     let (queue, exec, path) = (queue.clone(), exec.clone(), path.clone());
@@ -1737,7 +1956,8 @@ impl Router {
     }
 
     /// 불변 결과의 캐시 → 같은 키 요청 합치기 → 큐 슬롯 안에서 `task`. `commit` 과 같은 방식이다:
-    /// 요청 토큰은 실행기에 넘기지 않고(합쳐진 다른 호출자의 프로세스까지 죽이게 된다) 이 호출자는 기다리기만 그만둔다
+    /// 요청 토큰은 실행기에 넘기지 않고(합쳐진 다른 호출자의 프로세스까지 죽이게 된다) 이 호출자는 기다리기만 그만둔다.
+    /// `task` 가 돌려주는 크기가 `None` 이면 캐시에 넣지 않는다(원격 전용 저장소의 통계 없는 결과)
     async fn cached_shared<F, Fut>(
         &self,
         rt: &SourceRuntime,
@@ -1748,7 +1968,7 @@ impl Router {
     ) -> Result<Arc<Value>, ExecError>
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = Result<(Value, u64), ExecError>> + Send + 'static,
+        Fut: std::future::Future<Output = Result<(Value, Option<u64>), ExecError>> + Send + 'static,
     {
         if let Some(hit) = cache.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
             return Ok(hit);
@@ -1757,7 +1977,9 @@ impl Router {
         let run = rt.queue.run(Some(&key), None, move || async move {
             let (value, cost) = task().await?;
             let value = Arc::new(value);
-            cache.lock().unwrap_or_else(PoisonError::into_inner).set(&cache_key, value.clone(), cost);
+            if let Some(cost) = cost {
+                cache.lock().unwrap_or_else(PoisonError::into_inner).set(&cache_key, value.clone(), cost);
+            }
             Ok(value)
         });
         tokio::select! {
@@ -1781,12 +2003,17 @@ impl Router {
             return Ok(hit);
         }
         let rt = self.runtime(target)?;
+        // 원격 전용 저장소는 오프라인·로그아웃이면 통계에 필요한 blob 을 받지 못한다 — 던지지 않고 파일 목록만 보여 준다(TS `lenient`)
+        let lenient = matches!(target, Target::Github { .. });
         let (exec, path, cache, cache_key) = (rt.exec.clone(), target.path().to_string(), self.commit_cache.clone(), key.clone());
         let run = rt.queue.run(Some(&key), None, move || async move {
-            let detail = commit_detail(&exec, &path, &hash).await?;
+            let detail = commit_detail(&exec, &path, &hash, lenient).await?;
             let cost = estimate_commit_bytes(&detail);
             let value = Arc::new(serde_json::to_value(&detail).map_err(|e| ExecError::Other { message: e.to_string() })?);
-            cache.lock().unwrap_or_else(PoisonError::into_inner).set(&cache_key, value.clone(), cost);
+            // 통계를 못 읽은 결과는 캐시하지 않는다(다시 연결되면 완전한 결과를 받는다)
+            if !lenient || has_line_stats(&detail.files) {
+                cache.lock().unwrap_or_else(PoisonError::into_inner).set(&cache_key, value.clone(), cost);
+            }
             Ok(value)
         });
         // 요청 토큰은 실행기에 넘기지 않는다 — 합쳐진 다른 호출자의 프로세스까지 죽이게 된다. 이 호출자는 기다리기만 그만둔다

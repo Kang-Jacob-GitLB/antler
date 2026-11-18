@@ -1,8 +1,8 @@
 //! GitHub 서비스가 저장소 정보를 묻는 길의 **소유 분기**(Phase 6a PR 8). [`RepoQuery`](crate::github::ports::RepoQuery) 의 실제 구현이다.
 //!
-//! - Rust 가 git 을 맡는 저장소(local·WSL·SSH — 라우터의 한 술어 `RepoMirror::resolve`)의 `gh_repo`·`gh_remotes`·`pushed_shas_by_author` 는 **Rust 의 라우터가 직접** 답한다.
+//! - Rust 가 git 을 맡는 저장소(local·WSL·SSH, 그리고 GitHub 서비스와 캐시 실행기가 주입된 github kind — 라우터의 한 술어 `RepoMirror::resolve`)의 `gh_repo`·`gh_remotes`·`pushed_shas_by_author` 는 **Rust 의 라우터가 직접** 답한다.
 //!   사이드카는 그 저장소에 git 을 돌리지 않는다(SSH 호스트당 연결이 앱 하나다). 실행기·큐·캐시는 채널 핸들러(`gh:repo`)가 쓰는 라우터의 것 그대로다.
-//! - 그 밖(github kind·미러에 없는 id·`ANTLER_RUST_GIT=0`)은 사이드카에 묻는다([`SidecarRepos`](crate::repoq::SidecarRepos) 위임).
+//! - 그 밖(캐시 실행기가 없는 github kind·미러에 없는 id·`ANTLER_RUST_GIT=0`)은 사이드카에 묻는다([`SidecarRepos`](crate::repoq::SidecarRepos) 위임).
 //! - 미러가 **거부한** 저장소(경로·호스트·배포판 검사에 걸림)는 위임하지 않는다 — 오류다. 위임하면 미러가 막은 경로에 사이드카가 git 을 돌린다.
 //! - `github_client_id`·`repo_ids`(설정 읽기)는 항상 사이드카다. `invalidate_gh_remotes` 는 Rust 캐시를 비우고 사이드카에도 알린다.
 //!

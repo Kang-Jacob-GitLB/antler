@@ -186,6 +186,8 @@ const RUST_SOURCES: Record<string, string> = {
   // GitHub 캐시 실행 기반(PR 2): 골든·실제 git 시험 둘과 실행기의 단위 시험
   'github_cache_exec.rs': '../src-tauri/tests/github_cache_exec.rs',
   'github_cache_isolation.rs': '../src-tauri/tests/github_cache_isolation.rs',
+  // github kind 의 git 조회(PR 6)
+  'github_route.rs': '../src-tauri/tests/github_route.rs',
   'github.rs': '../src-tauri/src/git/exec/github.rs',
   'github_link.rs': '../src-tauri/src/git/github_link.rs',
   'load.rs': '../src-tauri/src/config/load.rs',

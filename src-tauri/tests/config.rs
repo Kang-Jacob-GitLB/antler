@@ -121,6 +121,9 @@ fn mirror_json(config: &Json) -> Json {
                 if let Some(h) = &e.repo.ssh_host {
                     o.push(("sshHost".to_string(), s(h)));
                 }
+                if let Some((owner, repo)) = &e.github {
+                    o.push(("github".to_string(), Json::Obj(vec![("owner".to_string(), s(owner)), ("repo".to_string(), s(repo))])));
+                }
                 Json::Obj(o)
             })
             .collect(),
