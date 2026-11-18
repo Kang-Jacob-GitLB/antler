@@ -115,7 +115,7 @@ export const migrationEnabled = (value) => !['off', 'false', '0', 'no'].includes
  * 설치본(디스크의 실물)을 읽어 매니페스트를 만들고, 만든 값이 실물과 맞는지 되짚는다(가드).
  * 돌려주는 값: { files: { <이름>: <내용> }, warnings: [문자열], sha512, size }
  */
-export function makeManifests({ dir, version, installer, signatureText, migration, now = new Date() }) {
+export function makeManifests({ dir, version, installer, signatureText: rawSignature, signed = false, migration, now = new Date() }) {
   assertVersion(version)
   const fileName = installer ?? installerName(version)
   if (fileName !== installerName(version)) throw new Error(`설치본 이름이 버전과 맞지 않습니다: ${fileName} (기대: ${installerName(version)})`)
@@ -127,9 +127,12 @@ export function makeManifests({ dir, version, installer, signatureText, migratio
   const files = {}
   const warnings = []
 
+  // 서명 단계가 실제로 돌았다(`signed`)는 표식이 없으면 어떤 서명도 쓰지 않는다 — .sig 가 있어도(이전 실행이 남겼거나 잘린 파일) 항목을 만들지 않는다
+  const signatureText = signed ? rawSignature : null
+  if (!signed) warnings.push('서명 단계가 돌았다는 표식(--signed true)이 없어 latest.json 의 서명 항목을 만들지 않았습니다')
   // 수동 경로(dmg·deb): 설치본과 `<이름>.sig` 가 둘 다 있는 것만 넣는다. 없는 것은 경고하고 건너뛴다(그 플랫폼 사용자는 업데이트를 받지 못한다)
   const extras = []
-  for (const { key, name } of MANUAL_ASSETS) {
+  for (const { key, name } of signed ? MANUAL_ASSETS : []) {
     const asset = name(version)
     const assetFile = join(dir, asset)
     const sigFile = join(dir, `${asset}.sig`)
@@ -188,12 +191,14 @@ function main() {
   try {
     const args = parseArgs(process.argv.slice(2))
     if (!args.version || !args.dir) throw new Error('--version 과 --dir 이 필요합니다')
-    const signatureText = args.sig && existsSync(args.sig) ? readFileSync(args.sig, 'utf8') : null
+    const signed = args.signed === 'true'
+    const signatureText = signed && args.sig && existsSync(args.sig) ? readFileSync(args.sig, 'utf8') : null
     const r = makeManifests({
       dir: args.dir,
       version: args.version,
       installer: args.installer,
       signatureText,
+      signed,
       migration: args['electron-migration'] ?? process.env.ELECTRON_MIGRATION
     })
     for (const [name, content] of Object.entries(r.files)) {

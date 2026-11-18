@@ -575,6 +575,31 @@ fn 번들_표식과_실행_위치로_업데이트_대상을_고른다() {
 }
 
 #[test]
+fn 대상_파일_형식_표식을_본다() {
+    use logic::{detect_target, BundleMark as M, Target};
+    let deb = detect_target("linux", "x86_64", M::Deb, false).expect("deb");
+    let dmg = detect_target("macos", "aarch64", M::App, true).expect("dmg");
+    // deb: ar 아카이브 + 첫 멤버 debian-binary
+    let good_deb = [b"!<arch>\ndebian-binary   ".as_slice(), &[0u8; 100]].concat();
+    assert!(deb.check_bytes(&good_deb));
+    for bad in [b"".as_slice(), b"!<arch>\n", b"!<arch>\nsomething-else", b"\x7fELF....", b"MZ......", b"koly"] {
+        assert!(!deb.check_bytes(bad), "{bad:?}");
+    }
+    // dmg: 끝 512바이트의 첫 4바이트가 `koly`
+    let mut good_dmg = vec![0u8; 4096];
+    let at = good_dmg.len() - 512;
+    good_dmg[at..at + 4].copy_from_slice(b"koly");
+    assert!(dmg.check_bytes(&good_dmg));
+    assert!(!dmg.check_bytes(&[0u8; 4096]));
+    assert!(!dmg.check_bytes(&good_deb), "deb 는 dmg 가 아니다");
+    assert!(!dmg.check_bytes(&good_dmg[..good_dmg.len() - 1]), "꼬리표가 밀리면 거부");
+    assert!(!dmg.check_bytes(&[b'k'; 511]) && !dmg.check_bytes(b"") && !dmg.check_bytes(b"koly"));
+    assert!(!deb.check_bytes(&good_dmg), "dmg 는 deb 가 아니다");
+    // NSIS 는 플러그인이 형식을 확인한다
+    assert!(Target::nsis().check_bytes(b""));
+}
+
+#[test]
 fn 앱_번들_안의_실행_파일만_앱_번들로_본다() {
     let yes = |p: &str| logic::in_app_bundle(Path::new(p));
     assert!(yes("/Applications/Antler.app/Contents/MacOS/antler"));

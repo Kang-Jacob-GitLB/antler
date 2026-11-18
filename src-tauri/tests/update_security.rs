@@ -750,8 +750,38 @@ struct ManualEnv {
 
 impl Drop for ManualEnv {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(self.dir.parent().unwrap_or(&self.dir));
+        remove_tree(self.dir.parent().unwrap_or(&self.dir));
     }
+}
+
+/// 읽기 전용 사본(유닉스 0400·Windows 읽기 전용 속성)까지 지운다
+fn remove_tree(root: &Path) {
+    #[allow(clippy::permissions_set_readonly_false)]
+    fn writable(p: &Path) {
+        if let Ok(m) = fs::metadata(p) {
+            let mut perm = m.permissions();
+            perm.set_readonly(false);
+            let _ = fs::set_permissions(p, perm);
+        }
+    }
+    if let Ok(rd) = fs::read_dir(root) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                remove_tree(&p);
+            } else {
+                writable(&p);
+            }
+        }
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+/// `path` 가 `dir` 안의 `file` 의 열기용 사본인가(저장 파일 자체가 아니고, 같은 확장자, 내용이 검증한 바이트)
+fn is_open_copy(path: &Path, dir: &Path, file: &str) -> bool {
+    let (stem, ext) = file.rsplit_once('.').expect("확장자");
+    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+    path.parent() == Some(dir) && path != dir.join(file) && name.starts_with(&format!("{stem}.open-")) && name.ends_with(&format!(".{ext}")) && fs::read(path).is_ok_and(|b| b == PAYLOAD)
 }
 
 impl ManualEnv {
@@ -772,7 +802,16 @@ impl ManualEnv {
     }
 }
 
+/// 시험 서명은 고정 바이트(`PAYLOAD`)에 걸려 있어 형식 표식을 넣을 수 없다 — 기본은 형식 확인을 통과시키고, 엄격한 시험(`manual_env_strict`)만 운영의 `Target::check_bytes` 를 쓴다
+fn permissive(_: &Target, _: &[u8]) -> bool {
+    true
+}
+
 async fn manual_env(target: Target, pubkey: Option<&str>, stall: Duration, open_result: Result<(), String>, route: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> ManualEnv {
+    manual_env_fmt(target, pubkey, stall, open_result, true, route).await
+}
+
+async fn manual_env_fmt(target: Target, pubkey: Option<&str>, stall: Duration, open_result: Result<(), String>, relaxed: bool, route: impl Fn(&Req) -> Resp + Send + Sync + 'static) -> ManualEnv {
     let app = mock_app(pubkey);
     let server = Server::start(route).await;
     let (manifest, api, download) = clients(&server, stall);
@@ -786,7 +825,8 @@ async fn manual_env(target: Target, pubkey: Option<&str>, stall: Duration, open_
         log.lock().unwrap().push(p.to_path_buf());
         open_result.clone()
     });
-    let backend = Arc::new(HostBackend::with_target(UpdateNet::from_clients(manifest, api, download), engine.clone(), CURRENT.to_string(), target, dir.clone(), open));
+    let built = HostBackend::with_target(UpdateNet::from_clients(manifest, api, download), engine.clone(), CURRENT.to_string(), target, dir.clone(), open);
+    let backend = Arc::new(if relaxed { built.with_format_check(permissive) } else { built });
     ManualEnv { inner: Env { _app: app, server, engine, backend }, dir, opened }
 }
 
@@ -821,15 +861,24 @@ async fn 수동_경로는_서명을_검증한_파일을_저장해_열고_설치_
         env.backend().download("2.0.0", &|p| seen.lock().unwrap().push(p), &CancellationToken::new()).await.unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(*seen.lock().unwrap(), [100.0], "{name}");
         // 자산 이름 그대로 저장되고(임시 파일은 남지 않는다) 그 경로를 한 번 열었다
-        assert_eq!(env.files(), [file.to_string()], "{name}");
+        assert!(env.files().contains(&file.to_string()) && env.files().len() == 2, "{name}: 저장 파일 + 열기용 사본: {:?}", env.files());
         assert_eq!(fs::read(env.dir.join(file)).unwrap(), PAYLOAD, "{name}");
-        assert_eq!(*env.opened.lock().unwrap(), [env.dir.join(file)], "{name}");
+        // 열린 것은 저장 파일이 아니라 방금 검증한 바이트의 새 사본이다
+        assert_eq!(env.opened.lock().unwrap().len(), 1, "{name}");
+        assert!(is_open_copy(&env.opened.lock().unwrap()[0], &env.dir, file), "{name}: {:?}", env.opened.lock().unwrap());
         assert_eq!(env.backend().file_name().as_deref(), Some(file), "{name}");
         assert!(env.engine().installs.lock().unwrap().is_empty(), "{name}: 수동 경로는 설치 포트를 부르지 않는다");
         // 다시 열기: 파일을 다시 읽어 **다시 검증한 뒤** 연다
         env.backend().install().unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(env.engine().verifies.load(Ordering::SeqCst), 2, "{name}: 내려받을 때 + 다시 열기 전");
         assert_eq!(env.opened.lock().unwrap().len(), 2, "{name}");
+        // 다시 열 때마다 새 사본이고 옛 사본은 지워진다
+        {
+            let opened = env.opened.lock().unwrap();
+            assert_ne!(opened[0], opened[1], "{name}");
+            assert!(!opened[0].exists() && is_open_copy(&opened[1], &env.dir, file), "{name}");
+            assert_eq!(env.files().len(), 2, "{name}: 저장 파일 + 사본 하나");
+        }
         assert!(env.engine().installs.lock().unwrap().is_empty(), "{name}");
         // 요청은 토큰·쿠키 없이 나갔다
         assert!(env.server().requests().iter().all(|r| r.headers.iter().all(|(k, _)| k != "authorization" && k != "cookie")), "{name}");
@@ -908,8 +957,9 @@ async fn 수동_경로는_이미_있는_파일을_덮어쓰지_않는다() {
     // 같은 내용(같은 버전을 다시 받는 경우)은 다시 쓰지 않고 그것을 연다
     fs::write(env.dir.join(file), PAYLOAD).unwrap();
     env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await.expect("같은 내용은 재사용");
-    assert_eq!(env.files(), [file.to_string()]);
-    assert_eq!(*env.opened.lock().unwrap(), [env.dir.join(file)]);
+    assert!(env.files().contains(&file.to_string()) && env.files().len() == 2, "{:?}", env.files());
+    assert_eq!(env.opened.lock().unwrap().len(), 1);
+    assert!(is_open_copy(&env.opened.lock().unwrap()[0], &env.dir, file));
 }
 
 #[tokio::test]
@@ -942,7 +992,7 @@ async fn 수동_경로의_열기_실패는_오류로_알리고_파일은_남긴�
     env.backend().check().await.expect("확인");
     // 오류 문구에 열기 실패의 원문(경로)이 섞이지 않는다
     assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err("설치 파일을 열지 못했습니다. 다운로드 폴더에서 직접 여세요".to_string()));
-    assert_eq!(env.files(), [file.to_string()], "검증한 파일은 남는다(직접 열 수 있게)");
+    assert!(env.files().contains(&file.to_string()), "검증한 파일은 남는다(직접 열 수 있게): {:?}", env.files());
 }
 
 #[tokio::test]
@@ -1041,7 +1091,7 @@ impl TmpDir {
 
 impl Drop for TmpDir {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        remove_tree(&self.0);
     }
 }
 
@@ -1131,7 +1181,79 @@ fn 다시_읽기는_일반_파일만_상한_안에서_읽는다() {
     assert_eq!(read_stored(&big), Err("설치 파일이 너무 큽니다".to_string()));
 }
 
+#[tokio::test]
+async fn 수동_경로는_서명을_통과해도_대상_형식이_아니면_저장하지도_열지도_않는다() {
+    // 운영의 형식 확인(`Target::check_bytes`)을 쓴다. 시험 서명 바이트(`PAYLOAD`)는 서명은 맞지만 deb·dmg 형식이 아니다
+    for (name, target, key, file) in manual_cases() {
+        let env = manual_env_fmt(target, Some(PUBKEY_A), Duration::from_secs(5), Ok(()), false, manual_site(manual_manifest("2.0.0", key, &asset_url(file), SIG_GOOD), file, || Resp::ok(PAYLOAD))).await;
+        env.backend().check().await.expect("확인");
+        assert_eq!(env.backend().download("2.0.0", &|_| {}, &CancellationToken::new()).await, Err("설치 파일 형식이 올바르지 않습니다".to_string()), "{name}");
+        assert_eq!(env.engine().verifies.load(Ordering::SeqCst), 1, "{name}: 서명 검증은 통과했다");
+        assert!(env.files().is_empty() && env.opened.lock().unwrap().is_empty(), "{name}");
+        assert_eq!(env.backend().file_name(), None, "{name}");
+    }
+}
+
+#[test]
+fn 열기용_사본은_매번_새_이름이고_읽기_전용이며_옛_사본을_지울_수_있다() {
+    use antler_lib::update::store::{remove_open_copy, write_open_copy, BAD_NAME};
+    let tmp = TmpDir::new();
+    let dir = tmp.0.join("updates");
+    let a = write_open_copy(&dir, "Antler-2.0.0-arm64.dmg", PAYLOAD).unwrap();
+    let b = write_open_copy(&dir, "Antler-2.0.0-arm64.dmg", PAYLOAD).unwrap();
+    assert_ne!(a, b);
+    for p in [&a, &b] {
+        assert_eq!(p.parent(), Some(dir.as_path()));
+        let n = p.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(n.starts_with("Antler-2.0.0-arm64.open-") && n.ends_with(".dmg"), "{n}");
+        assert_eq!(fs::read(p).unwrap(), PAYLOAD);
+        assert!(fs::metadata(p).unwrap().permissions().readonly(), "읽기 전용");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o400);
+    }
+    remove_open_copy(&a);
+    assert!(!a.exists() && b.exists(), "읽기 전용이어도 지워진다");
+    assert_eq!(write_open_copy(&dir, "../x.dmg", PAYLOAD), Err(BAD_NAME.to_string()));
+}
+
+#[cfg(unix)]
+#[test]
+fn 저장_폴더가_링크면_거부하고_링크_수가_다른_파일은_읽지도_재사용하지도_않는다() {
+    use antler_lib::update::store::{read_stored, store_verified, EXISTS, SAVE_FAILED};
+    let tmp = TmpDir::new();
+    // 저장 폴더 자리가 심볼릭 링크
+    let real = tmp.0.join("real");
+    fs::create_dir_all(&real).unwrap();
+    let link = tmp.0.join("updates");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    assert_eq!(store_verified(&link, "a.dmg", PAYLOAD), Err(SAVE_FAILED.to_string()));
+    assert!(fs::read_dir(&real).unwrap().next().is_none(), "링크 너머에 쓰지 않았다");
+    // 저장 폴더 밖 파일에 하드 링크로 이어진 이름
+    let dir = tmp.0.join("ok");
+    fs::create_dir_all(&dir).unwrap();
+    let outside = tmp.0.join("outside.dmg");
+    fs::write(&outside, PAYLOAD).unwrap();
+    fs::hard_link(&outside, dir.join("b.dmg")).unwrap();
+    assert_eq!(store_verified(&dir, "b.dmg", PAYLOAD), Err(EXISTS.to_string()));
+    assert!(read_stored(&dir.join("b.dmg")).is_err());
+}
+
 // ── 소스 검사 ────────────────────────────────────────────────────────────────
+
+#[test]
+fn 형식_확인_교체는_시험_전용이고_운영_조립은_부르지_않는다() {
+    let host = code("src/update/host.rs");
+    assert_eq!(host.matches("with_format_check(").count(), 1, "정의 하나뿐(운영 조립은 부르지 않는다)");
+    assert!(host.contains("format_ok: production_format_check"));
+    assert!(code("src/lib.rs").find("with_format_check").is_none());
+    // 저장 전 형식 확인이 있다(저장 호출보다 앞)
+    let at = host.find("async fn deliver(").expect("deliver");
+    let body = &host[at..];
+    assert!(body.find("(m.format_ok)(").expect("형식 확인") < body.find("store_verified(").expect("저장"));
+}
 
 #[test]
 fn 수동_경로는_설치_포트_앞에서_갈라진다() {

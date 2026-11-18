@@ -182,7 +182,7 @@ describe('makeManifests (실물 대조 가드)', () => {
 
   it('서명이 있으면 둘 다, 해시·크기는 실물과 같다', () => {
     const dir = installerDir('2.0.0', content)
-    const r = M.makeManifests({ dir, version: '2.0.0', signatureText: `${SIG}\n`, migration: undefined, now: DATE })
+    const r = M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText: `${SIG}\n`, migration: undefined, now: DATE })
     expect(Object.keys(r.files).sort()).toEqual(['latest.json', 'latest.yml'])
     // 이 폴더에는 macOS·Linux 설치본이 없다 — 항목을 건너뛰었다고 경고한다(Windows 항목은 정상)
     expect(r.warnings).toHaveLength(3)
@@ -197,7 +197,7 @@ describe('makeManifests (실물 대조 가드)', () => {
   it('서명이 없으면 latest.json 만 건너뛰고 경고한다(빌드는 성공)', () => {
     const dir = installerDir('2.0.0', content)
     for (const signatureText of [null, undefined, '', '  \n']) {
-      const r = M.makeManifests({ dir, version: '2.0.0', signatureText, now: DATE })
+      const r = M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText, now: DATE })
       expect(Object.keys(r.files)).toEqual(['latest.yml'])
       expect(r.warnings.join()).toContain('latest.json')
     }
@@ -210,7 +210,7 @@ describe('makeManifests (실물 대조 가드)', () => {
     put('Antler-2.0.0-arm64.dmg', 'dmg bytes')
     put('Antler-2.0.0-arm64.dmg.sig', `${SIG}\n`)
     put('Antler-2.0.0-x64.dmg', 'dmg bytes')
-    const r = M.makeManifests({ dir, version: '2.0.0', signatureText: SIG, now: DATE })
+    const r = M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText: SIG, now: DATE })
     const doc = JSON.parse(r.files['latest.json'])
     expect(Object.keys(doc.platforms)).toEqual(['windows-x86_64-nsis', 'windows-x86_64', 'darwin-aarch64-dmg'])
     expect(doc.platforms['darwin-aarch64-dmg']).toEqual({ signature: SIG, url: `${M.DOWNLOAD_PREFIX}v2.0.0/Antler-2.0.0-arm64.dmg` })
@@ -219,16 +219,32 @@ describe('makeManifests (실물 대조 가드)', () => {
     // latest.yml(Electron 이관용)은 Windows 설치본만 가리킨다
     expect(r.files['latest.yml']).not.toContain('dmg')
     // Windows 서명이 없어도 수동 경로 항목이 있으면 그것만으로 latest.json 을 만든다
-    const only = M.makeManifests({ dir, version: '2.0.0', signatureText: null, now: DATE })
+    const only = M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText: null, now: DATE })
     expect(Object.keys(JSON.parse(only.files['latest.json']).platforms)).toEqual(['darwin-aarch64-dmg'])
     // 서명 형식이 틀린 .sig 는 거부한다
     put('Antler-2.0.0-x64.dmg.sig', 'not base64 !!')
-    expect(() => M.makeManifests({ dir, version: '2.0.0', signatureText: SIG, now: DATE })).toThrow(/서명 형식/)
+    expect(() => M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText: SIG, now: DATE })).toThrow(/서명 형식/)
+  })
+
+  it('서명 단계가 돌았다는 표식(signed)이 없으면 .sig 가 있어도 어떤 서명 항목도 만들지 않는다', () => {
+    const dir = installerDir('2.0.0', content)
+    writeFileSync(join(dir, 'Antler-2.0.0-arm64.dmg'), 'dmg bytes')
+    writeFileSync(join(dir, 'Antler-2.0.0-arm64.dmg.sig'), `${SIG}\n`)
+    for (const signed of [undefined, false]) {
+      const r = M.makeManifests({ dir, version: '2.0.0', signatureText: SIG, signed, now: DATE })
+      expect('latest.json' in r.files, String(signed)).toBe(false)
+      expect(r.warnings.join('\n')).toContain('--signed true')
+      // latest.yml(서명과 무관)은 그대로다
+      expect('latest.yml' in r.files).toBe(true)
+    }
+    // 워크플로는 키 확인 단계의 결과를 표식으로 넘기고, 스크립트는 'true' 문자열만 받는다
+    expect(read('.github', 'workflows', 'tauri-package.yml')).toContain('--signed "${{ steps.key.outputs.signed }}"')
+    expect(read('scripts', 'make-update-manifests.mjs')).toContain("args.signed === 'true'")
   })
 
   it('수동 경로 서명이 하나도 없고 Windows 서명도 없으면 latest.json 을 만들지 않는다', () => {
     const dir = installerDir('2.0.0', content)
-    const r = M.makeManifests({ dir, version: '2.0.0', signatureText: null, now: DATE })
+    const r = M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText: null, now: DATE })
     expect('latest.json' in r.files).toBe(false)
     expect(r.warnings.join('\n')).toContain('latest.json 을 만들지 않았습니다')
   })
@@ -238,7 +254,7 @@ describe('makeManifests (실물 대조 가드)', () => {
     const cases = [['off', false], ['OFF', false], [' off ', false], ['false', false], ['False', false], ['0', false], ['no', false], ['NO', false],
       ['on', true], ['', true], [undefined, true], ['1', true], ['true', true], ['yes', true]] as const
     for (const [migration, expected] of cases) {
-      const r = M.makeManifests({ dir, version: '2.0.0', signatureText: SIG, migration, now: DATE })
+      const r = M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText: SIG, migration, now: DATE })
       expect('latest.yml' in r.files, String(migration)).toBe(expected)
       expect('latest.json' in r.files).toBe(true)
     }
@@ -247,9 +263,9 @@ describe('makeManifests (실물 대조 가드)', () => {
 
   it('설치본이 없거나 이름이 버전과 다르면 실패한다', () => {
     const dir = installerDir('2.0.0', content)
-    expect(() => M.makeManifests({ dir, version: '2.0.1', signatureText: SIG })).toThrow(/설치본이 없습니다/)
-    expect(() => M.makeManifests({ dir, version: '2.0.0', installer: 'Antler-Setup-9.9.9-x64.exe', signatureText: SIG })).toThrow(/버전과 맞지 않습니다/)
-    expect(() => M.makeManifests({ dir, version: 'bad', signatureText: SIG })).toThrow()
+    expect(() => M.makeManifests({ signed: true, dir, version: '2.0.1', signatureText: SIG })).toThrow(/설치본이 없습니다/)
+    expect(() => M.makeManifests({ signed: true, dir, version: '2.0.0', installer: 'Antler-Setup-9.9.9-x64.exe', signatureText: SIG })).toThrow(/버전과 맞지 않습니다/)
+    expect(() => M.makeManifests({ signed: true, dir, version: 'bad', signatureText: SIG })).toThrow()
   })
 })
 

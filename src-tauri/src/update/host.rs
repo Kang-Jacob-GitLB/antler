@@ -27,7 +27,7 @@ use super::logic::{
     ReleaseNotes, Target, MAX_API_BYTES, MAX_INSTALLER_BYTES, MAX_MANIFEST_BYTES, RELEASE_LIST_PATH, REPO_NAME, REPO_OWNER, STABLE_MANIFEST_URL,
 };
 use super::service::{Backend, Deps, UpdateService, UpdateState};
-use super::store::{read_stored, store_verified};
+use super::store::{read_stored, remove_open_copy, store_verified, write_open_copy};
 use crate::config::ConfigStore;
 use crate::net::http::{classify, or_abort, read_capped, read_capped_progress, AssetError, Failure, HttpClient, HttpInitError, ReadError, Redirects};
 use crate::net::json::Json;
@@ -292,7 +292,20 @@ pub type OpenFile = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
 struct Manual {
     dir: PathBuf,
     open: OpenFile,
+    /// 대상의 파일 형식 확인(운영은 `Target::check_bytes`. 시험만 `with_format_check` 로 바꾼다 — 시험 서명은 고정 바이트에 걸려 있어 형식 표식을 넣을 수 없다)
+    format_ok: FormatCheck,
+    /// 지금 열려 있는 열기용 사본 — 다음에 열 때 지운다
+    open_copy: Mutex<Option<PathBuf>>,
 }
+
+/// 서명을 통과한 바이트가 대상의 파일 형식인지 보는 함수
+pub type FormatCheck = fn(&Target, &[u8]) -> bool;
+
+fn production_format_check(target: &Target, bytes: &[u8]) -> bool {
+    target.check_bytes(bytes)
+}
+
+const BAD_FORMAT: &str = "설치 파일 형식이 올바르지 않습니다";
 
 /// 저장해 연 설치 파일(수동 경로) — 다시 열기가 이 파일을 다시 검증한다
 struct Delivered {
@@ -321,25 +334,43 @@ impl<E: Engine> HostBackend<E> {
 
     /// 수동 경로(macOS dmg·Linux deb): 검증한 파일을 `dir` 에 저장하고 `open` 으로 연다. `target` 이 NSIS 면 `new` 와 같다
     pub fn with_target(net: UpdateNet, engine: Arc<E>, current: String, target: Target, dir: PathBuf, open: OpenFile) -> Self {
-        let manual = target.is_manual().then_some(Manual { dir, open });
+        let manual = target.is_manual().then_some(Manual { dir, open, format_ok: production_format_check, open_copy: Mutex::new(None) });
         Self { target, manual, ..Self::new(net, engine, current) }
     }
 
-    /// 저장한 설치 파일을 연다(열기 실패는 고정 문구)
-    fn open_delivered(m: &Manual, path: &Path) -> Result<(), String> {
-        (m.open)(path).map_err(|_| OPEN_FAILED.to_string())
+    /// **시험 전용**: 형식 확인을 바꾼다. 운영 조립(`build_service`)은 부르지 않는다(소스 검사가 강제한다)
+    pub fn with_format_check(mut self, f: FormatCheck) -> Self {
+        if let Some(m) = &mut self.manual {
+            m.format_ok = f;
+        }
+        self
     }
 
-    /// 수동 경로의 내려받기 마무리: 검증을 마친 바이트를 저장하고 연다
+    /// 방금 검증한 바이트를 **새 이름의 사본**으로 다시 써서 그것을 연다(옛 사본은 지운다). 저장해 둔 파일은 검증과 열기 사이에 바뀔 수 있어(TOCTOU) 열리는 것은 항상 검증한 바이트의 새 사본이다.
+    /// 열기 실패는 고정 문구다
+    fn open_verified(m: &Manual, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let copy = write_open_copy(&m.dir, name, bytes)?;
+        if let Some(old) = m.open_copy.lock().unwrap_or_else(PoisonError::into_inner).replace(copy.clone()) {
+            remove_open_copy(&old);
+        }
+        (m.open)(&copy).map_err(|_| OPEN_FAILED.to_string())
+    }
+
+    /// 수동 경로의 내려받기 마무리: 서명을 통과한 바이트의 **형식을 확인**하고 저장해 연다
     async fn deliver(&self, m: &Manual, offer: ManifestOffer, bytes: Vec<u8>, cancel: &CancellationToken) -> Result<(), String> {
         // 검증 뒤에도 취소를 존중한다(저장·열기 전에)
         if cancel.is_cancelled() {
             return Err(CANCELLED.to_string());
         }
+        // 서명은 바이트와 버전에만 묶인다 — 같은 키로 서명한 다른 형식의 파일이 이 자리에 올 수 있어 저장 전에 형식 표식을 본다
+        if !(m.format_ok)(&self.target, &bytes) {
+            return Err(BAD_FORMAT.to_string());
+        }
         let (dir, name) = (m.dir.clone(), offer.file_name().to_string());
-        let path = tokio::task::spawn_blocking(move || store_verified(&dir, &name, &bytes)).await.map_err(|_| crate::update::store::SAVE_FAILED.to_string())??;
-        *self.delivered.lock().unwrap_or_else(PoisonError::into_inner) = Some(Delivered { offer, path: path.clone() });
-        Self::open_delivered(m, &path)
+        let (dir2, name2, bytes2) = (dir.clone(), name.clone(), bytes);
+        let (path, bytes) = tokio::task::spawn_blocking(move || store_verified(&dir2, &name2, &bytes2).map(|p| (p, bytes2))).await.map_err(|_| crate::update::store::SAVE_FAILED.to_string())??;
+        *self.delivered.lock().unwrap_or_else(PoisonError::into_inner) = Some(Delivered { offer, path });
+        Self::open_verified(m, &name, &bytes)
     }
 
     /// 수동 경로의 다시 열기: 저장한 파일을 다시 읽어 **다시 검증한 뒤** 연다(받은 뒤 파일이 바뀌었을 수 있다)
@@ -351,7 +382,11 @@ impl<E: Engine> HostBackend<E> {
         };
         let bytes = read_stored(&path).map_err(|e| format!("다시 열기 전 검증 실패: {e}"))?;
         self.engine.verify(&offer, &bytes).map_err(|e| format!("다시 열기 전 검증 실패: {e}"))?;
-        Self::open_delivered(m, &path)
+        if !(m.format_ok)(&self.target, &bytes) {
+            return Err(format!("다시 열기 전 검증 실패: {BAD_FORMAT}"));
+        }
+        // 열리는 것은 방금 검증한 바이트의 새 사본이다(저장 파일은 그대로 둔다)
+        Self::open_verified(m, offer.file_name(), &bytes)
     }
 
     /// 프리릴리스 판이 최근 릴리스 목록에서 매니페스트 주소를 고른다

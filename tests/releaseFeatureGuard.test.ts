@@ -131,6 +131,39 @@ describe('tauri-package.yml', () => {
     expect(idx('업데이트 매니페스트 생성·검증')).toBeGreaterThan(idx('업데이트 서명'))
     expect(manifest.env).toEqual({ ELECTRON_MIGRATION: '${{ vars.ELECTRON_MIGRATION }}' })
     expect(manifest.run).toContain('scripts/make-update-manifests.mjs')
+    expect(manifest.run).toContain('--signed "${{ steps.key.outputs.signed }}"')
+
+    // 서명 입력의 출처 고정: 아티팩트마다 다른 입력 폴더(in/…)에 받고(merge-multiple·pattern 없음), out/ 에 쓰는 것은 명시 복사 단계뿐이다
+    const downloads = sign.steps.filter((s) => s.uses?.startsWith('actions/download-artifact'))
+    expect(downloads.length).toBe(4)
+    const paths = downloads.map((s) => String(s.with?.['path']))
+    expect(new Set(paths).size).toBe(paths.length)
+    for (const s of downloads) {
+      expect(String(s.with?.['path']), '입력 폴더').toMatch(/^in\/[a-z0-9-]+$/)
+      expect(s.with).not.toHaveProperty('merge-multiple')
+      expect(s.with).not.toHaveProperty('pattern')
+    }
+    const copy = stepAt('서명 입력 복사')
+    expect(idx('서명 입력 복사')).toBeLessThan(idx('서명 키 확인'))
+    expect(copy.run).toContain('cp --no-dereference')
+    expect(copy.run).toContain('[ -L "$dir" ] || [ -L "$f" ]')
+    expect(copy.run).toContain('-gt 300000000')
+    expect([...(copy.run ?? '').matchAll(/^\s*copy_one (\S+) "([^"]+)" (yes|no)$/gm)].map((m) => `${m[1]} ${m[2]} ${m[3]}`)).toEqual([
+      'in/win Antler-Setup-${VERSION}-x64.exe yes',
+      'in/mac-arm64 Antler-${VERSION}-arm64.dmg no',
+      'in/mac-x64 Antler-${VERSION}-x64.dmg no',
+      'in/linux antler_${VERSION}_amd64.deb no'
+    ])
+    // out/ 를 만들거나 복사로 채우는 곳은 복사 단계뿐이다(서명·매니페스트 단계는 고정 이름·스크립트만)
+    for (const s of sign.steps) {
+      if (s === copy) continue
+      expect(s.run ?? '', s.name).not.toMatch(/\bmkdir\b|\bcp\b|\bmv\b|\bln\b|\bunzip\b|\btar\b/)
+      if (s.uses?.startsWith('actions/download-artifact')) expect(String(s.with?.['path']), '다운로드가 out/ 에 쓴다').not.toMatch(/^out(\/|$)/)
+    }
+    expect(step.run ?? '').not.toContain('*')
+    const upload = sign.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'))
+    expect(String(upload?.with?.['path'])).not.toContain('out/*')
+    for (const line of String(upload?.with?.['path']).split('\n').filter(Boolean)) expect(line).toMatch(/^out\/(Antler-Setup-\$\{\{ env\.VERSION \}\}-x64\.exe|Antler-\$\{\{ env\.VERSION \}\}-(arm64|x64)\.dmg|antler_\$\{\{ env\.VERSION \}\}_amd64\.deb)(\.sig)?$|^out\/latest\.(json|yml)$/)
   })
 
   it('cdp·test-hooks 를 켜지 않는다', () => {

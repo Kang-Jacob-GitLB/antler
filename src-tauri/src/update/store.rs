@@ -8,6 +8,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::logic::{is_safe_file_name, MAX_INSTALLER_BYTES};
 
@@ -50,7 +51,7 @@ fn exists_same(path: &Path, bytes: &[u8]) -> Result<bool, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(_) => return Err(SAVE_FAILED.to_string()),
     };
-    if !meta.file_type().is_file() || meta.len() != bytes.len() as u64 {
+    if !meta.file_type().is_file() || !single_link(&meta) || meta.len() != bytes.len() as u64 {
         return Err(EXISTS.to_string());
     }
     let mut have = Vec::with_capacity(bytes.len());
@@ -74,7 +75,12 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     f.write_all(bytes).and_then(|()| f.sync_all()).map_err(|_| SAVE_FAILED.to_string())
 }
 
+/// 저장 폴더를 만든다. **폴더 자리가 심볼릭 링크면 거부한다**(만들기 전과 뒤 모두 — 링크 너머의 폴더에 쓰지 않는다)
 fn make_dir(dir: &Path) -> Result<(), String> {
+    let is_link = |d: &Path| fs::symlink_metadata(d).is_ok_and(|m| m.file_type().is_symlink());
+    if is_link(dir) {
+        return Err(SAVE_FAILED.to_string());
+    }
     let mut b = fs::DirBuilder::new();
     b.recursive(true);
     #[cfg(unix)]
@@ -82,13 +88,17 @@ fn make_dir(dir: &Path) -> Result<(), String> {
         use std::os::unix::fs::DirBuilderExt;
         b.mode(0o700);
     }
-    b.create(dir).map_err(|_| SAVE_FAILED.to_string())
+    b.create(dir).map_err(|_| SAVE_FAILED.to_string())?;
+    if is_link(dir) {
+        return Err(SAVE_FAILED.to_string());
+    }
+    Ok(())
 }
 
 /// 저장한 파일을 다시 열기 전에 읽는다(상한 [`MAX_INSTALLER_BYTES`]). 일반 파일이 아니거나(링크·폴더) 상한을 넘으면 오류
 pub fn read_stored(path: &Path) -> Result<Vec<u8>, String> {
     let meta = fs::symlink_metadata(path).map_err(|_| "설치 파일을 찾지 못했습니다".to_string())?;
-    if !meta.file_type().is_file() {
+    if !meta.file_type().is_file() || !single_link(&meta) {
         return Err("설치 파일이 일반 파일이 아닙니다".to_string());
     }
     if meta.len() > MAX_INSTALLER_BYTES as u64 {
@@ -100,4 +110,68 @@ pub fn read_stored(path: &Path) -> Result<Vec<u8>, String> {
         return Err(TOO_BIG.to_string());
     }
     Ok(out)
+}
+
+// ── 열 때마다 새로 쓰는 사본 ─────────────────────────────────────────────────
+
+static COPY_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// 서명을 검증한 바이트를 **열기용 새 이름**(`<이름>.open-<pid>-<시각>-<순번>.<확장자>`, `create_new`, 유닉스 0400, Windows 읽기 전용)으로 다시 써서 그 경로를 돌려준다.
+/// 저장해 둔 파일(최종 이름)은 검증과 열기 사이에 바뀔 수 있으므로(TOCTOU) 열리는 것은 **방금 검증한 바이트를 우리가 만든 새 파일에 쓴 사본**이다 — 사본을 만든 뒤 열리기까지의 틈은 남는다(같은 사용자 권한 범위, 완전 해소 불가)
+pub fn write_open_copy(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    if !is_safe_file_name(name) {
+        return Err(BAD_NAME.to_string());
+    }
+    make_dir(dir)?;
+    let (stem, ext) = name.rsplit_once('.').unwrap_or((name, "bin"));
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let path = dir.join(format!("{stem}.open-{}-{nanos}-{}.{ext}", std::process::id(), COPY_SEQ.fetch_add(1, Ordering::SeqCst)));
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o400);
+    }
+    let mut f = opts.open(&path).map_err(|_| SAVE_FAILED.to_string())?;
+    let written = f.write_all(bytes).and_then(|()| f.sync_all());
+    drop(f);
+    if written.is_err() {
+        let _ = fs::remove_file(&path);
+        return Err(SAVE_FAILED.to_string());
+    }
+    #[cfg(windows)]
+    set_readonly(&path, true);
+    Ok(path)
+}
+
+/// 열기용 사본을 지운다(옛 사본 정리 — 실패는 무시한다. 마운트 중인 dmg 등은 지워지지 않을 수 있다)
+pub fn remove_open_copy(path: &Path) {
+    #[cfg(windows)]
+    set_readonly(path, false);
+    let _ = fs::remove_file(path);
+}
+
+#[cfg(windows)]
+#[allow(clippy::permissions_set_readonly_false)]
+fn set_readonly(path: &Path, readonly: bool) {
+    if let Ok(meta) = fs::metadata(path) {
+        let mut perm = meta.permissions();
+        perm.set_readonly(readonly);
+        let _ = fs::set_permissions(path, perm);
+    }
+}
+
+/// 유닉스에서 일반 파일의 링크 수가 1 인가(다른 이름으로 이어진 하드 링크는 거부 — 저장 폴더 밖의 파일을 이 이름으로 읽거나 여는 것을 막는다). 다른 OS 는 항상 참
+fn single_link(meta: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.nlink() == 1
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        true
+    }
 }

@@ -284,6 +284,16 @@ impl Target {
         }
     }
 
+    /// 서명을 통과한 바이트가 이 대상의 파일 형식인가(저장·열기 직전의 마지막 확인). 서명은 형식을 보증하지 않으므로(같은 키로 서명한 다른 플랫폼 자산도 통과한다) 형식 표식만 본다:
+    /// deb 는 `ar` 아카이브(`!<arch>\n` + 첫 멤버 `debian-binary`), dmg 는 끝 512바이트의 UDIF 꼬리표 시그니처 `koly`. NSIS 는 플러그인이 설치 직전에 형식을 확인하므로 여기서는 보지 않는다
+    pub fn check_bytes(&self, bytes: &[u8]) -> bool {
+        match self.kind {
+            InstallKind::Nsis => true,
+            InstallKind::Deb => bytes.starts_with(b"!<arch>\ndebian-binary"),
+            InstallKind::Dmg => bytes.len() >= 512 && &bytes[bytes.len() - 512..bytes.len() - 508] == b"koly",
+        }
+    }
+
     /// 수동 경로가 기대하는 자산 이름(TS `pickAsset` — electron-builder 의 artifactName 규칙이고 `tauri-package.yml` 이 같은 이름으로 맞춘다). NSIS 는 이름 규칙이 없다(안전한 이름이면 된다)
     pub fn asset_name(&self, version: &str) -> Option<String> {
         let v = strip_v(version);
@@ -350,7 +360,8 @@ pub fn check_manifest(text: &str, current: &str) -> Result<Option<ManifestOffer>
 }
 
 /// [`check_manifest`] 의 일반형. `target` 이 볼 키와 파일 이름 규칙을 정한다 — 수동 경로(dmg·deb)는 **그 키 하나만** 보고,
-/// URL 의 파일 이름이 기대 이름(`Target::asset_name`)과 정확히 같아야 한다(같은 서명 키로 서명된 다른 플랫폼 자산을 그 키에 끼워 넣는 것을 막는다)
+/// URL 의 파일 이름이 기대 이름(`Target::asset_name`)과 정확히 같아야 한다 — **매니페스트 생성 실수를 거르는 검사일 뿐 보안 경계가 아니다**: 서명(minisign)은 바이트와 버전에만 묶이고 파일 이름·플랫폼에는 묶이지 않으므로,
+/// 같은 키로 서명된 다른 플랫폼 자산을 끼워 넣는 것은 이 검사가 막지 못한다(파일 형식은 `Target::check_bytes` 가 저장 직전에 한 번 더 본다)
 pub fn check_manifest_for(text: &str, current: &str, target: &Target) -> Result<Option<ManifestOffer>, String> {
     if text.len() > MAX_MANIFEST_BYTES {
         return Err("응답이 너무 큽니다".to_string());
