@@ -184,6 +184,9 @@ const BLOB_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 /// GitHub remote 추론 결과(`gh:repo`) 캐시 시간·모든 GitHub remote 목록(Launchpad) 캐시 시간(`GH_REPO_TTL_MS`·`GH_REMOTES_TTL_MS`)
 const GH_REPO_TTL: Duration = Duration::from_secs(60);
 const GH_REMOTES_TTL: Duration = Duration::from_secs(10 * 60);
+/// `gh_remotes` 응답 상한(사이드카 경로 `repoq` 의 응답 검증과 같은 값)
+const GH_REMOTES_MAX: usize = 100;
+const GH_REMOTE_NAME_MAX: usize = 200;
 /// `git:onRemote` 가 true 였던 (저장소, 커밋)을 기억하는 개수 상한(넘으면 비운다)
 const ON_REMOTE_MAX: usize = 2000;
 /// 합치기만 하는 큐(`Router::joins`)의 슬롯 수 — 실제 git 은 소스의 큐에서 돌므로 이 큐는 막지 않는다
@@ -641,7 +644,9 @@ impl Router {
         let mirror = &self.mirror;
         let owned = |id: &String| matches!(mirror.resolve(id), Resolved::Rust(_));
         self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| owned(id));
-        self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| owned(id));
+        // Launchpad 의 remote 목록은 통째로 비운다 — `repos:update` 무효화(route 시점)와 미러 반영(비동기) 사이에 옛 경로로 채운 항목이
+        // 소유만 보는 retain 으로는 남는다(10분 캐시라 다시 채우는 비용이 작다)
+        self.invalidate_gh_remotes(None);
         // 사라졌거나 Rust 가 맡지 않게 된 저장소의 fetch 상태를 비운다
         if let Some(service) = self.fetch_port() {
             service.sync_mirror();
@@ -1284,7 +1289,8 @@ impl Router {
         Some(
             async {
                 let list = self.remote_list(repo_id, &target, Some(cancel)).await?;
-                let value = pick_github_remotes(&list);
+                // 사이드카 경로(repoq)와 같은 응답 모양 상한 — remote 100개·이름 200자. 악성 `.git/config` 의 remote 수십만 개가 10분 캐시에 남지 않게
+                let value: Vec<GhRepoRef> = pick_github_remotes(&list).into_iter().filter(|r| r.remote.chars().count() <= GH_REMOTE_NAME_MAX).take(GH_REMOTES_MAX).collect();
                 self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), (Instant::now(), value.clone()));
                 Ok(value)
             }
