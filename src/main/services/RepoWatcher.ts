@@ -55,7 +55,7 @@ export class RepoWatcher {
 
   /**
    * @param owns 이 감시자가 맡는 저장소인가. 기본은 전부 맡는다(Electron). Tauri 사이드카는 Rust 가 감시를 맡는 종류의 저장소를 뺀다 —
-   *   fetch 와 같은 소유 판정(`ANTLER_RUST_FETCH_KINDS`, src/sidecar/fetchOwns.ts)이라 이중 감시도 무감시도 없다
+   *   fetch 와 같은 소유 판정(옛 사이드카 env 판정 — 제거됨)이라 이중 감시도 무감시도 없다
    */
   constructor(
     private readonly repos: RepoService,

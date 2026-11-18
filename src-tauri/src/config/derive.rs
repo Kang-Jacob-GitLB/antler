@@ -1,4 +1,4 @@
-//! 설정에서 파생하는 값: Rust 라우터 미러(`src/sidecar/mirror.ts` 의 `mirrorOf`)와 fetch 설정(`src/sidecar/fetchPrefs.ts` 의 `fetchPrefsOf`).
+//! 설정에서 파생하는 값: Rust 라우터 미러(`tests/fixtures/rustPortSpecs.ts` 의 `mirrorOf`)와 fetch 설정(`tests/fixtures/rustPortSpecs.ts` 의 `fetchPrefsOf`).
 //! Rust 가 설정이 바뀔 때 같은 함수(`config::sync`)로 미러·fetch 서비스에 직접 넘긴다(Phase 6b PR 9).
 use crate::mirror::MirrorRepo;
 use crate::net::json::Json;

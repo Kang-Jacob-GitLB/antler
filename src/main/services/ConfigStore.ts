@@ -144,7 +144,7 @@ export interface ConfigStoreOptions {
   cacheDir?: string
   /**
    * 파일을 열지 않고 기본값(빈 저장소 목록)으로 시작하며 모든 변경자가 던진다. 설정 파일의 작성자는 한 실행에 하나여야 하므로,
-   * Rust 가 설정을 소유하는 Tauri 사이드카(`ANTLER_RUST_CONFIG=1`)가 쓴다. `loadFailed` 도 켠다 — 빈 목록을 근거로 캐시를 지우지 못하게. Electron 판은 쓰지 않는다
+   * (옛 Tauri 사이드카 전용 — 제거됨) Rust 가 설정을 소유하던 사이드카가 쓰던 옵션이다. `loadFailed` 도 켠다 — 빈 목록을 근거로 캐시를 지우지 못하게. Electron 판은 쓰지 않는다
    */
   readOnly?: boolean
 }
@@ -156,7 +156,7 @@ export class ConfigStore {
   loadFailed = false
   /**
    * 설정이 디스크에 쓰인 직후(메모리 상태를 바꾼 뒤) 새 설정으로 불린다. 기본은 아무 일도 하지 않으며 Electron 판은 쓰지 않는다.
-   * Tauri 사이드카가 저장소 목록을 Rust 라우터에 미러로 알리는 데 쓴다(src/sidecar/index.ts).
+   * 옛 Tauri 사이드카가 저장소 목록을 Rust 라우터에 미러로 알리는 데 쓰던 알림이다(사이드카는 제거됐다).
    */
   onChange: (config: AppConfig) => void = () => {}
 

@@ -41,7 +41,7 @@ pub struct ConfigSync {
     state: Mutex<State>,
 }
 
-/// 미러 항목 하나를 `repos` 메시지의 한 줄로(`src/sidecar/protocol.ts` 의 `MirrorRepo` 와 같은 모양)
+/// 미러 항목 하나를 `repos` 메시지의 한 줄로(`tests/fixtures/rustPortSpecs.ts` 의 `MirrorRepo` 와 같은 모양)
 fn entry_json(e: &MirrorEntry) -> Value {
     let mut o = Map::new();
     o.insert("id".into(), json!(e.repo.id));

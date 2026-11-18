@@ -1,7 +1,7 @@
 //! Rust 포트(`env_host`·`fetch_host`·`config_host`)가 부탁한 확인 창·폴더/파일 선택을 Rust 네이티브 대화상자로 띄운다(webview HTML 이 아니다).
 //! renderer 에는 이 대화상자를 띄우거나 누를 경로가 없다 — 플러그인의 JS command 는 capability 에 주지 않는다.
 //! 실패(창 없음·잘못된 인자·닫기·Esc)는 모두 `None` 이고, 호출한 포트가 이를 취소(cancelId)로 바꾼다.
-//! 인자 모양은 src/sidecar/protocol.ts 의 MessageBoxArg·PickPathArg 와 같아야 한다.
+//! 인자 모양은 tests/fixtures/rustPortSpecs.ts 의 MessageBoxArg 와 같아야 한다.
 
 use std::path::Path;
 

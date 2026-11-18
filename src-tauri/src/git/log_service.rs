@@ -478,7 +478,7 @@ pub enum NoteOp {
 }
 
 impl NoteOp {
-    /// 프로토콜의 `op` 문자열(`src/sidecar/protocol.ts` 의 `NOTE_OPS`)
+    /// 프로토콜의 `op` 문자열(옛 사이드카 프로토콜의 `NOTE_OPS`)
     pub fn as_str(self) -> &'static str {
         match self {
             NoteOp::FirstPage => "logFirstPage",

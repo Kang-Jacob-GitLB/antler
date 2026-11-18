@@ -400,7 +400,7 @@ impl<B: Backend> UpdateService<B> {
             Ok(Err(e)) => sanitize_error(&e),
             Err(_) => INSTALL_FAILED.to_string(),
         };
-        // 종료 정리(git 프로세스 트리·사이드카·플러그인 잠금)가 이미 돌았으면 되돌릴 수 없다 — 다시 시도하지 못하게 표식을 남기고 앱을 다시 시작하라고 안내한다.
+        // 종료 정리(git 프로세스 트리·플러그인 잠금)가 이미 돌았으면 되돌릴 수 없다 — 다시 시도하지 못하게 표식을 남기고 앱을 다시 시작하라고 안내한다.
         // (앱을 스스로 다시 시작하지는 않는다: 설치 프로그램이 뜨지 못한 이유를 모르는 채 재시작하면 같은 실패를 되풀이할 수 있다)
         let cleaned = c.backend.cleanup_ran();
         let error = if cleaned { format!("{RESTART_HINT} ({error})") } else { error };
