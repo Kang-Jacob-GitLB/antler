@@ -2036,13 +2036,20 @@ SFTP 채널 닫기 순서가 실제 sshd 의 `MaxSessions` 에 걸릴 수 있다
 (`ANTLER_RUST_API=0` 이면 사이드카가 자기 토큰으로 조회한다). `repos:watch` 는 github 를 Rust 가 감시하지 않는다(`set_watch` 가 `resolve_fetch` 를 보고 이전 감시를 멈춘다) — 다만 첫 페이지 문(`arm`)은 `resolve` 를 보므로 Rust 가 푸는 github 저장소도 닫는다(Rust 의 로그가 열어 준다).
 
 **`repos:remove`(계획 §3.4·§13 C2 그대로 — 사용자 요청문의 "Rust 가 캐시 디렉터리 삭제"와 다르다)**: 라우터가 사이드카로 넘기기 **전에** 그 저장소를 github 로 풀고 있으면 (1) 저장소별 취소 범위(`GithubScope`)로 진행 중인 조회를 끊고(route 의 dispatch 와 GitHub 서비스의 `gh_repo`·`gh_remotes`·`pushed_shas` 질의(`scoped`)를 `select!` 로 감싸 future 를 버린다 — 큐 슬롯의 git 프로세스 트리와 로그 커서 스트림이 정리된다. 채널 응답은 `ABORTED`)
-(2) 열린 로그 커서·앵커를 닫고 (3) untracked 허용 목록·`gh:repo` 캐시를 버리고 (4) 끊긴 조회가 끝나기를 기다린다(최대 5초, 닫은 커서가 있으면 50ms 더). 그 뒤 `Routed::Sidecar` — 사이드카의 기존 핸들러가 `forgetAndWait` → 감시 정지 → `removeGithubCache`(링크 확인·재시도 삭제) → 레코드 삭제를 한다.
+(2) 열린 로그 커서·앵커를 닫고 (3) untracked 허용 목록·`gh:repo` 캐시를 버리고 (4) 끊긴 조회가 끝나기를 기다린다(최대 5초, 닫은 커서가 있으면 50ms 더).
+범위 가드(`ScopeGuard`)는 취소와 함께 곧바로 사라져 기다림의 근거가 못 되므로 (4) 는 셋을 본다: 취소한 **활동 공유 시그니처 계산**(`RepoState::cancel_shared` — spawn 한 태스크라 범위 취소가 닿지 않아 최대 20초 폴더를 쥐던 것을 취소 토큰으로 끊고 끝나기를 기다린다),
+범위 안 조회, 그리고 **실행기가 센 그 저장소의 git 프로세스 수**(`GithubExecutor::live_processes` — `run` 의 future 가 끝나거나 버려질 때, 스트림은 `ChildGuard` 가 트리를 죽인 뒤 풀린다. 범위 밖에서 도는 시그니처·로그 커서도 센다). 프로세스 종료의 보장은 "트리 종료를 요청했고 그 호출이 돌아왔다"까지다 —
+Windows 가 파일 핸들을 풀기까지의 틈은 `remove_github_cache` 의 재시도(10회×100ms)가 흡수한다.
+**"삭제 중" 표식**(`github_removing`): 정리를 시작할 때 그 id 에 달아 새 조회의 범위 진입을 거부한다(`저장소를 삭제하는 중입니다`) — 사이드카가 레코드를 지우기까지의 틈에 들어온 조회가 폴더를 다시 쥐지 못하게 한다. 미러가 바뀌어 그 id 가 github 로 풀리지 않게 되면(`on_mirror_changed`) 풀리고, 사이드카가 지우지 못해 미러가 그대로면 30초 뒤 풀린다(안전장치). 그 뒤 `Routed::Sidecar` — 사이드카의 기존 핸들러가 `forgetAndWait` → 감시 정지 → `removeGithubCache`(링크 확인·재시도 삭제) → 레코드 삭제를 한다.
 **캐시 삭제를 Rust 가 하지 않는 이유**: fetch·감시가 아직 사이드카 소유라 "멈춘 뒤 지운다"를 한 프로세스가 지켜야 하고(TS `pathLocks` 도 한 프로세스의 것이다 — 계획 §0), 사이드카가 응답한 뒤에 지우면 같은 경로의 재추가와 겹친다. 대신 Rust 판 삭제 함수(`remove_github_cache`)와 시험(캐시 밖·모양 틀린 경로는 `GithubCachePath` 를 못 만든다·정션/심볼릭 링크 거부·형제 폴더 보존·빈 owner 폴더 정리)을 두어 PR 9(삭제를 Rust 로)가 그대로 쓴다.
 
-**시험**: 새 바이너리 `tests/github_route.rs`(15개, `test-hooks`, `tauri.yml` 목록에 추가). `file:///` 소스에서 `blob:none` 으로 받은 캐시 + 같은 소스의 local 저장소 + 라우터로 — 소유(스위치·서비스·실행기 순서·`git:fetch`/`repos:watch` 는 사이드카·감시 없음)·**같은 저장소의 local 결과와 같음**(commit·compare·fileDiff·fileHistory·blame·tree·blob·resolveRev·search·repoExtras·lfsPaths·log 해시·activity — 받지 않은 blob 은 lazy fetch 로 받는다)·
+**시험**: 새 바이너리 `tests/github_route.rs`(16개, `test-hooks`, `tauri.yml` 목록에 추가). `file:///` 소스에서 `blob:none` 으로 받은 캐시 + 같은 소스의 local 저장소 + 라우터로 — 소유(스위치·서비스·실행기 순서·`git:fetch`/`repos:watch` 는 사이드카·감시 없음)·**같은 저장소의 local 결과와 같음**(commit·compare·fileDiff·fileHistory·blame·tree·blob·resolveRev·search·repoExtras·lfsPaths·log 해시·activity — 받지 않은 blob 은 lazy fetch 로 받는다)·
 github 갈래(worktrees·서브모듈(소스에 `.gitmodules`+gitlink 커밋을 더해 local 은 1개, github 는 0개)·onRemote 가 잘못된 rev 에도 true·wip 빈 결과·gh:repo 링크 / 링크 없으면 remote 추론)·받지 않은 캐시의 빈 결과·**오프라인 lenient**(소스 폴더를 치워 lazy fetch 가 실패하게 한 뒤 — 통계 없는 목록, 이름 변경+수정 커밋은 `-M` 없이, 돌아오면 캐시에 굳지 않은 완전한 결과)·
 activity 가 ref 변경(알림 없음)을 반영·**토큰 비노출**(23개 호출과 소스를 치운 뒤 lazy fetch 가 실패하는 `fileDiff`·`blob`·`blame` 의 응답·오류 봉투에 가짜 토큰·base64 가 없다)·**`repos:remove`**(열린 커서 + 응답 없는 127.0.0.1 서버에서 멈춘 lazy fetch → 넘기기 전에 둘 다 정리돼 Rust 판 삭제 `remove_github_cache`(사이드카와 같은 10회×100ms 재시도)가 성공 — 정리를 빼면 이 시험이 실패하는 것을 확인했다)·소스 검사(`Target::Github` 를 만드는 곳은 `resolve` 한 곳·종류 목록에 github 없음·앱 배선 순서·닫힌 실행기).
 대응표(`tests/golden/repos/test-map.json`): `N/A: PR 6` 4개를 `github_route.rs::…` 로 옮겼다(`goldenConfig.test.ts` 의 소스 목록에 `github_route.rs` 를 더했다). **TS 쪽 골든 하네스는 만들지 않았다** — 같은 저장소의 local 결과와 비교하는 방식으로 대신했다(TS `RepoService` 는 같은 코드를 실행기만 바꿔 타므로 local 결과가 곧 TS 기준이다).
+
+**PR 9 계약**: `config/derive.rs` 의 `mirror_of`(42-46행)와 `mirror.rs` 의 `apply_with_links`(119행 — 시험·설정 쪽이 쓴다)는 링크의 owner/repo 를 `sanitize_github_link` 없이 읽는다. 지금은 사이드카가 검증한 값만 `apply_message` 를 거쳐 들어오므로 안전하지만,
+PR 9 가 설정에서 미러를 직접 만들 때는 **반드시 `sanitize_github_link`(또는 `apply_message` 의 같은 경로)를 거쳐** 링크를 넣는다 — 건너뛰면 검증되지 않은 owner/repo 가 `gh:repo`·GitHub 서비스 질의로 간다.
 
 **TS 와 다른 점**
 - 라우터가 github 저장소의 모든 조회를 하나의 취소 범위로 묶어 `repos:remove` 가 끊는다(TS 는 한 프로세스라 `retire` 로 커서만 닫고 진행 중 조회는 `rmSync` 재시도에 맡겼다).

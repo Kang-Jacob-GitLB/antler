@@ -120,6 +120,9 @@ struct Rig {
     cache: Cache,
     dir: GithubCachePath,
     router: Arc<Router>,
+    /// 라우터와 같은 미러·실행기(복제하면 같은 표를 본다) — 미러를 바꾸고 진행 중인 프로세스 수를 보는 시험용
+    mirror: RepoMirror,
+    exec: GithubExecutor,
     third: String,
     fourth: String,
 }
@@ -153,10 +156,11 @@ impl Rig {
         ];
         let links = std::collections::HashMap::from([(G.to_string(), GhLink { owner: "octocat".into(), repo: "hello".into() })]);
         assert!(mirror.apply_with_links(1, repos, links));
-        let router = Router::new(true, false, mirror);
+        let router = Router::new(true, false, mirror.clone());
         router.set_github(gh_host());
-        router.set_github_cache(token_exec(&cache, protocol));
-        Rig { src, cache, dir, router: Arc::new(router), third, fourth }
+        let exec = token_exec(&cache, protocol);
+        router.set_github_cache(exec.clone());
+        Rig { src, cache, dir, router: Arc::new(router), mirror, exec, third, fourth }
     }
 
     fn git(&self, args: &[&str]) -> String {
@@ -617,6 +621,7 @@ async fn repos_remove_는_진행_중인_조회와_열린_로그_커서를_정리
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(!stuck.is_finished());
+    assert!(rig.exec.live_processes(rig.dir.as_str()) > 0, "멈춘 조회의 git 이 진행 중으로 세어져야 한다");
     // local 저장소의 질의는 이 범위에 들지 않는다
     let other = call(&r, "git:commit", json!([L, rig.src.second])).await;
     assert_eq!(other["ok"], true);
@@ -626,15 +631,43 @@ async fn repos_remove_는_진행_중인_조회와_열린_로그_커서를_정리
     let Routed::Done(env) = tokio::time::timeout(Duration::from_secs(10), stuck).await.expect("끊긴 조회가 끝난다").unwrap() else { panic!("사이드카로 갔다") };
     assert_eq!(env["ok"], false, "{env}");
     assert_eq!(env["code"], "ABORTED", "{env}");
+    // route 가 돌아온 시점에 그 저장소의 git 프로세스는 모두 끝나 있다(drain 이 프로세스 종료를 기다렸다)
+    assert_eq!(rig.exec.live_processes(rig.dir.as_str()), 0, "정리가 끝났는데 git 이 남았다");
     assert_eq!(r.log_cursor_count(), 0, "열린 커서가 남았다");
     // 사이드카가 지우는 시점: 사이드카와 같은 재시도 예산(10회×100ms)으로 지워져야 한다 — 커서나 멈춘 git 이 살아 있으면 Windows 는 폴더를 지우지 못한다.
     // 앱에 연결하지 않은 Rust 판 삭제 함수(`remove_github_cache`)를 실제 캐시에 써 본다
     let dir = PathBuf::from(rig.dir.as_str());
     assert_eq!(remove_github_cache(&rig.dir), Ok(true), "캐시 폴더를 쥔 핸들이 남았다");
     assert!(!dir.exists());
-    // 같은 id 의 다음 조회는 새 범위를 받는다(끊긴 범위를 재사용하지 않는다) — 폴더가 없으니 git 오류일 뿐 ABORTED 가 아니다
+    // 사이드카가 레코드를 지워 미러가 바뀌기 전까지 그 id 의 새 조회는 "삭제 중"으로 거부된다(범위에 들어 폴더를 다시 쥐지 않는다)
+    let env = call(&r, "git:commit", json!([G, rig.src.second])).await;
+    assert_eq!(env["ok"], false, "{env}");
+    assert!(env["error"].as_str().unwrap_or_default().contains("삭제하는 중"), "{env}");
+    assert_eq!(rig.exec.live_processes(rig.dir.as_str()), 0);
+    // 미러에서 사라지면(사이드카가 지웠다) 표식이 풀리고, 같은 id 가 다시 github 로 풀리면 새 범위를 받는다(끊긴 범위를 재사용하지 않는다) — 폴더가 없으니 git 오류일 뿐 ABORTED 가 아니다
+    let local = MirrorRepo { id: L.into(), kind: "local".into(), path: rig.src.dir("octocat", "hello").to_string_lossy().into_owned(), distro: None, ssh_host: None };
+    assert!(rig.mirror.apply(2, vec![local.clone()]));
+    r.on_mirror_changed();
+    let github = MirrorRepo { id: G.into(), kind: "github".into(), path: rig.dir.as_str().to_string(), distro: None, ssh_host: None };
+    let links = std::collections::HashMap::from([(G.to_string(), GhLink { owner: "octocat".into(), repo: "hello".into() })]);
+    assert!(rig.mirror.apply_with_links(3, vec![github, local], links));
     let env = call(&r, "git:commit", json!([G, rig.src.second])).await;
     assert_ne!(env["code"], "ABORTED", "{env}");
+    assert!(!env["error"].as_str().unwrap_or_default().contains("삭제하는 중"), "{env}");
+}
+
+#[tokio::test]
+async fn repos_remove_뒤_미러가_바뀌기_전까지_그_id_의_새_조회를_거부한다() {
+    let rig = Rig::new("file").await;
+    let r = &rig.router;
+    assert!(is_sidecar(r.route("repos:remove", &json!([G])).await));
+    for ch_args in [("git:commit", json!([G, rig.src.second])), ("git:log", json!([G, { "count": 1, "skip": 0 }]))] {
+        let env = call(r, ch_args.0, ch_args.1).await;
+        assert_eq!(env["ok"], false, "{env}");
+        assert!(env["error"].as_str().unwrap_or_default().contains("삭제하는 중"), "{env}");
+    }
+    // 다른 저장소(local)는 영향이 없다
+    assert_eq!(call(r, "git:commit", json!([L, rig.src.second])).await["ok"], true);
 }
 
 #[tokio::test]

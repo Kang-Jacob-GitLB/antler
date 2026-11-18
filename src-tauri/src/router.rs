@@ -482,6 +482,11 @@ impl Runtimes {
         self.github.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
+    /// 그 캐시 경로에서 진행 중인 git 프로세스 수(실행기가 없으면 0)
+    fn github_live_processes(&self, repo_path: &str) -> usize {
+        self.github_exec().map_or(0, |e| e.live_processes(repo_path))
+    }
+
     fn ssh_pool(&self) -> Option<Arc<SshPool>> {
         self.pool.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
@@ -539,6 +544,11 @@ impl Drop for ScopeGuard {
 
 /// `repos:remove` 가 진행 중인 조회가 끝나기를 기다리는 최대 시간(프로세스 트리는 동기 종료지만 핸들이 풀리는 데 짧은 틈이 있다)
 const SCOPE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// "삭제 중" 표식의 안전장치 시간 — 사이드카가 레코드를 지우지 못해 미러가 바뀌지 않아도 이 시간이 지나면 풀린다(그 저장소가 영영 막히지 않게)
+const REMOVING_TTL: Duration = Duration::from_secs(30);
+
+const REMOVING_MESSAGE: &str = "저장소를 삭제하는 중입니다";
 
 pub struct Router {
     enabled: bool,
@@ -598,6 +608,9 @@ pub struct Router {
     env: Mutex<Option<EnvHost>>,
     /// github 저장소별 조회 범위(저장소 id → 범위). 미러가 바뀌면 github 로 풀리지 않는 저장소 것을 치운다
     github_scopes: Mutex<HashMap<String, Arc<GithubScope>>>,
+    /// "삭제 중"인 github 저장소(id → 만료 시각). `repos:remove` 가 정리를 시작한 뒤 사이드카가 레코드를 지우고 미러가 바뀌기 전까지, 그 id 의 새 조회가
+    /// 범위에 들어가 폴더를 다시 쥐지 못하게 한다. 미러가 바뀌어 github 로 풀리지 않게 되면 풀리고, 아니면 [`REMOVING_TTL`] 뒤에 풀린다
+    github_removing: Mutex<HashMap<String, Instant>>,
 }
 
 impl Router {
@@ -627,6 +640,7 @@ impl Router {
             app: Mutex::default(),
             env: Mutex::default(),
             github_scopes: Mutex::default(),
+            github_removing: Mutex::default(),
             log,
             mirror: mirror.clone(),
             cancels: Arc::default(),
@@ -928,6 +942,9 @@ impl Router {
         self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| owned(id));
         // github 저장소별 조회 범위(진행 중인 조회는 자기 Arc 를 쥐고 있어 맵에서 빠져도 계속 돈다)
         self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| matches!(mirror.resolve(id), Resolved::Rust(Target::Github { .. })));
+        // 지워진 저장소(더는 github 로 풀리지 않는다)의 "삭제 중" 표식을 푼다. 아직 풀리는 저장소는 만료 시각까지 둔다
+        let now = Instant::now();
+        self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, until| *until > now && matches!(mirror.resolve(id), Resolved::Rust(Target::Github { .. })));
         // Launchpad 의 remote 목록은 통째로 비운다 — `repos:update` 무효화(route 시점)와 미러 반영(비동기) 사이에 옛 경로로 채운 항목이
         // 소유만 보는 retain 으로는 남는다(10분 캐시라 다시 채우는 비용이 작다)
         self.invalidate_gh_remotes(None);
@@ -1095,7 +1112,14 @@ impl Router {
         }
         let args = decode_args(raw);
         // GitHub 원격 전용 저장소의 조회는 그 저장소의 범위 안에서 돈다(`repos:remove` 가 끊을 수 있게). `git:fetch` 는 소유가 사이드카라 범위에 들이지 않는다
-        let scope = if channel == "git:fetch" { None } else { self.enter_github_scope(&args) };
+        let scope = if channel == "git:fetch" {
+            None
+        } else {
+            match self.enter_github_scope(&args) {
+                Ok(scope) => scope,
+                Err(e) => return Routed::Done(err_env(&e.to_string(), e.envelope_code())),
+            }
+        };
         // 채널 처리기 future 는 크다 — 힙에 둔다(범위 안팎 어느 쪽이든 호출 스택에 그대로 쌓이지 않게)
         let dispatch = Box::pin(async {
             match channel {
@@ -1125,24 +1149,30 @@ impl Router {
         }
     }
 
-    /// github 소스 저장소의 조회면 그 저장소의 취소 범위에 들어간다(아니면 `None`). 반환한 가드가 살아 있는 동안 진행 중으로 센다
-    fn enter_github_scope(&self, args: &[Option<&Value>]) -> Option<(Arc<GithubScope>, ScopeGuard)> {
-        let Some(Some(Value::String(id))) = args.first() else { return None };
+    /// github 소스 저장소의 조회면 그 저장소의 취소 범위에 들어간다(아니면 `Ok(None)`). 반환한 가드가 살아 있는 동안 진행 중으로 센다.
+    /// 삭제 중인 저장소(`repos:remove` 가 정리를 시작했다)면 들어가지 못하고 오류다
+    fn enter_github_scope(&self, args: &[Option<&Value>]) -> Result<Option<(Arc<GithubScope>, ScopeGuard)>, ExecError> {
+        let Some(Some(Value::String(id))) = args.first() else { return Ok(None) };
         self.enter_github_scope_of(id)
     }
 
-    fn enter_github_scope_of(&self, id: &str) -> Option<(Arc<GithubScope>, ScopeGuard)> {
+    fn enter_github_scope_of(&self, id: &str) -> Result<Option<(Arc<GithubScope>, ScopeGuard)>, ExecError> {
         if !matches!(self.mirror.resolve(id), Resolved::Rust(Target::Github { .. })) {
-            return None;
+            return Ok(None);
         }
-        let scope = self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner).entry(id.to_string()).or_default().clone();
+        // 표식 확인과 범위 등록이 범위 맵 잠금 안이다 — 정리(`release_github_repo`)가 표식을 먼저 달고 범위를 뺀 뒤이므로, 여기서 통과한 조회는 그 정리가 보는 범위에 든다
+        let mut scopes = self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).get(id).is_some_and(|until| *until > Instant::now()) {
+            return Err(ExecError::Other { message: REMOVING_MESSAGE.to_string() });
+        }
+        let scope = scopes.entry(id.to_string()).or_default().clone();
         scope.inflight.fetch_add(1, Ordering::SeqCst);
-        Some((scope.clone(), ScopeGuard(scope)))
+        Ok(Some((scope.clone(), ScopeGuard(scope))))
     }
 
     /// GitHub 서비스(`RoutedRepos`)가 채널을 거치지 않고 부르는 저장소 질의도 같은 범위 안에서 돌린다 — `repos:remove` 가 끊을 수 있게. github 저장소가 아니면 그대로 돌린다
     async fn scoped<T>(&self, repo_id: &str, target: &Target, fut: impl std::future::Future<Output = Result<T, ExecError>>) -> Result<T, ExecError> {
-        let entered = if matches!(target, Target::Github { .. }) { self.enter_github_scope_of(repo_id) } else { None };
+        let entered = if matches!(target, Target::Github { .. }) { self.enter_github_scope_of(repo_id)? } else { None };
         let Some((scope, _guard)) = entered else { return fut.await };
         tokio::select! {
             biased;
@@ -1151,32 +1181,38 @@ impl Router {
         }
     }
 
-    /// `repos:remove` 의 Rust 쪽 정리(Phase 6b PR 6): 이 저장소를 github 소스로 풀고 있으면 진행 중인 조회를 끊고, 열려 있는 로그 커서·앵커를 닫고, 끊긴 조회가 모두 끝나기를 기다린다
-    /// (프로세스 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있다 — 최대 [`SCOPE_DRAIN_TIMEOUT`]). 이 뒤에 사이드카가 캐시 폴더를 지운다. 캐시 삭제 자체는 사이드카의 몫이다:
+    /// `repos:remove` 의 Rust 쪽 정리(Phase 6b PR 6): 이 저장소를 github 소스로 풀고 있으면 "삭제 중" 표식을 달고, 진행 중인 조회와 활동 공유 시그니처 계산을 끊고,
+    /// 열려 있는 로그 커서·앵커를 닫고, 그 저장소의 git 프로세스가 모두 끝나기를 기다린다
+    /// (실행기가 센다 — 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있어, 최대 [`SCOPE_DRAIN_TIMEOUT`] 까지만 기다린다). 이 뒤에 사이드카가 캐시 폴더를 지운다. 캐시 삭제 자체는 사이드카의 몫이다:
     /// fetch·감시가 아직 사이드카의 소유라 "멈춘 뒤 지운다"는 순서를 한 프로세스가 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
     async fn release_github_repo(&self, repo_id: &str) {
-        if !matches!(self.mirror.resolve(repo_id), Resolved::Rust(Target::Github { .. })) {
-            return;
-        }
-        // 범위를 맵에서 빼면 이 뒤에 들어오는 조회는 새 범위를 받는다(끊기지 않는다 — 미러에서 사라지기까지의 틈은 TS 도 같다)
+        let Resolved::Rust(target @ Target::Github { .. }) = self.mirror.resolve(repo_id) else { return };
+        let path = target.path().to_string();
+        // "삭제 중" 표식을 **먼저** 단다 — 이 뒤에 들어오는 새 조회는 범위에 들지 못하고 거부된다(사이드카가 레코드를 지워 미러가 바뀔 때까지)
+        self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), Instant::now() + REMOVING_TTL);
         let scope = self.github_scopes.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
         if let Some(scope) = &scope {
             scope.cancel.cancel();
         }
+        // 범위 취소가 닿지 않는 일: 활동 공유 시그니처 계산은 spawn 한 태스크라 기다리는 쪽이 떠나도 최대 20초 계속 간다 — 직접 끊고 끝나기를 기다린다
+        let signature = self.repo_state.cancel_shared(repo_id);
         // 커서의 읽기 태스크 중단은 비동기로 끝난다(그때 git 스트림이 버려져 프로세스 트리가 종료된다) — 닫은 커서가 있으면 그것이 끝날 틈을 준다
         if self.logs.close_repo(repo_id) > 0 {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         self.untracked_allow.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
         self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).remove(repo_id);
-        if let Some(scope) = scope {
-            let _ = tokio::time::timeout(SCOPE_DRAIN_TIMEOUT, async {
-                while scope.inflight.load(Ordering::SeqCst) > 0 {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-            })
-            .await;
-        }
+        // 끝나기를 기다린다: 취소된 시그니처 계산, 범위 안의 조회, 그리고 실행기가 센 이 저장소의 git 프로세스(범위 가드는 취소와 함께 곧바로 사라지지만
+        // 실행기의 표시는 프로세스 트리를 죽인 뒤에야 풀린다 — 시그니처·로그 커서처럼 범위 밖에서 도는 것도 센다)
+        let _ = tokio::time::timeout(SCOPE_DRAIN_TIMEOUT, async {
+            if let Some(signature) = signature {
+                signature.await;
+            }
+            while scope.as_ref().is_some_and(|s| s.inflight.load(Ordering::SeqCst) > 0) || self.runtimes.github_live_processes(&path) > 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await;
     }
 
     /// 서비스가 없는 `jira:*`·`gh:*` 채널의 행선지. Rust 가 소유(사이드카를 env=1 로 띄움)했는데 서비스가 없으면 사이드카는 받지 않으므로 오류다.
