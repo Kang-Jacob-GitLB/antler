@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { GithubRepoLink } from '../src/shared/types'
-import type { GitExecutor } from '../src/main/executors/GitExecutor'
+import { SCRUB_PARENT_ENV_KEY, type GitExecutor } from '../src/main/executors/GitExecutor'
 import { fetchConfigArgs, inspectEntries, parseConfigList, runFetch, type ConfigEntry } from '../src/main/git/fetch'
 import {
   checkGithubConfig,
@@ -204,7 +204,8 @@ function envCases(): EnvCaseIn[] {
 
 function captureEnv(c: EnvCaseIn): [string, string][] {
   const env = githubEnv(c.token, { gitDir: c.gitDir, hooksPath: HOOKS, netConfig: c.netConfig, ...(c.allowProtocol ? { allowProtocol: c.allowProtocol } : {}) })
-  return Object.entries(env).map(([k, v]) => [k, v === EMPTY_GIT_CONFIG && k === 'GIT_CONFIG_GLOBAL' ? '<빈 설정>' : v])
+  // SCRUB_PARENT_ENV_KEY 는 processRunner.childEnv 가 소비하는 TS 내부 표식이다 — Rust 는 같은 의미를 실행기 env_remove 로 구현하므로 골든에 넣지 않는다
+  return Object.entries(env).filter(([k]) => k !== SCRUB_PARENT_ENV_KEY).map(([k, v]) => [k, v === EMPTY_GIT_CONFIG && k === 'GIT_CONFIG_GLOBAL' ? '<빈 설정>' : v])
 }
 
 // ── 가짜 실행기: 호출한 argv 를 남긴다 ────────────────────────────────────

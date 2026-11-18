@@ -60,7 +60,7 @@
   "githubRemote > 실제 git: 초기화 → fetch(blob:none) → lazy fetch > fetch 인자에 필터가 들어가고 토큰은 인자에 없다": "github.rs::fetch_인자에_토큰이_없고_환경의_한_값에만_있다",
   "githubRemote > 실제 git: 초기화 → fetch(blob:none) → lazy fetch > 커밋 상세·비교: github 저장소가 오프라인이면(lenient) 던지지 않고 통계 없는 파일 목록을 돌려준다": "N/A: PR 6",
   "githubRemote > 실제 git: 사용자 git 설정과 격리 > 전역 설정이 insteadOf(전송 금지에 걸리는 ssh)·safe.bareRepository=explicit·reftable 기본값이어도 끝까지 동작한다": "github_cache_isolation.rs::전역_설정이_insteadof_safe_bare_repository_reftable_이어도_끝까지_동작한다",
-  "githubRemote > 실제 git: 사용자 git 설정과 격리 > init 이 reftable 저장소를 만들어도(git 3.0 기본) 설정 검사를 통과하고 fetch·log 가 된다": "github_cache_isolation.rs::init_이_reftable_저장소를_만들어도_검사를_통과하고_fetch_log_가_된다",
+  "githubRemote > 실제 git: 사용자 git 설정과 격리 > init 이 reftable 저장소를 만들어도(git 3.0 기본) 설정 검사를 통과하고 fetch·log 가 된다": "github_cache_exec.rs::reftable_저장소도_검사를_통과하고_fetch_log_가_된다",
   "githubRemote > 실제 git: 사용자 git 설정과 격리 > 실제로 적용되는 http.followRedirects 는 false 다(fetch 의 -c 가 환경 설정을 덮어쓰지 않는다)": "github_cache_exec.rs::리다이렉트를_따라가지_않고_토큰이_다른_호스트로_가지_않는다",
   "githubRemote > 실제 git: 사용자 git 설정과 격리 > 캐시 폴더가 비었거나 깨져 있으면 상위 폴더의 저장소로 올라가지 않고 실패한다(config 쓰기 포함)": "github_cache_exec.rs::캐시_폴더가_비었거나_깨져_있으면_상위_저장소로_올라가지_않고_실패한다",
   "githubRemote > RepoService: 원격 전용 저장소 > 같은 경로를 동시에 추가해도 서로의 폴더를 지우지 않고 하나만 등록된다": "N/A: PR 9",
