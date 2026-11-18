@@ -1,0 +1,196 @@
+{
+  "scenarios": [
+    {
+      "name": "자동 확인은 나중에·건너뛴 버전을 숨기고 수동 확인은 항상 보인다",
+      "steps": [
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": true
+        },
+        {
+          "op": "snooze",
+          "version": "0.2.0"
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": true,
+          "out": true
+        },
+        {
+          "op": "notify",
+          "version": "0.2.1",
+          "manual": false,
+          "out": true
+        },
+        {
+          "op": "restart"
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": true
+        },
+        {
+          "op": "skip",
+          "value": "0.3.0"
+        },
+        {
+          "op": "notify",
+          "version": "0.3.0",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "0.2.5",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "0.3.1",
+          "manual": false,
+          "out": true
+        },
+        {
+          "op": "notify",
+          "version": "0.3.0",
+          "manual": true,
+          "out": true
+        }
+      ]
+    },
+    {
+      "name": "건너뛴 값이 해석되지 않으면 자동 확인은 모두 숨긴다",
+      "steps": [
+        {
+          "op": "skip",
+          "value": "garbage"
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "99.0.0",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": true,
+          "out": true
+        }
+      ]
+    },
+    {
+      "name": "건너뛴 값이 빈 문자열이거나 없으면 숨기지 않는다",
+      "steps": [
+        {
+          "op": "skip",
+          "value": ""
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": true
+        },
+        {
+          "op": "skip",
+          "value": null
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": true
+        }
+      ]
+    },
+    {
+      "name": "건너뛴 프리릴리스와 정식의 순서",
+      "steps": [
+        {
+          "op": "skip",
+          "value": "1.0.0-rc.2"
+        },
+        {
+          "op": "notify",
+          "version": "1.0.0-rc.1",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "1.0.0-rc.2",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "1.0.0-rc.10",
+          "manual": false,
+          "out": true
+        },
+        {
+          "op": "notify",
+          "version": "1.0.0",
+          "manual": false,
+          "out": true
+        }
+      ]
+    },
+    {
+      "name": "v 접두사와 나중에는 문자열이 같을 때만 숨긴다",
+      "steps": [
+        {
+          "op": "snooze",
+          "version": "0.2.0"
+        },
+        {
+          "op": "notify",
+          "version": "v0.2.0",
+          "manual": false,
+          "out": true
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "skip",
+          "value": "v0.2.0"
+        },
+        {
+          "op": "notify",
+          "version": "0.2.0",
+          "manual": false,
+          "out": false
+        },
+        {
+          "op": "notify",
+          "version": "0.2.1",
+          "manual": false,
+          "out": true
+        }
+      ]
+    }
+  ]
+}

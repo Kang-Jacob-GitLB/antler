@@ -166,7 +166,8 @@ pub fn has_hash(u: &Url) -> bool {
 }
 
 /// 경로에 인코딩된 `/`·`\`·`.`(`%2f`·`%5c`·`%2e`, 대소문자 무시)가 있는가 — 앞단 프록시가 풀어 사이트 경로 밖으로 보낼 수 있다
-fn has_encoded_separator(path: &str) -> bool {
+/// (업데이트의 릴리스 자산 URL 판정도 원문 전체에 같은 검사를 쓴다)
+pub fn has_encoded_separator(path: &str) -> bool {
     path.as_bytes().windows(3).any(|w| w[0] == b'%' && matches!([w[1].to_ascii_lowercase(), w[2].to_ascii_lowercase()], [b'2', b'f'] | [b'5', b'c'] | [b'2', b'e']))
 }
 

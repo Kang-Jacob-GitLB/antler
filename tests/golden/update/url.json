@@ -1,0 +1,402 @@
+{
+  "allowed": [
+    {
+      "input": "https://github.com/a/b",
+      "out": true
+    },
+    {
+      "input": "https://objects.githubusercontent.com/x?y=1",
+      "out": true
+    },
+    {
+      "input": "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?sig=3",
+      "out": true
+    },
+    {
+      "input": "http://github.com/a",
+      "out": false
+    },
+    {
+      "input": "https://evil.com/a",
+      "out": false
+    },
+    {
+      "input": "https://github.com.evil.com/a",
+      "out": false
+    },
+    {
+      "input": "https://evilgithub.com/a",
+      "out": false
+    },
+    {
+      "input": "https://github.com./a",
+      "out": false
+    },
+    {
+      "input": "https://GITHUB.COM/a",
+      "out": true
+    },
+    {
+      "input": "https://user:pw@github.com/a",
+      "out": false
+    },
+    {
+      "input": "https://user@github.com/a",
+      "out": false
+    },
+    {
+      "input": "https://:pw@github.com/a",
+      "out": false
+    },
+    {
+      "input": "https://github.com:8443/a",
+      "out": false
+    },
+    {
+      "input": "https://github.com:443/a",
+      "out": true
+    },
+    {
+      "input": "https://github.com:/a",
+      "out": true
+    },
+    {
+      "input": "not a url",
+      "out": false
+    },
+    {
+      "input": "",
+      "out": false
+    },
+    {
+      "input": "/relative/path",
+      "out": false
+    },
+    {
+      "input": "//github.com/a",
+      "out": false
+    },
+    {
+      "input": "https:github.com/a",
+      "out": true
+    },
+    {
+      "input": "https:/github.com/a",
+      "out": true
+    },
+    {
+      "input": "https:\\\\github.com\\a",
+      "out": true
+    },
+    {
+      "input": "HTTPS://github.com/a",
+      "out": true
+    },
+    {
+      "input": "ftp://github.com/a",
+      "out": false
+    },
+    {
+      "input": "https://github.com\\@evil.com/",
+      "out": true
+    },
+    {
+      "input": "https://github.com%2eevil.com/",
+      "out": false
+    },
+    {
+      "input": "https://github.com#@evil.com/",
+      "out": true
+    },
+    {
+      "input": "https://[::1]/a",
+      "out": false
+    },
+    {
+      "input": "https://127.0.0.1/a",
+      "out": false
+    },
+    {
+      "input": "https://gıthub.com/a",
+      "out": false
+    },
+    {
+      "input": "https://objects.githubusercontent.com.evil.com/",
+      "out": false
+    },
+    {
+      "input": " https://github.com/a",
+      "out": true
+    },
+    {
+      "input": "https://github.com/a b",
+      "out": true
+    },
+    {
+      "input": "https://github.com/\t/a",
+      "out": true
+    }
+  ],
+  "asset": [
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v0.2.0/a.dmg",
+      "out": true
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v0.2.0/Antler-0.2.0-arm64.dmg",
+      "out": true
+    },
+    {
+      "input": "https://github.com/other/repo/releases/download/v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/kang-jacob-gitlb/antler/releases/download/v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/../../../../evil/repo/releases/download/v9.9.9/x.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/%2e%2e/%2e%2e/x.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/..%2f..%2fx.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/..%2F..%2Fx.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a%5cb.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a%5Cb.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a\\b.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/./a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/../v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg?x=1",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg?",
+      "out": true
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg#",
+      "out": true
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg#x",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a b.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a%20b.dmg",
+      "out": true
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a\"b.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a<b>.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a{b}|c^d[e]'f.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a`b.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/한글.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/%zz.dmg",
+      "out": true
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a%2Fb.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a\tb.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a\nb.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download//v1/a.dmg",
+      "out": true
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/downloadv1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://GITHUB.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com:443/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com:8443/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "http://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://user@github.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/",
+      "out": true
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/latest/download/latest.json",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v1/latest.json",
+      "out": true
+    },
+    {
+      "input": " https://github.com/Kang-Jacob-GitLB/antler/releases/download/v0.2.0/Antler-0.2.0-arm64.dmg",
+      "out": false
+    },
+    {
+      "input": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v0.2.0/Antler-0.2.0-arm64.dmg ",
+      "out": false
+    },
+    {
+      "input": "https://objects.githubusercontent.com/Kang-Jacob-GitLB/antler/releases/download/v1/a.dmg",
+      "out": false
+    }
+  ],
+  "notesUrl": [
+    {
+      "input": "0.2.0",
+      "out": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+    },
+    {
+      "input": "v0.2.0",
+      "out": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v0.2.0"
+    },
+    {
+      "input": "vv1",
+      "out": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/vv1"
+    },
+    {
+      "input": "1.0.0-rc.1",
+      "out": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v1.0.0-rc.1"
+    },
+    {
+      "input": "",
+      "out": "https://github.com/Kang-Jacob-GitLB/antler/releases/tag/v"
+    }
+  ],
+  "safeName": [
+    {
+      "input": "Antler-Setup-2.0.0-x64.exe",
+      "out": true
+    },
+    {
+      "input": "latest.json",
+      "out": true
+    },
+    {
+      "input": "a",
+      "out": true
+    },
+    {
+      "input": ".hidden",
+      "out": false
+    },
+    {
+      "input": "-dash",
+      "out": false
+    },
+    {
+      "input": "a..b",
+      "out": false
+    },
+    {
+      "input": "..",
+      "out": false
+    },
+    {
+      "input": "a/b",
+      "out": false
+    },
+    {
+      "input": "a\\b",
+      "out": false
+    },
+    {
+      "input": "a b",
+      "out": false
+    },
+    {
+      "input": "a%20b",
+      "out": false
+    },
+    {
+      "input": "한글.exe",
+      "out": false
+    },
+    {
+      "input": "",
+      "out": false
+    },
+    {
+      "input": "abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "out": true
+    },
+    {
+      "input": "abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "out": false
+    },
+    {
+      "input": "a\nb",
+      "out": false
+    },
+    {
+      "input": "a\n",
+      "out": false
+    }
+  ]
+}

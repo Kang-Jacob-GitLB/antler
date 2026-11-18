@@ -44,7 +44,8 @@ jobs:
             '^src/main/services/RepoService\.ts$', '^src/main/services/ConfigStore\.ts$', '^src/main/windowState\.ts$','^src/main/ipc/handlers\.ts$',
             '^scripts/make-repo-fixtures\.mjs$', '^scripts/make-edge-fixtures\.mjs$', '^scripts/lib/edgeFixtures6a\.mjs$', '^src/shared/', '^src/sidecar/',
             '^src/renderer/tauri/', '^tests/golden.*\.test\.ts$', '^\.github/workflows/tauri\.yml$',
-            '^src/main/ipc/confirmText\.ts$', '^src/main/ipc/jira\.ts$', '^src/main/ipc/github\.ts$', '^scripts/gen-fetch-special\.mjs$', '^src/main/github/', '^src/main/jira/'
+            '^src/main/ipc/confirmText\.ts$', '^src/main/ipc/jira\.ts$', '^src/main/ipc/github\.ts$', '^scripts/gen-fetch-special\.mjs$', '^src/main/github/', '^src/main/jira/',
+            '^src/main/update/', '^tests/update\.test\.ts$'
           )
           if ($env:EVENT -ne 'pull_request') { "run=true" >> $env:GITHUB_OUTPUT; exit 0 }
           $files = git diff --name-only "$env:BASE_SHA" HEAD
@@ -94,9 +95,11 @@ jobs:
       # 알림·쓰기 실패·동시 쓰기·uuid. 임시 폴더에만 쓰고 사용자 설정·네트워크·git 을 쓰지 않는다. TS 테스트 대응표는 tests/golden/repos/test-map.json(vitest tests/goldenConfig.test.ts 가 누락을 강제)
       # external: 외부 열기(Phase 6b PR 3)의 경로 검증·실행 인자 계획·실행기·링크 허용이 tests/golden/external 골든과 같은지 + 가짜 의존성 시나리오 + 소스 검사(프로세스는 external/launch.rs 한 곳).
       # 에디터·터미널·탐색기·wsl.exe 를 띄우지 않는다. TS 테스트 대응표는 tests/golden/external/test-map.json(vitest 가 누락을 강제)
+      # update: 업데이트 판정 로직(Phase 6c PR 1 — semver·URL 허용 목록·매니페스트 검사·정책·오류 정화·릴리스 노트)이 tests/golden/update 골든과 같은지 + 소스 검사(입출력 없음·앱 미연결).
+      # 네트워크를 쓰지 않는다. TS 테스트 대응표는 tests/golden/update/test-map.json(vitest 가 누락을 강제)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route --test update
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy
