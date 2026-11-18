@@ -176,3 +176,15 @@ fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=fal
   에디터 실행 파일은 사용자가 고른 `.exe`/`.com` 만(`check_chosen_exe` — 절대 경로·UNC 거부·존재), `setUi` 로는 바꿀 수 없다.
 - **Electron 설정 가져오기(D1)**: Tauri 설정이 없을 때 한 번만, Electron 파일은 읽기만(고치지도 백업도 만들지 않는다). **명령을 실행할 수 있는 저장소 설정의 "항상 허용"(`trustedConfigs`)은 가져오지 않는다**(이관 뒤 한 번 다시 묻는다). 창 위치·GitHub 캐시 폴더·토큰(D2)도 가져오지 않는다.
 - **매핑된 네트워크 드라이브(`Z:\repo`)** 로 등록한 저장소는 Electron 판처럼 열린다 — 입력이 드라이브 문자 경로이고 대상의 canonical 이 그 드라이브 루트의 canonical 과 **같은 서버·공유 아래**일 때만(`restore_mapped_drive`). UNC 로 직접 등록한 경로·드라이브 안에서 다른 공유로 나가는 링크·`canonicalize` 앞의 링크 가드(원격 UNC 를 가리키는 링크는 따라가기 전에 거부)는 그대로 거부한다.
+
+## Tauri 판의 앱 업데이트(Phase 6c PR 4)
+
+`update:*` 7채널을 Rust(`src-tauri/src/update/`)가 처리한다. **설치 프로그램을 실행하는 길이라 위조 설치본이 한 줄기로도 실행되지 않게 한다**(자세한 구조: [tauri.md](tauri.md), 사용자 안내: [updates.md](updates.md)).
+- **무결성은 minisign 서명 + 서명된 버전 일치다.** 매니페스트·설치본은 우리 HTTP 클라이언트(`net::http`)로만 받고, 검증은 플러그인의 `Updater::restore_update`(검사를 통과한 제안으로 **다시 만든** 매니페스트 — 플랫폼 키 하나·`target` 고정·서명된 버전 일치 강제) → `Update::verify`, 설치는 `Update::install` 이 **다시 검증한 뒤**에만 한다. **검증 전에는 디스크에 쓰지 않는다**(메모리 바이트). 플러그인의 `check()`·`download()`·`configure_client`·`download_and_install` 은 쓰지 않는다(리다이렉트 허용 목록·크기 상한이 `net::http` 한 곳에 있어야 해서다 — 소스 검사가 강제한다). `Update::install` 호출은 `update/host.rs` 의 한 곳이다.
+- **믿는 공개 키는 `update::host::UPDATE_PUBKEY` 한 곳이다.** 환경 변수·설정 파일·`tauri.conf.json` 으로 바꾸는 길이 없다(conf 에 `plugins` 가 없음을 시험이 강제한다). **비어 있으면 fail-closed**: 확인은 하지만 내려받기는 네트워크를 열기 전에, 설치는 설치 포트 앞에서 "업데이트 서명 키가 설정되지 않았습니다"로 끝난다.
+- **다운로드 허용 목록**: 첫 주소는 매니페스트(고정 주소 또는 이 저장소 릴리스의 `latest.json`)·설치본(이 저장소의 `releases/download/` 자산, `..`·인코딩된 구분자·쿼리·해시 거부) 규칙을 통과해야 하고, 리다이렉트는 **매 홉** `github.com`·`objects.githubusercontent.com`·`release-assets.githubusercontent.com` 의 https·기본 포트·사용자 정보 없음이어야 하며 5번까지만 따라간다(`Redirects::ReleaseAssets` — 닫힌 변형, 클라이언트 자체는 3xx 를 따르지 않는다). 매니페스트의 설치본 주소는 **그 버전의 태그** 아래여야 한다(다른 저장소·다른 태그 거부). 크기: 매니페스트 1MB·API 2MB·설치본 300MB(Content-Length 로 받기 전에, chunked 는 누계로). 내려받기는 전체 시간 제한 없이 연결 15초·읽기 정지 30초.
+- **renderer 가 플러그인을 직접 부르는 길이 없다**: capability 에 `updater` 권한이 없다(플러그인 JS command 는 `headers`·`proxy` 를 받는다 — 시험이 강제). 업데이트는 `antler_invoke` 의 검증된 채널로만 돈다. `update:dismiss` 는 지금 알리는 버전만 받고, **건너뛴 버전을 설정에 쓰는 곳은 업데이트 호스트 한 곳이다**(`config:setUi` 는 그 키를 거부한다 — 소스 검사).
+- 업데이트 요청에는 토큰·쿠키를 보내지 않는다(GitHub 서비스의 클라이언트·보관소와 공유하지 않는다). 프록시는 따르지 않는다. 오류 문구는 reqwest·플러그인 오류의 `Display` 가 아니라 고정 문구다(요청 주소·경로가 섞이지 않게) — 서비스가 `sanitize_error` 를 한 번 더 건다.
+- 사용 가능 판정은 번들러가 심은 `bundle_type()`(NSIS)뿐이다(환경 변수를 믿지 않는다). 개발 장치(`ANTLER_UPDATE_FAKE`)는 개발·cdp 빌드 코드에만 있다.
+- **설치 직전 정리**: `Update::install` 이 `exit(0)` 으로 끝나 `RunEvent::Exit` 을 건너뛰므로 `on_before_exit` 가 같은 `exit_cleanup`(git 프로세스 트리 종료 등)을 부른다.
+- **지키지 못하는 것**: 첫 설치(Electron 이관 포함)의 무결성은 Electron 이 읽는 `latest.yml` 의 sha512 다(Electron 쪽 코드). 설치본에 Authenticode 가 없다(코드 서명 인증서 없음). 플러그인이 임시 폴더에 쓴 설치본과 실행 사이의 TOCTOU 는 같은 사용자 권한 범위다.

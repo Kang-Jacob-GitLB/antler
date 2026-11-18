@@ -76,7 +76,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 - Deployment branches and tags: **Selected branches and tags → `main` 만**. 태그를 허용해야 한다면 tag ruleset 으로 `v*` 태그 생성을 제한한다.
 - Required reviewers: 소유자 1명.
 - 이유: `workflow_dispatch` 는 다른 브랜치의 워크플로 파일로도 실행할 수 있고, Environment 의 시크릿은 그 파일로 전달된다. 파일 안의 `if:` 가드는 공격자가 고친 파일에서는 무효이므로 방어가 되지 않는다 — 방어는 Environment 쪽 설정뿐이다.
-키는 사용자가 만들어 시크릿으로 넣고, **공개 키는 아직 저장소에 없다**(사용자 공개 키 대기). 업데이터를 앱에 연결하는 PR 4 가 `plugins.updater.pubkey` 를 `tauri.conf.json` 에 넣는다. 지금 `tauri.conf.json` 에는 `plugins.updater` 가 없으므로 업데이터는 비활성이다(플러그인 크레이트도 아직 없다).
+키는 사용자가 만들어 시크릿으로 넣고, **공개 키는 아직 저장소에 없다**(사용자 공개 키 대기). 공개 키는 `src-tauri/src/update/host.rs` 의 `UPDATE_PUBKEY` 한 곳에 넣는다(Phase 6c PR 4 가 업데이터를 앱에 연결했고 `tauri.conf.json` 에는 `plugins` 를 두지 않는다 — [updates.md](updates.md#tauri-판-phase-6c-pr-4)). 상수가 `None` 인 동안 앱은 업데이트를 확인만 하고 내려받기·설치는 거부한다.
 
 **매니페스트** — `scripts/make-update-manifests.mjs` 가 만든다(순수 함수 + `tests/updateManifests.test.ts`).
 - `latest.json`: Tauri 업데이터 형식. `url` 은 `https://github.com/Kang-Jacob-GitLB/antler/releases/download/v<버전>/<파일>`, 플랫폼 키는 `windows-x86_64-nsis` 와 `windows-x86_64`(같은 항목). 앱의 `check_manifest`(`update/logic.rs`)가 읽는 형식이고, 실제 검사가 표본 `tests/fixtures/update/latest.json` 을 받는지 `src-tauri/tests/update.rs` 가 확인한다.
