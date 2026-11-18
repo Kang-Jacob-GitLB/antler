@@ -99,7 +99,7 @@ jobs:
       # 네트워크를 쓰지 않는다. TS 테스트 대응표는 tests/golden/update/test-map.json(vitest 가 누락을 강제)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route --test update
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route --test update --test single_instance
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy
