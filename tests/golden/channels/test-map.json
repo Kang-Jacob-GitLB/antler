@@ -203,5 +203,16 @@
   "repoService > RepoService.scanRepos / addRepos (local) > 저장소가 아닌 폴더는 바로 아래 저장소들을 이름순으로 찾고, 숨김 폴더와 일반 폴더는 뺀다": "N/A: 6b 저장소 추가 흐름·ConfigStore 는 6b 에서 옮긴다",
   "repoService > RepoService.scanRepos / addRepos (local) > 고른 폴더 자체가 저장소면 isRepo 로 알리고 하위는 보지 않는다": "N/A: 6b 저장소 추가 흐름·ConfigStore 는 6b 에서 옮긴다",
   "repoService > RepoService.scanRepos / addRepos (local) > 여러 경로를 한 번에 추가하고, 실패한 경로는 나머지를 막지 않고 따로 돌려준다": "N/A: 6b 저장소 추가 흐름·ConfigStore 는 6b 에서 옮긴다",
-  "repoService > ConfigStore > 손상된 설정 파일은 .bak 으로 보존하고 기본값으로 시작한다": "N/A: 6b 저장소 추가 흐름·ConfigStore 는 6b 에서 옮긴다"
+  "repoService > ConfigStore > 손상된 설정 파일은 .bak 으로 보존하고 기본값으로 시작한다": "N/A: 6b 저장소 추가 흐름·ConfigStore 는 6b 에서 옮긴다",
+  "ghRemote > parseGithubRemote > %s": "golden.rs::rust_parsers_match_ts_golden",
+  "ghRemote > parseGithubRemote > 점이 든 저장소 이름은 .git 만 벗긴다": "golden.rs::rust_parsers_match_ts_golden",
+  "ghRemote > parseGithubRemote > 거부: %s": "golden.rs::rust_parsers_match_ts_golden",
+  "ghRemote > pickGithubRemote > origin → upstream → 첫 GitHub remote 순": "golden.rs::rust_parsers_match_ts_golden",
+  "ghRemote > pickGithubRemote > origin 이 GitHub 가 아니면 건너뛴다": "golden.rs::rust_parsers_match_ts_golden",
+  "ghRemote > pickGithubRemote > 없으면 null": "golden.rs::rust_parsers_match_ts_golden",
+  "ghRemote > git remotes() > remote 가 없으면 빈 목록": "channels.rs::remote_조회_시나리오가_ts_골든과_같다",
+  "ghRemote > git remotes() > 점이 든 이름도 마지막 .url 기준으로 해석한다": "channels.rs::remote_조회_시나리오가_ts_골든과_같다",
+  "ghRemote > git remotes() > RepoService.ghRepo 가 origin 을 고른다": "channels.rs::remote_조회_시나리오가_ts_골든과_같다",
+  "pushedShas > RepoService.pushedShasByAuthor > push 된 커밋만 돌려주고 로컬 전용 커밋은 뺀다": "channels.rs::remote_조회_시나리오가_ts_골든과_같다",
+  "pushedShas > RepoService.pushedShasByAuthor > 이메일은 대소문자 무시·고정 문자열로 맞춘다(비슷한 이메일은 걸리지 않는다)": "channels.rs::remote_조회_시나리오가_ts_골든과_같다"
 }

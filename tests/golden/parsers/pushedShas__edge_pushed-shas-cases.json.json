@@ -1,0 +1,93 @@
+[
+  {
+    "in": "",
+    "out": []
+  },
+  {
+    "in": "\n",
+    "out": []
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef01234567\n",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567"
+    ]
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef01234567",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567"
+    ]
+  },
+  {
+    "in": "0123456789ABCDEF0123456789ABCDEF01234567\n",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567"
+    ]
+  },
+  {
+    "in": "  0123456789abcdef0123456789abcdef01234567  \n",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567"
+    ]
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef01234567\r\n0123456789abcdef0123456789abcdef01234568\r\n",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567",
+      "0123456789abcdef0123456789abcdef01234568"
+    ]
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef01234567\n0123456789abcdef0123456789abcdef01234567\n",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567",
+      "0123456789abcdef0123456789abcdef01234567"
+    ]
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef0123456\n0123456789abcdef0123456789abcdef012345678\n",
+    "out": []
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+    "out": [
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    ]
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde\n0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0\n",
+    "out": []
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+    "out": []
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef0123456g\n",
+    "out": []
+  },
+  {
+    "in": " 0123456789abcdef0123456789abcdef01234567 \n",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567"
+    ]
+  },
+  {
+    "in": "﻿0123456789abcdef0123456789abcdef01234567\n",
+    "out": [
+      "0123456789abcdef0123456789abcdef01234567"
+    ]
+  },
+  {
+    "in": "0123456789abcdef0123456789abcdef01234567 x\n",
+    "out": []
+  },
+  {
+    "in": "abcdefabcdefabcdefabcdefabcdefabcdefabcd\n\n\nfedcbafedcbafedcbafedcbafedcbafedcbafedc",
+    "out": [
+      "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      "fedcbafedcbafedcbafedcbafedcbafedcbafedc"
+    ]
+  }
+]

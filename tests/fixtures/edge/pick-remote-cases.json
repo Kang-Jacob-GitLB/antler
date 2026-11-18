@@ -1,0 +1,41 @@
+[
+  [],
+  [{ "name": "origin", "url": "git@gitlab.com:a/b.git" }],
+  [{ "name": "origin", "url": "https://github.com/e/f.git" }],
+  [
+    { "name": "fork", "url": "git@github.com:a/b.git" },
+    { "name": "upstream", "url": "git@github.com:c/d.git" },
+    { "name": "origin", "url": "git@github.com:e/f.git" }
+  ],
+  [
+    { "name": "fork", "url": "git@github.com:a/b.git" },
+    { "name": "upstream", "url": "git@github.com:c/d.git" }
+  ],
+  [
+    { "name": "x", "url": "git@gitlab.com:a/b.git" },
+    { "name": "fork", "url": "git@github.com:a/b.git" }
+  ],
+  [
+    { "name": "origin", "url": "git@gitlab.com:a/b.git" },
+    { "name": "upstream", "url": "git@github.com:c/d.git" }
+  ],
+  [
+    { "name": "origin", "url": "git@github.com:Octo/Hello.git" },
+    { "name": "upstream", "url": "git@github.com:octo/hello.git" },
+    { "name": "mirror", "url": "https://github.com/OCTO/HELLO" },
+    { "name": "other", "url": "git@github.com:octo/other.git" }
+  ],
+  [
+    { "name": "b", "url": "git@github.com:o/r.git" },
+    { "name": "a", "url": "git@github.com:o/r.git" },
+    { "name": "origin", "url": "git@github.com:o/r.git" }
+  ],
+  [
+    { "name": "my.fork", "url": "git@github.com:me/hello.git" },
+    { "name": "a.url", "url": "https://example.com/x/y.git" }
+  ],
+  [
+    { "name": "origin", "url": "" },
+    { "name": "upstream", "url": "  https://github.com/c/d  " }
+  ]
+]

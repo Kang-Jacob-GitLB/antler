@@ -790,6 +790,26 @@
     "golden": "submodulePath__edge_submodule-path-cases.json.json"
   },
   {
+    "parser": "githubRemote",
+    "fixture": "edge/github-remote-cases.json",
+    "golden": "githubRemote__edge_github-remote-cases.json.json"
+  },
+  {
+    "parser": "pickRemote",
+    "fixture": "edge/pick-remote-cases.json",
+    "golden": "pickRemote__edge_pick-remote-cases.json.json"
+  },
+  {
+    "parser": "remoteConfig",
+    "fixture": "edge/remote-config-cases.json",
+    "golden": "remoteConfig__edge_remote-config-cases.json.json"
+  },
+  {
+    "parser": "pushedShas",
+    "fixture": "edge/pushed-shas-cases.json",
+    "golden": "pushedShas__edge_pushed-shas-cases.json.json"
+  },
+  {
     "parser": "normalizeDir",
     "fixture": "edge/normalize-dir-cases.json",
     "golden": "normalizeDir__edge_normalize-dir-cases.json.json"

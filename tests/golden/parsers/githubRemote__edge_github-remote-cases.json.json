@@ -1,0 +1,733 @@
+[
+  {
+    "in": "https://github.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello/",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello.git/",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello///",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "http://github.com/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://user:pass@github.com/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://ghp_token@github.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://GitHub.COM/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://www.github.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://WWW.GITHUB.COM./octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com./octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://git%68ub.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello?tab=readme#top",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello#frag",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com\\octo\\hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo\\hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello/../hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/x/../hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/./octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/%2e%2e/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hel%6co",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/hello.git.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello.git"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello.js.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello.js"
+    }
+  },
+  {
+    "in": "https://github.com/octo/.github",
+    "out": {
+      "owner": "octo",
+      "repo": ".github"
+    }
+  },
+  {
+    "in": "https://github.com/octo/.git",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/-",
+    "out": {
+      "owner": "octo",
+      "repo": "-"
+    }
+  },
+  {
+    "in": "https://github.com/octo/..",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/.",
+    "out": null
+  },
+  {
+    "in": "https://github.com/-octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo-/hello",
+    "out": {
+      "owner": "octo-",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo_x/hello",
+    "out": {
+      "owner": "octo_x",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/_octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com/a/b",
+    "out": {
+      "owner": "a",
+      "repo": "b"
+    }
+  },
+  {
+    "in": "https://github.com/a/b.git",
+    "out": {
+      "owner": "a",
+      "repo": "b"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello:443",
+    "out": null
+  },
+  {
+    "in": "https://github.com:443/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com:8443/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com:80/octo/hello",
+    "out": null
+  },
+  {
+    "in": "http://github.com:80/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "http://github.com:443/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com:/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "ssh://git@github.com/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "ssh://git@github.com:22/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "ssh://git@github.com:022/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "ssh://git@github.com:2222/octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "ssh://git@GitHub.com/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "ssh://git@git%68ub.com/octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "ssh://git@github.com./octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "ssh://github.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "ssh://git@github.com:22",
+    "out": null
+  },
+  {
+    "in": "git://github.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git://github.com:9418/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git://github.com:22/octo/hello",
+    "out": null
+  },
+  {
+    "in": "ssh://git@github.com:9418/octo/hello",
+    "out": null
+  },
+  {
+    "in": "GIT://GITHUB.COM/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git+ssh://git@github.com/octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "ftp://github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "file:///home/me/github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "file://github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com@evil.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://evil.com@github.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com.evil.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://evil.com/github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://gitlab.com/octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo",
+    "out": null
+  },
+  {
+    "in": "https://github.com/",
+    "out": null
+  },
+  {
+    "in": "https://github.com",
+    "out": null
+  },
+  {
+    "in": "https://github.com//octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo//hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/hello/tree/main",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/he llo",
+    "out": null
+  },
+  {
+    "in": "https:///github.com/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https:github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://",
+    "out": null
+  },
+  {
+    "in": "://github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "1https://github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "a1+.-b://github.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git@github.com:octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git@github.com:/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git@github.com:octo/hello/",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git@github.com:octo/hello.git/",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git@github.com:octo/hello.git.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello.git"
+    }
+  },
+  {
+    "in": "git@GITHUB.COM:octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "git@www.github.com:octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "github.com:octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "github.com:/octo/hello",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "x:y@github.com:octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "a@b@github.com:octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/hello/extra.git",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo",
+    "out": null
+  },
+  {
+    "in": "git@github.com:",
+    "out": null
+  },
+  {
+    "in": "git@github.com",
+    "out": null
+  },
+  {
+    "in": "git@github.com:22:octo/hello",
+    "out": null
+  },
+  {
+    "in": "git@github.com/octo:hello",
+    "out": null
+  },
+  {
+    "in": "git@gitlab.com:octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "git@ghe.example.com:octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/hello?x=1",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/hello#x",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/hello%20x",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo\\hello",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/../hello",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/hello/..",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/.",
+    "out": null
+  },
+  {
+    "in": "@github.com:octo/hello",
+    "out": null
+  },
+  {
+    "in": "git@:octo/hello",
+    "out": null
+  },
+  {
+    "in": ":octo/hello",
+    "out": null
+  },
+  {
+    "in": "/home/me/repo",
+    "out": null
+  },
+  {
+    "in": "C:\\repos\\hello",
+    "out": null
+  },
+  {
+    "in": "C:/repos/hello",
+    "out": null
+  },
+  {
+    "in": "../relative/repo",
+    "out": null
+  },
+  {
+    "in": "",
+    "out": null
+  },
+  {
+    "in": " ",
+    "out": null
+  },
+  {
+    "in": "  https://github.com/octo/hello.git  ",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "\thttps://github.com/octo/hello.git\n",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": " https://github.com/octo/hello.git ",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "﻿https://github.com/octo/hello.git",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "　git@github.com:octo/hello.git　",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello.git",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/hello x",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/hello ",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/octo/hello\u0000",
+    "out": null
+  },
+  {
+    "in": "git@github.com:octo/hel\u0000lo",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/hel\tlo",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/héllo",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/hello😀",
+    "out": null
+  },
+  {
+    "in": "https://github.com/öcto/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/hello",
+    "out": {
+      "owner": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "repo": "hello"
+    }
+  },
+  {
+    "in": "https://github.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": {
+      "owner": "octo",
+      "repo": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "in": "https://github.com/octo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.git",
+    "out": {
+      "owner": "octo",
+      "repo": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "in": "https://[::1]/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com:99999/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://exa mple.com/octo/hello",
+    "out": null
+  },
+  {
+    "in": "https://github.com/octo/hello\\",
+    "out": {
+      "owner": "octo",
+      "repo": "hello"
+    }
+  }
+]

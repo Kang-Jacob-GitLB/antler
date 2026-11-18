@@ -1,0 +1,164 @@
+{
+  "scenarios": [
+    {
+      "args": {
+        "email": "dev@example.com",
+        "limit": 3
+      },
+      "name": "remote 가 없다",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 2
+    },
+    {
+      "args": {
+        "email": "dev+x@corp.io",
+        "limit": 3
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [
+          "6aefc46ed0c1371dcaf9b975c6ff62538ce45cd8"
+        ],
+        "ok": true
+      },
+      "step": 7
+    },
+    {
+      "args": {
+        "email": "DEV+X@CORP.IO",
+        "limit": 3
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [
+          "6aefc46ed0c1371dcaf9b975c6ff62538ce45cd8"
+        ],
+        "ok": true
+      },
+      "step": 8
+    },
+    {
+      "args": {
+        "email": "devxx@corp.io",
+        "limit": 3
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [
+          "81c8705ddaa7128636315290083f4e134d78c076"
+        ],
+        "ok": true
+      },
+      "step": 9
+    },
+    {
+      "args": {
+        "email": "dev@example.com",
+        "limit": 2
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [
+          "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+          "f79d260c0374825ede572587567c476425efbfe8"
+        ],
+        "ok": true
+      },
+      "step": 10
+    },
+    {
+      "args": {
+        "email": "dev@example.com",
+        "limit": 100
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [
+          "be1e957fb83a4fbb8de7977c9ce0f9a4c2de3d58",
+          "f79d260c0374825ede572587567c476425efbfe8",
+          "45c2104daba8df006e2bd1fe3653064bf1ea868b",
+          "bfb65e92b68dc84f2b21d6e2749051a9e779b46b",
+          "d2ed02de5d7030c00a7cd29072501e71e9089d4e",
+          "72a68ce72ca0ed3fa09e57227563baf32075ea5c"
+        ],
+        "ok": true
+      },
+      "step": 11
+    },
+    {
+      "args": {
+        "email": "nobody@corp.io",
+        "limit": 3
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 12
+    },
+    {
+      "args": {
+        "email": ".*",
+        "limit": 3
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 13
+    },
+    {
+      "args": {
+        "email": "dev+x@corp.io>",
+        "limit": 3
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 14
+    },
+    {
+      "args": {
+        "email": "--output=pwned.txt",
+        "limit": 3
+      },
+      "name": "push 된 커밋만: 원격 추적 ref 에서 닿는 커밋, 이메일은 고정 문자열·대소문자 무시",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 15
+    },
+    {
+      "args": {
+        "email": "dev@example.com",
+        "limit": 5
+      },
+      "name": "원격 추적 ref 가 없으면 push 된 커밋이 없다",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 0
+    },
+    {
+      "args": {
+        "email": "dev@example.com",
+        "limit": 3
+      },
+      "name": "커밋이 없는 저장소",
+      "result": {
+        "data": [],
+        "ok": true
+      },
+      "step": 3
+    }
+  ]
+}

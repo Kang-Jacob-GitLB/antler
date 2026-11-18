@@ -16,6 +16,9 @@
 //! Rust 가 처리한다([`api_host`]). 꺼져 있으면 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
 //! env `ANTLER_RUST_API=1` 로 띄워 jira·gh 를 소유하지 않음을 알린다(앱은 두 서비스가 모두 만들어졌을 때만 주입한다)(라우터가 가로채므로 닿지 않는다 — 방어).
 //!
+//! `gh:repo`(Phase 6a PR 8)는 `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 위 git 채널과 같은 소유 술어(`RepoMirror::resolve`)를 쓴다 — Rust 가 맡는 저장소는 Rust 가 답하고
+//! (결과 캐시 60초), github kind·미러에 없는 id 는 사이드카가 답한다. GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
+//!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
 //! - git 인자는 `git::commit`·`git::scope`(log)·`git::file_channels`(compare·fileDiff·fileHistory·blame)·`git::code_browse`(resolveRev·tree·blob·onRemote)·`git::refs_service`(refs·refsDetails — 인자가 저장소 id 뿐)·`git::search`·`git::activity`(search·activity — 질의는 `--grep=`·`--author=` 접두가 붙은 한 인자) 가 서브커맨드·옵션 상수 + 검증된 값으로만 만든다.
@@ -50,7 +53,10 @@ use crate::git::lfs::{lfs_paths, repo_extras, LfsPathsRequest};
 use crate::git::log_service::{parse_query, LogService, NoteSink};
 use crate::git::lru::LruCache;
 use crate::git::refs_service::{refs_details, refs_snapshot};
+use crate::git::remotes::{check_pushed_request, pushed_shas, remotes};
 use crate::git::repo_state::{RepoState, SigError};
+use crate::github::ports::GhRepoRef;
+use crate::github::remote_url::{pick_github_remote, pick_github_remotes, Remote};
 use crate::git::search::{search, SearchRequest};
 use crate::git::signature::{refs_signature_digest, Signature};
 use crate::mirror::{RepoMirror, Resolved, Target};
@@ -75,6 +81,8 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:activity",
     "git:repoExtras",
     "git:lfsPaths",
+    // `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 다른 git 채널과 같은 소유 술어를 쓴다(Phase 6a PR 8). github kind·미러에 없는 id 는 사이드카가 답한다
+    "gh:repo",
 ];
 
 /// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
@@ -118,8 +126,9 @@ pub const API_CHANNELS: &[&str] = &[
     "gh:accessibleRepos",
 ];
 
-/// `gh:` 접두어이지만 사이드카가 계속 처리하는 채널. `gh:repo` 는 저장소의 remote 를 git 으로 읽는 일이라 git 실행기·캐시를 쥔 사이드카의 `RepoService` 가 맡는다
-/// (Rust 서비스는 `repoq` 질의로 그 결과를 받는다). `src/sidecar/apiOwns.ts` 의 `SIDECAR_KEPT_CHANNELS` 와 같아야 한다
+/// `gh:` 접두어이지만 [`API_CHANNELS`] 가 아닌 채널(서비스가 아니라 저장소를 보는 `gh:repo`). Rust 는 이 채널을 [`RUST_CHANNELS`] 의 git 채널로서 **Rust 가 맡는 저장소(local·WSL·SSH)만** 처리하고
+/// (`Router::gh_repo`), github kind·미러에 없는 id·스위치가 꺼졌을 때는 사이드카의 `RepoService` 가 처리한다 — 그래서 사이드카는 이 채널을 계속 받는다.
+/// `src/sidecar/apiOwns.ts` 의 `SIDECAR_KEPT_CHANNELS` 와 같아야 한다
 pub const API_SIDECAR_CHANNELS: &[&str] = &["gh:repo"];
 
 /// Rust 가 fetch 를 맡는 소스 종류(사이드카 env `ANTLER_RUST_FETCH_KINDS` 의 값. `src/sidecar/fetchOwns.ts` 가 읽는다).
@@ -172,6 +181,9 @@ const TREE_CACHE_ENTRIES: usize = 200;
 const TREE_CACHE_BYTES: u64 = 8 * 1024 * 1024;
 const BLOB_CACHE_ENTRIES: usize = 64;
 const BLOB_CACHE_BYTES: u64 = 32 * 1024 * 1024;
+/// GitHub remote 추론 결과(`gh:repo`) 캐시 시간·모든 GitHub remote 목록(Launchpad) 캐시 시간(`GH_REPO_TTL_MS`·`GH_REMOTES_TTL_MS`)
+const GH_REPO_TTL: Duration = Duration::from_secs(60);
+const GH_REMOTES_TTL: Duration = Duration::from_secs(10 * 60);
 /// `git:onRemote` 가 true 였던 (저장소, 커밋)을 기억하는 개수 상한(넘으면 비운다)
 const ON_REMOTE_MAX: usize = 2000;
 /// 합치기만 하는 큐(`Router::joins`)의 슬롯 수 — 실제 git 은 소스의 큐에서 돌므로 이 큐는 막지 않는다
@@ -243,6 +255,11 @@ fn ok_env(data: Value) -> Value {
 }
 
 const API_UNAVAILABLE: &str = "연결 서비스를 사용할 수 없습니다";
+
+/// `gh:repo` 의 응답 값(TS `GhRepoRef`)
+fn ref_json(r: &GhRepoRef) -> Value {
+    json!({ "owner": r.owner, "repo": r.repo, "remote": r.remote })
+}
 
 fn err_env(error: &str, code: &str) -> Value {
     json!({ "ok": false, "error": error, "code": code })
@@ -394,6 +411,9 @@ pub struct Router {
     on_remote_yes: Mutex<HashSet<String>>,
     /// 활동 결과 캐시(범위 키 → 시그니처·결과, 8개)
     activity_cache: Arc<Mutex<ActivityCache>>,
+    /// `gh:repo` 추론 결과(없음도 담는다, 60초)·Launchpad 용 모든 GitHub remote(10분). 저장소 id 가 키다 — 목록은 미러가 바뀔 때 사라진 저장소 것을 치운다
+    gh_repo_cache: Mutex<HashMap<String, (Instant, Option<GhRepoRef>)>>,
+    gh_remotes_cache: Mutex<HashMap<String, (Instant, Vec<GhRepoRef>)>>,
     /// 슬롯과 무관하게 같은 키의 진행 중 요청을 합치는 큐(TS `RepoService.shared`). 슬롯을 쥔 채 시그니처의 슬롯을 기다리지 않도록 소스의 큐와 분리한다
     joins: ProcessQueue<Arc<Value>>,
     logs: LogService,
@@ -445,6 +465,8 @@ impl Router {
             blob_cache: Arc::new(Mutex::new(LruCache::new(BLOB_CACHE_ENTRIES, BLOB_CACHE_BYTES))),
             on_remote_yes: Mutex::default(),
             activity_cache: Arc::default(),
+            gh_repo_cache: Mutex::default(),
+            gh_remotes_cache: Mutex::default(),
             joins: ProcessQueue::new(JOIN_SLOTS),
             logs,
             repo_state,
@@ -615,6 +637,11 @@ impl Router {
     pub fn on_mirror_changed(&self) {
         self.logs.sync_mirror();
         self.sync_ssh_hosts();
+        // 사라졌거나 Rust 가 맡지 않게 된 저장소의 remote 추론 결과를 치운다(저장소 id 로 쌓이는 표가 앱 수명 동안 자라지 않게)
+        let mirror = &self.mirror;
+        let owned = |id: &String| matches!(mirror.resolve(id), Resolved::Rust(_));
+        self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| owned(id));
+        self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| owned(id));
         // 사라졌거나 Rust 가 맡지 않게 된 저장소의 fetch 상태를 비운다
         if let Some(service) = self.fetch_port() {
             service.sync_mirror();
@@ -637,6 +664,8 @@ impl Router {
         // 첫 페이지 문을 기다리는 조회를 풀고 시그니처 기억을 비운다
         self.repo_state.dispose();
         self.activity_cache.lock().unwrap_or_else(PoisonError::into_inner).clear();
+        self.invalidate_gh_remotes(None);
+        self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).clear();
         // SSH 연결을 닫는다(런타임 밖 스레드면 정중한 해제 메시지는 보내지 못하고 연결만 버린다 — 프로세스가 끝나며 소켓이 닫힌다)
         if let Some(pool) = self.ssh_pool() {
             pool.dispose_all();
@@ -716,6 +745,14 @@ impl Router {
             }
             return Routed::Sidecar;
         }
+        if channel == "repos:update" || channel == "repos:remove" {
+            // TS 핸들러가 저장소를 바꾸기 전에 부르는 `invalidateGhRemotes(repoId)` — 모든 GitHub remote 목록 캐시만 비운다(`gh:repo` 추론 결과는 TS 도 60초 그대로다).
+            // 응답은 사이드카가 한다. 사이드카 쪽 캐시는 그 핸들러가 직접 비운다
+            if let Some(Value::String(id)) = raw.first() {
+                self.invalidate_gh_remotes(Some(id));
+            }
+            return Routed::Sidecar;
+        }
         if !RUST_CHANNELS.contains(&channel) {
             return Routed::Sidecar;
         }
@@ -733,6 +770,7 @@ impl Router {
             "git:refs" | "git:refsDetails" => self.git_refs_channel(channel, &args).await,
             "git:search" | "git:activity" => self.git_history_channel(channel, &args).await,
             "git:repoExtras" | "git:lfsPaths" => self.git_extras_channel(channel, &args).await,
+            "gh:repo" => self.gh_repo_channel(&args).await,
             _ => Routed::Sidecar,
         }
     }
@@ -1171,6 +1209,137 @@ impl Router {
                 let t = token.clone();
                 rt.queue.run(None, Some(token.clone()), move || async move { Ok(Arc::new(json!(lfs_paths(&exec, &path, &req, &RunOpts::with_cancel(t)).await?))) }).await
             }
+        }
+    }
+
+    /// `gh:repo(repoId)` — 저장소의 GitHub remote(없으면 `null`). 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), github kind·미러에 없는 id 는 사이드카가 답한다
+    /// (원격 전용 저장소는 레코드가 어느 GitHub 저장소인지 안다 — git 을 부르지 않는다)
+    async fn gh_repo_channel(&self, args: &[Option<&Value>]) -> Routed {
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let target = match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => t,
+            Resolved::Sidecar => {
+                self.note("gh:repo", "sidecar");
+                return Routed::Sidecar;
+            }
+            Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
+        };
+        self.note("gh:repo", "rust");
+        self.rust_handled.fetch_add(1, Ordering::Relaxed);
+        Routed::Done(match self.gh_repo_of(repo_id, &target).await {
+            Ok(found) => ok_env(found.as_ref().map_or(Value::Null, ref_json)),
+            Err(e) => err_env(&e.to_string(), e.envelope_code()),
+        })
+    }
+
+    /// Rust 가 git 을 돌릴 저장소인가. `Ok(None)` 이면 사이드카의 몫(스위치 꺼짐·미러에 없음·github·풀 없는 ssh)이고, `Err` 는 미러가 거부한 저장소(경로·호스트·배포판 검사)다 —
+    /// 그 저장소에는 사이드카도 git 을 돌리지 않는다. 채널 라우팅과 GitHub 서비스의 저장소 질의가 **같은 술어**(`RepoMirror::resolve`)를 쓴다
+    fn rust_target(&self, repo_id: &str) -> Result<Option<Target>, ExecError> {
+        if !self.enabled {
+            return Ok(None);
+        }
+        match self.mirror.resolve(repo_id) {
+            Resolved::Rust(t) => Ok(Some(t)),
+            Resolved::Sidecar => Ok(None),
+            Resolved::Invalid(message) => Err(ExecError::Other { message }),
+        }
+    }
+
+    /// GitHub 서비스의 `gh_repo` 질의(`RepoQuery`): Rust 가 맡는 저장소면 `Some`(결과 또는 오류), 아니면 `None`(호출자가 사이드카에 묻는다)
+    pub async fn gh_repo(&self, repo_id: &str) -> Option<Result<Option<GhRepoRef>, ExecError>> {
+        match self.rust_target(repo_id) {
+            Ok(Some(target)) => Some(self.gh_repo_of(repo_id, &target).await),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
+
+    /// remote URL 에서 추론한 GitHub 저장소. TS `RepoService.ghRepo` 와 같은 순서: 60초 캐시(없음도) → 첫 로그 페이지 문 → 큐(키 `remotes:<id>`)
+    async fn gh_repo_of(&self, repo_id: &str, target: &Target) -> Result<Option<GhRepoRef>, ExecError> {
+        if let Some((at, value)) = self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).get(repo_id) {
+            if at.elapsed() < GH_REPO_TTL {
+                return Ok(value.clone());
+            }
+        }
+        self.repo_state.after_first_page(repo_id).await;
+        let list = self.remote_list(repo_id, target, None).await?;
+        let value = pick_github_remote(&list);
+        self.gh_repo_cache.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), (Instant::now(), value.clone()));
+        Ok(value)
+    }
+
+    /// GitHub 서비스(Launchpad)의 `gh_remotes` 질의: 저장소의 모든 GitHub remote. 10분 캐시이고 `invalidate_gh_remotes` 로 비운다.
+    /// 취소하면 기다리기만 그만둔다(같은 키로 합쳐진 `gh_repo` 의 git 은 그 요청이 남아 있는 동안 계속 돈다)
+    pub async fn gh_remotes(&self, repo_id: &str, cancel: &CancellationToken) -> Option<Result<Vec<GhRepoRef>, ExecError>> {
+        let target = match self.rust_target(repo_id) {
+            Ok(Some(t)) => t,
+            Ok(None) => return None,
+            Err(e) => return Some(Err(e)),
+        };
+        if let Some((at, value)) = self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner).get(repo_id) {
+            if at.elapsed() < GH_REMOTES_TTL {
+                return Some(Ok(value.clone()));
+            }
+        }
+        Some(
+            async {
+                let list = self.remote_list(repo_id, &target, Some(cancel)).await?;
+                let value = pick_github_remotes(&list);
+                self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), (Instant::now(), value.clone()));
+                Ok(value)
+            }
+            .await,
+        )
+    }
+
+    /// remote 이름·URL 목록. `gh_repo`·`gh_remotes` 가 키 `remotes:<id>` 로 합친다(같은 git 한 번). 취소 신호가 있으면 이 호출자의 기다림만 끊는다
+    async fn remote_list(&self, repo_id: &str, target: &Target, cancel: Option<&CancellationToken>) -> Result<Vec<Remote>, ExecError> {
+        let rt = self.runtime(target)?;
+        let (exec, path) = (rt.exec.clone(), target.path().to_string());
+        let key = format!("remotes:{repo_id}");
+        let run = rt.queue.run(Some(&key), None, move || async move { Ok(Arc::new(to_value(&remotes(&exec, &path, &RunOpts::default()).await?)?)) });
+        let data = match cancel {
+            Some(token) => tokio::select! {
+                biased;
+                () = token.cancelled() => Err(ExecError::Aborted),
+                r = run => r,
+            },
+            None => run.await,
+        }?;
+        serde_json::from_value((*data).clone()).map_err(|e| ExecError::Other { message: e.to_string() })
+    }
+
+    /// 아바타 조회용 `pushed_shas_by_author` 질의: 그 작성자의 push 된 커밋 해시. Rust 가 맡는 저장소면 `Some`, 아니면 `None`.
+    /// 요청 검증(이메일·개수)은 사이드카의 `repoq` 검사와 같고, 큐 슬롯을 기다리는 동안과 git 실행 중 모두 `cancel` 이 닿는다
+    pub async fn pushed_shas_by_author(&self, repo_id: &str, email: &str, limit: usize, cancel: &CancellationToken) -> Option<Result<Vec<String>, ExecError>> {
+        let target = match self.rust_target(repo_id) {
+            Ok(Some(t)) => t,
+            Ok(None) => return None,
+            Err(e) => return Some(Err(e)),
+        };
+        Some(
+            async {
+                check_pushed_request(email, limit).map_err(|m| ExecError::Other { message: m.to_string() })?;
+                let rt = self.runtime(&target)?;
+                let (exec, path, email, t) = (rt.exec.clone(), target.path().to_string(), email.to_string(), cancel.clone());
+                let data = rt
+                    .queue
+                    .run(None, Some(cancel.clone()), move || async move { Ok(Arc::new(json!(pushed_shas(&exec, &path, &email, limit, &RunOpts::with_cancel(t)).await?))) })
+                    .await?;
+                serde_json::from_value((*data).clone()).map_err(|e| ExecError::Other { message: e.to_string() })
+            }
+            .await,
+        )
+    }
+
+    /// Launchpad 가 쓰는 모든 GitHub remote 캐시를 비운다(`repo_id` 가 없으면 전부). `gh:repo` 의 60초 추론 결과는 건드리지 않는다(TS `invalidateGhRemotes` 와 같다)
+    pub fn invalidate_gh_remotes(&self, repo_id: Option<&str>) {
+        let mut cache = self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner);
+        match repo_id {
+            Some(id) => {
+                cache.remove(id);
+            }
+            None => cache.clear(),
         }
     }
 

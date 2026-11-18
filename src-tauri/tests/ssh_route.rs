@@ -137,6 +137,7 @@ async fn 잘못된_ssh_호스트는_연결하지_않고_거부한다() {
             ("git:activity", json!([id])),
             ("git:repoExtras", json!([id])),
             ("git:lfsPaths", json!([id, { "paths": ["a.txt"] }])),
+            ("gh:repo", json!([id])),
         ] {
             let env = envelope(router.route(ch, &args).await);
             assert_eq!((env["ok"].as_bool(), env["code"].as_str(), env["error"].as_str()), (Some(false), Some("ERROR"), Some("잘못된 SSH 호스트입니다")), "{id} {ch}");
@@ -172,7 +173,7 @@ async fn 스위치가_꺼지면_ssh_는_사이드카이고_연결하지_않는�
     git_off.set_ssh_pool(rig.pool.clone());
     assert!(!git_off.ssh_active());
     for r in [&off, &git_off] {
-        for ch in ["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame", "git:resolveRev", "git:tree", "git:blob", "git:onRemote", "git:refs", "git:refsDetails", "git:search", "git:activity", "git:repoExtras", "git:lfsPaths"] {
+        for ch in ["git:commit", "git:log", "git:compare", "git:fileDiff", "git:fileHistory", "git:blame", "git:resolveRev", "git:tree", "git:blob", "git:onRemote", "git:refs", "git:refsDetails", "git:search", "git:activity", "git:repoExtras", "git:lfsPaths", "gh:repo"] {
             assert!(matches!(r.route(ch, &json!(["s", { "skip": 0, "count": 1 }])).await, Routed::Sidecar), "{ch}");
         }
     }

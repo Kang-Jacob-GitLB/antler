@@ -1,5 +1,7 @@
 //! Rust → Node 질의(`repoq`)와 토큰 사본(`ghToken`)의 메시지·검증(Phase 4 PR 9). 프로토콜은 `src/sidecar/protocol.ts`(`REPOQ_OPS`·`ToSidecar`)와 같아야 한다.
 //!
+//! (Phase 6a PR 8 부터 앱은 이 구현을 직접 쓰지 않고 `routed_repos::RoutedRepos` 로 감싼다 — Rust 가 git 을 맡는 저장소의 질의는 Rust 가 답하므로 사이드카에는 github·미러에 없는 저장소·설정 읽기만 온다.)
+//!
 //! GitHub 서비스([`GitHubService`](crate::github::service::GitHubService))가 사이드카에 묻는 것들(저장소 → owner/repo, remote 목록, push 된 sha, `githubClientId`, 등록된 저장소 ID)을
 //! [`RepoQuery`] 의 실제 구현([`SidecarRepos`])으로 옮겼다. 전송은 [`QueryTransport`] 로 주입한다 — 앱은 사이드카의 stdio(`sidecar.rs`), 시험은 가짜.
 //!

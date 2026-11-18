@@ -1,0 +1,19 @@
+[
+  "",
+  "remote.origin.url\nhttps://github.com/octo/hello.git\u0000",
+  "remote.origin.url\nhttps://github.com/octo/hello.git",
+  "remote.origin.url\nhttps://github.com/octo/hello.git\u0000remote.my.fork.url\ngit@github.com:me/hello.git\u0000remote.a.url.url\nhttps://example.com/x/y.git\u0000",
+  "remote.origin.url\nhttps://a/x\u0000remote.origin.url\nhttps://b/y\u0000",
+  "remote..url\nhttps://a/x\u0000remote.x.url\nhttps://b/y\u0000",
+  "remote.origin.url\u0000remote.x.url\nhttps://b/y\u0000",
+  "remote.sp ace.url\nhttps://host/with space/repo\u0000",
+  "remote.origin.url\n\u0000",
+  "remote.origin.url\nline1\nline2\u0000",
+  "remote.한글.url\nhttps://github.com/octo/hello\u0000",
+  "remote.😀.url\nhttps://github.com/octo/hello\u0000",
+  "remote.a.url\n�\u0000",
+  "x.y\nz\u0000",
+  "\u0000\u0000",
+  "remote.url\nhttps://short/x\u0000",
+  "remote.origin.url\nhttps://github.com/octo/hello\r\n\u0000"
+]

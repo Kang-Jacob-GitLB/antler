@@ -24,6 +24,7 @@ import { knownHostsLine, makeHome, newKeyPair, startServer, type TestServer } fr
 //  - tests/golden/channels/{refs,refsDetails}.json: 사이드바 ref 채널 시나리오(tests/fixtures/repos/refs.scenarios.json — 다단계: 저장소 조작 뒤 조회. knownDiff 는 정렬 근사 때문에 Rust 가 다른 순서를 내는 알려진 차이)
 //  - tests/golden/channels/{search,activity}.json: 검색·활동 채널 시나리오(tests/fixtures/repos/search.scenarios.json — 다단계: 저장소 조작 뒤 조회. 악성 질의·범위·해시 갈래·스태시 같은 닿지 않는 커밋을 포함한다)
 //  - tests/golden/channels/{repoExtras,lfsPaths}.json: LFS·gitflow 채널 시나리오(tests/fixtures/repos/extras.scenarios.json — 다단계: 저장소·작업 트리·info/attributes·설정 조작 뒤 조회. 요청 검증·묶음·1000개 상한을 포함한다)
+//  - tests/golden/channels/{ghRepo,ghRemotes,pushedShas}.json: remote 추론(gh:repo)·모든 GitHub remote(Launchpad)·push 된 커밋(아바타) 시나리오(tests/fixtures/repos/remotes.scenarios.json — 다단계: remote·커밋 조작 뒤 조회. 캐시 동작을 포함한다)
 //  - tests/golden/channels/commit.json: git:commit 시나리오(tests/fixtures/repos/commit.scenarios.json)의 결과 envelope.
 //    오류는 code 만 남긴다(문구 패리티는 하지 않는다). 해시는 .fi 가 날짜·내용을 고정해 결정적이다.
 //  - tests/golden/channels/fetch.json: git:fetch 시나리오(tests/fixtures/repos/fetch.scenarios.json)의 단계별 상태. TS FetchService 와 Rust 라우터가 같은 순서로 돌려 같은 상태·확인 창 횟수·승인 저장을 낸다.
@@ -618,6 +619,64 @@ describe('LFS·gitflow 채널 골든(channels/{repoExtras,lfsPaths}.json)', () =
       await svc.dispose()
     }
     for (const channel of ['repoExtras', 'lfsPaths'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
+  }, 180_000)
+})
+
+// ── remote 추론·push 된 커밋: gh:repo · ghRemotes · pushedShas ────────────────
+
+type RemoteStep = { git: string[] } | { ghRepo: true } | { ghRemotes: true } | { invalidate: true } | { pushed: { email: string; limit: number } }
+interface RemoteScenario {
+  name: string
+  repo: string
+  steps: RemoteStep[]
+}
+
+describe('remote 조회 채널 골든(channels/{ghRepo,ghRemotes,pushedShas}.json)', () => {
+  const scenarios = (JSON.parse(readFileSync(join(FIXTURES, 'remotes.scenarios.json'), 'utf8')) as { scenarios: RemoteScenario[] }).scenarios
+  let root: string
+  const git = (cwd: string, args: string[], input?: Buffer): string =>
+    execFileSync('git', args, { cwd, input, env: { ...process.env, ...REFS_STEP_ENV, GIT_CONFIG_NOSYSTEM: '1' } }).toString('utf8').trim()
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), 'antler-chanremotes-'))
+  })
+  afterAll(() => rmSync(root, { recursive: true, force: true }))
+
+  it('시나리오 결과가 골든과 같다', async () => {
+    const out: Record<'ghRepo' | 'ghRemotes' | 'pushedShas', unknown[]> = { ghRepo: [], ghRemotes: [], pushedShas: [] }
+    for (const [si, sc] of scenarios.entries()) {
+      const dir = join(root, `s${si}`)
+      mkdirSync(dir)
+      git(dir, ['init', '-q', '-b', 'main'])
+      git(dir, ['fast-import', '--quiet'], readFileSync(join(FIXTURES, `${sc.repo}.fi`)))
+      const config = new ConfigStore(join(root, `s${si}.config.json`))
+      const id = config.addRepo({ sourceId: 'local', path: dir, name: sc.repo }).id
+      const svc = new RepoService(config)
+      const rev = (expr: string): string => git(dir, ['rev-parse', expr])
+      for (const [i, step] of sc.steps.entries()) {
+        if ('git' in step) {
+          git(dir, expand(step.git, rev) as string[])
+          continue
+        }
+        if ('invalidate' in step) {
+          svc.invalidateGhRemotes(id)
+          continue
+        }
+        let result: Record<string, unknown>
+        try {
+          if ('ghRepo' in step) result = { ok: true, data: JSON.parse(JSON.stringify(await svc.ghRepo(id))) }
+          else if ('ghRemotes' in step) result = { ok: true, data: JSON.parse(JSON.stringify(await svc.ghRemotes(id))) }
+          else result = { ok: true, data: await svc.pushedShasByAuthor(id, step.pushed.email, step.pushed.limit) }
+        } catch (err) {
+          result = { ok: false, code: codeOf(err) }
+        }
+        if ('ghRepo' in step) out.ghRepo.push({ name: sc.name, step: i, result })
+        else if ('ghRemotes' in step) out.ghRemotes.push({ name: sc.name, step: i, result })
+        else out.pushedShas.push({ name: sc.name, step: i, args: step.pushed, result })
+      }
+      await svc.dispose()
+    }
+    for (const channel of ['ghRepo', 'ghRemotes', 'pushedShas'] as const) check(join(GOLDEN_DIR, 'channels', `${channel}.json`), stable({ scenarios: out[channel] }))
   }, 180_000)
 })
 
