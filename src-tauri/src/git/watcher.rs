@@ -135,8 +135,11 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// 활성 저장소 하나를 감시한다. 복제는 같은 감시자를 가리킨다
-#[derive(Clone)]
+/// 활성 저장소 하나를 감시한다. **복제되지 않는 소유자**다 — 공유가 필요하면 `Arc` 로 감싼다. 버리면(`dispose` 를 부르지 않아도) 감시가 멈춘다.
+///
+/// 정지 계약: [`watch`](Self::watch)(`None`·다른 저장소)·[`unwatch_if`](Self::unwatch_if)·`Drop` 이 돌아올 때 이전 저장소의 디렉터리 감시 핸들은 **이미 닫혀 있다**
+/// (TS `stop()` 의 `w.close()` — 호출처가 바로 캐시 폴더를 지워도 Windows 에서 핸들 때문에 실패하지 않는다). 다만 멀티스레드 런타임에서는
+/// 정지 직전에 끝난 확인의 `on_change` 가 드물게 정지 뒤에 한 번 늦게 올 수 있다 — 받는 쪽(renderer)이 activeRepoId 로 거른다
 pub struct RepoWatcher {
     inner: Arc<Inner>,
 }
@@ -160,12 +163,37 @@ struct Run {
     ctl: Arc<Ctl>,
 }
 
+impl Run {
+    /// 태스크에 취소를 보내고 디렉터리 감시 핸들을 **이 스레드에서 바로** 닫는다.
+    /// 취소를 먼저 하므로 태스크가 핸들을 맡기는 순간(`Ctl::adopt`)에는 취소를 보거나, 아니면 여기서 닫힌다 — 새는 핸들이 없다
+    fn stop(self) {
+        self.cancel.cancel();
+        let handles = std::mem::take(&mut *lock(&self.ctl.handles));
+        drop(handles);
+    }
+}
+
 /// 감시 태스크와 바깥(포커스)이 나누는 것
 struct Ctl {
+    /// 열린 디렉터리 감시 핸들. 태스크가 아니라 여기 둬서 정지가 동기로 닫을 수 있다
+    handles: Mutex<Vec<WatchHandle>>,
     /// 기준 시그니처를 계산하는 중 — 이때 포커스로 확인을 또 돌리면 같은 for-each-ref 를 한 번 더 실행한다
     baselining: AtomicBool,
     /// 포커스를 얻어 바로 확인하라는 요청
     check_now: Notify,
+}
+
+impl Ctl {
+    /// 새 핸들을 맡는다. 이미 취소됐으면(정지가 핸들 비우기를 끝냈을 수 있다) 바로 닫는다
+    fn adopt(&self, handle: WatchHandle, cancel: &CancellationToken) {
+        let mut handles = lock(&self.handles);
+        if cancel.is_cancelled() {
+            drop(handles);
+            drop(handle);
+        } else {
+            handles.push(handle);
+        }
+    }
 }
 
 /// 이벤트 콜백이 감시 태스크를 깨우는 길. 이벤트를 쌓지 않고 합친다
@@ -222,23 +250,46 @@ impl RepoWatcher {
         if core.current.as_deref() == repo_id {
             return;
         }
-        if let Some(run) = core.run.take() {
-            run.cancel.cancel();
-        }
+        let old = core.run.take();
         core.current = repo_id.map(str::to_string);
-        let Some(id) = repo_id else { return };
-        let cancel = CancellationToken::new();
-        let ctl = Arc::new(Ctl { baselining: AtomicBool::new(true), check_now: Notify::new() });
-        core.run = Some(Run { cancel: cancel.clone(), ctl: ctl.clone() });
-        drop(core);
-        let (inner, id) = (self.inner.clone(), id.to_string());
-        tokio::spawn(async move {
-            // 취소하면 진행 중인 확인·감시 핸들이 함께 버려진다
-            tokio::select! {
-                _ = cancel.cancelled() => {}
-                _ = inner.run(id, ctl, cancel.clone()) => {}
-            }
+        let started = repo_id.map(|id| {
+            let cancel = CancellationToken::new();
+            let ctl = Arc::new(Ctl { handles: Mutex::default(), baselining: AtomicBool::new(true), check_now: Notify::new() });
+            core.run = Some(Run { cancel: cancel.clone(), ctl: ctl.clone() });
+            (id.to_string(), cancel, ctl)
         });
+        drop(core);
+        // 핸들 닫기는 뮤텍스 밖에서, 하지만 돌아가기 전에 끝낸다
+        if let Some(run) = old {
+            run.stop();
+        }
+        if let Some((id, cancel, ctl)) = started {
+            let inner = self.inner.clone();
+            tokio::spawn(async move {
+                // 취소가 먼저다(`biased`) — 취소하면 진행 중인 확인도 버려진다
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => {}
+                    _ = inner.run(id, ctl, cancel.clone()) => {}
+                }
+            });
+        }
+    }
+
+    /// 지금 감시 중인 저장소가 `repo_id` 일 때만 멈춘다(한 잠금 안에서 비교하고 멈춘다 — 저장소 제거가 그 사이 다른 저장소로 바뀐 감시를 끊지 않게).
+    /// 멈췄으면 `true`. 돌아올 때 디렉터리 감시 핸들은 닫혀 있다
+    pub fn unwatch_if(&self, repo_id: &str) -> bool {
+        let mut core = lock(&self.inner.core);
+        if core.current.as_deref() != Some(repo_id) {
+            return false;
+        }
+        core.current = None;
+        let run = core.run.take();
+        drop(core);
+        if let Some(run) = run {
+            run.stop();
+        }
+        true
     }
 
     /// 창 포커스 변화. 다시 포커스를 얻으면 바로 한 번 확인한다(다른 도구에서 커밋하고 돌아온 경우). 감시 중이 아니거나 기준을 잡는 중이면 확인하지 않는다.
@@ -256,6 +307,13 @@ impl RepoWatcher {
     }
 
     pub fn dispose(&self) {
+        self.watch(None);
+    }
+}
+
+impl Drop for RepoWatcher {
+    /// 태스크가 쥔 `Inner` 의 수명에 기대지 않고 소유자가 사라지면 멈춘다
+    fn drop(&mut self) {
         self.watch(None);
     }
 }
@@ -294,9 +352,8 @@ impl Inner {
 
     /// `.git` 디렉터리들에 감시를 건다. 악성 저장소의 `.git` 파일이 gitdir/commondir 로 홈 전체나 네트워크 경로를 가리키면
     /// 재귀 감시가 이벤트 폭주(DoS)가 되므로, 실제 git 디렉터리(`HEAD` 가 있는 곳)이고 네트워크 경로가 아닐 때만 건다
-    async fn watch_dirs(&self, repo_id: &str, events: &Arc<Events>) -> Vec<WatchHandle> {
-        let Some(dirs) = self.host.local_git_dirs(repo_id).await else { return Vec::new() };
-        let mut handles = Vec::new();
+    async fn watch_dirs(&self, repo_id: &str, events: &Arc<Events>, ctl: &Ctl, cancel: &CancellationToken) {
+        let Some(dirs) = self.host.local_git_dirs(repo_id).await else { return };
         for dir in dirs {
             if is_unc(&dir) || !self.dirs.has_head(&dir) {
                 continue;
@@ -310,10 +367,9 @@ impl Inner {
             });
             // 재귀 감시를 지원하지 않는 파일 시스템 — 안전망 폴링에 맡긴다
             if let Ok(h) = self.dirs.watch(&dir, sink) {
-                handles.push(h);
+                ctl.adopt(h, cancel);
             }
         }
-        handles
     }
 
     /// 한 저장소의 감시 태스크 본체. 취소되면(저장소가 바뀌거나 멈추면) 어디서든 버려진다
@@ -325,8 +381,10 @@ impl Inner {
 
         let kind = self.host.kind(&repo_id);
         let events = Arc::new(Events::default());
-        // 버려지면 감시가 멈춘다
-        let _handles = if kind.is_some_and(WatchKind::watches_dirs) { self.watch_dirs(&repo_id, &events).await } else { Vec::new() };
+        // 핸들은 `ctl` 이 쥔다 — 정지가 동기로 닫는다
+        if kind.is_some_and(WatchKind::watches_dirs) {
+            self.watch_dirs(&repo_id, &events, &ctl, &cancel).await;
+        }
 
         let mut timing = Timing { debounce_at: None, pending_since: Instant::now(), last_check: None };
         let mut poll_at = self.next_poll(kind);
@@ -362,7 +420,7 @@ impl Inner {
                 } => {
                     // 실패(SSH 끊김·시간 초과·잠금 경합)는 다음 주기에 다시 본다
                     if let Some(sig) = sig {
-                        if last_sig.is_some_and(|l| l != sig) {
+                        if !cancel.is_cancelled() && last_sig.is_some_and(|l| l != sig) {
                             self.host.on_change(&repo_id);
                         }
                         last_sig = Some(sig);
@@ -755,13 +813,35 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn 확인이_진행_중이면_포커스·이벤트가_또_확인하지_않는다() {
         let fx = Fx::started(WatchKind::Local).await;
-        *lock(&fx.host.check_delay) = ms(1_000);
+        // 확인(0~3000)이 디바운스 마감(400)과 최소 간격(2000)을 넘겨 계속된다
+        *lock(&fx.host.check_delay) = ms(3_000);
         fx.w.set_focused(true);
         settle().await;
+        assert_eq!(fx.host.checks(), vec![ms(0)]);
         fx.w.set_focused(true);
         fx.dirs.emit("HEAD");
-        fx.at(900).await;
-        assert_eq!(fx.host.checks().len(), 1, "진행 중에는 건너뛴다(디바운스 확인 400 도 마찬가지)");
+        fx.at(401).await;
+        assert_eq!(fx.host.checks().len(), 1, "디바운스 마감(400)에 진행 중이라 건너뛴다");
+        fx.at(2_900).await;
+        assert_eq!(fx.host.checks().len(), 1, "포커스·이벤트 모두 진행 중에는 새 확인을 부르지 않는다");
+        fx.at(10_000).await;
+        assert_eq!(fx.host.checks().len(), 1, "건너뛴 디바운스는 확인이 끝난 뒤 다시 부르지 않는다");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn 확인_중에_폴링_시각이_오면_건너뛰고_다음_폴링을_다시_건다() {
+        let fx = Fx::started(WatchKind::Wsl).await;
+        // 포커스 확인(0~5000)이 첫 폴링(4000)을 지나서까지 계속된다
+        *lock(&fx.host.check_delay) = ms(5_000);
+        fx.w.set_focused(true);
+        settle().await;
+        fx.at(4_001).await;
+        assert_eq!(fx.host.checks(), vec![ms(0)], "진행 중이라 폴링은 확인을 시작하지 않는다");
+        fx.at(7_999).await;
+        assert_eq!(fx.host.checks().len(), 1);
+        // 재무장한 폴링(4000 + 4000)이 다음 확인을 시작한다 — 재무장이 없으면 폴링이 영영 멎는다
+        fx.at(8_001).await;
+        assert_eq!(fx.host.checks(), vec![ms(0), ms(8_000)]);
     }
 
     #[tokio::test(start_paused = true)]
@@ -881,6 +961,53 @@ mod tests {
         fx.at(200_000).await;
         assert!(fx.host.checks().is_empty());
         assert!(fx.host.changes().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn 정지와_교체는_돌아오기_전에_핸들을_닫는다() {
+        let fx = Fx::started(WatchKind::Local).await;
+        assert_eq!(fx.dirs.open(), 1);
+        fx.w.watch(None);
+        assert_eq!(fx.dirs.open(), 0, "settle 없이 곧바로 닫혀 있어야 한다");
+
+        fx.w.watch(Some("r"));
+        settle().await;
+        assert_eq!(fx.dirs.open(), 1);
+        fx.w.watch(Some("other"));
+        assert_eq!(fx.dirs.open(), 0, "교체도 이전 핸들을 먼저 닫는다(새 감시는 태스크가 연다)");
+        settle().await;
+        assert_eq!(fx.dirs.open(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unwatch_if_는_감시_중인_저장소일_때만_멈춘다() {
+        let fx = Fx::started(WatchKind::Local).await;
+        assert!(!fx.w.unwatch_if("other"));
+        assert_eq!((fx.w.current().as_deref(), fx.dirs.open()), (Some("r"), 1));
+        assert!(fx.w.unwatch_if("r"));
+        assert_eq!((fx.w.current(), fx.dirs.open()), (None, 0), "settle 없이 곧바로 닫혀 있어야 한다");
+        assert!(!fx.w.unwatch_if("r"), "이미 멈췄다");
+        fx.host.set_sig(2);
+        fx.w.set_focused(true);
+        fx.at(200_000).await;
+        assert!(fx.host.checks().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dispose_없이_소유자를_버려도_태스크와_핸들이_정리된다() {
+        let Fx { host, dirs, w, t0 } = Fx::started(WatchKind::Local).await;
+        assert_eq!(dirs.open(), 1);
+        // 태스크가 쥔 Inner 가 host 를 붙잡고 있다
+        assert!(Arc::strong_count(&host) > 1);
+        drop(w);
+        assert_eq!(dirs.open(), 0, "버리는 즉시 핸들이 닫힌다");
+        settle().await;
+        assert_eq!(Arc::strong_count(&host), 1, "태스크가 끝나 Inner 가 사라졌다");
+        host.set_sig(2);
+        dirs.emit("HEAD");
+        tokio::time::sleep_until(t0 + ms(200_000)).await;
+        assert!(host.checks().is_empty(), "폴링 git 이 더 불리지 않는다");
+        assert!(host.changes().is_empty());
     }
 
     #[tokio::test(start_paused = true)]
