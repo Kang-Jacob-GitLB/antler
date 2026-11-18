@@ -89,9 +89,11 @@ jobs:
       # TS 테스트 대응표는 tests/golden/channels/test-map.json(vitest tests/golden6a.test.ts 가 누락을, golden.rs 가 가리키는 fn 을 강제)
       # Phase 6b PR 1 — config: 설정 저장소 코어(ConfigStore)·GitHub 링크 순수 함수가 tests/golden/config 골든(**실제 TS ConfigStore** 를 임시 파일로 돌린 결과 — 최종 파일 바이트·던진 문구·알림 횟수)과 같은지 +
       # 알림·쓰기 실패·동시 쓰기·uuid. 임시 폴더에만 쓰고 사용자 설정·네트워크·git 을 쓰지 않는다. TS 테스트 대응표는 tests/golden/repos/test-map.json(vitest tests/goldenConfig.test.ts 가 누락을 강제)
+      # external: 외부 열기(Phase 6b PR 3)의 경로 검증·실행 인자 계획·실행기·링크 허용이 tests/golden/external 골든과 같은지 + 가짜 의존성 시나리오 + 소스 검사(프로세스는 external/launch.rs 한 곳).
+      # 에디터·터미널·탐색기·wsl.exe 를 띄우지 않는다. TS 테스트 대응표는 tests/golden/external/test-map.json(vitest 가 누락을 강제)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden --test ssh --test ssh_route --test config
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy
