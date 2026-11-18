@@ -10,7 +10,7 @@ pub mod config_host;
 // 저장소 추가 창의 환경 채널(Phase 6b PR 8)의 처리. 통합 테스트(tests/env_route.rs)가 별도 크레이트라 pub 이다
 pub mod env_host;
 mod dialogs;
-// 외부 도구로 열기(Phase 6b PR 3) — 순수 계획·실행기. 아직 앱에 연결하지 않는다(PR 9). 통합 테스트(tests/external.rs)가 별도 크레이트라 pub 이다
+// 외부 도구로 열기(Phase 6b PR 3 순수 계획·실행기 → PR 9 에서 `config_host` 가 연결). 프로세스를 띄우는 `launch::SystemDeps` 는 이 파일이 주입하는 한 곳뿐이다. 통합 테스트(tests/external.rs)가 별도 크레이트라 pub 이다
 pub mod external;
 mod fetch_host;
 pub mod fsguard;
@@ -196,7 +196,7 @@ pub fn run() {
                 None => app.path().app_data_dir()?,
             };
             std::fs::create_dir_all(&user_data)?;
-            // 라우터와 사이드카가 같은 미러를 본다(사이드카가 채우고 라우터가 읽는다)
+            // 라우터와 사이드카가 같은 미러를 본다(Rust 가 설정이 바뀔 때 채우고(`ConfigSync`) 라우터가 읽는다. `ANTLER_RUST_GIT=0` 이면 사이드카가 채운다)
             let mirror = mirror::RepoMirror::default();
             let router = router::Router::from_env(mirror.clone());
             // Rust 가 처리한 git:log 가 사이드카에 알리는 일(첫 페이지·이력 변경). 사이드카는 이 뒤에 managed 된다
@@ -214,8 +214,8 @@ pub fn run() {
                 clipboard: clipboard_port(app.handle().clone()),
                 open_link: std::sync::Arc::new(open_https),
             });
-            // SSH 풀(Phase 5 PR 3). 스위치가 꺼져 있으면(ANTLER_RUST_SSH=0·ANTLER_RUST_GIT=0) 만들지 않는다 — ssh 저장소는 사이드카가 전부 맡는다.
-            // 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(사이드카가 처리한다).
+            // SSH 풀(Phase 5 PR 3). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 만들지 않는다 — ssh 저장소는 사이드카가 전부 맡는다. 하위 스위치 ANTLER_RUST_SSH 는 은퇴했다(Phase 6b PR 9, 결정 D5).
+            // 풀을 주입해야 미러가 ssh 를 Rust 로 풀기 시작한다(Router::ssh_active). 홈을 알 수 없으면 주입하지 않는다(설정을 소유한 실행에서는 Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다).
             // **fetch 서비스·사이드카 env 보다 먼저다** — 서비스의 실행기 공장이 이 풀을 쓰고, 사이드카 env 가 같은 판정(ssh_active)을 따른다
             // 홈은 Node `os.homedir()`(libuv)와 같은 순서로 정한다 — 환경변수(Windows `USERPROFILE`·그 밖 `HOME`)가 있으면 그것, 없으면 Tauri 의 `home_dir`.
             // 그래야 사이드카와 Rust 가 같은 `~/.ssh` 를 읽는다
@@ -228,7 +228,7 @@ pub fn run() {
                 }
             }
             // 저장소 추가 창의 환경 채널(Phase 6b PR 8)의 포트: WSL 목록(레지스트리 관문 뒤의 `list_distros` — `wsl.exe` 를 직접 부르지 않는다)·`~/.ssh/config` 별칭(홈을 모르면 빈 목록)·
-            // 설정에 없는 SSH 호스트의 확인 창(dialogs.rs)·local/wsl 실행기. ssh 연결은 위의 풀이 맡는다(풀이 없으면 ssh 종류는 사이드카가 처리한다). 스위치가 꺼져 있으면 주입하지 않는다
+            // 설정에 없는 SSH 호스트의 확인 창(dialogs.rs)·local/wsl 실행기. ssh 연결은 위의 풀이 맡는다(풀이 없으면 ssh 종류는 Rust 가 오류로 답한다). 스위치가 꺼져 있으면 주입하지 않는다
             let env_host = env_host_port(app.handle().clone(), home.map(|h| h.to_string_lossy().into_owned()));
             router.set_env(env_host.clone());
             // 설정 소유(Phase 6b PR 9): **Rust 가 설정 파일의 유일한 작성자다**. 스위치가 켜져 있을 때만(`router.enabled()` 하나가 소유 술어다) 파일을 열고 — 꺼져 있으면(`ANTLER_RUST_GIT=0`)
@@ -261,9 +261,9 @@ pub fn run() {
             if let Some(host) = &config_host {
                 router.set_config(host.clone());
             }
-            // Jira·GitHub 서비스(PR 6·9). 스위치가 꺼져 있으면(ANTLER_RUST_API=0·ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다.
+            // Jira·GitHub 서비스(PR 6·9). 스위치가 꺼져 있으면(ANTLER_RUST_GIT=0) 서비스도 보관소도 만들지 않는다 — 키체인을 읽지 않고 사이드카가 전부 맡는다(하위 스위치 ANTLER_RUST_API 는 은퇴했다).
             // 켜져 있으면 보관소(ANTLER_USER_DATA 면 메모리, 아니면 자격 증명 관리자) → Vault → 서비스 순으로 만들고, 저장된 연결·로그인은 여기서 복원한다.
-            // 사이드카의 env(ANTLER_RUST_API) 하나가 두 서비스를 함께 넘기므로 **둘 다** 만들어졌을 때만 둘 다 주입한다(하나만 되면 사이드카가 둘 다 처리한다)
+            // 사이드카의 env(ANTLER_RUST_API) 하나가 두 서비스를 함께 넘기므로 **둘 다** 만들어졌을 때만 둘 다 주입한다. 하나라도 만들지 못하면(키체인 오류 등) Rust 가 설정을 소유하므로 jira:*·gh:* 는 오류로 답한다 — 사이드카는 설정·토큰을 모른다
             // github 캐시 실행기의 복제(라우터가 받은 것과 같은 `LiveProcs` 를 본다) — 아래 fetch 서비스의 github 실행기가 된다. 라우터가 받지 않았으면(서비스 없음·스위치 꺼짐) 없다
             let mut github_exec: Option<GithubExecutor> = None;
             // 위 실행기가 읽는 네트워크 설정 칸(읽기 완료 신호를 fetch 서비스가 기다린다)
@@ -315,10 +315,10 @@ pub fn run() {
                     }
                     (jira, gh) => {
                         if let Err(e) = jira {
-                            eprintln!("[api] Jira 서비스를 만들지 못했다({e}) — 사이드카가 처리한다");
+                            eprintln!("[api] Jira 서비스를 만들지 못했다({e}) — jira:*·gh:* 는 오류로 답한다(사이드카는 설정·토큰을 모른다)");
                         }
                         if let Err(e) = gh {
-                            eprintln!("[api] GitHub 서비스를 만들지 못했다({e}) — 사이드카가 처리한다");
+                            eprintln!("[api] GitHub 서비스를 만들지 못했다({e}) — jira:*·gh:* 는 오류로 답한다(사이드카는 설정·토큰을 모른다)");
                         }
                     }
                 }
@@ -368,7 +368,7 @@ pub fn run() {
             let rust_ssh = router.ssh_active();
             let rust_github = router.github_cache_active();
             let fetch_kinds = router::sidecar_fetch_kinds(router.enabled(), rust_ssh, rust_github);
-            // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 사이드카가 처리한다)
+            // 사이드카에 jira·gh 를 소유하지 않음을 알리는 값. 두 서비스가 실제로 만들어졌을 때만 켠다(만들지 못했으면 Rust 가 오류로 답한다)
             let rust_api = router.claim_api();
             let config_owned = router.config_owned();
             app.manage(router);

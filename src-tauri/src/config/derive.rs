@@ -1,5 +1,5 @@
 //! 설정에서 파생하는 값: Rust 라우터 미러(`src/sidecar/mirror.ts` 의 `mirrorOf`)와 fetch 설정(`src/sidecar/fetchPrefs.ts` 의 `fetchPrefsOf`).
-//! 지금은 사이드카가 이 값을 `repos`·`fetchPrefs` 줄로 보낸다. Rust 가 설정을 소유하면(PR 9) 같은 함수로 미러·fetch 서비스에 직접 넘긴다.
+//! 지금은 사이드카가 이 값을 `repos`·`fetchPrefs` 줄로 보내던 것을 Rust 가 설정이 바뀔 때 같은 함수(`config::sync`)로 미러·fetch 서비스에 직접 넘긴다(Phase 6b PR 9 — `ANTLER_RUST_GIT=0` 이면 사이드카가 보낸다).
 use crate::mirror::MirrorRepo;
 use crate::net::json::Json;
 

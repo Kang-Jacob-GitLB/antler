@@ -53,7 +53,8 @@ fn isolate() {
 }
 
 fn read_src(rel: &str) -> String {
-    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}"))
+    // CI(Windows)의 체크아웃은 CRLF 일 수 있다 — 소스 검사는 LF 기준으로 본다
+    fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)).unwrap_or_else(|e| panic!("{rel}: {e}")).replace("\r\n", "\n")
 }
 
 /// 주석을 뺀 운영 코드(`#[cfg(test)]` 이후는 제외)
@@ -311,6 +312,19 @@ async fn 소유자가_없거나_스위치가_꺼져_있으면_모두_사이드�
 }
 
 #[tokio::test]
+async fn 설정을_소유한_실행에서_서비스가_없으면_jira_gh_채널은_토큰_인자를_사이드카로_보내지_않고_오류로_답한다() {
+    // 서비스를 만들지 못한 경우(키체인 오류 등): 사이드카는 설정·토큰을 모르므로 `gh:loginPat` 의 토큰이 그쪽으로 가면 안 된다
+    let rig = Rig::new(false);
+    let unavailable = json!({ "ok": false, "error": "연결 서비스를 사용할 수 없습니다", "code": "ERROR" });
+    for (ch, args) in [("gh:loginPat", json!(["ghp_secret_token"])), ("gh:auth", json!([])), ("jira:connect", json!([{ "site": "https://x.atlassian.net", "email": "a@b.c", "token": "jira_secret" }])), ("gh:pulls", json!("x"))] {
+        assert_eq!(rig.call(ch, args).await, unavailable, "{ch}");
+    }
+    // 설정 소유자가 없는 실행(`ANTLER_RUST_GIT=0` — 사이드카가 서비스도 맡는다)은 지금처럼 사이드카다
+    let bare = Router::new(true, false, RepoMirror::default());
+    assert!(matches!(bare.route("gh:loginPat", &json!(["x"])).await, Routed::Sidecar));
+}
+
+#[tokio::test]
 async fn 소유자가_있으면_11채널을_모두_rust_가_응답하고_배열이_아닌_인자도_사이드카로_가지_않는다() {
     let rig = Rig::new(false);
     assert!(rig.router.config_owned());
@@ -532,6 +546,89 @@ async fn 이름과_그룹을_바꾸고_삭제하면_설정과_미러에서_함�
     assert_eq!(rig.call("repos:update", json!(["nope", { "name": 5 }])).await["ok"], true, "모르는 id 는 던지지 않는다(TS 와 같다)");
 }
 
+/// 패치의 객체 키가 (깊이 전체에서) 정렬돼 있고 정수형 키가 없는가. `serde_json::Value` 가 키를 정렬하므로 renderer → 채널을 지나도 순서가 같은 사례만 TS 골든과 바이트로 대조할 수 있다
+fn is_sorted_deep(v: &Json) -> bool {
+    match v {
+        Json::Obj(o) => o.iter().all(|(k, _)| !k.starts_with(|c: char| c.is_ascii_digit())) && o.windows(2).all(|w| w[0].0 < w[1].0) && o.iter().all(|(_, x)| is_sorted_deep(x)),
+        Json::Arr(a) => a.iter().all(is_sorted_deep),
+        _ => true,
+    }
+}
+
+/// **PR 1 의 TS 골든(`tests/golden/config/store.json` — 실제 TS `ConfigStore` 가 만든 최종 파일 바이트·단계별 오류 문구)을 채널로 재생한다.**
+/// 채널로 표현되는 연산(`config:setUi`·`repos:update`·`repos:remove`)만으로 된 사례 중 패치 키가 정렬돼 있는 것을 `Rig` 의 라우터에 그대로 흘려 최종 파일을 **바이트로** 대조한다
+/// (키 순서를 보존하는 `ConfigStore` 의 쓰기는 PR 1 이 이미 맞췄고, 여기서 보는 것은 채널 입력 → 변경 연산의 대응과 검증 문구다). `addRepo`·승인·기본 브랜치 연산은 채널로 직접 올 수 없어 이 시험의 대상이 아니다
+#[tokio::test]
+async fn 설정_골든의_채널_연산_사례를_라우터로_재생하면_최종_파일_바이트와_오류_문구가_ts_와_같다() {
+    let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/golden/config/store.json")).unwrap();
+    let golden = parse(&text).unwrap();
+    let Some(Json::Arr(cases)) = golden.get("cases") else { panic!("cases") };
+    let (mut replayed, mut with_file, mut with_error) = (0, 0, 0);
+    for c in cases {
+        let name = c.get("name").and_then(Json::as_str).unwrap_or_default();
+        let input = c.get("input").unwrap();
+        let ops = match input.get("ops") {
+            Some(Json::Arr(o)) => o,
+            _ => panic!("ops"),
+        };
+        let file_text = input.get("file").and_then(Json::as_str);
+        let simple = input.get("fileIsDir") != Some(&Json::Bool(true)) && matches!(input.get("fileHex"), None | Some(Json::Null)) && input.get("cacheDir") != Some(&Json::Bool(true)) && !file_text.is_some_and(|t| t.contains("github"));
+        let on_channels = ops.iter().all(|o| match o.get("op").and_then(Json::as_str) {
+            Some("setUi") | Some("updateRepo") => o.get("patch").is_some_and(is_sorted_deep) && (o.get("op").and_then(Json::as_str) == Some("setUi") || o.get("id").and_then(Json::as_str).is_some()),
+            Some("removeRepo") => o.get("id").and_then(Json::as_str).is_some(),
+            _ => false,
+        });
+        if !simple || !on_channels {
+            continue;
+        }
+        let rig = Rig::with_file(false, file_text);
+        assert_eq!(Json::Bool(rig.store.load_failed()), *c.get("loadFailed").unwrap(), "{name}: loadFailed");
+        let Some(Json::Arr(steps)) = c.get("steps") else { panic!("steps") };
+        let mut expected = c.get("initial").unwrap();
+        for (i, (op, step)) in ops.iter().zip(steps).enumerate() {
+            let patch = op.get("patch").map(antler_lib::config_host::to_value);
+            let id = op.get("id").and_then(Json::as_str);
+            let env = match op.get("op").and_then(Json::as_str).unwrap() {
+                "setUi" => rig.call("config:setUi", json!([patch])).await,
+                "updateRepo" => rig.call("repos:update", json!([id, patch])).await,
+                _ => rig.call("repos:remove", json!([id])).await,
+            };
+            match step.get("error").and_then(Json::as_str) {
+                Some(want) => {
+                    fail(&env, want);
+                    with_error += 1;
+                }
+                None => {
+                    assert_eq!(env["ok"], true, "{name} / 단계 {i}: {env}");
+                    // 설정이 바뀐 단계만 `config` 가 있다 — 없으면 직전 설정 그대로다(`tests/config.rs` 와 같은 규칙)
+                    if let Some(next) = step.get("config") {
+                        expected = next;
+                    }
+                    assert_eq!(env["data"], antler_lib::config_host::to_value(expected), "{name} / 단계 {i}: 반환한 설정");
+                }
+            }
+        }
+        // 최종 파일 바이트(쓰지 않은 사례는 파일이 없다)와 손상 백업 이름
+        let file = rig.dir.path().join("antler.config.json");
+        match (c.get("file"), fs::read_to_string(&file).ok().filter(|_| file.is_file())) {
+            (Some(Json::Null), None) => {}
+            (Some(Json::Str(want)), Some(got)) => {
+                assert_eq!(&got, want, "{name}: 최종 파일 바이트");
+                with_file += 1;
+            }
+            (want, got) => panic!("{name}: 파일 유무가 다르다 — TS {want:?} / Rust {got:?}"),
+        }
+        if let Some(Json::Arr(files)) = c.get("files") {
+            for f in files.iter().filter_map(Json::as_str).filter(|f| f.ends_with(".bak")) {
+                assert!(rig.dir.path().join(f).is_file(), "{name}: 손상 백업 {f}");
+            }
+        }
+        replayed += 1;
+    }
+    println!("골든 재생 {replayed}개 사례(최종 파일 바이트 대조 {with_file}·오류 문구 대조 {with_error})");
+    assert!(replayed >= 150 && with_file >= 60 && with_error >= 40, "재생한 사례가 너무 적다: {replayed}개(파일 {with_file}·오류 {with_error})");
+}
+
 #[tokio::test]
 async fn 한_요청_안에서_추가_이름_승인_삭제를_거친_설정_파일은_기대한_값과_키_순서까지_같다() {
     let rig = Rig::new(false);
@@ -623,8 +720,7 @@ async fn 등록되지_않은_찌꺼기_폴더는_지우고_새로_만들고_init
     fs::write(stray.join("junk.txt"), "x").unwrap();
     ok(&rig.call("repos:addGithub", json!([{ "repos": [{ "owner": "octo", "repo": "hello" }] }])).await);
     assert!(!stray.join("junk.txt").exists() && is_bare(&stray), "찌꺼기를 치우고 다시 만든다");
-    // 기본 브랜치 이름이 쓸 수 없는 값이면 링크 검증이 버리므로(부가 정보) 추가는 성공하고 HEAD 는 건드리지 않는다
-    // init 이 실패하는 경우: 이미 같은 이름의 *파일* 이 owner 자리에 있다 → 폴더를 만들지 못해 실패하고 아무것도 남지 않는다
+    // 폴더를 만들지 못하는 경우: 같은 이름의 *파일* 이 owner 자리에 있다 → 실패하고 아무것도 남지 않으며 남의 파일은 그대로다
     fs::write(cache_of(&rig).join("blocked"), "file").unwrap();
     let r = rig.call("repos:addGithub", json!([{ "repos": [{ "owner": "blocked", "repo": "r" }] }])).await;
     assert_eq!(ok(&r)["added"].as_array().unwrap().len(), 0);
@@ -695,7 +791,6 @@ async fn 고아_정리는_레코드가_없는_캐시_모양_폴더만_지우고_
     assert!(!cache.join("gone").exists(), "비게 된 owner 폴더도 정리한다");
     assert!(!cache.join("octo").join("stale.git").exists());
     assert!(cache.join("octo").join("notes").exists() && cache.join("octo").join("readme.txt").exists() && cache.join("top.txt").exists());
-    // 로드 때 버려진 레코드(링크가 틀림)의 폴더도 고아다: 설정을 다시 열면 그 레코드가 사라진다
     // 설정을 읽지 못한 채 시작했으면(저장소 목록이 빈 것이 사실이 아니다) 아무것도 지우지 않는다
     let broken = Rig::with_file(true, Some("{ 손상"));
     assert!(broken.store.load_failed());

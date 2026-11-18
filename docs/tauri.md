@@ -2165,20 +2165,25 @@ GitHub 저장소의 경로는 정화가 이 앱의 캐시 경로로 다시 계�
 **이 PC 에서 매핑된 드라이브로 확인하지 못했다**(네트워크 접근 금지) — 순수 함수 시험(`opener.rs` 의 `매핑된_드라이브는…`)과 소스 검사만 있다. 사람 확인 항목이다.
 
 **TS 와 다른 점**
-- 응답의 객체 키 순서: `serde_json::Value` 는 키를 정렬한다(설정 파일 바이트는 순서를 보존하는 `Json` 트리가 쓰므로 TS 와 같다 — 파일 순서는 `tests/config_route.rs` 가 값으로 대조한다). renderer 는 키 순서에 기대지 않는다.
+- 키 순서: renderer 가 보낸 인자·응답은 `serde_json::Value` 를 지나므로 **객체 키가 정렬된다**. 응답은 renderer 가 키 순서에 기대지 않아 무해하다. 그러나 `config:setUi` 의 **패치**(키와 값 안의 객체 키)도 정렬돼 들어오므로, 새 키가 여럿이면 설정 파일의 키 순서가 Electron 판(패치 삽입 순서)과 다르다
+  (사이드카가 같은 길(JSON 줄)로 받던 때도 같았다 — 회귀는 아니다. 내용은 같고 파일 안 키 순서만 다르다). 저장소·소스 레코드처럼 Rust 가 직접 만드는 객체의 순서는 TS 와 같다(위 시나리오 시험이 값으로, 골든 재생이 바이트로 본다).
 - `repos:add` 는 git 이 돌려준 최상위 경로를 `check_path` 로 한 번 더 본다(TS 는 추가 때만 보고 쓸 때마다 다시 보지 않는다 — Rust 미러는 쓸 때마다 본다). `external:open` 의 `path: null` 은 TS 와 같이 `잘못된 입력입니다` 다(Rust 의 opener 는 null 을 루트로 받으므로 처리기가 먼저 거른다).
 - 원격 전용 저장소 삭제는 한 프로세스(Rust)에서 **경로 잠금 안에서** 한다(TS 는 `removeGithubCache` 에 잠금이 없다). 승인 쓰기는 동기이고 fetch 서비스의 태스크에서 불린다(작은 파일 쓰기 — 블로킹 풀로 보내지 않았다).
 - 설정 쓰기 실패 문구는 Node 가 아니라 Rust `io::Error` 다. `config:setUi` 등 쓰기 채널의 처리는 블로킹 풀(`spawn_blocking`)에서 한다.
 - 라우터가 풀지 못하는 저장소(WSL 이 아닌 OS 의 WSL·홈을 모르는 PC 의 ssh·서비스가 없는 github)의 git 채널은 여전히 사이드카로 가지만 사이드카의 설정이 비어 있어 TS 의 "알 수 없는 저장소" 오류가 난다(PR 10 이 Rust 쪽 명시적 오류로 바꾼다).
 
-**시험**: 새 바이너리 `tests/config_route.rs`(29개, `test-hooks`, `tauri.yml` 목록에 추가) — 채널 목록(`IPC_CHANNELS` 의 부분집합·다른 목록과 겹치지 않음·TS `configOwns.ts` 와 같음), **소유자가 없거나 `ANTLER_RUST_GIT=0` 이면 사이드카**·소유자가 있으면 11채널 모두 Rust(배열이 아닌 인자 포함),
+**시험**: 새 바이너리 `tests/config_route.rs`(31개, `test-hooks`, `tauri.yml` 목록에 추가) — 채널 목록(`IPC_CHANNELS` 의 부분집합·다른 목록과 겹치지 않음·TS `configOwns.ts` 와 같음), **소유자가 없거나 `ANTLER_RUST_GIT=0` 이면 사이드카**·소유자가 있으면 11채널 모두 Rust(배열이 아닌 인자 포함),
 `config:get`·`setUi`(검증 문구·승인 위조 불가·UI 설정만 쓰면 미러 반영 없음), 추가(최상위 등록·응답 전 미러 반영·다시 추가하면 같은 항목·GIT 오류·입력 검증 표·WSL 미설치)·`addMany`(실패가 나머지를 막지 않음·500 상한·같은 환경), **SSH 승인 기억 하나**(`env:test`→`repos:add`→`addMany` 가 한 번만 묻고 거부는 기억하지 않음 — 127.0.0.1 닫힌 포트)·**루프백 SSH 서버로 추가하면 연결을 쥔 채 등록하고 등록한 뒤에도 연결이 남으며 삭제하면 닫힘**,
 이름·그룹 변경·삭제, **추가→이름→승인→삭제 시나리오의 설정 파일을 키 순서까지 값으로 대조**, `addGithub`(bare 캐시·`origin` URL·기본 브랜치 HEAD·같은 이름 org 접두·동시 추가·찌꺼기 폴더·init 실패 정리·상한), **삭제 순서·링크 일치 검사**(다른 저장소의 캐시를 가리키는 레코드·캐시 밖·github 아닌 소스·링크 틀림은 지우지 않음,
 빈 owner 폴더 정리, 폴더를 쥐고 있어도 레코드는 지움 — Windows), 고아 정리(모양이 다른 폴더·파일 보존·링크 owner 폴더 보존·로드가 버린 레코드의 폴더는 고아·**설정을 못 읽었으면 0**)·빈 캐시 복구, `external:open`(입력·github 거부·루트는 설정에서·파일은 보여 줌·에디터 인자·`ELECTRON_RUN_AS_NODE` 제거 — 가짜 `OpenerDeps`)·`pickEditorExe`(거부 사유 4가지는 저장 안 함),
 소스 검사(`ConfigStore::open` 은 `open_config` 한 곳·`router.enabled()` 분기 안, 승인 변경자는 `fetch_host.rs` 한 곳, 삭제 순서, 미러 진입점, 프로세스 실행은 주입 하나).
+`config_route.rs` 는 PR 1 TS 골든의 채널 연산 사례 199개를 라우터로 재생하고(위 "TS 와 다른 점"·아래 설명), 서비스를 만들지 못한 실행의 `jira:*`·`gh:*` 가 사이드카가 아니라 오류로 답함(토큰 인자가 사이드카로 가지 않음)도 본다.
+`fetch_host.rs` 단위 시험 3개가 승인·기본 브랜치 쓰기의 조건(저장소 존재·지문 모양·두 종류·소스·이름·같은 값·쓰기 실패 삼킴)을 본다.
 `config.rs`(PR 1 골든)·`sync.rs`·`import.rs`(D1 — Electron 파일 불변·`trustedConfigs`·`window` 제외·손상은 가져오지 않고 `.bak` 도 없음·github 경로 재계산)·`opener.rs`(드라이브 정책) 단위 시험, vitest `sidecarConfigOwns.test.ts`(읽기 전용 설정·목록 일치·Electron 불변).
 기존 시험 갱신: `fetch_route`·`fetch_service`(승인 소스 검사를 새 모양으로)·`api_route`(하위 스위치 은퇴·토큰 줄 없음)·`ssh_route`·`github_fetch`·`external`(외부 열기 연결). 대응표(`tests/golden/repos/test-map.json`)의 `N/A: PR 9` 17개와 6a 표의 `N/A: 6b` 7개를 `config_route.rs`·`config.rs`·`external.rs` 로 옮겼다
-(`goldenConfig.test.ts`·`golden6a.test.ts`·`golden.rs` 의 소스 목록에 더했다). net 표의 "ConfigStore 는 사이드카에 남아" 5개는 사유를 바꿨다. **TS 쪽 핸들러 골든 하네스는 만들지 않았다**(electron 핸들러를 가짜 host 로 돌리는 구동기가 없다 — PR 5·8 과 같다) — 파일 바이트는 PR 1 골든이 같은 `ConfigStore` 로 TS 와 맞춰 두었다.
+(`goldenConfig.test.ts`·`golden6a.test.ts`·`golden.rs` 의 소스 목록에 더했다). net 표의 "ConfigStore 는 사이드카에 남아" 5개는 사유를 바꿨다. **`handlers.ts`·`external.ts` 를 가짜 `IpcHandle` 로 돌리는 TS 쪽 새 골든은 만들지 않았다**(`goldenGithubChannels.test.ts` 처럼 만들 수는 있다 — 만들지 않았을 뿐이다). 대신 **PR 1 의 TS 골든(`tests/golden/config/store.json`, 실제 TS `ConfigStore` 가 만든 최종 파일 바이트·단계별 오류 문구)에서
+채널로 표현되는 연산(`setUi`·`updateRepo`·`removeRepo`)만으로 된 사례 중 패치 키가 정렬된 199개를 라우터로 재생**해 최종 파일을 **바이트로**(96개)·오류 문구를(108개) 대조한다(`config_route.rs::설정_골든의_채널_연산_사례를…`). 키가 정렬되지 않은 패치는 renderer → 채널을 지나며 정렬되므로(아래) 제외한다.
+`repos:add`·`addMany`·`addGithub`·`external:*` 의 핸들러 입력 검증 문구는 TS 코드를 읽고 손으로 적은 기대값이다(남은 위험).
 
 **사람 확인(자동화 불가·실환경 — 실제 대화상자·프로그램·사용자 설정은 쓰지 않았다)**
 - 저장소 추가(로컬 하위 폴더·WSL·SSH 설정 밖 호스트의 확인 창 — **같은 호스트를 폴더 탐색·추가에서 다시 묻지 않는지**)·폴더 안 저장소 찾기 뒤 한 번에 추가, GitHub 탭 추가 → 첫 fetch → 삭제(캐시 폴더가 사라지는지·삭제 직후 재추가).
@@ -2189,7 +2194,7 @@ GitHub 저장소의 경로는 정화가 이 앱의 캐시 경로로 다시 계�
 **남은 위험**
 - 설정 쓰기가 fetch 서비스의 비동기 태스크에서 동기로 일어난다(승인·기본 브랜치): 백신·OneDrive 가 설정 파일을 잡으면 그 태스크가 재시도(최대 5회·30×(n+1)ms) 동안 막힌다. 쓰기 실패는 "다음에 다시 묻는다"/"다음 fetch 가 다시 알아낸다"로 끝낸다.
 - 알림 안에서 `on_mirror_changed`·`apply_fetch_prefs` 가 동기로 돈다 — 두 알림이 겹쳐도 `ConfigSync` 의 잠금 하나가 순서를 지키지만, 그 안에서 라우터의 다른 잠금을 잡으므로 라우터 쪽이 `ConfigSync::push` 를 잠금을 쥔 채 부르면 안 된다(지금은 부르는 곳이 없다).
-- 홈을 모르는 PC 의 ssh·서비스를 만들지 못한 github 저장소는 사이드카도 처리하지 못한다(위 "TS 와 다른 점" 마지막). 사이드카의 `ghToken`·`repoq`·`fetchApprove`·`githubBranch` 수신 코드는 남아 있다(PR 10 이 지운다).
+- 홈을 모르는 PC 의 ssh 저장소·서비스를 만들지 못한 PC 의 github 저장소는 사이드카도 처리하지 못한다(위 "TS 와 다른 점" 마지막). **서비스를 만들지 못하면(키체인 오류 등) `jira:*`·`gh:*` 는 오류로 답한다** — 설정을 소유한 실행에서는 `gh:loginPat` 의 토큰 인자가 사이드카로 가지 않게 `api_unserved` 가 사이드카로 보내지 않는다(시험: `api_route.rs`). 사이드카의 `ghToken`·`repoq`·`fetchApprove`·`githubBranch` 수신 코드는 남아 있다(PR 10 이 지운다).
 - 매핑된 드라이브 정책과 WSL 이 있는 PC 의 `repos:add`(레지스트리 읽기·`wsl.exe`)는 확인하지 못했다. 같은 새 SSH 호스트를 동시에 두 창이 입력하면 확인 창이 둘 뜰 수 있다(TS 와 같다).
 
 ## 업데이터·패키징·Electron 사용자 이관(Phase 6c, `src-tauri/src/update/`)

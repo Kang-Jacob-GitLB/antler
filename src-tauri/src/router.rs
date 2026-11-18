@@ -12,18 +12,18 @@
 //! (notify·폴링 — `git::watcher`), 사이드카는 같은 env 로 그 저장소를 감시하지 않는다(`src/sidecar/index.ts` 가 `FetchService` 와 같은 `fetchOwner` 를 `RepoWatcher` 에 준다). github 저장소의 bare 캐시 폴더도 같다(Phase 6b PR 7).
 //! 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) env 도 감시자도 없다 — 사이드카가 전부 감시한다.
 //!
-//! ssh(Phase 5 PR 3): `ANTLER_RUST_SSH` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이면 함께 꺼진다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 git 채널을 Rust 가 처리한다(Phase 5 PR 4: `git:fetch` 포함).
+//! ssh(Phase 5 PR 3): `ANTLER_RUST_GIT` 이 `0` 이 아니고(하위 스위치 `ANTLER_RUST_SSH` 는 Phase 6b PR 9 에서 은퇴했다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 git 채널을 Rust 가 처리한다(Phase 5 PR 4: `git:fetch` 포함).
 //! 호스트마다 실행기(= 연결 하나)를 [`SshPool`] 에서 받고 큐는 호스트마다 하나(동시 4)다. fetch 서비스도 같은 풀의 연결을 쓴다.
 //! fetch 소유는 해석 결과가 아니라 소스 종류([`rust_fetch_kinds`])로 정한다(`RepoMirror::resolve_fetch`) — 사이드카 env 와 같은 술어 하나라 이중 fetch 도 미소유도 없다.
 //!
-//! `jira:*`·`gh:*`(`gh:repo` 제외, [`API_CHANNELS`])는 별개의 스위치다: `ANTLER_RUST_API` 가 `0` 이 아니고(`ANTLER_RUST_GIT=0` 이어도 꺼진다) 서비스가 주입돼 있으면 **미러와 무관하게**
-//! Rust 가 처리한다([`api_host`]). 꺼져 있으면 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
+//! `jira:*`·`gh:*`(`gh:repo` 제외, [`API_CHANNELS`])는 미러와 무관하게 서비스가 주입돼 있으면 Rust 가 처리한다([`api_host`]; 하위 스위치 `ANTLER_RUST_API` 는 은퇴했고 `ANTLER_RUST_GIT=0` 이 함께 끈다).
+//! 꺼져 있으면(`ANTLER_RUST_GIT=0`) 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
 //! env `ANTLER_RUST_API=1` 로 띄워 jira·gh 를 소유하지 않음을 알린다(앱은 두 서비스가 모두 만들어졌을 때만 주입한다)(라우터가 가로채므로 닿지 않는다 — 방어).
 //!
 //! 앱 채널(Phase 6b PR 5, [`APP_CHANNELS`]: 폴더 선택·클립보드·링크 열기·타이틀바 테마)은 설정·미러와 무관하다: `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`AppHost`])가 주입돼 있으면 Rust 가 처리한다([`app_host`]).
 //!
 //! 환경 채널(Phase 6b PR 8, [`ENV_CHANNELS`]: `env:wslDistros`·`env:sshHosts`·`env:test`·`env:listDir`·`repos:scan`)도 설정을 읽지 않는다: `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`EnvHost`])가 주입돼 있으면 Rust 가 처리한다([`env_host`]).
-//! 단 ssh 종류(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만이고, 풀이 없으면(`ANTLER_RUST_SSH=0`) 사이드카가 처리한다(미러·fetch 와 같은 판정).
+//! 단 ssh 종류(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만 처리하고, 풀이 없으면 Rust 가 설정을 소유한 실행은 "SSH 를 사용할 수 없습니다" 로 답한다(사이드카는 설정을 모른다).
 //!
 //! `gh:repo`(Phase 6a PR 8)는 `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 위 git 채널과 같은 소유 술어(`RepoMirror::resolve`)를 쓴다 — Rust 가 맡는 저장소는 Rust 가 답하고
 //! (결과 캐시 60초), 캐시 실행기가 없는 github kind·미러에 없는 id 는 사이드카가 답한다. GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
@@ -34,7 +34,7 @@
 //! github 갈래: refs 의 worktrees 를 비우고 refsDetails 는 서브모듈을 건너뛰며,
 //! commit·compare 는 오프라인에서 통계 없는 목록을 돌려주고(lenient) onRemote 는 항상 true, wip 은 빈 결과, `gh:repo` 는 레코드의 링크로 답한다.
 //! `repos:remove` 는 사이드카로 넘기기 전에 그 저장소의 fetch 를 멈추고 끝나기를 기다리고(`FetchControl::forget_and_wait`) 감시를 멈추고 진행 중 조회·열린 로그 커서를 끊고 끝나기를 기다린다 —
-//! 사이드카가 캐시 폴더를 지울 때(설정 소유 PR 9 까지) 이 쪽 핸들이 남아 있지 않게.
+//! 폴더 삭제도 Phase 6b PR 9 부터 Rust 가 한다(`config_host` — 이 정리가 끝난 뒤 링크·경로 일치를 확인하고 지운다).
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
@@ -1252,8 +1252,8 @@ impl Router {
 
     /// `repos:remove` 의 Rust 쪽 정리(Phase 6b PR 6): 이 저장소를 github 소스로 풀고 있으면 "삭제 중" 표식을 달고, **fetch 를 멈추고 끝나기를 기다리고 감시를 멈추고**(Phase 6b PR 7), 진행 중인 조회와 활동 공유 시그니처 계산을 끊고,
     /// 열려 있는 로그 커서·앵커를 닫고, 그 저장소의 git 프로세스가 모두 끝나기를 기다린다
-    /// (실행기가 센다 — 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있어, 최대 [`SCOPE_DRAIN_TIMEOUT`] 까지만 기다린다). 이 뒤에 사이드카가 캐시 폴더를 지운다. 캐시 삭제 자체는 사이드카의 몫이다:
-    /// 설정(레코드)·삭제의 소유가 아직 사이드카라 "Rust 가 멈춘 뒤 사이드카가 지운다"는 순서를 이 호출이 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
+    /// (실행기가 센다 — 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있어, 최대 [`SCOPE_DRAIN_TIMEOUT`] 까지만 기다린다). 이 뒤에 설정 소유자(`config_host::remove_repo` — Phase 6b PR 9)가 링크·경로 일치를 확인하고 캐시 폴더를 지운다:
+    /// "멈춘 뒤 지운다"는 순서를 이 호출이 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
     pub(crate) async fn release_github_repo(&self, repo_id: &str) {
         let Resolved::Rust(target @ Target::Github { .. }) = self.mirror.resolve(repo_id) else { return };
         let path = target.path().to_string();
@@ -1295,14 +1295,15 @@ impl Router {
         .await;
     }
 
-    /// 서비스가 없는 `jira:*`·`gh:*` 채널의 행선지. Rust 가 소유(사이드카를 env=1 로 띄움)했는데 서비스가 없으면 사이드카는 받지 않으므로 오류다.
-    /// 아니면(스위치 꺼짐·서비스 없음·한쪽만 있음) 사이드카가 처리한다
+    /// 서비스가 없는 `jira:*`·`gh:*` 채널의 행선지. Rust 가 소유(사이드카를 env=1 로 띄움)했거나 **설정을 소유**(Phase 6b PR 9)했는데 서비스가 없으면 오류다 —
+    /// 사이드카는 이 채널을 받지 않거나(env=1) 설정·토큰을 모르고(설정 소유), 인자(`gh:loginPat` 의 토큰)를 그쪽으로 보낼 이유도 없다.
+    /// 아니면(스위치 꺼짐 — 사이드카가 설정도 서비스도 맡는다) 사이드카가 처리한다
     fn api_unserved(&self, channel: &str) -> Routed {
-        if self.api_owned.load(Ordering::SeqCst) {
+        if self.api_owned.load(Ordering::SeqCst) || self.config_owned() {
             self.note(channel, "error(서비스 없음)");
             return Routed::Done(err_env(API_UNAVAILABLE, "ERROR"));
         }
-        self.note(channel, "sidecar(ANTLER_RUST_API=0)");
+        self.note(channel, "sidecar(ANTLER_RUST_GIT=0)");
         Routed::Sidecar
     }
 

@@ -4,7 +4,7 @@
 //!   사이드카는 그 저장소에 git 을 돌리지 않는다(SSH 호스트당 연결이 앱 하나다). 실행기·큐·캐시는 채널 핸들러(`gh:repo`)가 쓰는 라우터의 것 그대로다.
 //! - 그 밖(캐시 실행기가 없는 github kind·미러에 없는 id)은 설정을 소유한 Rust 가 답한다([`ConfigRepos`] — Phase 6b PR 9 부터 사이드카에 묻지 않는다. 사이드카는 설정을 모른다). 이전의 사이드카 위임([`SidecarRepos`](crate::repoq::SidecarRepos))은 시험과 PR 10 의 정리를 위해 남아 있다.
 //! - 미러가 **거부한** 저장소(경로·호스트·배포판 검사에 걸림)는 위임하지 않는다 — 오류다. 위임하면 미러가 막은 경로에 사이드카가 git 을 돌린다.
-//! - `github_client_id`·`repo_ids`(설정 읽기)는 항상 사이드카다. `invalidate_gh_remotes` 는 Rust 캐시를 비우고 사이드카에도 알린다.
+//! - `github_client_id`·`repo_ids`(설정 읽기)는 Phase 6b PR 9 부터 설정을 소유한 Rust 가 답한다([`ConfigRepos`]). `invalidate_gh_remotes` 는 Rust 캐시를 비운다.
 //!
 //! 라우터는 앱이 `app.manage` 로 가져가므로 이 구현은 라우터를 호출 때 찾는다([`RouterSource`]). 서비스는 라우터보다 먼저 만들어진다.
 //! 질의마다 사이드카 질의와 같은 제한 시간([`QUERY_TIMEOUT`])을 건다(멈춘 원격이 `gh:*` 를 붙잡지 않게).

@@ -17,7 +17,7 @@ use crate::config::{source_for, ConfigStore};
 use crate::git::exec::{GitExecutor, GithubExecutor};
 use crate::git::fetch::js_trim;
 use crate::git::github_cache::{init_github_repo, remove_github_cache, GithubCachePath};
-use crate::git::github_link::{cache_path_matches_link, github_cache_path, github_cache_slug, sanitize_github_link, validate_github_link, GithubLink, GITHUB_SOURCE_ID, MAX_ADD_GITHUB};
+use crate::git::github_link::{cache_path_matches_link, github_cache_path, sanitize_github_link, validate_github_link, GithubLink, GITHUB_SOURCE_ID, MAX_ADD_GITHUB};
 use crate::net::json::Json;
 
 /// 한 번에 추가하는 저장소의 그룹 이름 상한(UTF-16 단위)
@@ -275,11 +275,8 @@ pub async fn restore_missing_github_caches(store: &Arc<ConfigStore>, exec: Optio
     let Some(Json::Arr(repos)) = crate::config::model::get(&cfg, "repos").cloned() else { return 0 };
     let mut made = 0;
     for r in repos {
+        // 소스가 github 이고 링크가 유효하며 저장된 경로가 그 링크의 캐시 경로인 레코드만(`github_target_of` — 로드가 경로를 이미 맞춘다)
         let Some((gp, link)) = github_target_of(store, cache_dir, &r) else { continue };
-        // 저장된 경로가 링크에서 다시 계산한 캐시 경로와 같은 레코드만(로드가 이미 맞춘다)
-        if github_cache_slug(cache_dir, gp.as_str()).is_none() {
-            continue;
-        }
         let path = gp.as_str().to_string();
         let _guard = locks.lock(&path).await;
         let dir = Path::new(&path);
