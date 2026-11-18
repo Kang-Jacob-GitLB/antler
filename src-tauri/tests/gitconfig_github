@@ -1,0 +1,21 @@
+[user]
+	name = Antler Test
+	email = test@antler.invalid
+# 사용자 전역 설정이 GitHub 캐시를 깨려는 모양들(tests/github_cache_isolation.rs 가 프로세스 전역 설정으로 쓴다 — 읽기만 한다)
+# 소스 저장소 URL(file:///)을 전송 금지에 걸리는 ssh 로 바꾼다
+[url "ssh://nowhere.invalid/"]
+	insteadOf = file:///
+# 이름 없는 bare 저장소 접근을 막는다(git 2.38+)
+[safe]
+	bareRepository = explicit
+# git 3.0 의 기본 ref 저장 형식
+[init]
+	defaultRefFormat = reftable
+# 읽어 와야 하는 네트워크 키와, 가져오면 안 되는 키
+[http]
+	proxy = http://proxy.corp:8080
+	sslCAInfo = /etc/ca.pem
+	sslVerify = false
+	extraHeader = X-Evil: 1
+[credential]
+	helper = evil

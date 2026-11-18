@@ -133,3 +133,12 @@ WSL 은 4초, SSH 는 30초 폴링만 한다(`.git` 을 직접 보지 않는다)
 물려주지 않는다(이름은 대소문자 무관 — Windows 환경 변수 규칙). 프록시·`GIT_SSL_CAINFO` 등 나머지 환경은 그대로 상속한다.
 일반 local·WSL·SSH git 은 토큰을 싣지 않으므로 이 거르기를 적용하지 않는다(사용자의 TLS·추적 설정은 사용자 선택이고, 자격 증명 도우미는 호스트가 정한다) — 표식을 `env` 에 넣는 실행만 거른다.
 시험: `tests/githubEnvScrub.test.ts`.
+
+Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`, 아직 앱에 연결하지 않음)은 같은 예외를 세 겹으로 가둔다:
+캐시 모양을 통과한 경로만 담는 `GithubCachePath` 타입이 환경·init·HEAD 쓰기의 입력이고, 환경(`github_env`)을 만드는 곳은 그 파일 한 곳(소스 검사로 강제)이며,
+캐시 밖 경로의 git 은 토큰도 읽지 않고 기본 환경(전송 금지)으로 돈다. `http.followRedirects=false` 는 `-c` 로도 명시한다(`-c` 는 환경의 설정을 이긴다). 일반 저장소의 fetch 허용 목록은 바뀌지 않는다.
+
+**부모 환경을 거른다**(Rust 판). 캐시 경로의 git 은 부모 프로세스의 `GIT_*` 변수를 **하나도 물려받지 않는다**(`GIT_SSL_CAINFO`·`GIT_SSL_CAPATH` 만 예외 — 사설 인증서용이고 검증을 끄지 않는다. `SSLKEYLOGFILE` 도 지운다). 이름은 대소문자를 구분하지 않는다.
+토큰 헤더가 환경에 실리는 유일한 경로라 허용 목록 쪽으로 정했다: 부모의 `GIT_SSL_NO_VERIFY`(빈 값이어도 TLS 검증을 끈다)·`GIT_TRACE*`/`GIT_CURL_VERBOSE`(`GIT_TRACE_REDACT=0` 와 함께 Authorization 기록)·`GIT_EXEC_PATH`·`GIT_ALTERNATE_OBJECT_DIRECTORIES`·`GIT_NAMESPACE`·`GIT_COMMON_DIR`·`GIT_OBJECT_DIRECTORY`·`GIT_INDEX_FILE`·`GIT_WORK_TREE`·`GIT_CONFIG*` 는 어느 하나도 이 실행기에 필요하지 않고,
+`GIT_COMMON_DIR` 를 물려받으면 `init_github_repo` 의 `git config --local` 이 사용자 저장소의 `.git/config` 를 덮어쓴다. 필요한 `GIT_*` 는 `github_env` 가 모두 직접 넣는다. 지우기는 덧씌우기보다 **먼저** 적용돼(`exec/process.rs` `launch`) 실행기가 넣은 `GIT_DIR`·`GIT_CONFIG_COUNT` 등은 살아남는다.
+토큰은 `run` 의 stdout·stderr·오류 문구와 `stream` 의 `finish` 오류 문구(message·stderr)에서 가린다(`config --list` 가 환경의 `extraheader` 를 보여 주기 때문이다). `stream` 의 stdout 은 파일 내용(blob)이라 가리지 않는다 — 설정을 드러내는 명령은 `run` 으로만 읽는다.

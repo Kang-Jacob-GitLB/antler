@@ -223,6 +223,8 @@ pub async fn list_distros() -> Vec<String> {
             program: "wsl.exe".to_string(),
             argv: argv.iter().map(|a| (*a).to_string()).collect(),
             env: WSL_SPAWN_ENV.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),
+            env_remove: Vec::new(),
+            cwd: None,
             git_args: Vec::new(),
             wsl: true,
         };
@@ -253,6 +255,8 @@ impl WslExecutor {
             program: "wsl.exe".to_string(),
             argv: wsl_argv_with(&self.distro, repo_path, args, fetch),
             env: WSL_SPAWN_ENV.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect(),
+            env_remove: Vec::new(),
+            cwd: None,
             git_args: to_strings(args),
             wsl: true,
         }

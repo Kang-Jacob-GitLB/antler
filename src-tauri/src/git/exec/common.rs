@@ -1,6 +1,8 @@
 //! 모든 git 호출에 공통인 전역 인자·환경변수(`src/main/executors/GitExecutor.ts`)와 실행 옵션.
 //! 이 두 상수는 **이 모듈에만** 있고, 호출자는 환경변수를 마음대로 바꿀 수 없다(`RunOpts` 에 일반 env 필드가 없다 —
 //! fetch 가 덮어쓰는 여섯 개는 닫힌 타입 [`FetchEnv`] 로만 준다).
+//! 두 번째 환경은 GitHub 원격 전용 저장소(앱 캐시)의 것이다 — `git/github_cache.rs` 의 `github_env` 가 한 곳에서만 만들고(`tests/github_cache_exec.rs` 가 소스로 강제한다),
+//! `GitExecutor::Github` 가 캐시 모양 경로에서만 [`Spec`] 에 싣는다. `Spec` 은 `exec` 밖에서 만들 수 없다.
 //! 값과 순서는 `tests/golden/exec/env.json`(TS 가 만든 골든)과 같아야 한다.
 
 use tokio_util::sync::CancellationToken;
@@ -91,7 +93,8 @@ pub fn merged_env(fetch: Option<&FetchEnv>) -> Vec<(String, String)> {
     env
 }
 
-/// 호출 옵션. 환경변수는 **닫힌 [`FetchEnv`] 로만** 바꿀 수 있다(`run` 에서만 쓰이고 `stream` 은 무시한다).
+/// 호출 옵션. 환경변수는 **닫힌 [`FetchEnv`] 로만** 바꿀 수 있다(`run` 에서만 쓰이고 `stream` 은 무시한다. `GitExecutor::Github` 는 `run` 에서도 무시한다 —
+/// 그 실행기의 환경은 실행기 종류가 정한다).
 #[derive(Debug, Clone, Default)]
 pub struct RunOpts {
     /// 취소되면 프로세스 트리를 죽이고 `Aborted` 로 끝난다
@@ -116,17 +119,38 @@ pub struct RunResult {
     pub code: i32,
 }
 
-/// 실행할 프로세스. 실행기가 만들고 `process` 모듈만 읽는다
-#[derive(Debug, Clone)]
+/// 실행할 프로세스. 실행기가 만들고 `process` 모듈만 읽는다.
+/// `env` 에는 GitHub 원격 전용 저장소의 토큰(`GIT_CONFIG_VALUE_n`)이 들 수 있다 — `Debug` 는 값을 찍지 않고 버릴 때 값을 0 으로 덮는다
+#[derive(Clone)]
 pub(super) struct Spec {
     pub program: String,
     pub argv: Vec<String>,
     /// 부모 환경에 덧씌울 값
     pub env: Vec<(String, String)>,
+    /// 부모 환경에서 지울 이름(사용자 설정 읽기 — [`super::local::read_user_config_list`]). 나머지 실행기는 비워 둔다
+    pub env_remove: Vec<String>,
+    /// 작업 디렉터리(없으면 부모의 것). 사용자 설정 읽기만 쓴다
+    pub cwd: Option<String>,
     /// 오류 메시지에 쓸 git 인자(`-C`·전역 인자 제외)
     pub git_args: Vec<String>,
     /// WSL 이면 wsl.exe 자신의 실패를 stdout 메시지로 해석한다
     pub wsl: bool,
+}
+
+impl std::fmt::Debug for Spec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 환경 값은 찍지 않는다(토큰이 든다). 이름만 보인다
+        let names: Vec<&str> = self.env.iter().map(|(k, _)| k.as_str()).collect();
+        f.debug_struct("Spec").field("program", &self.program).field("argv", &self.argv).field("env", &names).field("git_args", &self.git_args).field("wsl", &self.wsl).finish()
+    }
+}
+
+impl Drop for Spec {
+    fn drop(&mut self) {
+        for (_, v) in &mut self.env {
+            zeroize::Zeroize::zeroize(v);
+        }
+    }
 }
 
 pub(super) fn to_strings<S: AsRef<str>>(args: &[S]) -> Vec<String> {

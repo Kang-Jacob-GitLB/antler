@@ -6,7 +6,8 @@
 //! - **훅 차단 경로는 이 모듈이 실행기 종류로 만든다**(호출자가 `HooksPath` 를 넘기지 못한다). 로컬은 앱 소유 빈 디렉터리(드라이브 문자 경로),
 //!   WSL 은 `/dev/null` 이라 Windows 경로가 WSL 로 갈 수 없다. 경로는 `canonicalize` 하지 않는다(Windows 에서 `\\?\` 접두가 붙어 UNC·NT 모양이 된다).
 //! - 모든 `-c` 는 `fetch` 앞에, remote 이름은 `--` 뒤(와 refspec 안)에만 둔다. `--refmap=`(빈 값)을 빼지 않는다.
-//! - `filter`·`FollowRedirects::False`·임의 env 는 이 API 에 없다(GitHub 원격 전용 저장소는 사이드카가 처리한다).
+//! - 일반 fetch([`run_fetch`])에는 `filter`·`FollowRedirects::False`·임의 env 가 없다. GitHub 원격 전용 저장소(앱 캐시)는 별도 진입점 [`run_github_fetch`] 가 **닫힌 값**
+//!   (`--filter=blob:none`·`http.followRedirects=false`·remote `origin`)으로만 받고, 환경은 `GitExecutor::Github` 가 붙인다. 두 진입점은 서로의 실행기로 부르면 Err 다(Phase 6b PR 2).
 //! - git 은 [`GitRunner`] 로만 부른다. 실제 실행은 [`GitExecutor`], 테스트는 옛 git 을 흉내 내는 래퍼를 끼운다(프로세스를 띄우는 길은 늘지 않는다).
 
 use std::collections::HashMap;
@@ -18,16 +19,17 @@ use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
 use super::guard::{
-    apply_remote_list, apply_remote_urls, fetch_config_args, finish_remote_urls, hooks_path_for_test, inspect_entries, is_empty_dir, parse_config_list,
+    apply_remote_list, apply_remote_urls, fetch_config_args, finish_remote_urls, hooks_path_for, hooks_path_for_test, inspect_entries, is_empty_dir, parse_config_list,
     parse_git_version, resolve_ssh_command, show_scope_outcome, unknown_write_fetch_head, ConfigArgsOpts, ConfigEntry, ConfigInspection, FollowRedirects, GitOut,
     GitVersion, ScopeWalk, ShowScopeOutcome, WalkStep, FETCH_ARGS,
 };
 use super::js_trim;
 use crate::git::exec::{ExecError, FetchEnv, GitExecutor, RunOpts, RunResult};
+use crate::git::github_cache::GithubCachePath;
 
 /// 이 모듈이 git 을 부르는 유일한 길
 pub trait GitRunner: Sync {
-    /// "local" | "wsl" | "ssh"
+    /// "local" | "wsl" | "ssh" | "github"(GitHub 원격 전용 저장소의 앱 캐시 — `run_github_fetch` 만 받는다)
     fn kind(&self) -> &'static str;
     fn run(&self, repo_path: &str, args: &[String], opts: &RunOpts) -> impl Future<Output = Result<RunResult, ExecError>> + Send;
     /// 정리돼 영구히 거부하는 실행기인가(SSH 실행기가 미러에서 빠진 호스트의 연결을 닫은 경우). 서비스는 이런 실행기를 쥐지 않고 새로 받는다
@@ -197,8 +199,30 @@ pub fn fetch_config_for_test(kind: &str, no_hooks_dir: Option<&str>, platform_wi
 /// remote 하나의 fetch 인자(`git -C <repo> <전역 인자>` 뒤). 순서: 모든 `-c` → `fetch` 와 고정 옵션 → (`--no-write-fetch-head`) → `--refmap=` → `--` → 이름 → refspec.
 /// refspec 의 목적지는 `refs/remotes/<이름>/` 로 고정한다 — 설정의 refspec 은 쓰지 않는다
 pub fn fetch_args(cfg: &[String], name: &str, write_fetch_head: bool) -> Vec<String> {
+    fetch_args_for(cfg, name, write_fetch_head, None)
+}
+
+/// `--filter=<값>`(partial clone). 자유 문자열이 아니라 닫힌 값이다 — GitHub 원격 전용 저장소의 `blob:none` 하나뿐
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FetchFilter {
+    BlobNone,
+}
+
+impl FetchFilter {
+    fn arg(self) -> &'static str {
+        match self {
+            FetchFilter::BlobNone => "--filter=blob:none",
+        }
+    }
+}
+
+/// [`fetch_args`] 에 필터를 더한 것: `fetch` 와 고정 옵션 바로 뒤, `--no-write-fetch-head` 앞이다(TS `runFetch` 의 `--filter=<값>` 자리)
+pub fn fetch_args_for(cfg: &[String], name: &str, write_fetch_head: bool, filter: Option<FetchFilter>) -> Vec<String> {
     let mut v: Vec<String> = cfg.to_vec();
     v.extend(FETCH_ARGS.iter().map(|s| (*s).to_string()));
+    if let Some(f) = filter {
+        v.push(f.arg().to_string());
+    }
     if !write_fetch_head {
         v.push("--no-write-fetch-head".to_string());
     }
@@ -234,6 +258,10 @@ pub async fn run_fetch_for_test<R: GitRunner>(
     env: &HashMap<String, String>,
     platform_win32: bool,
 ) -> Result<(), ExecError> {
+    // GitHub 캐시는 자기 진입점으로만 받는다: 일반 모드의 `http.followRedirects=initial`(-c)이 실행기 환경의 `false` 를 이기고 remote 이름·자격 증명 규칙이 달라진다
+    if r.kind() == "github" {
+        return Err(ExecError::Other { message: "GitHub 원격 저장소는 run_github_fetch 로만 받는다".to_string() });
+    }
     let cfg = fetch_config_for_test(r.kind(), o.no_hooks_dir, platform_win32, o.credential_helpers).map_err(|message| ExecError::Other { message })?;
     let run_opts = RunOpts { cancel: o.cancel.clone(), fetch_env: Some(fetch_env_for_test(ins, r.kind(), env, platform_win32, o.allow_file)), ..RunOpts::default() };
     let mut first_error: Option<ExecError> = None;
@@ -249,6 +277,46 @@ pub async fn run_fetch_for_test<R: GitRunner>(
         }
     }
     first_error.map_or(Ok(()), Err)
+}
+
+/// GitHub 원격 전용 저장소의 remote. 하나뿐이다(검사가 `origin` 하나만 통과시킨다)
+const GITHUB_REMOTE: &str = "origin";
+
+pub struct GithubFetchOpts<'a> {
+    pub cancel: Option<CancellationToken>,
+    /// 훅 차단용 앱 소유의 빈 디렉터리(드라이브 문자 경로)
+    pub no_hooks_dir: &'a str,
+}
+
+/// GitHub 원격 전용 저장소(앱 캐시)의 fetch — TS `runFetch` 의 github 갈래(`env`·`filter: 'blob:none'`·`followRedirects: 'false'`).
+/// 일반 fetch 와 **같은 보안 모델**이다(고정 refspec `+refs/heads/*:refs/remotes/origin/*`·`--refmap=`·`--`·모든 `-c` 는 `fetch` 앞). 다른 점은 모드가 정한다:
+/// remote 는 `origin` 하나, `--filter=blob:none`, `http.followRedirects=false`(Authorization 헤더가 리다이렉트 너머로 가지 않게), 자격 증명 도우미 없음.
+/// 환경은 **실행기**가 붙인다(`GitExecutor::Github` — 이 함수는 `fetch_env` 를 주지 않는다). 다른 종류의 실행기로 부르면 Err 다.
+/// 설정이 기대값과 일치하는지의 검사(`inspect_github_repo`)는 호출자가 먼저 한다
+pub async fn run_github_fetch<R: GitRunner>(r: &R, repo_path: &GithubCachePath, o: &GithubFetchOpts<'_>) -> Result<(), ExecError> {
+    let repo_path = repo_path.as_str();
+    if r.kind() != "github" {
+        return Err(ExecError::Other { message: "run_github_fetch 는 GitHub 캐시 실행기로만 부른다".to_string() });
+    }
+    // 훅 경로는 일반 local 규칙이다(앱 소유 빈 디렉터리)
+    let hooks = hooks_path_for(true, Some(o.no_hooks_dir)).map_err(|message| ExecError::Other { message })?;
+    let cfg = fetch_config_args(&hooks, ConfigArgsOpts { credential_helpers: false, follow_redirects: FollowRedirects::False });
+    let run_opts = RunOpts { cancel: o.cancel.clone(), ..RunOpts::default() };
+    let (cfg, run_opts) = (&cfg, &run_opts);
+    let run = |write_fetch_head: bool| async move {
+        let args = fetch_args_for(cfg, GITHUB_REMOTE, write_fetch_head, Some(FetchFilter::BlobNone));
+        r.run(repo_path, &args, run_opts).await
+    };
+    let mut out = run(false).await?;
+    if out.code != 0 && unknown_write_fetch_head(&out.stderr) {
+        out = run(true).await?;
+    }
+    if out.code != 0 {
+        let stderr = js_trim(&out.stderr);
+        let message = if stderr.is_empty() { format!("git fetch 실패({})", out.code) } else { stderr.to_string() };
+        return Err(ExecError::Git { message, code: out.code, stderr: out.stderr.clone(), args: FETCH_ARGS.iter().map(|s| (*s).to_string()).collect() });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

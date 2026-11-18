@@ -95,11 +95,14 @@ jobs:
       # 알림·쓰기 실패·동시 쓰기·uuid. 임시 폴더에만 쓰고 사용자 설정·네트워크·git 을 쓰지 않는다. TS 테스트 대응표는 tests/golden/repos/test-map.json(vitest tests/goldenConfig.test.ts 가 누락을 강제)
       # external: 외부 열기(Phase 6b PR 3)의 경로 검증·실행 인자 계획·실행기·링크 허용이 tests/golden/external 골든과 같은지 + 가짜 의존성 시나리오 + 소스 검사(프로세스는 external/launch.rs 한 곳).
       # 에디터·터미널·탐색기·wsl.exe 를 띄우지 않는다. TS 테스트 대응표는 tests/golden/external/test-map.json(vitest 가 누락을 강제)
+      # Phase 6b PR 2 — github_cache_exec: GitHub 원격 전용 저장소 캐시 실행 기반(닫힌 환경 GithubEnv·GitExecutor::Github·init·정확 일치 검사·HEAD 맞추기·github 모드 fetch)이 tests/golden/github 골든(TS 가 만든 판정·환경 순서·가짜 실행기의 argv)과 같은지 +
+      # 실제 git(file:/// 소스 저장소만)·127.0.0.1 가짜 서버(리다이렉트를 따라가지 않음·토큰이 다른 호스트로 가지 않음)·소스 검사. github_cache_isolation: 프로세스 전역 git 설정이 적대적일 때(insteadOf·safe.bareRepository·reftable)의 격리 — 전역 설정이 다른 별도 바이너리.
+      # TS 테스트 대응표는 tests/golden/repos/test-map.json(vitest tests/goldenConfig.test.ts 가 누락을 강제), 골든은 tests/goldenGithub.test.ts 가 TS 로 만든다
       # update: 업데이트 판정 로직(Phase 6c PR 1 — semver·URL 허용 목록·매니페스트 검사·정책·오류 정화·릴리스 노트)이 tests/golden/update 골든과 같은지 + 소스 검사(입출력 없음·앱 미연결).
       # 네트워크를 쓰지 않는다. TS 테스트 대응표는 tests/golden/update/test-map.json(vitest 가 누락을 강제)
       - name: 테스트 (단위 + TS 골든 패리티 + 실행기 + 채널)
         if: steps.changes.outputs.run == 'true'
-        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route --test update --test single_instance --test env_route
+        run: cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test app_route --test net --test ssh_golden --test ssh --test ssh_route --test config --test external --test watch_route --test update --test single_instance --test env_route --test github_cache_exec --test github_cache_isolation --test github_cache_env
 
       # test-hooks(HTTP 테스트 훅, docs/tauri.md): feature 없는 빌드가 운영 모양이다 — 둘 다 돌린다
       - name: clippy
