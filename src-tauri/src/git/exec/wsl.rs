@@ -159,6 +159,42 @@ pub fn registered_distro_names() -> Vec<String> {
     Vec::new()
 }
 
+/// 등록 여부를 다시 읽는 간격(감시 폴링은 4초마다 오므로 그때마다 레지스트리를 열지 않는다. 배포판을 설치·제거하면 1분 안에 반영된다)
+pub const DISTRO_RECHECK: Duration = Duration::from_secs(60);
+
+/// WSL 사용자 배포판이 하나라도 등록돼 있는가에 대한 **기억된** 답. WSL 을 지운 PC 에도 system32 의 `wsl.exe` 스텁이 남아 부르기만 하면 "WSL 설치" 창이 뜨므로,
+/// `wsl.exe` 를 띄우는 모든 지점(실행기 생성·감시 폴링)이 먼저 묻는다. `docker-desktop*` 은 사용자 배포판이 아니다([`list_distros_with`] 와 같다).
+/// 프로브는 레지스트리만 읽는다(시험이 갈아 끼운다)
+pub struct DistroGate {
+    probe: Box<dyn Fn() -> bool + Send + Sync>,
+    recheck: Duration,
+    cache: std::sync::Mutex<Option<(std::time::Instant, bool)>>,
+}
+
+impl DistroGate {
+    pub fn new(probe: impl Fn() -> bool + Send + Sync + 'static, recheck: Duration) -> Self {
+        DistroGate { probe: Box::new(probe), recheck, cache: std::sync::Mutex::new(None) }
+    }
+
+    /// 실제 레지스트리를 읽는 관문. Windows 가 아니면 WSL 자체가 없으므로 막지 않는다(이 관문이 막는 것은 Windows 의 스텁 창이다)
+    pub fn system() -> Self {
+        Self::new(|| !cfg!(windows) || registered_distro_names().iter().any(|n| !n.starts_with("docker-desktop")), DISTRO_RECHECK)
+    }
+
+    /// 등록된 사용자 배포판이 있는가(마지막 확인이 `recheck` 안이면 그 답)
+    pub fn is_registered(&self) -> bool {
+        let mut cache = self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((at, answer)) = *cache {
+            if at.elapsed() < self.recheck {
+                return answer;
+            }
+        }
+        let answer = (self.probe)();
+        *cache = Some((std::time::Instant::now(), answer));
+        answer
+    }
+}
+
 /// 설치된 WSL 배포판 목록(TS `listWslDistros`). 레지스트리를 읽는 `registered` 와 `wsl.exe` 를 띄우는 `run` 을 주입한다.
 ///
 /// **`registered` 에 사용자 배포판이 하나도 없으면 `run` 을 부르지 않는다** — WSL 을 지운 PC 에도 system32 의 `wsl.exe` 스텁이 남아,
@@ -330,6 +366,23 @@ mod tests {
     fn 레지스트리_읽기는_패닉_없이_이름_목록을_돌려준다() {
         let names = registered_distro_names();
         assert!(names.iter().all(|n| !n.is_empty() && n == n.trim()), "{names:?}");
+    }
+
+    #[test]
+    fn 등록_관문은_답을_기억하고_간격이_지나면_다시_읽는다() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let probes = Arc::new(AtomicUsize::new(0));
+        let p = probes.clone();
+        // 첫 읽기는 없음, 이후는 있음 — 기억 중에는 바뀌지 않는다
+        let gate = DistroGate::new(move || p.fetch_add(1, Ordering::SeqCst) > 0, Duration::from_millis(150));
+        assert!(!gate.is_registered());
+        assert!(!gate.is_registered());
+        assert_eq!(probes.load(Ordering::SeqCst), 1, "간격 안에서는 다시 읽지 않는다");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(gate.is_registered(), "간격이 지나면 다시 읽어 새로 설치한 배포판이 반영된다");
+        assert_eq!(probes.load(Ordering::SeqCst), 2);
+        assert_eq!(DISTRO_RECHECK, Duration::from_secs(60));
     }
 
     #[tokio::test]

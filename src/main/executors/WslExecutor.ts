@@ -3,6 +3,7 @@ import { buildGitArgs, GIT_ENV, GitError, type GitExecutor, type RunOpts, type R
 import { runProcess, streamProcess, type SpawnSpec } from './processRunner'
 
 const LIST_TIMEOUT_MS = 8000
+const NO_DISTRO_MESSAGE = 'WSL: 등록된 배포판이 없습니다'
 
 /**
  * WSL 배포판 안에서 git 을 실행한다. repoPath 는 리눅스 경로('/home/me/repo').
@@ -17,13 +18,18 @@ const LIST_TIMEOUT_MS = 8000
 export class WslExecutor implements GitExecutor {
   readonly kind = 'wsl' as const
 
-  constructor(private readonly distro: string) {}
+  /** @param registered 등록된 배포판이 있는가(시험이 갈아 끼운다). 없으면 wsl.exe 를 띄우지 않는다 — 스텁이 "WSL 설치" 창을 띄운다 */
+  constructor(
+    private readonly distro: string,
+    private readonly registered: () => Promise<boolean> = hasRegisteredWslDistroCached
+  ) {}
 
   private spec(repoPath: string, args: string[], extraEnv?: Record<string, string>): SpawnSpec {
     return { command: 'wsl.exe', argv: wslArgv(this.distro, repoPath, args, extraEnv), env: WSL_SPAWN_ENV, gitArgs: args }
   }
 
   async run(repoPath: string, args: string[], opts?: RunOpts): Promise<RunResult> {
+    if (!(await this.registered())) return { stdout: Buffer.alloc(0), stderr: NO_DISTRO_MESSAGE, code: 0xffffffff }
     // opts.env 는 리눅스 쪽 git 에 `env` 로 전달한다(wsl.exe 프로세스 환경은 WSLENV 없이는 넘어가지 않는다)
     const r = await runProcess(this.spec(repoPath, args, opts?.env), opts)
     // wsl.exe 자체가 실패하면(배포판 없음·WSL 서비스 중지) 메시지를 stdout 으로 내고 stderr 는 비어 있다
@@ -36,6 +42,7 @@ export class WslExecutor implements GitExecutor {
   async *stream(repoPath: string, args: string[], opts?: RunOpts): AsyncIterable<Buffer> {
     // 실패했을 때 보여 줄 수 있게 앞부분만 기억해 둔다
     let head = Buffer.alloc(0)
+    if (!(await this.registered())) throw new GitError(NO_DISTRO_MESSAGE, 0xffffffff, NO_DISTRO_MESSAGE, args)
     try {
       for await (const chunk of streamProcess(this.spec(repoPath, args, opts?.env), opts)) {
         if (head.length < 4096) head = Buffer.concat([head, chunk]).subarray(0, 4096)
@@ -98,6 +105,25 @@ export function hasRegisteredWslDistro(): Promise<boolean> {
     )
   })
 }
+
+/** 등록 여부 확인 결과를 기억하는 시간. 폴링(4초)마다 reg.exe 를 띄우지 않으면서 배포판 설치·제거는 1분 안에 반영한다 */
+export const WSL_REGISTERED_TTL_MS = 60_000
+
+/** `probe` 의 결과를 `ttl` 동안 기억하는 확인 함수(동시에 부르면 하나를 같이 기다린다). 시계는 시험이 주입한다 */
+export function cachedProbe(probe: () => Promise<boolean>, ttl: number = WSL_REGISTERED_TTL_MS, now: () => number = Date.now): () => Promise<boolean> {
+  let at = -Infinity
+  let pending: Promise<boolean> | null = null
+  return () => {
+    if (pending && now() - at < ttl) return pending
+    at = now()
+    pending = probe().catch(() => false)
+    return pending
+  }
+}
+
+/** 프로세스 전역의 기억된 등록 여부 확인 — WSL 감시 폴링과 실행기가 같이 쓴다 */
+// Windows 가 아니면 막지 않는다(레지스트리도 wsl.exe 스텁도 없다 — Rust `DistroGate` 와 같다)
+export const hasRegisteredWslDistroCached = cachedProbe(() => (process.platform === 'win32' ? hasRegisteredWslDistro() : Promise.resolve(true)))
 
 /** 설치된 WSL 배포판 목록. Windows 가 아니거나 등록된 배포판이 없거나 wsl.exe 가 없거나 멈추면(8초) 빈 배열. */
 export async function listWslDistros(): Promise<string[]> {

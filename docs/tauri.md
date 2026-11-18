@@ -25,7 +25,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결) 완료(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)") |
 
 이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
 
@@ -992,8 +992,8 @@ IdentitiesOnly 필터)를 갖는다. Rust 판도 같은 구조로 간다 — 시
 - 실제 sshd 지연·패킷 손실 아래의 상한 동작은 루프백으로만 봤다.
 
 **남은 위험(3)**
-- **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널·감시가 넘어오면 줄어든다. 사이드카의 `gh:repo`·repoq 의 git 조회(`remotes`·`pushedShas`)는 **6a PR 8 이 Rust 로 옮겼다**(아래 "PR 8"). 사라지는 것은 6a 가 끝났을 때다 — 이 PR 8 만으로는 아니다:
-  RepoWatcher(PR 7b)와 저장소 **추가 흐름**의 사이드카 git(`repos:add`·`scan`·`env:test`·`env:listDir` — 6b)가 남아 있는 동안은 Rust 가 맡은 저장소에도 사이드카가 연결을 연다.
+- **호스트당 연결이 둘이 된다.** 사이드카가 `git:refs`·fetch·감시 등을 위해 `ssh2` 연결을 계속 쥐고, Rust 가 russh 연결을 하나 더 맺는다. 인증도 두 번이라 터치가 필요한 키·agent 확인이 필요한 키는 두 번 묻는다. 호스트의 접속 수 제한(`MaxSessions`·`MaxStartups`)에도 영향이 있다. Phase 6a 에서 나머지 git 채널·감시가 넘어오면 줄어든다(감시는 PR 7b 에서 넘어왔다 — Rust 가 푸는 SSH 저장소의 30초 폴링은 라우터·fetch 와 같은 풀의 연결 하나를 쓰고, 사이드카는 그 저장소를 감시하지 않는다). 사이드카의 `gh:repo`·repoq 의 git 조회(`remotes`·`pushedShas`)는 **6a PR 8 이 Rust 로 옮겼다**(아래 "PR 8"). 사라지는 것은 6a 가 끝났을 때다 — 이 PR 8 만으로는 아니다:
+  저장소 **추가 흐름**의 사이드카 git(`repos:add`·`scan`·`env:test`·`env:listDir` — 6b)가 남아 있는 동안은 Rust 가 맡은 저장소에도 사이드카가 연결을 연다.
 - **정리 경합.** 미러 변경 직전에 해석을 마친 요청이 정리(`sync_ssh_hosts`) 뒤에 `runtime()` 으로 들어오면 지운 호스트가 풀에 다시 생긴다. 다음 미러 변경이나 유휴 5분(연결 해제) 뒤에 정리되며 기능 영향은 없다.
 - `file_diff` 상한 초과(위)·실제 sshd 에서의 라우팅은 확인하지 않았다(루프백 서버만).
 - 검증 중 `cargo test` 가 한 번 `fetch_service` 의 `git clone file://…`(시험 준비용 git)에서 15분 넘게 멈춘 적이 있다 — 1회 관측, 원인은 확인하지 못했고 그 바이너리를 단독으로 다시 돌리면 통과했다(PR 3 의 코드는 그 바이너리에서 `MirrorRepo` 리터럴 한 줄만 바뀌었다).
@@ -1093,7 +1093,7 @@ ssh 저장소의 `git:fetch`(수동·자동·포커스)를 Rust 의 `FetchServic
 Rust 로 옮기는 것: 사이드카가 처리하던 git 채널 12개(`git:refs`·`refsDetails`·`search`·`activity`·`resolveRev`·`tree`·`blob`·`onRemote`·`repoExtras`·`lfsPaths`·`wipStatus`·`wipDiff`)와 RepoWatcher.
 GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 보낸다. 되돌리기 스위치는 늘리지 않는다 — `ANTLER_RUST_GIT=0`(전부 사이드카)·`ANTLER_RUST_SSH=0`(ssh 만)이 새 채널과 감시에도 그대로 적용된다.
 
-**결정(사용자 승인)**: ① refs 정렬은 `natural_compare` 근사를 유지한다(ICU 를 들이지 않는다 — 한글↔라틴 경계만 TS 와 다르다, 위 "골든 테스트"). ② `notify` 크레이트는 PR 7b 에서 도입한다(이 PR 에는 새 크레이트가 없다).
+**결정(사용자 승인)**: ① refs 정렬은 `natural_compare` 근사를 유지한다(ICU 를 들이지 않는다 — 한글↔라틴 경계만 TS 와 다르다, 위 "골든 테스트"). ② `notify` 크레이트는 PR 7b 에서 도입한다(7a 까지는 새 크레이트가 없다 — 도입 내역은 아래 "PR 7b").
 ③ #113 에서 TS 에 들어간 방어(untracked 허용 목록·정션/심볼릭 링크 거부·unstaged `~숫자` 거부·서브모듈 경로 검증과 realpath)는 Rust 에 **동등 이상으로** 옮긴다.
 ④ PR 8(`gh:repo`·repoq 의 git 조회를 Rust 가 처리)은 6a 에 **포함**한다(2026-11-17) — 하지 않으면 SSH 호스트당 사이드카 `ssh2` 연결이 6a 뒤에도 남는다.
 
@@ -1105,7 +1105,7 @@ GitHub 원격 전용(github kind) 저장소는 미러가 계속 사이드카로 
 | 4 | `search`·`activity` | 있음 | **완료** |
 | 5 | `repoExtras`·`lfsPaths` | 있음 | **완료(코드)** — 작업 트리 `--no-index` 읽기는 #121 의 `FilterGuard` 로 필터를 무력화한다(아래 "필터 실행 차단") |
 | 6 | `wipStatus`·`wipDiff`(filter 드라이버 무력화 — 보안 리뷰 집중) | 있음 | **완료(코드)** — 사람 확인 항목은 아래 "PR 6" 절 |
-| 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | 7a **완료** |
+| 7a / 7b | 7a: 감시 상태 기계·가짜 `DirWatch`·멈춘 시계 시험. 7b: notify 어댑터·라우팅·포커스 배선·사이드카 감시 `owns`·activity 의 시그니처 재사용 | 7a 없음 / 7b 있음 | 7a·7b **완료** |
 | 8 | `gh:repo`·repoq 의 git 조회 | 있음 | **완료(코드)** — 저장소 추가 흐름의 사이드카 git 은 6b 몫이다 |
 
 모든 PR 의 제목은 `refactor:` 다(야간 릴리스 회피). 마지막 PR 에서 이식 대응표의 `N/A: PR n` 이 0개여야 한다.
@@ -1267,8 +1267,8 @@ TS `RepoService` 가 쥔 상태 둘을 Rust 에 둔다. 소비자(`refsDetails`�
 - 공유 계산은 spawn 한 태스크이고 제한 시간이 지나면 계산에 취소를 보낸다(TS 는 `AbortSignal.timeout`). 대기자가 모두 떠나도 끝까지 간다.
 - 패닉한 계산은 `Failed` 로 돌려주고 진행 중 표에서 빠진다(TS 에는 해당 없음).
 
-**소비 금지**: `known_signature` 는 **감시(PR 7b)가 갱신하기 전까지 소비하지 않는다** — 감시와 `activity` 가 다른 프로세스에 있으면 기억값이 낡는다(계획 §2). PR 4 의 `activity` 는 기억값을 쓰지 않고 `shared_signature` 로 매번 얻는다.
-이 PR 은 사이드카가 보내는 `repo:changed`(감시 이벤트)는 **연결하지 않았다** — 감시는 PR 7 의 몫이고, 지금 Rust 상태를 갱신할 감시자가 없다.
+**소비 금지(PR 7b 에서 풀었다)**: `known_signature` 는 **감시(PR 7b)가 갱신하기 전까지 소비하지 않는다** — 감시와 `activity` 가 다른 프로세스에 있으면 기억값이 낡는다(계획 §2). PR 4 의 `activity` 는 기억값을 쓰지 않고 `shared_signature` 로 매번 얻었고, 7b 에서 Rust 감시가 확인마다 기억값을 갱신하면서 TS 처럼 기억값을 먼저 쓰게 했다.
+이 PR 은 사이드카가 보내는 `repo:changed`(감시 이벤트)는 **연결하지 않았다** — 감시는 PR 7 의 몫이었다(7b 에서 Rust 감시가 직접 낸다).
 
 **대응표**(`test-map.json`): `repoService` 의 첫 페이지 문 `it` 2개(문 열림·`logFirstPage`)만 `repo_state.rs::…` 로 연결했다(`golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `repo_state.rs` 를 더했다).
 TS 가 `activity` 결과로 관찰하던 4개(`logStale`·`fetchChanged`·시그니처 재사용·`StaleLogError`)는 `N/A: PR 4` 로 되돌렸다 — 이 PR 의 상태 수준 시험(기억이 비었는가·합류했는가·낡은 계산이 덮지 못하는가)은 `activity` 결과를 보증하지 않으므로, **PR 4 가 `activity` 수준 시험으로 다시 매핑해야 한다**(PR 4 에서 했다 — 아래).
@@ -1374,6 +1374,7 @@ git 단계는 작성자·시각을 고정해(`REFS_STEP_ENV`) 커밋·스태시 
 **activity 의 순서와 시그니처(핵심 결정)** — TS 와 같은 순서다: 같은 키(`activity\0<repoId>\0<범위 키>`)의 진행 중 요청에 합류 → 첫 페이지 문(`RepoState::after_first_page`) → 시그니처 → 캐시(`(시그니처, 결과)` 8개, **삽입 순서** — 적중해도 순서가 안 바뀌고 같은 키를 다시 넣으면 맨 뒤) → 큐 슬롯 안에서 스트림. 빈 저장소는 빈 결과다.
 - **기억한 시그니처(`known_signature`)를 소비하지 않는다.** TS 는 감시가 갱신하는 `knownSigs` 를 재사용하지만(`RepoService.ts:823`), 이 PR 에는 Rust 쪽 감시가 없어 기억값을 갱신할 주체가 없다 — 소비하면 낡은 값이 캐시 적중을 만든다. 그래서 매번 `shared_signature` 로 새로 계산한다(진행 중인 계산에 합류, 제한 20초).
   `shared_signature` 가 기록하는 것(`finish`)은 그대로라 기억값은 계속 갱신되고, 읽는 곳이 없을 뿐이다. 7b 가 감시로 기억값을 갱신하기 시작하면 이 한 줄(`activity_job` 의 `shared_signature` 호출)을 `known_signature` 우선으로 바꾼다. 대가: activity 호출마다 git 3번이 는다(캐시 적중이어도).
+  **→ PR 7b 에서 `known_signature` 우선으로 바꿨다**(`activity_job`: 기억값이 있으면 그것, 없으면 `shared_signature`). 아래 "PR 7b".
 - **PR 3a 계약**: 공유 계산은 spawn 된 태스크라 future 를 버려도 멈추지 않으므로, 넘긴 계산(`queued_signature`)은 받은 토큰을 **큐 슬롯 대기**(`queue.run(None, Some(token))`)와 **git 실행**(`refs_signature_digest(.., &token)`) 모두에 건다. 제한 시간의 취소가 닿는 길은 이 토큰뿐이다. 큐의 결과 타입이 JSON 이라 시그니처는 셀로 꺼낸다(큐 밖에서 git 을 돌리지 않는다).
 - **합치기는 슬롯과 분리한다.** 합치기를 소스의 큐 키(`queue.run(Some(key))`)로 하면 합친 작업 안에서 시그니처가 같은 큐의 슬롯을 또 요구한다 — 한도(local 6·wsl 4·ssh 4)만큼 겹치면 서로 슬롯을 쥔 채 기다려 20초 제한까지 막힌다.
   그래서 합치기 전용 큐(`Router::joins`, 슬롯 2^20 개라 막지 않는다 — 합치기·"기다리는 쪽이 모두 떠나면 버려진다"는 `ProcessQueue` 의 키 요청 구현을 그대로 쓴다)에서 하고, 실제 git 은 소스의 큐에서 슬롯 하나씩만 쥔다(`활동_요청은_합쳐지고_큐_한도보다_많아도_서로_막지_않는다` — 키가 다른 요청 16개를 local·ssh 로 돌린다).
@@ -1402,14 +1403,14 @@ TS 하네스는 `git` 단계 뒤에 `svc.noteLog('logStale', id)` 를 부른다 
 | 시그니처 재사용 | `활동은_기억한_시그니처를_재사용하지_않고_알림_없이도_매번_새로_계산한다` | **TS 와 반대로 "재사용하지 않음"을 단정한다** — 첫 활동 뒤 기억이 있어도 알림 없이 커밋하면 활동이 +1(기억값을 읽는 구현이면 캐시 적중으로 낡은 값이 나온다), 기억이 갱신되고, 바뀐 게 없으면 캐시 적중, ref 삭제도 반영 |
 | `StaleLogError` | `로그가_stale_을_알린_뒤의_활동은_바뀐_이력을_센다` | `git:log` 가 STALE 을 내는 시나리오(`branchy`: 커서를 물리고 `topic` 삭제) 뒤 활동 total = `rev-list --count`(줄었다) |
 
-주의: 앞의 두 알림 시험은 PR 4 에서는 **알림이 없어도 통과한다**(기억값을 안 읽으므로). 알림이 활동 결과를 깨지 않음을 보증할 뿐이고, 알림이 필요해지는 것은 7b 가 재사용을 켜는 때다(그때 알림 없이는 낡은 값이 나오므로 이 시험이 의미를 갖는다 — 7b 에서 "알림 없이는 낡다"를 단정하는 시험을 더한다).
+주의: 앞의 두 알림 시험은 PR 4 에서는 **알림이 없어도 통과했다**(기억값을 안 읽으므로). 7b 가 재사용을 켜면서 알림 없이는 낡은 값이 나오므로 이 시험이 의미를 갖게 됐고, 세 번째 시험(재사용)은 "알림 없이는 낡다"를 단정하는 시험으로 되돌렸다(`감시가_계산한_ref_시그니처를_활동_조회가_다시_계산하지_않고_쓴다`).
 `golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `search.rs` 를 더했다. 이 PR 뒤 `<파일>.rs::<fn>` 115개, `N/A: PR n` 41개, 사유 있는 N/A 43개(합 199).
 
 **TS 와 다른 점**
 - 비문자열·누락 질의의 문구가 `invalid query` 다(TS 는 `query.trim is not a function` TypeError — code 는 같은 ERROR, 골든은 이 입력의 문구를 비교하지 않는다). NUL 질의는 Rust 가 git 전에 거부하고 TS 는 spawn 검사가 거부한다(둘 다 ERROR).
 - 세 갈래 중 하나가 실패하면 TS 는 가장 먼저 거절된 것의 오류를 내고(`Promise.all`) Rust 는 `try_join!` 로 같다 — 나머지 갈래는 TS 에서는 계속 돌지만 Rust 는 future 를 버려 git 이 정리된다(결과에 영향 없음).
 - SSH 의 선읽기 초과가 검색 병합·활동 집계에서 ERROR 다(위). TS(ssh2)는 backpressure 라 없다.
-- activity 는 호출마다 시그니처를 새로 계산한다(위) — TS 는 감시가 갱신한 기억값을 재사용한다. 7b 에서 맞춘다.
+- activity 는 호출마다 시그니처를 새로 계산했다(위) — TS 는 감시가 갱신한 기억값을 재사용한다. **7b 에서 맞췄다.**
 - 시그니처 계산 실패의 code 를 GIT 으로 맞췄다(`signature.rs`, 위).
 - 같은 키 활동 요청의 합치기는 `futures::Shared`(키 큐)이고 TS 는 `AbortController` + 구독자 수다 — 관찰되는 동작(모두 떠나면 git 종료, 한쪽 취소가 다른 쪽을 죽이지 않음)은 같다.
 
@@ -1419,7 +1420,7 @@ TS 하네스는 `git` 단계 뒤에 `svc.noteLog('logStale', id)` 를 부른다 
 - 실제 sshd 의 SSH 저장소(큰 저장소)에서 검색·미니맵이 호스트당 연결 하나로 열리는지(원격 `ss`/`who`)와 16MB 선읽기 초과 시 오류가 나지 않는지. 이 PC 에는 WSL 이 없어 WSL 저장소는 **실행해 보지 않았다**(질의는 `--grep=<q>` 한 인자로 `wsl.exe` argv 에 실린다 — 인자 단위 시험과 `tests/exec.rs` 의 `wsl_통합` 이 덮는다).
 
 **남은 위험**
-- activity 가 호출마다 git 3번(시그니처)을 더 돈다 — 느린 SSH·큰 저장소에서 미니맵 지연이 TS 보다 클 수 있다(7b 까지). 캐시 적중이어도 시그니처는 매번 계산한다.
+- (PR 4 시점, 7b 에서 해소) activity 가 호출마다 git 3번(시그니처)을 더 돈다 — 느린 SSH·큰 저장소에서 미니맵 지연이 TS 보다 클 수 있다. 캐시 적중이어도 시그니처는 매번 계산한다.
 - `-F -i --grep=` 이 git 판마다 같다고 가정한다(다중 행 질의 `a\nb` 는 줄마다 OR 패턴이 된다 — 골든이 이 동작을 고정한다. 두 판이 같은 git 을 쓰므로 일치하지만 git 판이 바뀌면 골든 갱신이 필요할 수 있다).
 - **SSH 선읽기 초과 분기(검색 병합·활동 집계)는 실행된 적이 없다** — 소비가 빨라 시험에서 상한(16MB, 시험 훅으로 줄일 수 있다)에 닿게 만들지 못했다. 코드는 `log_service` 의 같은 분기를 따랐을 뿐이다. 취소 시험은 2ms 뒤 취소라 스트림 도중에 끊겼는지는 알 수 없다(어느 쪽이든 ABORTED 이거나 정상 끝이어야 하고 슬롯·합치기 표가 풀려 다음 요청이 받아지는 것만 본다).
 - 합치기 큐(`joins`)의 키 표는 버려진 요청의 항목을 다음 요청이 넣을 때 치운다(`ProcessQueue` 의 기존 동작) — 저장소·범위 조합 수에 비례한 작은 표다.
@@ -1466,7 +1467,7 @@ TS 하네스는 `git` 단계 뒤에 `svc.noteLog('logStale', id)` 를 부른다 
 "사이드카로 가는 다른 채널" 예시(`api_route.rs`·`channels.rs`·`router.rs` 단위)는 `git:lfsPaths` 에서 `config:get` 으로 바꿨다(PR 6·7 에서 옮겨질 git 채널 대신 6b 까지 남는 비 git 채널).
 
 **대응표**(`test-map.json`): `N/A: PR 5` 9개를 전부 Rust 대응으로 바꿨다 — `lfsGitflow` 의 실제 git `it` 8개는 `channels.rs::lfs_gitflow_시나리오가_ts_골든과_같다`(LFS 사용·gitflow·하위·info·커밋 없음·묶음),
-필터 미실행은 `악성_저장소의_필터는_lfs_paths_가_실행하지_않는다`(`check-attr` 길)·`no_index_읽기는_…`(작업 트리 읽기), rev·NUL 검증은 `적대적_lfs_요청은_git_을_띄우지_않는다`, 전역 gitflow 무시는 `lfs.rs::argv_는_ts_와_바이트까지_같다`(argv `--local`). 이 PR 뒤 `N/A: PR n` 은 PR 6(wip 계열)·7b(repoWatcher)·8 분만 남는다.
+필터 미실행은 `악성_저장소의_필터는_lfs_paths_가_실행하지_않는다`(`check-attr` 길)·`no_index_읽기는_…`(작업 트리 읽기), rev·NUL 검증은 `적대적_lfs_요청은_git_을_띄우지_않는다`, 전역 gitflow 무시는 `lfs.rs::argv_는_ts_와_바이트까지_같다`(argv `--local`). 이 PR 뒤 `N/A: PR n` 은 PR 6(wip 계열)·7b(repoWatcher)·8 분만 남았다(7b 는 이후 끝났다).
 `tests/noIndexFilter.test.ts`(#121)도 대응 대상에 넣었다(`golden6a.test.ts` `TARGET_TESTS`): `repoExtras` 쪽 4개 `it` 는 `channels.rs::no_index_읽기는_…`(local)·`…ssh_에서도_…`(루프백 SSH)로, `wipFileDiff(untracked)` 2개는 `N/A: PR 6`.
 `no_index_*` 시험: 실제 저장소에 표지 명령(`sh -c "echo x > <임시>/MARK-…; cat"`)을 심은 `filter.evil.clean` 을 두고 **대조군**(가드 없는 `git diff --no-index` 가 표지를 만든다)·작업 트리 `.gitattributes`·`info/attributes`·이름에 `=` 인 드라이버(`lfs:false`)를 `git:repoExtras`(라우터 경유)로 불러 표지가 없고 lfs 판정이 TS 와 같음을 본다. 가드를 빼면(`no_index_args(&FilterGuard::none(), …)`) 두 시험이 실패함을 확인했다.
 
@@ -1798,6 +1799,65 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다 — 골든
 - 호스트 키 안내 문구는 TS 에 없다(TS 는 `ssh CLI` 안내만). 실행기의 오류 문구(골든 대상)는 바꾸지 않고 `test_ssh_env` 가 덧붙인다.
 
 **남은 위험**: 레지스트리 열거는 `windows` API 를 직접 부르는 `unsafe` 다(키 이름·값 버퍼 크기와 256개 열거 상한으로 막았다). 이 PC 는 WSL 이 제거돼 **등록된 배포판이 있는 레지스트리를 실제로 읽는 경로는 확인하지 못했다**(시험은 읽기가 패닉 없이 정리된 이름 목록을 돌려주는지만 본다). 앱 연결(PR 8·9)에서 WSL 이 있는 PC 로 사람이 확인한다.
+
+### PR 7b — 실제 저장소 감시를 Rust 가 맡는다
+
+**새 의존 크레이트(사용자 승인)**: `notify = { version = "8.2.2", default-features = false }`(9.0 은 프리릴리스라 쓰지 않는다. default 를 끄면 macOS 의 `macos_fsevent` 가 빠진다 — notify 의 `RecommendedWatcher` 는 macOS 에서 `macos_fsevent`(기본)나 `macos_kqueue` 가 있어야 정해지므로, macOS 빌드를 하는 6c 에서 `macos_fsevent` 를 켠다. 지금은 macOS 빌드를 하지 않는다).
+`cargo tree -e normal -p notify` 로 확정한 새 크레이트:
+- **Windows 그래프: `notify`·`notify-types` 둘뿐**이다(`walkdir`·`same-file`·`winapi-util`·`windows-sys`·`libc`·`log`·`bitflags` 는 이미 있었다). Windows 백엔드는 ReadDirectoryChangesW 재귀다.
+- `Cargo.lock` 에는 다른 OS 몫이 넷 더 들어온다: `inotify`·`inotify-sys`(Linux), `kqueue`·`kqueue-sys`(BSD·macOS 의존 선언 — notify 의 `Cargo.toml` 이 BSD·macOS 타깃에 건다). 6c 에서 `macos_fsevent` 를 켜면 macOS 용 크레이트(`objc2-core-*`)가 더해진다. 넷 모두 Windows 빌드에는 컴파일되지 않는다.
+- 이 외의 크레이트는 더하지 않았다(`mio` 는 이미 락에 있다).
+
+**구성**
+- `git/fs_watch.rs`(새) — `NotifyDirs`(`DirWatch` 구현). notify 이벤트를 **감시 디렉터리 기준 상대 경로**의 `WatchEvent` 로 바꾼다(notify 는 넘긴 루트에 이름을 붙여 보고하므로 같은 `Path` 로 `strip_prefix`, 못 떼면 경로 없음 = 항상 확인 — 8.3 짧은 이름도 같은 문자열이라 맞는다). 접근(`Access`)·오류는 버린다(notify 8.2 의 inotify 감시 마스크에 `OPEN`·`CLOSE_WRITE` 가 있어 열기·쓰기 닫기가 접근 이벤트로 온다 — 우리 git 의 읽기가 확인을 부르는 고리가 되지 않게. Windows 백엔드는 접근 이벤트를 내지 않는다. TS 는 `w.on('error', () => {})`), 넘침(rescan 표시)은 확인한다.
+  `has_head`(stat)·감시 등록은 **blocking 풀**에서 돌린다 — 그래서 `DirWatch` 두 메서드를 future 로 바꿨다(7a 의 시험 가짜는 즉시 끝나는 future).
+- `watch_host.rs`(새) — `RouterWatchHost`(`WatchHost` 구현): 종류·소유는 `RepoMirror::resolve_fetch`, 첫 페이지 문은 `RepoState::after_first_page`, 시그니처는 **취소 신호가 있으면 `compute_signature`(합치지 않고 따로, 순번은 호출 시점), 없으면 `shared_signature`**(제한 20초 공유 계산) — 둘 다 성공하면 `known_signature` 를 갱신한다.
+  git 디렉터리는 로컬만 `rev-parse --path-format=absolute --git-dir --git-common-dir` 로 구한다(WSL·SSH 는 폴링만). 변화는 주입한 `ChangeSink` 로 낸다.
+- `router.rs` — `Runtimes`(소스별 실행기·큐·SSH 풀)를 라우터와 감시 호스트가 **같이 쥔다**(그래서 SSH 감시가 같은 풀의 연결 하나를 쓴다 — 감시용 연결이 따로 생기지 않는다). `repos:watch` 가로채기가 `arm` 다음에 `set_watch` 를 부른다: `resolve_fetch` 가 `Rust` 인 저장소면 감시를 시작·교체(대상이 달라졌어도 다시 시작), 아니면 **반드시 멈춘다**.
+  `on_mirror_changed` 가 감시 대상을 맞춘다(제거·Rust 가 맡지 않게 됨 → `unwatch_if`, 대상 변경 → 재시작 — SSH 연결 정리보다 먼저). `shutdown` 은 **문을 풀기 전에** 감시를 끝낸다(종료 중에 기준 계산 git 이 뜨지 않게). `watch_focus`(`lib.rs` 의 창 `Focused` — 얻을 때도 잃을 때도)는 플래그와 `Notify` 만 만지므로 런타임 밖 스레드에서 부른다(`in_runtime_of` 밖).
+  `lib.rs` 는 `fetch_host::change_sink` 를 사이드카 기동 전에 단다 — 사이드카의 `repo:changed` 와 같은 모양의 `antler:evt`.
+- `watcher.rs` — `DirWatch` future 화와 `PollTimes`(폴링 주기 주입 — `RepoWatcher::with_poll`. 기본은 TS 상수). 상태 기계는 그대로다.
+
+**소유 전환은 이 PR 하나에서 끝낸다(감시 소유 판정 = fetch 와 같은 한 술어)**
+- Rust: `resolve_fetch`(소스 종류가 먼저 — `rust_fetch_kinds(ssh_active)` 의 종류). 사이드카: 같은 값을 env `ANTLER_RUST_FETCH_KINDS` 로 받아 `fetchOwner` 로 판정하고, **`FetchService` 와 `RepoWatcher` 에 같은 함수 하나(`ownsRepo`)를 준다**(`src/sidecar/index.ts`).
+  `RepoWatcher` 의 선택 인자 `owns`(기본은 전부 — Electron 불변)가 거짓이면 `watch()` 는 id 만 기억하고 기준 계산·디렉터리 감시·폴링·포커스 확인(`check`)을 모두 건너뛴다. `repos:remove` 의 `watcher.current` 비교는 그대로 동작한다.
+- 결과: local·WSL(·Rust 가 푸는 ssh)은 Rust 만, github·미러에 없는 id 는 사이드카만 감시한다 — 이중 감시도 무감시 구간도 없다. 종류는 Rust 소유인데 미러 검사에 걸린 저장소(UNC 경로·잘못된 SSH 호스트)는 **Rust 도 사이드카도 감시하지 않는다**(그 저장소의 채널은 어차피 ERROR 다).
+  `ANTLER_RUST_GIT=0` 이면 env 가 없어 사이드카가 전부 감시하고 Rust 감시자는 만들어지지 않는다. env 이름이 의미보다 좁아진 것(`..._FETCH_KINDS`)은 6b 에서 정리한다.
+
+**activity 의 시그니처 재사용을 켰다**: `activity_job` 이 `known_signature` 가 있으면 그것을, 없으면 `shared_signature` 를 쓴다(TS `knownSigs.get(repoId) ?? sharedSignature`). PR 4 의 "호출마다 git 3번이 는다"는 해소됐다. 감시하지 않는 저장소의 기억값은 알림 없이 낡을 수 있다 — TS 도 같다.
+`channels.rs` 의 골든 러너는 `git` 단계 뒤에 TS 하네스처럼 `NoteOp::Stale` 알림을 보낸다.
+
+**시험**: 새 바이너리 `tests/watch_route.rs`(CI 목록에 추가) 11개 — **우리 git 의 읽기 전용 조회(`for-each-ref`·`symbolic-ref`·`rev-parse`)가 확인을 부르는 이벤트를 만들지 않음**(자기 유발 고리 없음 — 접근 이벤트는 Windows 백엔드가 내지 않아 Linux 에서 더 의미가 크다), 실제 git·파일 변화로 **외부 커밋·브랜치는 알리고 `git config` 변경은 알리지 않으며(정확한 알림 수 3), 멈춘 뒤에는 알림도 notify 핸들도 없다**(TS `repoWatcher.test.ts` 이식),
+감시가 변화를 알면 알림 없이도 활동이 새로 센다, 활성 저장소 교체(이전 감시 닫힘·새 저장소만 알림), 소유 판정(local 만 감시 / github·ssh(풀 없음)·UNC·없는 id 는 감시하지 않고 이전 감시를 멈춘다 / 스위치 끔이면 감시기 0 / `rust_fetch_kinds` 와 `resolve_fetch` 가 같은 종류를 가리킴 / `src/sidecar/index.ts` 가 두 서비스에 같은 `ownsRepo` 를 줌),
+미러 변화(제거 → `unwatch_if`·경로 변경 → 재시작·변화 없음 → 건드리지 않음), 종료·`Router` drop 뒤 notify 스레드 0, **루프백 SSH 서버에서 폴링(짧은 주기 주입)으로 알리고 `connections()==1`·notify 0·제거되면 감시 정지와 연결 닫힘**, 포커스를 얻으면 30초 주기를 기다리지 않고 바로 확인.
+`fs_watch.rs` 단위 4개(이벤트 변환 표 — 접근·오류 버림·경로 상대화·경로 없음·rescan / **실제 임시 디렉터리에서 `objects/` 변화는 이벤트로 오되 `should_kick()` 가 거짓이고 `refs/` 는 참**, 절대 경로가 새지 않음 / HEAD 없음·없는 디렉터리 거부와 등록 실패가 살아 있는 수를 남기지 않음 / 8개를 열고 닫으면 스레드 0), `watch_host.rs` 1개(git 디렉터리 목록 파싱).
+`watcher.rs` 의 28개는 그대로 통과한다(가짜 이벤트원이 future 를 돌려주도록만 바꿨다). `channels.rs` 의 활동 시험 세 개는 의미를 되돌렸다(알림 시험은 알림 없이는 낡은 값이 나오므로 의미를 갖고, 재사용 시험은 "알림 없이는 낡다"를 단정). 대응표(`test-map.json`)의 `N/A: PR 7b` 는 `watch_route.rs::…` 로, 활동 재사용 항목은 `channels.rs::감시가_계산한_ref_시그니처를_활동_조회가_다시_계산하지_않고_쓴다` 로 바뀌었다
+(`golden.rs` 의 `source_of`·`golden6a.test.ts` 의 `RUST_SOURCES` 에 `watch_route.rs` 를 더했다). 사이드카: `tests/sidecarWatchOwns.test.ts` 4개(맡지 않는 저장소는 `afterFirstPage`·`signature` 등 RepoService 를 부르지 않고 포커스·전환에도 확인하지 않음 / 종류별 소유 / env 없음·Electron 은 전부 감시 / 맡지 않는 저장소와 맡는 저장소 사이 전환).
+파일 감시·소켓 시험은 고정 `sleep` 없이 **조건 + 20초 상한**으로 기다린다. 부정은 "다음 양성 이벤트 뒤의 정확한 알림 수"로 본다.
+
+**TS 와 다른 점**
+- **notify 핸들 닫기가 완전히 동기가 아니다.** notify 의 `Drop` 은 스레드에 정지만 알리고 돌아온다(join 하지 않는다). 핸들 `Drop` 은 **닫기 요청을 즉시** 하고, 완료(notify 스레드가 이벤트 핸들러를 놓는 때)를 기다리는 것은 tokio 런타임 밖이거나 앱 종료 중(`RepoWatcher::dispose` → `DirWatch::begin_shutdown`)일 때뿐이다(최대 `CLOSE_WAIT` 1.5초). 런타임 안에서는 기다리지 않는다 — 보안 리뷰: 최대 1.5초 대기가 사이드카 리더 스레드와 `watch_target` 잠금 안(`router.rs` `set_watch`·`sync_watch`)에서 돌아 다른 요청을 막았다. 그래서 7a 시험의 "`watch(None)` 반환 전에 핸들이 닫힌다" 계약은 **"닫기 요청은 즉시, 완료는 비동기"** 로 고쳤다(가짜 핸들은 여전히 반환 전에 버려진다. 실제 핸들은 `live()` 가 곧 0 이 된다 — 시험은 조건으로 기다린다).
+  호출 스레드(tokio 워커)는 그만큼까지 막힐 수 있다(보통 몇 ms). 디렉터리를 **여는 중에**(blocking 풀에서 등록하는 동안) 정지하면 그 핸들은 곧 버려진다 — 살아 있는 수(`NotifyDirs::live`)가 잠깐 남을 수 있어 시험은 0 이 될 때까지 기다린다. 지운 뒤 폴더를 삭제하는 것은 github 캐시뿐이고 그것은 사이드카 몫이라 무해하다.
+- 접근 이벤트를 버린다(Node `fs.watch` 는 inotify 의 열기·닫기를 알리지 않는다). 이벤트 세부(Windows ReadDirectoryChangesW vs `fs.watch`)는 다르지만 판정은 시그니처로만 하므로 결과는 같다.
+- SSH 폴링 시험은 포커스 신호·짧은 주기 주입을 쓴다(멈춘 시계는 실제 소켓 대기 중 자동 전진으로 제한 시간을 헛발화시켜 쓰지 않았다). 30초 기본 주기 자체는 7a 의 멈춘 시계 시험이 덮는다.
+
+**사람 확인(자동화 불가·실환경)**
+- 앱에서 외부 도구로 커밋·브랜치 생성·체크아웃을 했을 때 그래프가 갱신되는지, Rust 가 맡는 저장소(local)에서 `ANTLER_ROUTE_LOG=1` 로 사이드카가 감시하지 않는지(사이드카 쪽 `repo:changed` 가 중복으로 오지 않는지). `ANTLER_RUST_GIT=0` 이면 사이드카가 감시하는지.
+- 실제 큰 저장소(10만 커밋)에서 `git fetch`·`gc` 중 notify 이벤트 폭주 때 CPU 와 `repo:changed` 가 2초 간격 안으로 묶이는지.
+- 실제 sshd 의 SSH 저장소에서 30초 폴링이 호스트당 연결 1개로 도는지(원격 `ss`/`who` — **저장소를 추가한 직후는 제외**: 추가 흐름은 사이드카 실행기를 쓴다). **WSL 은 이 PC 에 없어 실행해 보지 않았다**(4초 폴링은 상태 기계 시험이 덮고, 소유 판정은 종류 대조라 WSL 도 같은 술어다).
+- 네트워크 드라이브(매핑된 `Z:` 등)에 있는 로컬 저장소: `has_head`·감시 등록이 blocking 풀이라 UI 가 멈추지 않는지(UNC 경로는 감시하지 않는다).
+
+**남은 위험**
+- **디렉터리를 여는 동안의 정지·종료**: 위(살아 있는 수가 잠깐 남는다). 앱 종료(`RunEvent::Exit`)는 `shutdown` 이 `dispose` 로 핸들을 닫고(이때만 런타임 안에서도 동기로 기다린다), notify 스레드가 1.5초 안에 끝나지 않으면 기다리지 않고 돌아온다(프로세스가 끝나며 정리된다).
+- 매핑된 네트워크 드라이브에서 notify 가 이벤트를 놓치면 60초 안전망 폴링이 잡는다(TS 와 같다).
+- 감시하지 않는 저장소(비활성)의 `known_signature` 는 알림 없이 낡을 수 있고 activity 가 그것을 재사용한다(TS 와 같다). 활성 저장소는 감시가 갱신한다.
+- 파일 감시 시험은 CI 러너의 부하에 약할 수 있다(상한 20초). 다른 빌드가 도는 PC 에서 `channels.rs` 72개를 `--test-threads` 없이 돌리면(20분 걸렸다) 7개가 실패했다(SSH 시나리오 ERROR·활동 ABORTED·fetch 승인 불일치). `--test-threads=2` 로 그 7개를 다시 돌리면 모두 통과했다 — 부하 탓으로 보지만 origin/main 에서의 대조는 하지 않았다.
+- 감시 방어(UNC·NT 네임스페이스·링크·`HEAD` 없는 디렉터리 거부, `objects/` 무시)는 `docs/security.md` 의 "저장소 감시" 에 적었다.
+
+**보안 리뷰 후속(LOW 4건 + WSL 폴링)** — 같은 PR 에 포함했다.
+- **감시 게이트가 링크·NT 경로를 따라가지 않는다.** `has_head` 는 `symlink_metadata`(디렉터리 자체가 실제 디렉터리, `HEAD` 가 실제 파일)로 본다 — `exists` 는 링크를 따라가 UNC 를 가리키는 링크면 stat 이 SMB 접속을 일으킨다. 거부 경로는 `is_unc` 에 NT 네임스페이스(`\??\UNC\…`, `fetch::guard::has_nt_namespace`)를 더한 `is_remote_path` 이고 stat **전에** 거른다. notify 는 `follow_symlinks(false)` 로 만든다. **Electron 동작도 같이 바꿨다**: `RepoWatcher.ts` 의 `isWatchableGitDir`(`lstatSync` · NT 접두 정규식 · 디렉터리 링크 거부). 시험 `tests/repoWatcherGate.test.ts`.
+- **`local_git_dirs` 에 취소와 20초 제한.** `DirWatch` 가 아니라 `WatchHost::local_git_dirs(repo_id, cancel)` 가 취소 신호를 받고, 감시가 `CHECK_TIMEOUT` 안에 끝나지 않으면 신호를 취소해 git 을 죽인다(감시 없이 안전망 폴링만 남는다). 저장소를 바꾸면 같은 신호가 취소된다.
+- **WSL 배포판 등록 관문(Electron 판 버그 수정 포함 — PR 설명에 적는다).** WSL 저장소가 활성이면 4초마다 `wsl.exe` 를 불렀는데 등록 확인이 없어, WSL 을 지운 PC 에서 system32 의 스텁이 "WSL 설치" 창을 띄운 일이 실제로 있었다. Rust: `exec::DistroGate`(레지스트리 `registered_distro_names` 의 기억된 답 — `docker-desktop*` 은 사용자 배포판이 아니다, 다시 읽기 `DISTRO_RECHECK` 1분, Windows 가 아니면 막지 않는다)를 `Runtimes::get` 의 WSL 분기에 둬 감시 폴링·`signature` 가 모두 지난다(등록이 없으면 실행기를 내주지 않아 `wsl.exe` 호출 0). **한계**: fetch 서비스의 실행기 생성(`lib.rs` `make_runner`)은 `Result` 를 돌려주지 않아 이번에 관문을 달지 않았다. TS: `hasRegisteredWslDistro` 의 1분 캐시판(`hasRegisteredWslDistroCached`·`cachedProbe`)을 `RepoWatcher`(기준·확인)와 `WslExecutor`(`run`·`stream`)가 쓴다 — 시험이 주입한다(`RepoWatcher` 4번째·`WslExecutor` 2번째 인자).
 
 ## Phase 0 에서 확인한 것
 

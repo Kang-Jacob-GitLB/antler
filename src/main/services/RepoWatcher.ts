@@ -1,6 +1,21 @@
-import { existsSync, watch, type FSWatcher } from 'node:fs'
+import { lstatSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
+import { hasRegisteredWslDistroCached } from '../executors/WslExecutor'
 import type { RepoService } from './RepoService'
+
+/**
+ * 감시해도 되는 git 디렉터리인가 — 링크를 따라가지 않고(lstat) 본다. 악성 저장소의 `.git` 이 gitdir 로 UNC 경로나 심볼릭 링크를 가리키면
+ * stat 만으로도 SMB 접속이 일어난다. 네트워크 경로(`\\`·`//`)·NT 네임스페이스(`\??\UNC\…`)·디렉터리 자체가 링크인 경우·`HEAD` 가 링크이거나 파일이 아닌 경우는 거부한다
+ */
+export function isWatchableGitDir(dir: string): boolean {
+  if (/^[\\/]{2}/.test(dir) || /[\\/]\?\?[\\/]/.test(dir)) return false
+  try {
+    if (!lstatSync(dir).isDirectory()) return false
+    return lstatSync(join(dir, 'HEAD')).isFile()
+  } catch {
+    return false
+  }
+}
 
 /** 원격 환경 폴링 주기(ms). 창이 포커스를 잃으면 FOCUS_SLOWDOWN 배로 늦춘다 */
 const POLL_MS = { wsl: 4_000, ssh: 30_000 } as const
@@ -35,11 +50,25 @@ export class RepoWatcher {
   private pendingSince = 0
   /** 기준 시그니처를 계산하는 중 — 이때 포커스로 확인을 또 돌리면 같은 for-each-ref 를 한 번 더 실행한다 */
   private baselining = false
+  /** 현재 저장소를 이 감시자가 맡는가. 아니면 id 만 기억하고 감시·확인(git)을 하지 않는다 */
+  private owned = true
 
+  /**
+   * @param owns 이 감시자가 맡는 저장소인가. 기본은 전부 맡는다(Electron). Tauri 사이드카는 Rust 가 감시를 맡는 종류의 저장소를 뺀다 —
+   *   fetch 와 같은 소유 판정(`ANTLER_RUST_FETCH_KINDS`, src/sidecar/fetchOwns.ts)이라 이중 감시도 무감시도 없다
+   */
   constructor(
     private readonly repos: RepoService,
-    private readonly onChange: (repoId: string) => void
+    private readonly onChange: (repoId: string) => void,
+    private readonly owns: (repoId: string) => boolean = () => true,
+    /** WSL 배포판이 등록돼 있는가(시험이 갈아 끼운다). 없으면 WSL 저장소의 폴링이 wsl.exe 를 부르지 않는다 — 스텁이 "WSL 설치" 창을 띄운다 */
+    private readonly wslRegistered: () => Promise<boolean> = hasRegisteredWslDistroCached
   ) {}
+
+  /** 시그니처를 계산해도 되는가 — WSL 저장소는 등록된 배포판이 있을 때만(1분 단위로 다시 본다) */
+  private async canCheck(repoId: string): Promise<boolean> {
+    return this.repos.repoKind(repoId) !== 'wsl' || (await this.wslRegistered())
+  }
 
   /** 지금 감시 중인 저장소 */
   get current(): string | null {
@@ -52,13 +81,16 @@ export class RepoWatcher {
     this.repoId = repoId
     const gen = ++this.generation
     if (!repoId) return
+    // 다른 쪽(Rust)이 감시하는 저장소는 id 만 기억한다 — `current` 비교(저장소 제거)는 그대로 동작하고, 포커스·타이머가 git 을 부르지 않는다
+    this.owned = this.owns(repoId)
+    if (!this.owned) return
     // 기준 시그니처를 먼저 잡아 둔다(감시 시작 전 상태와 비교). 첫 화면이 나온 뒤에 시작한다
     this.baselining = true
     try {
       await this.repos.afterFirstPage(repoId)
       if (gen !== this.generation) return
       // signal 이 없는 호출은 제한 시간이 있는 공유 계산이다 — 멈춘 원격이어도 baselining 이 영영 남지 않는다
-      this.lastSig = await this.repos.signature(repoId).catch(() => null)
+      this.lastSig = (await this.canCheck(repoId)) ? await this.repos.signature(repoId).catch(() => null) : null
       if (gen !== this.generation) return
     } finally {
       // 다른 저장소로 바뀌어 중단된 경우에는 새 감시의 상태를 건드리지 않는다
@@ -73,7 +105,7 @@ export class RepoWatcher {
   /** 창 포커스 변화. 다시 포커스를 얻으면 바로 한 번 확인한다(다른 도구에서 커밋하고 돌아온 경우) */
   setFocused(focused: boolean): void {
     this.focused = focused
-    if (focused && this.repoId && !this.baselining) void this.check(this.generation)
+    if (focused && this.repoId && this.owned && !this.baselining) void this.check(this.generation)
   }
 
   dispose(): void {
@@ -87,7 +119,7 @@ export class RepoWatcher {
     for (const dir of dirs) {
       // .git 파일의 gitdir/commondir 은 저장소가 정한다 — 악성 저장소가 홈 전체나 네트워크 경로를 가리키면
       // 재귀 감시가 이벤트 폭주(DoS)가 되므로, 실제 git 디렉터리(HEAD 가 있는 곳)이고 네트워크 경로가 아닐 때만 감시한다
-      if (/^[\\/]{2}/.test(dir) || !existsSync(join(dir, 'HEAD'))) continue
+      if (!isWatchableGitDir(dir)) continue
       try {
         const w = watch(dir, { recursive: true }, (_event, file) => {
           // 객체 파일은 fetch·gc 때 대량으로 바뀐다 — ref 가 함께 바뀌므로 그쪽 이벤트로 충분하다
@@ -138,10 +170,11 @@ export class RepoWatcher {
   private async check(gen: number): Promise<void> {
     const repoId = this.repoId
     // 진행 중 표시는 세대별이다 — 이전 저장소의 확인이 멈춰 있어도 새 저장소 감시를 막지 않는다
-    if (!repoId || gen !== this.generation || this.checkingGen === gen) return
+    if (!repoId || !this.owned || gen !== this.generation || this.checkingGen === gen) return
     this.checkingGen = gen
     this.lastCheck = Date.now()
     try {
+      if (!(await this.canCheck(repoId)) || gen !== this.generation) return
       const sig = await this.repos.signature(repoId, AbortSignal.timeout(CHECK_TIMEOUT_MS))
       if (gen !== this.generation) return
       if (this.lastSig !== null && sig !== this.lastSig) this.onChange(repoId)
@@ -156,6 +189,7 @@ export class RepoWatcher {
   private stop(): void {
     this.generation++
     this.baselining = false
+    this.owned = true
     for (const w of this.watchers) w.close()
     this.watchers = []
     if (this.timer) clearTimeout(this.timer)

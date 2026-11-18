@@ -1,12 +1,12 @@
 //! 저장소마다 공유하는 상태: **첫 페이지 문**과 **ref 시그니처 저장소**. TS `RepoService` 의 `armFirstPage`·`afterFirstPage`·`openFirstPage`·`signature`·`invalidateSignature`
-//! (`src/main/services/RepoService.ts`)와 같은 의미다. 소비자(refsDetails·activity·wipStatus·RepoWatcher)는 뒤 PR(3b·4·6·7)에서 온다.
+//! (`src/main/services/RepoService.ts`)와 같은 의미다. 소비자는 refsDetails(3b)·activity(4)·RepoWatcher(7b)이고 wipStatus 는 뒤 PR(6)에서 온다.
 //!
 //! - **문**: 저장소가 활성화되면 닫히고(`arm`), 첫 로그 페이지가 나가면(`open`) 또는 유예([`FIRST_PAGE_GRACE`])가 지나면 열린다. 첫 화면에 필요 없는 백그라운드 조회는
 //!   [`RepoState::after_first_page`] 를 기다린 뒤 git 을 띄운다. 문이 없는 저장소는 기다리지 않는다. 타이머를 따로 두지 않고 문에 마감 시각을 둔다 —
 //!   대기자는 마감까지만 기다리고, 마감이 지난 문은 다음에 만지는 순간 열린 것으로 치워진다. 그래서 재활성화한 새 문을 낡은 타이머가 일찍 열 수 없다.
 //! - **시그니처**: 기억한 값(`known`)·진행 중 계산(`inflight`)·반영한 최신 순번(`applied`)·순번 발급기(`counter`). 계산은 시작할 때 순번을 받고, 끝났을 때 **더 나중에 시작한 계산(또는 무효화)이
 //!   이미 반영되지 않았을 때만**(`seq > applied`) 기록한다. 이력이 바뀐 것을 알면 [`RepoState::invalidate_signature`] 가 기억·진행 중 계산을 버리고 순번을 올려, 그 전에 시작한 계산이 다시 기록하지 못하게 한다.
-//!   **기억한 값은 감시(PR 7b)가 갱신하기 전까지 소비하지 않는다** — 감시와 소비자가 다른 프로세스에 있으면 낡는다(계획 §2).
+//!   **기억한 값은 감시가 갱신하는 같은 프로세스(Rust)의 소비자만 쓴다**(PR 7b 부터 `activity` 가 먼저 쓴다) — 감시와 소비자가 다른 프로세스에 있으면 낡는다(계획 §2).
 //! - 공유 계산([`RepoState::shared_signature`])은 spawn 한 태스크라 기다리는 쪽이 모두 떠나도 끝까지 간다(TS 의 Promise 와 같다). 제한 시간(20초)이 지나면 계산에 취소를 보낸다.
 //!   취소 토큰을 건 호출([`RepoState::compute_signature`])은 합치지 않고 따로 계산한다 — 진행 중이던 계산이 ref 변경 전 값일 수 있어 합치면 변화를 놓친다.
 //!

@@ -40,6 +40,7 @@ const RUST_SOURCES: Record<string, string> = {
   'golden.rs': '../src-tauri/tests/golden.rs',
   'exec.rs': '../src-tauri/tests/exec.rs',
   'channels.rs': '../src-tauri/tests/channels.rs',
+  'watch_route.rs': '../src-tauri/tests/watch_route.rs',
   'refs.rs': '../src-tauri/src/git/parsers/refs.rs',
   'submodule.rs': '../src-tauri/src/git/parsers/submodule.rs',
   'activity.rs': '../src-tauri/src/git/activity.rs',
