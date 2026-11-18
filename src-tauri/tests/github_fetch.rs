@@ -784,6 +784,8 @@ async fn repos_remove_는_진행_중인_fetch_와_감시를_멈추고_기다려_
     wait_for("fetch 가 서버에 걸림", || !server.requests().is_empty() && rig.svc.status(G).fetching).await;
     let path = rig.dir.as_str().to_string();
     assert!(rig.exec.live_processes(&path) > 0, "git 프로세스가 떠 있다");
+    // 감시가 디렉터리를 실제로 연 뒤에 지운다 — 첫 페이지 유예(1.5초)·기준 계산 전이면 notify 핸들을 닫는 길을 거치지 않는다(부하에 따라 갈리지 않게 조건으로 기다린다)
+    wait_for("감시 디렉터리 열림", || rig.dirs.live() >= 1).await;
 
     let started = Instant::now();
     // 사이드카가 레코드를 지우기 전의 Rust 쪽 정리다 — 응답은 사이드카가 한다
@@ -794,9 +796,11 @@ async fn repos_remove_는_진행_중인_fetch_와_감시를_멈추고_기다려_
     assert!(!status.fetching && status.error.is_none() && !status.auth_paused, "{status:?}");
     assert_eq!(rig.exec.live_processes(&path), 0);
     assert_eq!(rig.router.watching(), None);
-    assert_eq!(rig.dirs.live(), 0, "notify 핸들도 닫혔다");
-    // 그래서 운영 삭제 경로(`remove_github_cache` — 백신·인덱서 대비 짧은 재시도 1초 안)로 지워진다. 핸들이 남아 있으면 Windows 는 재시도 내내 지우지 못한다
+    // 운영 순서 그대로(`config_host::remove_repo` 는 정리 직후 지운다) 운영 삭제 경로(`remove_github_cache` — 백신·인덱서 대비 짧은 재시도 1초 안)로 곧바로 지운다.
+    // notify 핸들은 닫기 요청만 즉시이고 스레드 종료는 비동기라(`fs_watch` 의 "닫기") 이때 아직 열려 있을 수 있다 — Windows 백엔드는 디렉터리를 FILE_SHARE_DELETE 로 열어 삭제를 막지 않는다
     assert_eq!(remove_github_cache(&rig.dir), Ok(true), "캐시 폴더 삭제");
+    // notify 스레드도 곧 끝난다(폴더가 지워진 뒤여도)
+    wait_for("notify 핸들 닫힘", || rig.dirs.live() == 0).await;
     // 레코드가 지워지기 전의 틈: 새 fetch 도 새 감시도 폴더를 다시 쥐지 못한다
     let again = rig.svc.fetch(G, false).await;
     assert_eq!(again.error.as_deref(), Some(REMOVING), "{again:?}");
