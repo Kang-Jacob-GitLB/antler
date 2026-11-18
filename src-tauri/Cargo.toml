@@ -111,3 +111,7 @@ required-features = ["test-hooks"]
 [[test]]
 name = "github_route"
 required-features = ["test-hooks"]
+
+[[test]]
+name = "github_cache_pin"
+required-features = ["test-hooks"]

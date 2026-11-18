@@ -166,10 +166,22 @@ pub fn pick_network_config(entries: &[ConfigEntry]) -> Vec<(String, String)> {
 /// 프록시·인증서만 이렇게 따로 옮긴다. 읽을 때는 `GIT_CONFIG_COUNT/KEY/VALUE/PARAMETERS` 와 `GIT_DIR` 류를 비워 이미 격리된 값이나
 /// 어떤 저장소의 설정이 섞이지 않게 한다. 읽지 못하면(git 없음·옛 git·시간 초과) 빈 목록이다
 pub async fn read_network_config(git_binary: &str) -> Vec<(String, String)> {
-    match crate::git::exec::read_user_config_list(git_binary).await {
+    let mut picked = match crate::git::exec::read_user_config_list(git_binary).await {
         Some(out) => pick_network_config(&parse_config_list(&out)),
         None => Vec::new(),
+    };
+    // 사용자 설정에 프록시가 없으면 환경 변수의 것을 옮긴다(`github_env` 가 프록시를 고정하므로 그대로 두면 꺼진다)
+    if let Some(p) = env_https_proxy(|n| std::env::var(n).ok()) {
+        if !picked.iter().any(|(k, _)| k == "http.proxy") {
+            picked.push(("http.proxy".to_string(), p));
+        }
     }
+    picked
+}
+
+/// 부모 환경의 https 프록시(curl 이 https 대상에 쓰는 순서: `https_proxy` → `all_proxy`, 소문자 먼저). 없으면 `None`
+pub fn env_https_proxy(get: impl Fn(&str) -> Option<String>) -> Option<String> {
+    ["https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"].iter().find_map(|n| get(n).filter(|v| !v.is_empty())).filter(|v| utf16_len(v) <= 4096)
 }
 
 /// `GIT_CONFIG_GLOBAL` 에 줘서 사용자 전역 설정을 읽지 않게 하는 빈 파일(git 이 `NUL`·`/dev/null` 을 직접 처리한다)
@@ -202,6 +214,8 @@ fn set(env: &mut Vec<(String, String)>, k: &str, v: &str) {
 /// - 격리: 시스템·전역 설정을 읽지 않고(`GIT_CONFIG_NOSYSTEM`·`GIT_CONFIG_GLOBAL`=빈 파일), 상속된 `GIT_CONFIG_COUNT`/`PARAMETERS` 도 버린다.
 ///   사용자의 insteadOf(ssh 로 바꿔 전송 금지에 걸림)·`init.defaultRefFormat`·`safe.bareRepository` 가 이 기능을 깨지 못하게 하려는 것이다.
 ///   프록시·인증서만 `net_config` 로 command scope 에 옮긴다
+/// - 캐시 저장소의 로컬 config 가 TLS·프록시를 못 바꾸게 command scope 로 고정한다: `http.sslVerify=true`(일반·github.com URL 범위 둘 다),
+///   `http.proxy`·`http.https://github.com/.proxy` = 사용자(또는 환경 변수) 프록시, 없으면 빈 값(프록시 없음)
 /// - `GIT_DIR` 로 저장소를 고정하고 `GIT_CEILING_DIRECTORIES` 로 상위 탐색을 막는다. 캐시 폴더가 비었거나 깨져 있으면 `-C <폴더>` 가
 ///   상위 폴더의 다른 저장소로 올라가 그 저장소에 config 를 쓰거나 lazy fetch 환경을 적용하는 일이 없도록 그냥 실패시킨다
 /// - 유지보수·훅·번들 URI·리다이렉트 추종은 끈다(리다이렉트를 따라가면 Authorization 헤더가 다른 호스트로 갈 수 있다)
@@ -227,6 +241,11 @@ pub fn github_env(token: Option<&str>, path: &GithubCachePath, o: &GithubEnvOpts
         set(&mut env, k, v);
     }
     let mut extra: Vec<(&str, Zeroizing<String>)> = o.net_config.iter().map(|(k, v)| (k.as_str(), Zeroizing::new(v.clone()))).collect();
+    // 사용자 프록시가 없으면 빈 값으로 고정한다(`read_network_config` 가 환경 변수의 프록시를 이미 net_config 에 옮겨 둔다)
+    let user_proxy = o.net_config.iter().find(|(k, _)| k == "http.proxy").map(|(_, v)| v.as_str());
+    if user_proxy.is_none() {
+        extra.push(("http.proxy", Zeroizing::new(String::new())));
+    }
     for (k, v) in [
         ("credential.helper", ""),
         ("maintenance.auto", "false"),
@@ -234,6 +253,9 @@ pub fn github_env(token: Option<&str>, path: &GithubCachePath, o: &GithubEnvOpts
         ("core.hooksPath", o.hooks_path.as_str()),
         ("transfer.bundleURI", "false"),
         ("http.followRedirects", "false"),
+        ("http.sslVerify", "true"),
+        ("http.https://github.com/.sslVerify", "true"),
+        ("http.https://github.com/.proxy", user_proxy.unwrap_or("")),
     ] {
         extra.push((k, Zeroizing::new(v.to_string())));
     }
@@ -452,7 +474,7 @@ mod tests {
         assert_eq!(holders.len(), 1, "{holders:?}");
         assert!(holders[0].starts_with("GIT_CONFIG_VALUE_"));
         assert!(env.contains(&("GIT_NO_LAZY_FETCH".to_string(), "0".to_string())));
-        assert_eq!(env.last().unwrap(), &("GIT_CONFIG_COUNT".to_string(), "7".to_string()));
+        assert_eq!(env.last().unwrap(), &("GIT_CONFIG_COUNT".to_string(), "11".to_string()));
     }
 
     #[test]
@@ -462,7 +484,7 @@ mod tests {
         for t in ["a\nb", "", "a b", &"x".repeat(4097)] {
             let env = github_env(Some(t), &path, &GithubEnvOpts { hooks_path: &hooks, net_config: &[], allow_protocol: None });
             assert!(env.iter().all(|(_, v)| !v.contains("Authorization")), "{t:?}");
-            assert_eq!(env.last().unwrap().1, "6", "토큰 없이 설정은 여섯 개다");
+            assert_eq!(env.last().unwrap().1, "10", "토큰 없이 설정은 열 개다");
         }
     }
 

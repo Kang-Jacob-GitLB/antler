@@ -134,6 +134,18 @@ WSL 은 4초, SSH 는 30초 폴링만 한다(`.git` 을 직접 보지 않는다)
 일반 local·WSL·SSH git 은 토큰을 싣지 않으므로 이 거르기를 적용하지 않는다(사용자의 TLS·추적 설정은 사용자 선택이고, 자격 증명 도우미는 호스트가 정한다) — 표식을 `env` 에 넣는 실행만 거른다.
 시험: `tests/githubEnvScrub.test.ts`.
 
+**캐시의 로컬 config 가 TLS·프록시를 못 바꾸게 고정한다.** 정확 일치 검사(`checkGithubConfig`)는 fetch 앞에서만 돌므로 조회 경로의 lazy fetch 는 검사 없이 로컬 config 를 읽는다.
+로컬 쓰기 권한을 가진 쪽이 캐시 config 에 `http.sslVerify=false`·`http.proxy=…` 를 쓰면 Authorization 이 그 프록시를 지나고 검증도 꺼진다.
+command scope(`GIT_CONFIG_KEY_n`)는 로컬 config 보다 우선하므로 토큰 환경이 다음을 고정한다(TS `githubEnv`·Rust `github_env`, 값과 순서 동일 — 골든 `tests/golden/github/env.json`):
+- `http.sslVerify=true` 와 `http.https://github.com/.sslVerify=true` — URL 범위 키가 일반 키를 이기므로 둘 다 둔다.
+- `http.proxy` 와 `http.https://github.com/.proxy` = 사용자 전역·시스템 설정의 프록시, 없으면 **환경 변수**(`https_proxy`→`all_proxy`, 소문자 먼저)의 프록시, 그것도 없으면 빈 값(프록시 없음).
+  빈 `http.proxy` 는 환경 변수 `HTTPS_PROXY` 까지 꺼 버린다(git 2.49 로 127.0.0.1 접속 실측 — 빈 값이면 직접 접속, 없으면 환경 변수 프록시로 접속).
+  그래서 그냥 비우면 환경 변수 프록시를 쓰는 사용자의 fetch 가 깨진다. 환경 변수 프록시는 `readNetworkConfig`/`read_network_config` 가 netConfig 로 미리 옮겨 둔다.
+- `http.sslCAInfo`·`sslCAPath` 는 사용자 설정이 있을 때만(netConfig) 실리고 환경의 `GIT_SSL_CAINFO` 는 그대로 남는다(사내 CA 유지). 사용자 설정이 없으면 고정하지 않는다 — 빈 값을 줄 수 없고(빈 경로는 인증서 로드 오류가 된다) 사용자 CA 를 깨뜨릴 수 있어서다.
+시험: `tests/githubEnvPin.test.ts`, `src-tauri/tests/github_cache_pin.rs`(로컬 config 를 오염시킨 캐시에서 같은 환경으로 `git config --get`/`--get-urlmatch` 를 실행해 고정값이 이기는지, 고정하지 않은 git 에서는 로컬 값이 이기는 음성 대조 포함).
+**남는 위험**: 로컬 config 의 더 구체적인 URL 범위 키(`http.https://github.com/<owner>/<repo>.git.sslVerify`)는 호스트 범위 고정값을 이긴다(git 의 URL 일치는 경로가 긴 쪽이 우선 — 실측 확인). 원격 URL 의 대소문자가 캐시 경로(소문자)와 달라 `githubEnv` 가 그 URL 을 알 수 없어 고정하지 않았다.
+`http.sslCAInfo`·`http.curloptResolve`·`http.proxySSLVerify` 를 로컬 config 에 심는 경우도 같은 수준(네트워크 위치까지 필요)의 잔여 위험이다.
+
 Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`)은 같은 예외를 세 겹으로 가둔다. 앱에는 **조회 채널만** 연결돼 있다(Phase 6b PR 6 — fetch·감시·추가·삭제는 아직 Node 사이드카).
 라우터는 GitHub 서비스(토큰의 출처)와 캐시 실행기가 주입됐고 스위치가 켜져 있을 때만 github 저장소를 푼다(`Router::set_github_cache`). 토큰은 Rust 안에서만 읽혀 실행기의 환경 변수로만 가고 어떤 응답·오류 봉투에도 실리지 않으며(시험 `tests/github_route.rs`),
 `repos:remove` 는 사이드카가 캐시 폴더를 지우기 전에 이 쪽의 진행 중 조회·활동 시그니처 계산을 끊고 로그 커서를 닫은 뒤, 그 저장소의 git 프로세스가 끝나기를(실행기가 센다, 최대 5초) 기다린다.

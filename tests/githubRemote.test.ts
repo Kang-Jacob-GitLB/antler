@@ -360,7 +360,7 @@ describe('githubEnv', () => {
     })
     expect(Object.fromEntries(got)).toEqual({ 'http.proxy': 'http://proxy.corp:8080', 'http.sslcainfo': '/etc/ca.pem' })
     // git 을 실행하지 못하면 빈 목록이다
-    expect(await readNetworkConfig('git-does-not-exist')).toEqual([])
+    expect(await readNetworkConfig('git-does-not-exist', {})).toEqual([])
   })
 
   it('redactToken 은 토큰과 base64 형태를 가린다', () => {

@@ -234,9 +234,36 @@ export async function readNetworkConfig(gitBinary = 'git', baseEnv: NodeJS.Proce
       gitBinary,
       ['config', '--list', '--show-scope', '-z'],
       { env, cwd: tmpdir(), encoding: 'utf8', timeout: 10_000, windowsHide: true },
-      (err, stdout) => resolveEntries(err ? [] : pickNetworkConfig(parseConfigList(stdout)))
+      (err, stdout) => {
+        const picked = err ? [] : pickNetworkConfig(parseConfigList(stdout))
+        const envProxy = envHttpsProxy(baseEnv)
+        // 사용자 설정에 프록시가 없으면 환경 변수의 것을 옮긴다(githubEnv 가 프록시를 고정하므로 그대로 두면 꺼진다)
+        if (envProxy !== null && !picked.some(([k]) => k === 'http.proxy')) picked.push(['http.proxy', envProxy])
+        resolveEntries(picked)
+      }
     )
   })
+}
+
+/**
+ * 토큰 환경이 캐시 저장소의 로컬 config 에 지지 않도록 고정하는 TLS 키. command scope 는 로컬 config 보다 우선하고,
+ * URL 범위 키(`http.<url>.*`)는 일반 키를 이기므로 둘 다 둔다. 로컬 config 에 `http.sslVerify=false` 가 쓰여 있어도 검증이 켜진다.
+ */
+const GITHUB_TLS_PINS: [string, string][] = [
+  ['http.sslVerify', 'true'],
+  ['http.https://github.com/.sslVerify', 'true']
+]
+
+/**
+ * 부모 환경의 https 프록시(curl 이 https 대상에 쓰는 순서: https_proxy → all_proxy, 소문자 먼저). 없으면 null.
+ * githubEnv 는 프록시를 command scope 로 고정하는데, 빈 값으로 고정하면 환경 변수 프록시까지 꺼지므로 그 값을 여기서 옮겨 둔다.
+ */
+export function envHttpsProxy(baseEnv: NodeJS.ProcessEnv): string | null {
+  for (const name of ['https_proxy', 'HTTPS_PROXY', 'all_proxy', 'ALL_PROXY']) {
+    const v = baseEnv[name]
+    if (v) return v.length <= 4096 ? v : null
+  }
+  return null
 }
 
 /** GIT_CONFIG_GLOBAL 에 줘서 사용자 전역 설정을 읽지 않게 하는 빈 파일(git 이 NUL·/dev/null 을 직접 처리한다) */
@@ -274,7 +301,9 @@ export function redactToken(text: string, token: string | null): string {
  *    토큰은 인자·디스크가 아니라 이 환경 변수(GIT_CONFIG_VALUE_n)로만 git 에 전달된다
  *  - 격리: 시스템·전역 설정을 읽지 않고(GIT_CONFIG_NOSYSTEM · GIT_CONFIG_GLOBAL=빈 파일), 상속된 GIT_CONFIG_COUNT/PARAMETERS 도 버린다.
  *    사용자의 insteadOf(ssh 로 바꿔 전송 금지에 걸림) · init.defaultRefFormat · safe.bareRepository 가 이 기능을 깨지 못하게 하려는 것이다.
- *    프록시·인증서만 netConfig 로 command scope 에 옮긴다(HTTPS_PROXY 같은 환경 변수는 그대로 상속된다)
+ *    프록시·인증서만 netConfig 로 command scope 에 옮긴다
+ *  - 캐시 저장소의 로컬 config 가 TLS·프록시를 못 바꾸게 command scope 로 고정한다: http.sslVerify=true(일반·github.com URL 범위 둘 다),
+ *    http.proxy · http.https://github.com/.proxy = 사용자(또는 환경 변수) 프록시, 없으면 빈 값(프록시 없음)
  *  - GIT_DIR 로 저장소를 고정하고 GIT_CEILING_DIRECTORIES 로 상위 탐색을 막는다. 캐시 폴더가 비었거나 깨져 있으면 `-C <폴더>` 가
  *    상위 폴더의 다른 저장소로 올라가 그 저장소에 config 를 쓰거나 lazy fetch 환경을 적용하는 일이 없도록 그냥 실패시킨다
  *  - 유지보수·훅·번들 URI·리다이렉트 추종은 끈다(리다이렉트를 따라가면 Authorization 헤더가 다른 호스트로 갈 수 있다)
@@ -298,14 +327,21 @@ export function githubEnv(token: string | null, o: GithubEnvOpts): Record<string
     // 부모 환경의 GIT_SSL_NO_VERIFY·GIT_TRACE*·GIT_CURL_VERBOSE·저장소 위치 변수를 지운다(토큰 유출·사용자 저장소 오염 방지)
     [SCRUB_PARENT_ENV_KEY]: '1'
   }
+  const net = (o.netConfig ?? []).map(([k, v]): [string, string] => [k, v])
+  // 사용자 프록시가 없으면 빈 값으로 고정한다(readNetworkConfig 가 환경 변수의 프록시를 이미 netConfig 에 옮겨 둔다)
+  const userProxy = net.find(([k]) => k === 'http.proxy')
+  if (!userProxy) net.push(['http.proxy', ''])
+  const proxy = userProxy?.[1] ?? ''
   const extra: [string, string][] = [
-    ...(o.netConfig ?? []).map(([k, v]): [string, string] => [k, v]),
+    ...net,
     ['credential.helper', ''],
     ['maintenance.auto', 'false'],
     ['gc.auto', '0'],
     ['core.hooksPath', o.hooksPath],
     ['transfer.bundleURI', 'false'],
-    ['http.followRedirects', 'false']
+    ['http.followRedirects', 'false'],
+    ...GITHUB_TLS_PINS,
+    ['http.https://github.com/.proxy', proxy]
   ]
   if (usableToken(token)) {
     extra.push(['http.https://github.com/.extraheader', `Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`])
