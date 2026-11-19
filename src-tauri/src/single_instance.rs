@@ -42,6 +42,10 @@ pub fn bring_to_front(win: &impl Foregroundable) {
 
 /// 플러그인 콜백. 인자(`_args`)와 작업 디렉터리(`_cwd`)는 쓰지 않는다. 창이 아직 없으면(첫 인스턴스가 기동 중) 아무것도 하지 않는다
 pub fn on_second_instance<R: Runtime>(app: &AppHandle<R>, _args: Vec<String>, _cwd: String) {
+    // 메인 창이 아직 숨어 있으면(로딩 창이 떠 있는 동안) 건드리지 않는다 — 첫 화면 전에 빈 창을 보이지 않게. 준비되면 `startup::reveal` 이 포커스까지 준다
+    if app.try_state::<crate::startup::StartupGate>().is_some_and(|gate| !gate.revealed()) {
+        return;
+    }
     if let Some(win) = app.get_webview_window("main") {
         bring_to_front(&win);
     }

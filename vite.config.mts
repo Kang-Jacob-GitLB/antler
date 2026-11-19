@@ -34,6 +34,12 @@ export default defineConfig({
   plugins: [react(), tauriBridgePlugin()],
   worker: { format: 'es' },
   // 파싱 시간을 줄여 콜드 스타트를 앞당긴다
-  build: { minify: true, outDir: resolve('out-tauri/renderer'), emptyOutDir: true },
+  // 입력이 둘이다: 앱 화면(index.html)과 시작 로딩 창(splash.html — 스크립트 없는 정적 페이지, src-tauri/src/startup.rs)
+  build: {
+    minify: true,
+    outDir: resolve('out-tauri/renderer'),
+    emptyOutDir: true,
+    rollupOptions: { input: { index: resolve('src/renderer/index.html'), splash: resolve('src/renderer/splash.html') } }
+  },
   server: { port: 5174, strictPort: true }
 })

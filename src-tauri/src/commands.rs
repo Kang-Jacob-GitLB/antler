@@ -3,7 +3,7 @@
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::router::Router;
 
@@ -25,4 +25,13 @@ pub async fn antler_invoke(router: State<'_, Router>, channel: String, args: ser
 #[tauri::command]
 pub fn antler_uptime_ms() -> u64 {
     START.get().map_or(0, |t| t.elapsed().as_millis() as u64)
+}
+
+/// renderer 가 첫 화면을 그린 뒤 메인 창을 보여 달라고 알린다(`startup::reveal`). 메인 창에서 온 호출만 받고, 두 번째부터는 무시한다.
+/// 창 권한(capability)은 renderer 에 주지 않는다 — 창을 보이는 일은 Rust 만 한다
+#[tauri::command]
+pub fn antler_window_ready(window: tauri::WebviewWindow) {
+    if window.label() == crate::startup::MAIN_LABEL {
+        crate::startup::reveal(window.app_handle());
+    }
 }

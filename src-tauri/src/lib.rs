@@ -31,6 +31,7 @@ pub mod secret;
 mod platform;
 mod single_instance;
 mod snap;
+pub mod startup;
 // 앱 업데이트: 판정 로직(Phase 6c PR 1)·상태 기계와 호스트(PR 4 — `update:*` 7채널을 Rust 가 처리한다). 통합 테스트(tests/update*.rs)가 별도 크레이트라 pub 이다
 pub mod update;
 // 저장소 감시의 앱 쪽 호스트(Phase 6a PR 7b) — 라우터가 만든다
@@ -50,8 +51,38 @@ use git::exec::{GitExecutor, GithubExecutor, LocalExecutor, WslExecutor};
 use git::fetch::service::FetchService;
 use mirror::Target;
 
-/// 첫 페인트 전 흰 화면을 막는다. 토큰 --bg-base(Dark)와 같은 값
-const BG: Color = Color(0x14, 0x11, 0x0F, 0xFF);
+/// 창 바탕색(첫 페인트 전 흰 화면을 막는다). 설정 `ui.theme` 과 OS 테마로 고른다(`startup::background_rgb`)
+fn window_background(config_store: &ConfigStore) -> (Color, bool) {
+    let theme = config::model::js_get(&config_store.get(), "ui").and_then(|ui| config::model::js_get(ui, "theme")).and_then(net::json::Json::as_str).map(str::to_string);
+    let rgb = startup::background_rgb(theme.as_deref(), startup::os_prefers_dark());
+    (Color(rgb.0, rgb.1, rgb.2, 0xFF), startup::is_light(rgb))
+}
+
+/// 로딩 창(스플래시). 메인 창이 보일 때 닫힌다(`startup::reveal`). IPC 권한을 주지 않는다(capability 는 `main` 창만 지정한다)
+fn build_splash(app: &tauri::App, user_data: &Path, background: Color, light: bool) -> tauri::Result<()> {
+    let mut splash = WebviewWindowBuilder::new(app, startup::SPLASH_LABEL, WebviewUrl::App("splash.html".into()))
+        .title("Antler")
+        .inner_size(320.0, 360.0)
+        .center()
+        .decorations(false)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        // 작업 표시줄에는 메인 창 하나만 보이게 한다
+        .skip_taskbar(true)
+        .disable_drag_drop_handler()
+        .background_color(background)
+        .data_directory(user_data.join("webview2"))
+        .additional_browser_args(&browser_args())
+        .on_navigation(is_app_url)
+        .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+        .on_permission_request(|_, _| tauri::webview::PermissionResponse::Deny);
+    if let Some(script) = startup::splash_init_script(light) {
+        splash = splash.initialization_script(script);
+    }
+    splash.build()?;
+    Ok(())
+}
 
 /// WebView2 실행 인자. 하드웨어 가속은 기본으로 끈다(Electron 판과 같은 이유 — ANTLER_GPU=1 로 켠다)
 fn browser_args() -> String {
@@ -178,6 +209,8 @@ pub fn run() {
         builder = builder.plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED)
+                // 로딩 창은 크기·위치를 기억하지 않는다(항상 가운데 고정 크기)
+                .with_denylist(&[startup::SPLASH_LABEL])
                 .build(),
         );
     }
@@ -190,7 +223,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             snap::show_snap_overlay,
             commands::antler_invoke,
-            commands::antler_uptime_ms
+            commands::antler_uptime_ms,
+            commands::antler_window_ready
         ])
         .setup(|app| {
             // Electron 판의 %APPDATA%\Antler 와 설정이 섞이지 않게 기본값은 Tauri 의 app_data_dir 다
@@ -199,6 +233,15 @@ pub fn run() {
                 None => app.path().app_data_dir()?,
             };
             std::fs::create_dir_all(&user_data)?;
+            // 설정은 창 바탕색(테마)을 알려면 먼저 열어야 한다. 그다음 **곧바로** 로딩 창을 띄운다 — 메인 창은 숨긴 채 준비하는 동안 화면이 비면 안 된다
+            let cache_dir = user_data.join("remote-repos").to_string_lossy().into_owned();
+            let config_store: Arc<ConfigStore> = open_config(&user_data, &cache_dir);
+            let (background, light) = window_background(&config_store);
+            app.manage(startup::StartupGate::default());
+            if let Err(e) = build_splash(app, &user_data, background, light) {
+                // 로딩 창이 없어도 앱은 뜬다(메인 창이 안전망 시간 안에 보인다)
+                eprintln!("[startup] 로딩 창을 만들지 못했다: {e}");
+            }
             // 라우터가 읽는 미러(Rust 가 설정이 바뀔 때 채운다 — `ConfigSync`)
             let mirror = mirror::RepoMirror::default();
             let router = router::Router::from_env(mirror.clone());
@@ -225,8 +268,6 @@ pub fn run() {
             router.set_env(env_host.clone());
             // 설정 소유(Phase 6b PR 9): **Rust 가 설정 파일의 유일한 작성자다**. 변경 알림이 미러(`RepoMirror`)·fetch 설정을 직접 맞춘다.
             // 반영 뒤 할 일(`on_mirror_changed`·`apply_fetch_prefs`)은 라우터가 managed 된 뒤에 찾는다(알림은 어느 스레드에서 오든 앱 런타임에 들어가서 부른다)
-            let cache_dir = user_data.join("remote-repos").to_string_lossy().into_owned();
-            let config_store: Arc<ConfigStore> = open_config(&user_data, &cache_dir);
             let config_sync: Arc<ConfigSync> = {
                 let (mirror_app, prefs_app) = (app.handle().clone(), app.handle().clone());
                 let sync = Arc::new(ConfigSync::new(
@@ -398,7 +439,14 @@ pub fn run() {
                 .initialization_script(platform::init_script())
                 // 앱이 HTML5 드래그 앤 드롭을 쓴다 — Tauri 의 파일 드롭 처리가 이를 가로채지 않게 끈다
                 .disable_drag_drop_handler()
-                .background_color(BG)
+                .background_color(background)
+                // 숨긴 채 만든다 — 첫 화면이 그려졌다는 신호(`antler_window_ready`)나 안전망 타이머가 `startup::reveal` 로 보인다
+                .visible(false)
+                .on_page_load(|win, payload| {
+                    if win.label() == startup::MAIN_LABEL && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                        startup::schedule_fallback(win.app_handle().clone(), true);
+                    }
+                })
                 .data_directory(user_data.join("webview2"))
                 .additional_browser_args(&browser_args())
                 // src/main/index.ts 의 will-navigate·setWindowOpenHandler·권한 거부와 같다.
@@ -416,9 +464,15 @@ pub fn run() {
                 win = win.initialization_script("window.__ANTLER_MEASURE__=true");
             }
             win.build()?;
+            // 안전망: 페이지 로드 완료조차 오지 않아도(로드 실패·멈춤) 창이 영영 안 뜨는 일이 없게 한다
+            startup::schedule_fallback(app.handle().clone(), false);
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 메인 창이 닫히면 로딩 창도 남기지 않는다
+            if matches!(event, WindowEvent::Destroyed) && window.label() == startup::MAIN_LABEL {
+                startup::close_splash(window.app_handle());
+            }
             // 창이 뒤에 있을 때는 원격 폴링을 늦춘다(src/main/index.ts 의 focus·blur 처리와 같다)
             if let WindowEvent::Focused(focused) = event {
                 if let Some(r) = window.app_handle().try_state::<router::Router>() {
