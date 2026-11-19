@@ -276,6 +276,14 @@ describe('Electron 정리 NSIS 훅 (정적 검사)', () => {
     expect(code).not.toContain('--delete-app-data')
   })
 
+  it('제거기는 임시 폴더로 복사해 돌린다 — 설치 폴더 안에서 제자리로 돌리면 자기 자신이 잠겨 --updated 의 폴더 옮기기가 실패한다(종료 코드 2, v2.0.0-rc.3)', () => {
+    const exec = code.slice(code.indexOf('ExecWait'))
+    expect(exec).toMatch(/^ExecWait '"\$PLUGINSDIR\\old-uninstaller\.exe" /)
+    const before = code.slice(0, code.indexOf('ExecWait'))
+    expect(before).toContain('CopyFiles /SILENT /FILESONLY "$2" "$PLUGINSDIR\\old-uninstaller.exe"')
+    expect(before.indexOf('InitPluginsDir')).toBeLessThan(before.indexOf('CopyFiles'))
+  })
+
   it('%APPDATA% 를 건드리지 않고 재귀 삭제·HKLM 쓰기를 하지 않는다', () => {
     expect(code).not.toMatch(/\$APPDATA|\$LOCALAPPDATA|%APPDATA%/)
     expect(code).not.toMatch(/RMDir\s+\/r/i)

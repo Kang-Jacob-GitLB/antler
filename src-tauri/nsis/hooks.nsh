@@ -154,8 +154,17 @@ Function AntlerRemoveElectron
 
   ; electron-builder 가 옛 판을 지울 때 쓰는 인자와 같다(/KEEP_APP_DATA 와 --updated 로 앱 데이터를 보존하고, --keep-shortcuts 로
   ; 방금 만든 바로가기를 지우지 않게 한다). `_?=` 는 제거기가 제자리에서 끝날 때까지 기다리게 하며 반드시 마지막 인자다
+  ; 제거기는 **임시 폴더로 복사해서** 돌린다(electron-builder 의 installUtil.nsh 와 같은 방식). `--updated` 제거기는 설치 폴더를
+  ; 통째로 옮긴(rename) 뒤 지우는데, 설치 폴더 안의 제거기를 제자리에서 돌리면 자기 자신이 잠겨 옮기기가 실패하고 종료 코드 2 로
+  ; 멈춘다(v2.0.0-rc.3 이관 리허설에서 재현). `_?=` 는 그대로 두어 설치 폴더를 알려 주고 끝날 때까지 기다리게 한다
   DetailPrint "Removing the per-user Electron edition of Antler..."
-  ExecWait '"$2" /currentuser /S /KEEP_APP_DATA --updated --keep-shortcuts _?=$1' $6
+  InitPluginsDir
+  CopyFiles /SILENT /FILESONLY "$2" "$PLUGINSDIR\old-uninstaller.exe"
+  ${IfNot} ${FileExists} "$PLUGINSDIR\old-uninstaller.exe"
+    DetailPrint "Electron Antler: could not copy the uninstaller - skipped"
+    Goto done
+  ${EndIf}
+  ExecWait '"$PLUGINSDIR\old-uninstaller.exe" /currentuser /S /KEEP_APP_DATA --updated --keep-shortcuts _?=$1' $6
   ${If} $6 == 0
     ; `_?=` 로 돌리면 제거기 자신이 남는다 — 검증한 그 파일만 지우고, 폴더는 비어 있을 때만 지운다(재귀 삭제 없음)
     Delete $2
