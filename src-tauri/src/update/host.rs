@@ -491,7 +491,7 @@ pub fn write_skipped(store: &ConfigStore, version: &str) -> Result<(), String> {
     store.set_skipped_update_version(version).map(|_| ())
 }
 
-/// 상태가 바뀔 때 renderer 로 `update:state` 이벤트를 낸다(사이드카의 `evt` 와 같은 모양)
+/// 상태가 바뀔 때 renderer 로 `update:state` 이벤트를 낸다(`antler:evt` 이벤트)
 pub fn state_sink<R: Runtime>(app: AppHandle<R>) -> Arc<dyn Fn(&UpdateState) + Send + Sync> {
     Arc::new(move |state| {
         let _ = app.emit("antler:evt", json!({ "name": "update:state", "payload": state }));

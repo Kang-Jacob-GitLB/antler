@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use antler_lib::app_host::AppHost;
 use antler_lib::mirror::RepoMirror;
-use antler_lib::router::{Routed, Router, API_CHANNELS, API_SIDECAR_CHANNELS, APP_CHANNELS, RUST_CHANNELS, UNDEFINED_ARG};
+use antler_lib::router::{Routed, Router, API_CHANNELS, APP_CHANNELS, RUST_CHANNELS, UNDEFINED_ARG};
 use serde_json::{json, Value};
 
 #[derive(Default)]
@@ -38,8 +38,8 @@ fn fake(calls: &Arc<Mutex<Calls>>, pick: Option<&str>, fail: bool) -> AppHost {
     }
 }
 
-fn router(enabled: bool, host: Option<AppHost>) -> Router {
-    let r = Router::new(enabled, false, RepoMirror::default());
+fn router(host: Option<AppHost>) -> Router {
+    let r = Router::new(false, RepoMirror::default());
     if let Some(h) = host {
         r.set_app(h);
     }
@@ -49,7 +49,7 @@ fn router(enabled: bool, host: Option<AppHost>) -> Router {
 async fn done(r: &Router, channel: &str, args: Value) -> Value {
     match r.route(channel, &args).await {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("{channel} 가 사이드카로 갔다"),
+        Routed::Unserved => panic!("{channel} 를 풀지 못했다"),
     }
 }
 
@@ -69,35 +69,31 @@ fn 앱_채널은_ipc_채널의_부분집합이고_다른_소유_목록과_겹치
     assert_eq!(APP_CHANNELS, ["dialog:pickFolder", "clipboard:writeText", "code:openLink", "win:setTitleBarTheme"]);
     for ch in APP_CHANNELS {
         assert!(all.iter().any(|c| c == ch), "{ch} 가 IPC_CHANNELS 에 없다(tests/golden/exec/channels.json)");
-        assert!(!RUST_CHANNELS.contains(ch) && !API_CHANNELS.contains(ch) && !API_SIDECAR_CHANNELS.contains(ch), "{ch} 가 다른 Rust 채널 목록에도 있다");
+        assert!(!RUST_CHANNELS.contains(ch) && !API_CHANNELS.contains(ch), "{ch} 가 다른 Rust 채널 목록에도 있다");
     }
 }
 
 #[tokio::test]
-async fn 앱_채널은_사이드카로_가지_않고_사이드카_몫_채널은_계속_사이드카로_간다() {
+async fn 앱_채널은_포트가_있으면_rust_가_처리하고_다른_포트의_채널은_처리하지_않는다() {
     let calls = Arc::default();
-    let r = router(true, Some(fake(&calls, None, false)));
+    let r = router(Some(fake(&calls, None, false)));
     for ch in APP_CHANNELS {
         assert!(matches!(r.route(ch, &json!([])).await, Routed::Done(_)), "{ch}");
     }
-    // 아직 사이드카에 남는 채널(설정·저장소 관리·external·update — env·scan 은 PR 8 부터 Rust 다, tests/env_route.rs)
-    for ch in ["config:get", "config:setUi", "repos:add", "repos:addMany", "repos:addGithub", "external:open", "external:pickEditorExe", "update:get", "req:cancel"] {
-        assert!(matches!(r.route(ch, &json!([])).await, Routed::Sidecar), "{ch}");
+    // 설정·저장소 관리·external·update 는 각자의 포트(설정 소유자·업데이트 서비스)가 있어야 처리한다 — 이 라우터에는 없다
+    for ch in ["config:get", "config:setUi", "repos:add", "repos:addMany", "repos:addGithub", "external:open", "external:pickEditorExe", "update:get"] {
+        assert!(matches!(r.route(ch, &json!([])).await, Routed::Unserved), "{ch}");
     }
     assert_eq!(r.rust_handled(), APP_CHANNELS.len() as u64);
 }
 
 #[tokio::test]
-async fn 스위치가_꺼졌거나_포트가_없으면_전부_사이드카다() {
+async fn 포트가_없으면_앱_채널은_풀_수_없다() {
     let calls: Arc<Mutex<Calls>> = Arc::default();
-    // ANTLER_RUST_GIT=0: 포트를 달아도(주입 자체를 무시한다) 사이드카다
-    let off = router(false, Some(fake(&calls, Some("C:\\x"), false)));
-    // 포트 없음
-    let none = router(true, None);
-    for r in [&off, &none] {
-        for ch in APP_CHANNELS {
-            assert!(matches!(r.route(ch, &json!(["x"])).await, Routed::Sidecar), "{ch}");
-        }
+    let none = router(None);
+    for ch in APP_CHANNELS {
+        assert!(matches!(none.route(ch, &json!(["x"])).await, Routed::Unserved), "{ch}");
+        assert_eq!(none.invoke(ch, &json!(["x"])).await, err("이 기능을 사용할 수 없습니다"), "{ch}");
     }
     let c = calls.lock().unwrap();
     assert!(c.picks.is_empty() && c.clips.is_empty() && c.links.is_empty());
@@ -106,7 +102,7 @@ async fn 스위치가_꺼졌거나_포트가_없으면_전부_사이드카다() 
 #[tokio::test]
 async fn 폴더_선택은_시작_위치_관문을_통과한_값만_대화상자에_넘긴다() {
     let calls: Arc<Mutex<Calls>> = Arc::default();
-    let r = router(true, Some(fake(&calls, Some("C:\\repos\\a"), false)));
+    let r = router(Some(fake(&calls, Some("C:\\repos\\a"), false)));
     // 통과: 로컬·리눅스·WSL 공유(대소문자·슬래시 방향 무관)
     for ok in ["C:\\Users\\a", "/home/a", "\\\\wsl.localhost\\Ubuntu\\home", "//WSL$/Ubuntu/home"] {
         assert_eq!(done(&r, "dialog:pickFolder", json!([ok])).await, json!({ "ok": true, "data": "C:\\repos\\a" }), "{ok}");
@@ -123,16 +119,16 @@ async fn 폴더_선택은_시작_위치_관문을_통과한_값만_대화상자�
 #[tokio::test]
 async fn 폴더_선택은_취소면_null_이고_실패는_오류_봉투다() {
     let calls = Arc::default();
-    let cancel = router(true, Some(fake(&calls, None, false)));
+    let cancel = router(Some(fake(&calls, None, false)));
     assert_eq!(done(&cancel, "dialog:pickFolder", json!([])).await, json!({ "ok": true, "data": null }));
-    let failing = router(true, Some(fake(&calls, None, true)));
+    let failing = router(Some(fake(&calls, None, true)));
     assert_eq!(done(&failing, "dialog:pickFolder", json!([])).await, err("대화상자 실패"));
 }
 
 #[tokio::test]
 async fn 클립보드는_문자열이고_백만_utf16_단위_이하만_쓴다() {
     let calls: Arc<Mutex<Calls>> = Arc::default();
-    let r = router(true, Some(fake(&calls, None, false)));
+    let r = router(Some(fake(&calls, None, false)));
     let void = json!({ "ok": true });
     assert_eq!(done(&r, "clipboard:writeText", json!(["hello"])).await, void);
     assert_eq!(done(&r, "clipboard:writeText", json!([""])).await, void);
@@ -155,14 +151,14 @@ async fn 클립보드는_문자열이고_백만_utf16_단위_이하만_쓴다() 
 #[tokio::test]
 async fn 클립보드_쓰기_실패는_오류_봉투다() {
     let calls = Arc::default();
-    let r = router(true, Some(fake(&calls, None, true)));
+    let r = router(Some(fake(&calls, None, true)));
     assert_eq!(done(&r, "clipboard:writeText", json!(["x"])).await, err("복사하지 못했습니다"));
 }
 
 #[tokio::test]
 async fn 링크는_자격_증명_없는_https_만_정규화해_연다() {
     let calls: Arc<Mutex<Calls>> = Arc::default();
-    let r = router(true, Some(fake(&calls, None, false)));
+    let r = router(Some(fake(&calls, None, false)));
     assert_eq!(done(&r, "code:openLink", json!(["https://example.com"])).await, json!({ "ok": true }));
     assert_eq!(done(&r, "code:openLink", json!(["https://example.com/a?b=1#c"])).await, json!({ "ok": true }));
     let denied = err("https 주소만 열 수 있습니다");
@@ -183,14 +179,14 @@ async fn 링크는_자격_증명_없는_https_만_정규화해_연다() {
     }
     // 포트에는 정규화된 href 만 간다
     assert_eq!(calls.lock().unwrap().links, ["https://example.com/", "https://example.com/a?b=1#c"]);
-    let failing = router(true, Some(fake(&calls, None, true)));
+    let failing = router(Some(fake(&calls, None, true)));
     assert_eq!(done(&failing, "code:openLink", json!(["https://example.com"])).await, err("주소를 열지 못했습니다"));
 }
 
 #[tokio::test]
 async fn 타이틀바_테마는_불리언_값만_허용하고_아무것도_하지_않는다() {
     let calls: Arc<Mutex<Calls>> = Arc::default();
-    let r = router(true, Some(fake(&calls, None, false)));
+    let r = router(Some(fake(&calls, None, false)));
     for ok in [json!([{ "dark": true }]), json!([{ "dark": false, "dim": true }]), json!([{ "dark": true, "dim": false }]), json!([{ "dark": true, "extra": 1 }])] {
         assert_eq!(done(&r, "win:setTitleBarTheme", ok.clone()).await, json!({ "ok": true }), "{ok}");
     }

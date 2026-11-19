@@ -6,8 +6,8 @@
   "build": {
     "devUrl": "http://localhost:5174",
     "frontendDist": "../out-tauri/renderer",
-    "beforeDevCommand": "pnpm tauri:sidecar && pnpm tauri:web",
-    "beforeBuildCommand": "pnpm tauri:notices && pnpm tauri:sidecar && vite build --config vite.tauri.config.mts"
+    "beforeDevCommand": "pnpm tauri:web",
+    "beforeBuildCommand": "pnpm tauri:notices && vite build --config vite.tauri.config.mts"
   },
   "app": {
     "withGlobalTauri": false,

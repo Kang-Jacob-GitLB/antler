@@ -119,7 +119,7 @@ pub struct ConfirmBox {
 }
 
 impl ConfirmBox {
-    /// 사이드카 shim(`electronShim.ts` 의 `showMessageBox`)이 Rust 에 넘기는 `MessageBoxArg`: 본문은 message 와 detail 을 빈 줄로 잇되 빈 것은 뺀다.
+    /// 옛 사이드카 shim 이 만들던 `MessageBoxArg`(골든 `tests/fixtures/rustPortSpecs.ts` 의 `messageBoxArgOf`): 본문은 message 와 detail 을 빈 줄로 잇되 빈 것은 뺀다.
     /// 네이티브 대화상자는 기본 버튼 지정을 지원하지 않아 `defaultId` 는 가지 않는다(취소가 마지막 자리·Esc 가 된다)
     pub fn to_message_box_arg(&self) -> serde_json::Value {
         let message: Vec<&str> = [self.message.as_str(), self.detail.as_str()].into_iter().filter(|s| !s.is_empty()).collect();

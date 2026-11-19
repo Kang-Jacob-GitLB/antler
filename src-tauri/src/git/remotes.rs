@@ -8,7 +8,7 @@ use super::parsers::js_trim;
 use super::scope::is_js_space;
 use crate::github::remote_url::Remote;
 
-/// 이메일 길이 상한(`src/sidecar/repoQuery.ts` 의 `MAX_EMAIL_LENGTH` — Rust 경로에서도 같은 값을 건다)
+/// 이메일 길이 상한(옛 `repoQuery.ts` 의 `MAX_EMAIL_LENGTH` — Rust 경로에서도 같은 값을 건다)
 pub const MAX_EMAIL_LEN: usize = 320;
 /// 해시 개수 상한(`MAX_LIMIT`)
 pub const MAX_PUSHED_LIMIT: usize = 100;

@@ -56,8 +56,8 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn 승인은_설정에_직접_쓰고_fetch_설정은_사이드카를_띄우기_전에_반영한다() {
-    // Rust 가 설정을 소유한다(Phase 6b PR 9): 승인을 쓰는 곳은 호스트 구현 한 곳이고 사이드카에 부탁하지 않는다. `.approve(` 호출은 서비스(`host.approve(`)와 호스트 안의 쓰기 함수뿐이다
+fn 승인은_설정에_직접_쓰고_fetch_설정은_라우터_등록_뒤에_첫_반영한다() {
+    // Rust 가 설정을 소유한다(Phase 6b PR 9): 승인을 쓰는 곳은 호스트 구현 한 곳이다. `.approve(` 호출은 서비스(`host.approve(`)와 호스트 안의 쓰기 함수뿐이다
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     collect(&dir, &mut files);
@@ -71,39 +71,28 @@ fn 승인은_설정에_직접_쓰고_fetch_설정은_사이드카를_띄우기_�
     }
     assert_eq!(hits, [("git/fetch/service.rs".to_string(), 1)]);
     assert_eq!(prod_code("src/git/fetch/service.rs").matches("self.host.approve(").count(), 1);
-    let sidecar = prod_code("src/sidecar.rs");
-    assert!(!sidecar.contains("fn approve(") && !sidecar.contains("fetchApprove"), "사이드카에 승인을 부탁하는 길이 없다");
     // 호스트 구현 파일도 플랫폼 주입 버전을 부르지 않는다
     let host = prod_code("src/fetch_host.rs");
     for banned in ["_for_test", "run_fetch(", "hooks_path_for("] {
         assert!(!host.contains(banned), "fetch_host.rs 에 {banned}");
     }
-    // fetch 설정(주기·승인)은 설정 변경 알림이 직접 서비스에 넣는다(`config::sync` — 사이드카의 `fetchPrefs` 줄은 받지 않는다). 첫 반영은 라우터 등록 뒤·사이드카 기동 앞이다
+    // fetch 설정(주기·승인)은 설정 변경 알림이 직접 서비스에 넣는다(`config::sync`). 첫 반영은 라우터 등록 뒤다
     let lib = prod_code("src/lib.rs");
-    assert!(!lib.contains("FetchPrefsSink"), "사이드카가 보내던 fetchPrefs 받는 곳은 없다");
     let set_fetch = lib.find("router.set_fetch(").expect("서비스 주입");
     let manage_router = lib.find("app.manage(router)").expect("라우터 등록");
-    let first_push = lib.find("sync.push(None,").expect("설정의 첫 반영");
-    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(set_fetch < manage_router && manage_router < first_push && first_push < spawn);
-    // 사이드카 기동 인자는 설정 소유 여부 하나다(fetch 소유 종류를 env 로 알리지 않는다 — 소유하는 실행의 사이드카는 fetch 서비스가 없다)
-    assert!(!lib.contains("sidecar_fetch_kinds") && lib.contains("mirror, config_owned)?"));
-    // 사이드카 읽기 스레드·창 포커스·설정 알림·로그인 변경은 런타임 밖 스레드에서 불린다 — 라우터 호출은 앱 런타임 안에서
+    let first_push = lib.find("config_sync.push(None,").expect("설정의 첫 반영");
+    assert!(set_fetch < manage_router && manage_router < first_push);
+    // 창 포커스·설정 알림·로그인 변경은 런타임 밖 스레드에서 불린다 — 라우터 호출은 앱 런타임 안에서
     // (미러 반영·fetch 설정 반영 둘, 창 포커스, 그리고 GitHub 로그인 변경 콜백이 부르는 `github_auth_changed`)
     assert_eq!(lib.matches("in_runtime_of(").count(), 4);
 }
 
 #[test]
-fn fetch_소유_종류는_계산_값이고_사이드카에_env_로_알리지_않는다() {
+fn fetch_소유_종류는_계산_값이다() {
     assert_eq!(rust_fetch_kinds(false, false), "local,wsl");
     assert_eq!(rust_fetch_kinds(true, false), "local,wsl,ssh");
     assert_eq!(rust_fetch_kinds(false, true), "local,wsl,github");
     assert_eq!(rust_fetch_kinds(true, true), "local,wsl,ssh,github");
-    // PR 10: 사이드카가 읽던 env(ANTLER_RUST_FETCH_KINDS)와 그 파서(fetchOwns.ts)는 없다 — 사이드카는 fetch 를 소유 판정 없이 되돌리기에서만(전부) 한다
-    let sidecar = prod_code("src/sidecar.rs");
-    assert!(!sidecar.contains("ANTLER_RUST_FETCH_KINDS"));
-    assert!(!read_src("../src/sidecar/index.ts").contains("ANTLER_RUST_FETCH_KINDS"));
-    assert!(!std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("src/sidecar/fetchOwns.ts").exists());
 }
 
 #[test]
@@ -175,8 +164,8 @@ fn prefs(gen: u64) -> FetchPrefs {
     FetchPrefs { gen, auto_fetch_minutes: 5.0, approvals: Default::default(), trusted: Default::default() }
 }
 
-fn rig(enabled: bool) -> (Router, Arc<Calls>) {
-    let router = Router::new(enabled, false, mirror());
+fn rig() -> (Router, Arc<Calls>) {
+    let router = Router::new(false, mirror());
     let calls = Arc::new(Calls::default());
     router.set_fetch(Arc::new(Fake(calls.clone())));
     (router, calls)
@@ -186,68 +175,56 @@ fn log(calls: &Calls) -> Vec<String> {
     calls.log.lock().unwrap().clone()
 }
 
-fn is_sidecar(r: &Routed) -> bool {
-    matches!(r, Routed::Sidecar)
+fn is_unserved(r: &Routed) -> bool {
+    matches!(r, Routed::Unserved)
+}
+
+/// `repos:watch`·`req:cancel` 의 응답(라우터가 `{ok:true}` 로 답한다)
+fn is_acked(r: &Routed) -> bool {
+    matches!(r, Routed::Done(v) if v == &json!({ "ok": true }))
 }
 
 fn envelope(r: Routed) -> Value {
     match r {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("Rust 경로를 타야 하는데 사이드카로 갔다"),
+        Routed::Unserved => panic!("Rust 경로를 타야 하는데 풀지 못했다"),
     }
 }
 
 #[tokio::test]
-async fn git_fetch_는_local_wsl_이면_절대_사이드카로_가지_않고_그_밖은_사이드카로_간다() {
-    let (router, calls) = rig(true);
+async fn git_fetch_는_local_wsl_이면_rust_가_처리하고_그_밖은_풀_수_없다() {
+    let (router, calls) = rig();
     // local: Rust 가 처리한다
     let env = envelope(router.route("git:fetch", &json!(["loc", true])).await);
     assert_eq!(env["ok"], true);
     assert_eq!(env["data"]["repoId"], "loc");
     assert_eq!(log(&calls), ["fetch loc true"]);
-    // 미러 검사에 걸린 local·wsl 도 사이드카로 보내지 않고 오류로 끝낸다(사이드카는 그 환경을 맡지 않는다 — 보내면 이중 경로가 된다)
-    // (WSL 은 Windows 에서만 Rust 가 맡는다 — 그 밖의 OS 에서는 미러가 사이드카로 돌린다)
+    // 미러 검사에 걸린 local·wsl 도 오류로 끝낸다
+    // (WSL 은 Windows 에서만 Rust 가 맡는다 — 그 밖의 OS 에서는 미러가 풀지 않는다)
     let checked: &[&str] = if cfg!(windows) { &["unc", "wsl"] } else { &["unc"] };
     for id in checked {
         let env = envelope(router.route("git:fetch", &json!([id, true])).await);
         assert_eq!((env["ok"].as_bool(), env["code"].as_str()), (Some(false), Some("ERROR")), "{id}");
     }
     assert_eq!(log(&calls).len(), 1, "검사에 걸린 저장소는 서비스에 닿지 않는다");
-    // ssh·github·미러에 없는 id·모양이 틀린 인자는 사이드카가 처리한다
+    // ssh·github·미러에 없는 id·모양이 틀린 인자는 풀 수 없다
     for args in [json!(["ssh", true]), json!(["gh", true]), json!(["nope", true]), json!([]), json!([null]), json!([5, true]), json!({ "a": 1 })] {
-        assert!(is_sidecar(&router.route("git:fetch", &args).await), "{args}");
+        assert!(is_unserved(&router.route("git:fetch", &args).await), "{args}");
     }
     assert_eq!(log(&calls).len(), 1);
     assert_eq!(router.rust_handled(), 1);
 }
 
 #[tokio::test]
-async fn 스위치가_꺼지면_모든_fetch_가_사이드카로_가고_서비스는_주입되지_않는다() {
-    let (router, calls) = rig(false);
-    for id in ["loc", "unc", "wsl", "ssh", "gh", "nope"] {
-        assert!(is_sidecar(&router.route("git:fetch", &json!([id, true])).await), "{id}");
-    }
-    // repos:watch·prefs·포커스·종료도 서비스를 건드리지 않는다(되돌리기에서 Rust 가 자동 fetch 를 예약하면 이중 fetch 다)
-    assert!(is_sidecar(&router.route("repos:watch", &json!(["loc"])).await));
-    router.apply_fetch_prefs(prefs(1));
-    router.fetch_on_focus();
-    router.on_mirror_changed();
-    router.shutdown();
-    assert!(log(&calls).is_empty(), "{:?}", log(&calls));
-    assert_eq!(router.rust_handled(), 0);
-    assert!(!router.enabled());
-}
-
-#[tokio::test]
-async fn 서비스가_없으면_local_fetch_는_오류이고_사이드카로_가지_않는다() {
-    let router = Router::new(true, false, mirror());
+async fn 서비스가_없으면_local_fetch_는_오류다() {
+    let router = Router::new(false, mirror());
     let env = envelope(router.route("git:fetch", &json!(["loc", true])).await);
     assert_eq!((env["ok"].as_bool(), env["code"].as_str()), (Some(false), Some("ERROR")));
 }
 
 #[tokio::test]
 async fn manual_은_정확히_true_일_때만_참이다() {
-    let (router, calls) = rig(true);
+    let (router, calls) = rig();
     let marker = json!({ UNDEFINED_ARG: true });
     for (arg, want) in [
         (json!(true), true),
@@ -271,10 +248,10 @@ async fn manual_은_정확히_true_일_때만_참이다() {
 
 #[tokio::test]
 async fn repos_watch_는_rust_가_맡는_저장소만_자동_fetch_대상으로_삼는다() {
-    let (router, calls) = rig(true);
+    let (router, calls) = rig();
     for (arg, want) in [
         (json!(["loc"]), "active Some(\"loc\")"),
-        // 사이드카가 맡는 저장소로 옮겨 가면 Rust 의 예약은 비운다
+        // Rust 가 맡지 않는 저장소로 옮겨 가면 Rust 의 예약은 비운다
         (json!(["ssh"]), "active None"),
         (json!(["gh"]), "active None"),
         (json!(["nope"]), "active None"),
@@ -284,7 +261,7 @@ async fn repos_watch_는_rust_가_맡는_저장소만_자동_fetch_대상으로_
         (json!([5]), "active None"),
     ] {
         calls.log.lock().unwrap().clear();
-        assert!(is_sidecar(&router.route("repos:watch", &arg).await), "{arg}");
+        assert!(is_acked(&router.route("repos:watch", &arg).await), "{arg}");
         assert_eq!(log(&calls), [want], "{arg}");
     }
     // 같은 소유 판정으로 Rust 감시도 시작됐다 — 존재하지 않는 경로에서 유예 뒤 기준 계산이 돌지 않게 끝내기 전에 멈춘다
@@ -293,7 +270,7 @@ async fn repos_watch_는_rust_가_맡는_저장소만_자동_fetch_대상으로_
 
 #[tokio::test]
 async fn 포커스_prefs_미러_변경_종료는_서비스로_간다() {
-    let (router, calls) = rig(true);
+    let (router, calls) = rig();
     router.fetch_on_focus();
     router.apply_fetch_prefs(prefs(3));
     router.on_mirror_changed();
@@ -303,7 +280,7 @@ async fn 포커스_prefs_미러_변경_종료는_서비스로_간다() {
 
 #[test]
 fn 서비스가_주입되기_전에_온_prefs_는_마지막_것이_주입될_때_적용된다() {
-    let router = Router::new(true, false, mirror());
+    let router = Router::new(false, mirror());
     router.apply_fetch_prefs(prefs(1));
     router.apply_fetch_prefs(prefs(2));
     let calls = Arc::new(Calls::default());
@@ -316,7 +293,7 @@ fn 서비스가_주입되기_전에_온_prefs_는_마지막_것이_주입될_때
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// 런타임 밖 스레드(사이드카 읽기 스레드·창 이벤트)에서의 호출
+// 런타임 밖 스레드(창 이벤트·알림 콜백)에서의 호출
 // ---------------------------------------------------------------------------------------------------------------------
 
 struct NullHost;
@@ -334,7 +311,7 @@ impl FetchHost for NullHost {
 fn 활성_저장소가_있을_때_런타임_밖_스레드의_prefs_적용은_런타임에_들어가서만_안전하다() {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
     let m = mirror();
-    let router = Arc::new(Router::new(true, false, m.clone()));
+    let router = Arc::new(Router::new(false, m.clone()));
     let make_runner = |_: &Target| Arc::new(GitExecutor::Local(LocalExecutor::default()));
     router.set_fetch(Arc::new(FetchService::new(NullHost, m, make_runner, None)));
     // 활성 저장소를 정해 둔다(예약은 주기를 받기 전이라 아직 없다)
@@ -362,7 +339,7 @@ fn 활성_저장소가_있을_때_런타임_밖_스레드의_prefs_적용은_런
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// ssh 의 fetch(Phase 5 PR 4): ssh 가 Rust 로 풀리면(ssh_active) fetch 도 Rust 서비스가 맡는다 — 사이드카와 같은 술어(rust_fetch_kinds)로
+// ssh 의 fetch(Phase 5 PR 4): ssh 가 Rust 로 풀리면(ssh_active) fetch 도 Rust 서비스가 맡는다 — 같은 술어(rust_fetch_kinds)로
 // ---------------------------------------------------------------------------------------------------------------------
 
 fn ssh_repo(id: &str, host: &str) -> MirrorRepo {
@@ -381,7 +358,7 @@ fn ssh_mirror() -> RepoMirror {
 /// ssh 저장소가 Rust 로 풀리는(풀이 주입된) 라우터. 호스트가 잘못된 ssh 저장소(`sshbad`)도 있다
 fn ssh_rig() -> (Router, RepoMirror, Arc<Calls>) {
     let m = ssh_mirror();
-    let router = Router::new(true, false, m.clone());
+    let router = Router::new(false, m.clone());
     let calls = Arc::new(Calls::default());
     router.set_fetch(Arc::new(Fake(calls.clone())));
     router.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\\nonexistent-antler-home"));
@@ -390,7 +367,7 @@ fn ssh_rig() -> (Router, RepoMirror, Arc<Calls>) {
 }
 
 #[tokio::test]
-async fn ssh_저장소의_git_fetch_는_ssh_활성이면_rust_로_가고_사이드카_env_에_ssh_가_들어간다() {
+async fn ssh_저장소의_git_fetch_는_ssh_활성이면_rust_가_처리한다() {
     let (router, m, calls) = ssh_rig();
     assert!(matches!(m.resolve("ssh"), antler_lib::mirror::Resolved::Rust(Target::Ssh { .. })));
     assert!(matches!(m.resolve("sshbad"), antler_lib::mirror::Resolved::Invalid(_)));
@@ -399,41 +376,24 @@ async fn ssh_저장소의_git_fetch_는_ssh_활성이면_rust_로_가고_사이�
         assert_eq!((env["ok"].as_bool(), env["data"]["repoId"].as_str()), (Some(true), Some("ssh")), "{manual}");
     }
     assert_eq!(log(&calls), ["fetch ssh true", "fetch ssh false"]);
-    // 호스트가 잘못된 ssh 는 사이드카로 보내지 않고 오류다(사이드카는 그 저장소를 맡지 않는다 — local 의 검사에 걸린 저장소와 같다)
+    // 호스트가 잘못된 ssh 는 오류다(local 의 검사에 걸린 저장소와 같다)
     let env = envelope(router.route("git:fetch", &json!(["sshbad", true])).await);
     assert_eq!((env["ok"].as_bool(), env["code"].as_str(), env["error"].as_str()), (Some(false), Some("ERROR"), Some("잘못된 SSH 호스트입니다")));
     assert_eq!(log(&calls).len(), 2, "검사에 걸린 저장소는 서비스에 닿지 않는다");
-    // github·미러에 없는 id 는 여전히 사이드카다
+    // github·미러에 없는 id 는 풀 수 없다
     for id in ["gh", "nope"] {
-        assert!(is_sidecar(&router.route("git:fetch", &json!([id, true])).await), "{id}");
+        assert!(is_unserved(&router.route("git:fetch", &json!([id, true])).await), "{id}");
     }
     assert_eq!(router.rust_handled(), 2);
     assert_eq!(rust_fetch_kinds(router.ssh_active(), router.github_cache_active()), "local,wsl,ssh");
 }
 
 #[tokio::test]
-async fn ssh_스위치가_꺼지면_ssh_fetch_는_사이드카이고_env_에_ssh_가_없다() {
-    let m = ssh_mirror();
-    // ANTLER_RUST_SSH=0: 풀이 주입되지 않아 ssh 는 풀리지 않는다
-    let off = Router::new(true, false, m.clone()).with_ssh(false);
-    let calls = Arc::new(Calls::default());
-    off.set_fetch(Arc::new(Fake(calls.clone())));
-    off.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\\nonexistent-antler-home"));
-    assert!(!off.ssh_active());
-    for id in ["ssh", "sshbad"] {
-        assert!(is_sidecar(&off.route("git:fetch", &json!([id, true])).await), "{id}");
-    }
-    assert!(log(&calls).is_empty());
-    assert_eq!(rust_fetch_kinds(off.ssh_active(), off.github_cache_active()), "local,wsl");
-    // ANTLER_RUST_GIT=0: 서비스가 없다
-    let git_off = Router::new(false, false, ssh_mirror());
-    git_off.set_ssh_pool(antler_lib::git::exec::ssh::SshPool::for_home("C:\\nonexistent-antler-home"));
-    assert!(!git_off.enabled());
-    assert!(is_sidecar(&git_off.route("git:fetch", &json!(["ssh", true])).await));
-    // 풀이 없는 기본 라우터도 같다(미러의 ssh 해석이 꺼져 있으므로 fetch 소유도 사이드카다)
-    let bare = Router::new(true, false, ssh_mirror());
+async fn 풀이_없으면_ssh_fetch_는_풀_수_없다() {
+    // 풀이 없는 라우터(미러의 ssh 해석이 꺼져 있으므로 fetch 소유도 없다)
+    let bare = Router::new(false, ssh_mirror());
     bare.set_fetch(Arc::new(Fake(Arc::new(Calls::default()))));
-    assert!(is_sidecar(&bare.route("git:fetch", &json!(["ssh", true])).await));
+    assert!(is_unserved(&bare.route("git:fetch", &json!(["ssh", true])).await));
     assert_eq!(rust_fetch_kinds(bare.ssh_active(), bare.github_cache_active()), "local,wsl");
 }
 
@@ -442,7 +402,7 @@ async fn ssh_저장소는_자동_fetch_대상이다() {
     let (router, _m, calls) = ssh_rig();
     for (arg, want) in [(json!(["ssh"]), "active Some(\"ssh\")"), (json!(["sshbad"]), "active None"), (json!(["gh"]), "active None"), (json!(["loc"]), "active Some(\"loc\")")] {
         calls.log.lock().unwrap().clear();
-        assert!(is_sidecar(&router.route("repos:watch", &arg).await), "{arg}");
+        assert!(is_acked(&router.route("repos:watch", &arg).await), "{arg}");
         assert_eq!(log(&calls), [want], "{arg}");
     }
     // ssh 저장소를 활성화하면 Rust 감시도 시작된다 — 유예(1.5초) 뒤 기준 계산이 SSH 접속을 시도하지 않게 끝내기 전에 멈춘다
@@ -492,9 +452,9 @@ async fn fetch_서비스는_ssh_활성일_때_ssh_를_소유하고_전송_오류
     assert_eq!(built.0.lock().unwrap().len(), 2);
 }
 
-/// ssh 스위치가 꺼진 미러(`ANTLER_RUST_SSH=0`)에서는 서비스도 ssh 를 맡지 않는다 — 사이드카 env 에 ssh 가 없어 사이드카가 맡는다
+/// 풀이 없는(ssh 해석이 꺼진) 미러에서는 서비스도 ssh 를 맡지 않는다
 #[tokio::test]
-async fn fetch_서비스는_ssh_스위치가_꺼지면_ssh_를_소유하지_않는다() {
+async fn fetch_서비스는_풀이_없으면_ssh_를_소유하지_않는다() {
     let m = ssh_mirror();
     let built = Arc::new(Built::default());
     let b = built.clone();
@@ -531,7 +491,7 @@ async fn ssh_호스트가_빠졌다_다시_추가되면_fetch_서비스도_새_�
     let m = RepoMirror::default();
     let host = "127.0.0.1:1";
     m.apply(1, vec![ssh_repo("s", host)]);
-    let router = Router::new(true, false, m.clone());
+    let router = Router::new(false, m.clone());
     router.set_ssh_pool(pool.clone());
     let p = pool.clone();
     let make_runner = move |t: &Target| match t {
@@ -568,7 +528,7 @@ async fn ssh_호스트가_빠졌다_다시_추가되면_fetch_서비스도_새_�
 
 #[test]
 fn fetch_소유_판정은_소스_종류만_쓴다() {
-    // 서비스·라우터의 fetch 쪽은 mirror.resolve 가 아니라 resolve_fetch 만 부른다 — 해석 결과로 소유를 정하면 사이드카(ANTLER_RUST_FETCH_KINDS)와 어긋난다
+    // 서비스·라우터의 fetch 쪽은 mirror.resolve 가 아니라 resolve_fetch 만 부른다 — 해석 결과로 소유를 정하면 조회·감시의 소유(종류 목록)와 어긋난다
     let service = prod_code("src/git/fetch/service.rs");
     assert!(!service.contains("mirror.resolve("), "fetch 서비스가 mirror.resolve 로 소유를 정한다");
     assert_eq!(service.matches("mirror.resolve_fetch(").count(), 2);

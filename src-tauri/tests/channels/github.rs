@@ -3,7 +3,7 @@
 //! 서버가 받은 요청 목록(method·path·정렬한 query·Authorization 종류·본문)이다. 골든은 TS 가 기준이다: `UPDATE_GOLDEN=1 npx vitest run tests/goldenGithubChannels.test.ts`.
 //!
 //! 서버는 127.0.0.1 의 목 서버뿐이다(외부 접속 없음) — `api.github.com`·`github.com` 으로 가는 요청은 `*_for_test` 훅이 같은 목 서버로 보낸다.
-//! 사이드카에 묻는 저장소 정보(`RepoQuery`)와 gh CLI(`ExternalTokenProvider`)는 시나리오의 `fake` 로 대신한다.
+//! 대체 질의(앱은 설정 저장소)로 묻는 저장소 정보(`RepoQuery`)와 gh CLI(`ExternalTokenProvider`)는 시나리오의 `fake` 로 대신한다.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use super::mock::{norm, parse_routes, request_json, short, sorted, substitute, Mock};
 use super::read_json;
 
-// ── 사이드카·gh 의 가짜 ─────────────────────────────────────────────────
+// ── 대체 질의·gh 의 가짜 ─────────────────────────────────────────────────
 
 /// 시나리오의 `fake`(단계의 `fake` 가 키 단위로 덮는다)
 #[derive(Clone)]
@@ -129,7 +129,7 @@ fn service(base: &str, vault: Arc<Vault>, state: Arc<Mutex<FakeState>>) -> GitHu
 }
 
 fn router_with(base: &str, vault: Arc<Vault>, state: Arc<Mutex<FakeState>>, opened: Arc<Mutex<Vec<String>>>) -> (Router, GitHubService) {
-    let router = Router::new(true, false, RepoMirror::default());
+    let router = Router::new(false, RepoMirror::default());
     let opener: antler_lib::api_host::Opener = Arc::new(move |url: &str| {
         opened.lock().unwrap().push(url.to_string());
         Ok(())
@@ -193,14 +193,14 @@ async fn github_채널_시나리오가_ts_골든과_같다() {
                     while mock.seen.lock().unwrap().len() < from + *requests as usize && std::time::Instant::now() < deadline {
                         tokio::time::sleep(Duration::from_millis(5)).await;
                     }
-                    // 렌더러의 req:cancel 과 같은 길(라우터가 레지스트리와 서비스를 모두 취소하고 사이드카에도 넘긴다)
-                    assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+                    // 렌더러의 req:cancel 과 같은 길(라우터가 레지스트리와 서비스를 모두 취소한다)
+                    assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Done(_)));
                 };
                 tokio::join!(call, canceller).0
             }
             None => call.await,
         };
-        let Routed::Done(env) = routed else { panic!("{name}: gh 채널이 사이드카로 갔다") };
+        let Routed::Done(env) = routed else { panic!("{name}: gh 채널을 풀지 못했다") };
         let envelope = if env["ok"] == true {
             let mut o = json!({ "ok": true });
             if let Some(d) = env.get("data") {

@@ -1,44 +1,40 @@
-//! 채널 라우터. renderer 의 `antler_invoke` 를 Rust 가 직접 처리할지 Node 사이드카로 넘길지 정한다.
+//! 채널 라우터. renderer 의 `antler_invoke` 를 **모두 Rust 가** 처리한다(Phase 6c PR 5 에서 Node 사이드카와 되돌리기 스위치를 없앴다).
+//! 채널은 일곱 목록 — [`RUST_CHANNELS`]·[`APP_CHANNELS`]·[`ENV_CHANNELS`]·[`CONFIG_CHANNELS`]·[`ROUTER_CHANNELS`]·[`API_CHANNELS`]·[`UPDATE_CHANNELS`] — 중 하나에만 있어야 하고, 합집합이 `src/shared/ipc.ts` 의
+//! `IPC_CHANNELS` 와 정확히 같다(시험: `tests/channel_scope.rs`). 목록에 없는 채널·Rust 가 풀지 못한 호출(미러에 없는 저장소 id·풀 없는 ssh·모양이 틀린 인자·주입되지 않은 서비스)은
+//! [`Routed::Unserved`] 가 되고, 앱 경계([`Router::invoke`])가 그것을 **명시적 오류 봉투**(`unserved_message`)로 바꾼다 — 어디로도 넘기지 않는다.
 //!
-//! Rust 가 처리하는 것: [`RUST_CHANNELS`](`git:fetch` 포함 — fetch 가드·상태 기계는 `git::fetch`)에 있는 채널이고, 인자의 저장소 id 가 미러([`RepoMirror`])에 있고 kind 가 local·wsl(또는 ssh — 아래)이고,
-//! 환경변수 `ANTLER_RUST_GIT` 이 `0` 이 아닐 때. 그 밖에는 전부 사이드카가 지금까지처럼 처리한다
-//! (미러에 없는 id 의 오류 문구도 사이드카가 만든다). `ANTLER_RUST_GIT=0` 은 즉시 되돌리는 스위치다.
+//! git 채널([`RUST_CHANNELS`], `git:fetch` 포함 — fetch 가드·상태 기계는 `git::fetch`)은 인자의 저장소 id 가 미러([`RepoMirror`])에 있고 kind 가 local·wsl(또는 ssh·github — 아래)일 때 처리한다.
 //!
-//! **Rust 가 설정을 소유한 실행([`Router::config_owned`])에서 사이드카로 갈 수 있는 채널은 [`UPDATE_CHANNELS`] 7개뿐이다**(Phase 6b PR 10): [`Router::route`] 의 관문이 그 밖의 채널이 `Routed::Sidecar` 가 되면
-//! 사이드카로 보내지 않고 명시적 오류로 답한다(Rust 가 풀지 못한 저장소 — 사이드카는 설정을 모른다). 시험: `tests/sidecar_scope.rs`.
-//! 앱 업데이트 서비스([`Router::set_update`])가 주입돼 있으면(Phase 6c PR 4 — 스위치가 켜진 앱은 항상 주입한다) 그 7개도 Rust 가 처리해 **사이드카로 가는 채널이 없다**(`update::service`).
+//! fetch 의 소유권: local·wsl(그리고 ssh·github 가 Rust 로 풀릴 때는 ssh·github) 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스([`Router::set_fetch`])가 맡는다.
 //!
-//! fetch 의 소유권: 스위치가 켜져 있으면 local·wsl(그리고 ssh·github 가 Rust 로 풀릴 때는 ssh·github) 저장소의 fetch(수동·자동·포커스)는 Rust 의 서비스가 맡고, 앱은 사이드카를 env
-//! (Phase 6b PR 10 부터 설정을 소유한 실행의 사이드카는 `update:*` 밖의 서비스를 만들지 않아 fetch 를 하지 않는다 — env 로 알릴 일이 없다.)
-//! 스위치가 꺼져 있으면 서비스가 없다 — 사이드카가 전부 맡는다(이중 fetch 없음).
+//! 감시의 소유권(Phase 6a PR 7b): 활성 저장소 감시(`repos:watch` 가 시작·교체·중지, 창 포커스는 [`Router::watch_focus`])도 **같은 술어 하나**로 정한다 — Rust 는 fetch 를 맡는 종류의 저장소만 감시한다
+//! (notify·폴링 — `git::watcher`). github 저장소의 bare 캐시 폴더도 같다(Phase 6b PR 7).
 //!
-//! 감시의 소유권(Phase 6a PR 7b): 활성 저장소 감시(`repos:watch` 가 시작·교체·중지, 창 포커스는 [`Router::watch_focus`])도 **같은 술어 하나**로 정한다 — Rust 는 fetch 를 맡는 종류의 저장소만 감시하고
-//! (notify·폴링 — `git::watcher`), 설정을 소유한 실행의 사이드카는 감시자를 만들지 않는다. github 저장소의 bare 캐시 폴더도 같다(Phase 6b PR 7).
-//! 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 감시자도 없다 — 사이드카가 전부 감시한다.
-//!
-//! ssh(Phase 5 PR 3): `ANTLER_RUST_GIT` 이 `0` 이 아니고(하위 스위치 `ANTLER_RUST_SSH` 는 Phase 6b PR 9 에서 은퇴했다) SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 git 채널을 Rust 가 처리한다(Phase 5 PR 4: `git:fetch` 포함).
+//! ssh(Phase 5 PR 3): SSH 풀이 주입돼 있으면([`Router::ssh_active`]) ssh 저장소도 git 채널을 Rust 가 처리한다(Phase 5 PR 4: `git:fetch` 포함).
 //! 호스트마다 실행기(= 연결 하나)를 [`SshPool`] 에서 받고 큐는 호스트마다 하나(동시 4)다. fetch 서비스도 같은 풀의 연결을 쓴다.
 //! fetch 소유는 해석 결과가 아니라 소스 종류([`rust_fetch_kinds`])로 정한다(`RepoMirror::resolve_fetch`) — 술어 하나라 이중 fetch 도 미소유도 없다.
 //!
-//! `jira:*`·`gh:*`(`gh:repo` 제외, [`API_CHANNELS`])는 미러와 무관하게 서비스가 주입돼 있으면 Rust 가 처리한다([`api_host`]; 하위 스위치 `ANTLER_RUST_API` 는 은퇴했고 `ANTLER_RUST_GIT=0` 이 함께 끈다).
-//! 꺼져 있으면(`ANTLER_RUST_GIT=0`) 앱은 서비스도 만들지 않고 키체인도 읽지 않으며 사이드카가 지금처럼 처리한다. 켜져 있으면 사이드카를
-//! (앱은 두 서비스가 모두 만들어졌을 때만 주입한다.) 설정을 소유한 실행의 사이드카는 `update:*` 만 받으므로 jira·gh 채널은 닿지 않는다.
+//! `jira:*`·`gh:*`(`gh:repo` 제외, [`API_CHANNELS`])는 미러와 무관하게 서비스가 주입돼 있으면 Rust 가 처리한다([`api_host`]). 앱은 두 서비스가 모두 만들어졌을 때만 주입하고,
+//! 하나라도 만들지 못하면(키체인 오류 등) 두 채널군 모두 "연결 서비스를 사용할 수 없습니다" 오류로 답한다.
 //!
-//! 앱 채널(Phase 6b PR 5, [`APP_CHANNELS`]: 폴더 선택·클립보드·링크 열기·타이틀바 테마)은 설정·미러와 무관하다: `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`AppHost`])가 주입돼 있으면 Rust 가 처리한다([`app_host`]).
+//! 앱 채널(Phase 6b PR 5, [`APP_CHANNELS`]: 폴더 선택·클립보드·링크 열기·타이틀바 테마)은 설정·미러와 무관하다: 포트([`AppHost`])가 주입돼 있으면 Rust 가 처리한다([`app_host`]).
 //!
-//! 환경 채널(Phase 6b PR 8, [`ENV_CHANNELS`]: `env:wslDistros`·`env:sshHosts`·`env:test`·`env:listDir`·`repos:scan`)도 설정을 읽지 않는다: `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`EnvHost`])가 주입돼 있으면 Rust 가 처리한다([`env_host`]).
-//! 단 ssh 종류(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만 처리하고, 풀이 없으면 Rust 가 설정을 소유한 실행은 "SSH 를 사용할 수 없습니다" 로 답한다(사이드카는 설정을 모른다).
+//! 환경 채널(Phase 6b PR 8, [`ENV_CHANNELS`]: `env:wslDistros`·`env:sshHosts`·`env:test`·`env:listDir`·`repos:scan`)도 설정을 읽지 않는다: 포트([`EnvHost`])가 주입돼 있으면 Rust 가 처리한다([`env_host`]).
+//! 단 ssh 종류(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만 연결하고, 풀이 없으면 "SSH 를 사용할 수 없습니다" 로 답한다.
 //!
-//! `gh:repo`(Phase 6a PR 8)는 `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 위 git 채널과 같은 소유 술어(`RepoMirror::resolve`)를 쓴다 — Rust 가 맡는 저장소는 Rust 가 답하고
-//! (결과 캐시 60초), 캐시 실행기가 없는 github kind·미러에 없는 id 는 설정을 소유하지 않은 실행에서만 사이드카가 답한다(소유한 실행은 Rust 가 오류로 답한다). GitHub 서비스가 사이드카에 묻던 저장소 정보(`repoq`: remote 목록·push 된 커밋)도 같은 술어로 갈린다(`routed_repos`).
+//! 설정 소유 채널([`CONFIG_CHANNELS`], Phase 6b PR 9)은 설정 소유자([`Router::set_config`])가 처리한다([`config_host`]). 앱 업데이트 채널([`UPDATE_CHANNELS`], Phase 6c PR 4)은 업데이트 서비스([`Router::set_update`])가 처리한다(`update::service`).
+//! `req:cancel`·`repos:watch` 는 라우터 상태만 만지므로 설정 소유자 없이 라우터가 직접 처리한다.
 //!
-//! GitHub 원격 전용 저장소(github kind, Phase 6b PR 6)의 **조회**: 스위치가 켜져 있고 GitHub 서비스와 캐시 실행기가 주입돼 있으면(`Router::set_github_cache` — 토큰의 출처는 그 서비스 하나) 위 git 채널을 Rust 가 처리한다
-//! //! (`Target::Github` — 실행기 `GitExecutor::Github` 가 캐시 경로에서만 토큰·lazy fetch 환경을 연다). 아니면 사이드카가 전부 맡는다. **fetch·감시의 소유도 같은 스위치 하나다**(Phase 6b PR 7) —
+//! `gh:repo`(Phase 6a PR 8)는 `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 위 git 채널과 같은 소유 술어(`RepoMirror::resolve`)를 쓴다 — Rust 가 맡는 저장소는 Rust 가 답한다(결과 캐시 60초).
+//! GitHub 서비스가 저장소 정보를 물을 때(`routed_repos`)도 같은 술어로 라우터가 답한다.
+//!
+//! GitHub 원격 전용 저장소(github kind, Phase 6b PR 6)의 **조회**: GitHub 서비스와 캐시 실행기가 주입돼 있으면(`Router::set_github_cache` — 토큰의 출처는 그 서비스 하나) 위 git 채널을 Rust 가 처리한다
+//! (`Target::Github` — 실행기 `GitExecutor::Github` 가 캐시 경로에서만 토큰·lazy fetch 환경을 연다). **fetch·감시의 소유도 같은 조건 하나다**(Phase 6b PR 7) —
 //! `rust_fetch_kinds` 의 github 는 `Router::github_cache_active` 가 켜졌을 때만이고(미러의 `resolve_fetch` 가 같은 함수), 그래서 Rust 의 `activity` 도 github 저장소의 기억한 시그니처를 쓴다.
 //! github 갈래: refs 의 worktrees 를 비우고 refsDetails 는 서브모듈을 건너뛰며,
 //! commit·compare 는 오프라인에서 통계 없는 목록을 돌려주고(lenient) onRemote 는 항상 true, wip 은 빈 결과, `gh:repo` 는 레코드의 링크로 답한다.
-//! `repos:remove` 는 사이드카로 넘기기 전에 그 저장소의 fetch 를 멈추고 끝나기를 기다리고(`FetchControl::forget_and_wait`) 감시를 멈추고 진행 중 조회·열린 로그 커서를 끊고 끝나기를 기다린다 —
-//! 폴더 삭제도 Phase 6b PR 9 부터 Rust 가 한다(`config_host` — 이 정리가 끝난 뒤 링크·경로 일치를 확인하고 지운다).
+//! `repos:remove` 의 정리(`release_github_repo`)는 설정 소유자가 부른다: 그 저장소의 fetch 를 멈추고 끝나기를 기다리고(`FetchControl::forget_and_wait`) 감시를 멈추고 진행 중 조회·열린 로그 커서를 끊고 끝나기를 기다린 뒤
+//! 폴더를 지운다(`config_host` — 링크·경로 일치를 확인하고 지운다).
 //!
 //! 보안 경계(docs/security.md · docs/tauri.md "실행기"):
 //! - 저장소 경로·kind·배포판은 **미러에서만** 가져온다. renderer 가 보낸 값은 저장소 id 와 검증된 값(해시·ref 범위·파일 경로·숫자)뿐이다.
@@ -49,10 +45,10 @@
 //! - 취소: `requestId → CancellationToken` 레지스트리. cancel 이 등록보다 먼저 도착해도(별개 호출이라 순서가 보장되지 않는다)
 //!   tombstone 이 기억했다가 등록 때 이미 취소된 토큰을 준다.
 //!
-//! 이 모듈은 `Sidecar`·`AppHandle` 에 기대지 않는다 — 통합 테스트(`tests/channels.rs`)가 그대로 돌릴 수 있다.
+//! 이 모듈은 `AppHandle` 에 기대지 않는다 — 통합 테스트(`tests/channels.rs`)가 그대로 돌릴 수 있다.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -117,23 +113,22 @@ pub const RUST_CHANNELS: &[&str] = &[
     "git:activity",
     "git:repoExtras",
     "git:lfsPaths",
-    // `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 다른 git 채널과 같은 소유 술어를 쓴다(Phase 6a PR 8). 캐시 실행기가 없는 github kind·미러에 없는 id 는 사이드카가 답한다
+    // `gh:` 접두어이지만 저장소의 remote 를 git 으로 읽는 일이라 다른 git 채널과 같은 소유 술어를 쓴다(Phase 6a PR 8). 캐시 실행기가 없는 github kind·미러에 없는 id 는 처리하지 못함 오류다
     "gh:repo",
     "git:wipStatus",
     "git:wipDiff",
 ];
 
 /// Rust 가 처리하는 앱 채널(`app_host`, Phase 6b PR 5): 설정이 필요 없는 폴더 선택·클립보드·링크 열기·타이틀바 테마. `RUST_CHANNELS`·`API_CHANNELS` 와 겹치지 않고
-/// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다(`tests/app_route.rs` 가 강제한다). 스위치는 `ANTLER_RUST_GIT` 하나(`0` 이면 사이드카가 처리한다)
+/// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 한다(`tests/app_route.rs` 가 강제한다). 포트([`AppHost`])가 주입돼 있을 때만 처리한다
 pub const APP_CHANNELS: &[&str] = &["dialog:pickFolder", "clipboard:writeText", "code:openLink", "win:setTitleBarTheme"];
 
 /// Rust 가 처리하는 환경 채널(`env_host`, Phase 6b PR 8): 저장소 추가 창의 WSL 목록·SSH 별칭·연결 테스트·원격 폴더 목록·폴더 안 저장소 찾기. 다른 채널 목록과 겹치지 않고 전부 `IPC_CHANNELS` 에 있다(`tests/env_route.rs`).
-/// `ANTLER_RUST_GIT` 이 `0` 이 아니고 포트([`EnvHost`])가 주입돼 있어야 하고, **ssh 종류**(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만이다 — 아니면 사이드카가 처리한다(계획 §13 C4)
+/// 포트([`EnvHost`])가 주입돼 있어야 하고, **ssh 종류**(`env:listDir` 는 항상)는 SSH 풀이 있을 때([`Router::ssh_active`])만 연결한다 — 풀이 없으면 "SSH 를 사용할 수 없습니다" 오류다
 pub const ENV_CHANNELS: &[&str] = &["env:wslDistros", "env:sshHosts", "env:test", "env:listDir", "repos:scan"];
 
-/// Rust 가 응답하는 설정 소유 채널(`config_host`, Phase 6b PR 9): 설정 파일을 읽고 쓰는 채널과 그 설정이 필요한 `external:*`·`repos:watch`·`req:cancel`.
-/// 다른 채널 목록과 겹치지 않고 전부 `IPC_CHANNELS` 에 있다(`tests/config_route.rs`). 설정 소유자([`Router::set_config`])가 있을 때만 Rust 가 처리한다 —
-/// `ANTLER_RUST_GIT=0` 이면 소유자가 없어 전부 사이드카가 처리한다(그 실행에서는 사이드카가 설정 파일의 유일한 작성자다)
+/// Rust 가 응답하는 설정 소유 채널(`config_host`, Phase 6b PR 9): 설정 파일을 읽고 쓰는 채널과 그 설정이 필요한 `external:*`.
+/// 다른 채널 목록과 겹치지 않고 전부 `IPC_CHANNELS` 에 있다(`tests/config_route.rs`). 설정 소유자([`Router::set_config`])가 주입돼 있을 때만 처리한다 — 앱은 항상 주입한다
 pub const CONFIG_CHANNELS: &[&str] = &[
     "config:get",
     "config:setUi",
@@ -142,14 +137,16 @@ pub const CONFIG_CHANNELS: &[&str] = &[
     "repos:addGithub",
     "repos:update",
     "repos:remove",
-    "repos:watch",
     "external:open",
     "external:pickEditorExe",
-    "req:cancel",
 ];
 
-/// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 `ANTLER_RUST_API` 스위치만 본다.
-/// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 하고, `IPC_CHANNELS` 의 `jira:`·`gh:` 채널에서 [`API_SIDECAR_CHANNELS`] 를 뺀 것과 정확히 같아야 한다(`tests/api_route.rs` 가 강제한다)
+/// 라우터 상태만 만지는 채널(설정 소유자 없이 라우터가 직접 처리한다): `req:cancel`(요청 id 의 레지스트리·서비스 요청을 끊는다)과 `repos:watch`(활성 저장소의 로그 커서·감시·자동 fetch 대상을 맞춘다).
+/// 다른 채널 목록과 겹치지 않고 전부 `IPC_CHANNELS` 에 있다(`tests/channel_scope.rs`)
+pub const ROUTER_CHANNELS: &[&str] = &["req:cancel", "repos:watch"];
+
+/// Rust 가 처리하는 `jira:*`·`gh:*` 채널(`api_host`). `RUST_CHANNELS` 와 별개다 — 미러·저장소와 무관하고 서비스([`JiraHost`]·[`GithubHost`])가 주입돼 있을 때만 처리한다.
+/// 전부 `src/shared/ipc.ts` 의 `IPC_CHANNELS` 에 있어야 하고, `IPC_CHANNELS` 의 `jira:`·`gh:` 채널에서 `gh:repo`(저장소를 보는 git 채널이라 [`RUST_CHANNELS`] 에 있다)를 뺀 것과 정확히 같아야 한다(`tests/api_route.rs` 가 강제한다)
 pub const API_CHANNELS: &[&str] = &[
     "jira:auth",
     "jira:connect",
@@ -189,13 +186,8 @@ pub const API_CHANNELS: &[&str] = &[
     "gh:accessibleRepos",
 ];
 
-/// `gh:` 접두어이지만 [`API_CHANNELS`] 가 아닌 채널(서비스가 아니라 저장소를 보는 `gh:repo`). Rust 는 이 채널을 [`RUST_CHANNELS`] 의 git 채널로서 **Rust 가 맡는 저장소(local·WSL·SSH)만** 처리하고
-/// (`Router::gh_repo`), 캐시 실행기가 없는 github kind·미러에 없는 id·스위치가 꺼졌을 때는 사이드카의 `RepoService` 가 처리한다 — 그래서 사이드카는 이 채널을 계속 받는다.
-pub const API_SIDECAR_CHANNELS: &[&str] = &["gh:repo"];
-
-/// 앱 업데이트 채널(`update:*` 7개, Phase 6c PR 4). 업데이트 서비스([`UpdateControl`])가 주입돼 있으면(스위치가 켜진 앱은 항상 주입한다) **Rust 가 처리하고 사이드카로 가지 않는다**.
-/// 서비스가 없을 때(`ANTLER_RUST_GIT=0` 되돌리기 — PR 5 에서 사이드카와 함께 사라진다)만 사이드카의 `UpdateService` 가 처리한다.
-/// `IPC_CHANNELS` 의 `update:` 접두 채널과 정확히 같아야 하고 `src/sidecar/configOwns.ts` 의 `SIDECAR_UPDATE_CHANNELS` 와도 같다(`tests/sidecar_scope.rs` 가 강제한다)
+/// 앱 업데이트 채널(`update:*` 7개, Phase 6c PR 4). 업데이트 서비스([`UpdateControl`])가 주입돼 있을 때만 처리한다(앱은 항상 주입하고, 만들지 못하면 "처리하지 못함" 오류다).
+/// `IPC_CHANNELS` 의 `update:` 접두 채널과 정확히 같아야 한다(`tests/channel_scope.rs` 가 강제한다)
 pub const UPDATE_CHANNELS: &[&str] = &[
     "update:get",
     "update:check",
@@ -208,8 +200,8 @@ pub const UPDATE_CHANNELS: &[&str] = &[
 
 /// Rust 가 fetch 를 맡는 소스 종류.
 /// **계산 값이다**: local·wsl 은 항상, ssh 는 Rust 가 ssh 저장소를 푸는 때(`Router::ssh_active`)만 더한다. 미러의 fetch 소유 판정(`RepoMirror::resolve_fetch`)이 이 함수 하나를 부른다.
-/// github(GitHub 원격 전용 저장소, Phase 6b PR 7)는 Rust 가 github 저장소를 푸는 때(`Router::github_cache_active` — 스위치·GitHub 서비스·캐시 실행기가 모두 있다)만 더한다 —
-/// 조회·fetch·감시의 github 소유가 같은 스위치 하나다
+/// github(GitHub 원격 전용 저장소, Phase 6b PR 7)는 Rust 가 github 저장소를 푸는 때(`Router::github_cache_active` — GitHub 서비스·캐시 실행기가 모두 있다)만 더한다 —
+/// 조회·fetch·감시의 github 소유가 같은 조건 하나다
 pub fn rust_fetch_kinds(ssh_active: bool, github_active: bool) -> &'static str {
     match (ssh_active, github_active) {
         (false, false) => "local,wsl",
@@ -219,14 +211,14 @@ pub fn rust_fetch_kinds(ssh_active: bool, github_active: bool) -> &'static str {
     }
 }
 
-/// 주어진 tokio 런타임 안에서 `f` 를 부른다. 서비스의 예약·fetch 시작은 태스크를 만들어서 런타임 밖 스레드(사이드카 읽기 스레드·창 이벤트)에서는 패닉한다 —
+/// 주어진 tokio 런타임 안에서 `f` 를 부른다. 서비스의 예약·fetch 시작은 태스크를 만들어서 런타임 밖 스레드(창 이벤트·알림 콜백)에서는 패닉한다 —
 /// 그 스레드들은 이 함수로 앱 런타임에 들어간 뒤 라우터를 부른다
 pub fn in_runtime_of<T>(handle: &tokio::runtime::Handle, f: impl FnOnce() -> T) -> T {
     let _guard = handle.enter();
     f()
 }
 
-/// bridge 의 `encodeArgs` 가 인자 배열의 빈 자리(undefined)에 넣는 표식(`src/sidecar/protocol.ts` 의 `UNDEFINED_ARG`)
+/// bridge 의 `encodeArgs` 가 인자 배열의 빈 자리(undefined)에 넣는 표식(`src/shared/ipc.ts` 의 `UNDEFINED_ARG`)
 pub const UNDEFINED_ARG: &str = "__antlerUndefinedArg";
 
 /// 커밋 상세 캐시(`RepoService.ts` 의 COMMIT_CACHE_ENTRIES·COMMIT_CACHE_BYTES)
@@ -243,7 +235,7 @@ const BLOB_CACHE_BYTES: u64 = 32 * 1024 * 1024;
 /// GitHub remote 추론 결과(`gh:repo`) 캐시 시간·모든 GitHub remote 목록(Launchpad) 캐시 시간(`GH_REPO_TTL_MS`·`GH_REMOTES_TTL_MS`)
 const GH_REPO_TTL: Duration = Duration::from_secs(60);
 const GH_REMOTES_TTL: Duration = Duration::from_secs(10 * 60);
-/// `gh_remotes` 응답 상한(사이드카 경로 `repoq` 의 응답 검증과 같은 값)
+/// `gh_remotes` 응답 상한(악성 설정의 remote 수십만 개를 막는 상한)
 const GH_REMOTES_MAX: usize = 100;
 const GH_REMOTE_NAME_MAX: usize = 200;
 /// `git:onRemote` 가 true 였던 (저장소, 커밋)을 기억하는 개수 상한(넘으면 비운다)
@@ -311,16 +303,12 @@ pub(crate) async fn queued_signature(queue: ProcessQueue<Arc<Value>>, exec: Arc<
     sig.ok_or_else(|| SigError::Failed("signature missing".to_string()))
 }
 
+/// 라우팅 결과. 사이드카 경로는 없다 — Rust 가 풀지 못한 호출은 [`Routed::Unserved`] 이고, 앱 경계([`Router::invoke`])가 명시적 오류로 바꾼다
 pub enum Routed {
     /// Rust 가 처리했다 — IpcEnvelope(`{ok:true,data}` / `{ok:false,error,code}`)
     Done(Value),
-    /// 사이드카로 보낸다(인자는 호출자가 가진 원본 그대로)
-    Sidecar,
-}
-
-/// `ANTLER_RUST_GIT` 값으로 Rust 경로를 켤지 정한다. `0` 만 끈다
-pub fn rust_git_enabled(var: Option<&str>) -> bool {
-    var != Some("0")
+    /// Rust 가 풀지 못했다(목록에 없는 채널·미러에 없는 저장소 id·풀 없는 ssh·모양이 틀린 인자·주입되지 않은 서비스)
+    Unserved,
 }
 
 fn ok_env(data: Value) -> Value {
@@ -338,7 +326,7 @@ fn err_env(error: &str, code: &str) -> Value {
     json!({ "ok": false, "error": error, "code": code })
 }
 
-/// 알림 팬아웃: 상태에 먼저 반영하고 사이드카로 보낸다. 상태는 Rust 가 푸는 저장소만 만진다(TS `noteLog` 가 모르는 저장소를 무시하는 것과 같다).
+/// 알림 팬아웃: 상태에 먼저 반영하고 관찰자(`set_note_sink`)로 보낸다. 상태는 Rust 가 푸는 저장소만 만진다(TS `noteLog` 가 모르는 저장소를 무시하는 것과 같다).
 /// 순서가 중요하다 — `fetchChanged` 는 `repo:changed` 보다 먼저 시그니처를 버려야 하고, 싱크는 호출 시점에 읽는다(나중에 달아도 된다)
 fn fanout_sink(state: &RepoState, mirror: &RepoMirror, user: &Arc<Mutex<Option<NoteSink>>>) -> NoteSink {
     let (state, mirror, user) = (state.clone(), mirror.clone(), user.clone());
@@ -353,7 +341,7 @@ fn fanout_sink(state: &RepoState, mirror: &RepoMirror, user: &Arc<Mutex<Option<N
     })
 }
 
-/// 인자 배열의 표식을 None(undefined)으로 되돌린다. 사이드카 `decodeArgs` 와 같다 — 키가 정확히 그것 하나이고 값이 `true` 인 객체만
+/// 인자 배열의 표식을 None(undefined)으로 되돌린다. 키가 정확히 그것 하나이고 값이 `true` 인 객체만
 fn decode_args(raw: &[Value]) -> Vec<Option<&Value>> {
     raw.iter()
         .map(|a| match a.as_object() {
@@ -475,7 +463,7 @@ pub(crate) struct SourceRuntime {
 pub(crate) struct Runtimes {
     mirror: RepoMirror,
     sources: Arc<Mutex<HashMap<String, Arc<SourceRuntime>>>>,
-    /// 주입된 SSH 풀(스위치가 꺼져 있으면 없다)
+    /// 주입된 SSH 풀(주입하지 않았으면 없다)
     pool: Arc<Mutex<Option<Arc<SshPool>>>>,
     /// WSL 배포판 등록 관문 — 등록된 배포판이 없으면 WSL 실행기를 내주지 않는다(`wsl.exe` 스텁이 "WSL 설치" 창을 띄운다)
     wsl_gate: Arc<DistroGate>,
@@ -547,7 +535,7 @@ impl Runtimes {
 }
 
 /// GitHub 원격 전용 저장소 하나의 조회가 공유하는 취소 범위(Phase 6b PR 6). `repos:remove` 가 진행 중인 조회(git 프로세스·로그 커서)를 끊고 끝나기를 기다린 뒤에야
-/// 사이드카가 캐시 폴더를 지운다 — Windows 는 pack 파일 핸들을 쥔 프로세스가 있으면 폴더를 지우지 못한다
+/// 설정 소유자가 캐시 폴더를 지운다 — Windows 는 pack 파일 핸들을 쥔 프로세스가 있으면 폴더를 지우지 못한다
 #[derive(Default)]
 struct GithubScope {
     cancel: CancellationToken,
@@ -566,19 +554,18 @@ impl Drop for ScopeGuard {
 /// `repos:remove` 가 진행 중인 조회가 끝나기를 기다리는 최대 시간(프로세스 트리는 동기 종료지만 핸들이 풀리는 데 짧은 틈이 있다)
 const SCOPE_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// "삭제 중" 표식의 안전장치 시간 — 사이드카가 레코드를 지우지 못해 미러가 바뀌지 않아도 이 시간이 지나면 풀린다(그 저장소가 영영 막히지 않게)
+/// "삭제 중" 표식의 안전장치 시간 — 설정 소유자가 레코드를 지우지 못해 미러가 바뀌지 않아도 이 시간이 지나면 풀린다(그 저장소가 영영 막히지 않게)
 const REMOVING_TTL: Duration = Duration::from_secs(30);
 
 const REMOVING_MESSAGE: &str = "저장소를 삭제하는 중입니다";
 
 pub struct Router {
-    enabled: bool,
     log: bool,
     mirror: RepoMirror,
     cancels: Arc<CancelRegistry>,
     /// 소스별 실행기·큐·SSH 풀(감시 호스트와 나눠 쓴다)
     runtimes: Runtimes,
-    /// 활성 저장소 감시(Phase 6a PR 7b). **Rust 가 맡는 저장소(fetch 와 같은 소유 판정 — `RepoMirror::resolve_fetch`)만** 감시한다. 나머지(github·미러에 없음)는 사이드카가 감시한다
+    /// 활성 저장소 감시(Phase 6a PR 7b). **Rust 가 맡는 저장소(fetch 와 같은 소유 판정 — `RepoMirror::resolve_fetch`)만** 감시한다. 나머지(풀·실행기 없는 ssh·github, 미러에 없음)는 감시하지 않는다
     watcher: RepoWatcher,
     watch_host: Arc<RouterWatchHost>,
     watch_dirs: Arc<dyn DirWatch>,
@@ -606,40 +593,34 @@ pub struct Router {
     repo_state: RepoState,
     /// 저장소별 untracked diff 허용 목록(TS `untrackedAllow`). `wipStatus` 가 끝나면 교체하고, 미러에서 빠졌거나 대상이 바뀐 저장소는 `on_mirror_changed` 가 지운다. 없으면 untracked diff 는 거부다
     untracked_allow: Arc<Mutex<HashMap<String, AllowEntry>>>,
-    /// 앱이 단 사이드카 알림 싱크. 상태에 먼저 반영한 뒤 부른다(`note_sink`)
+    /// 관찰자의 알림 싱크(시험이 단다). 상태에 먼저 반영한 뒤 부른다(`note_sink`)
     user_sink: Arc<Mutex<Option<NoteSink>>>,
     rust_handled: AtomicU64,
-    /// fetch 서비스(앱이 켜져 있을 때만 주입한다). 없으면 fetch 채널은 오류다
+    /// fetch 서비스(앱이 주입한다). 없으면 fetch 채널은 처리하지 못함 오류다
     fetch: Mutex<Option<Arc<dyn FetchControl>>>,
     /// 서비스가 주입되기 전에 도착한 fetchPrefs(마지막 것만). 주입될 때 적용한다
     pending_prefs: Mutex<Option<FetchPrefs>>,
-    /// `ANTLER_RUST_SSH` 스위치(`ANTLER_RUST_GIT=0` 이어도 꺼진다). 꺼져 있으면 ssh 저장소는 풀 없이 사이드카로 간다
-    ssh_enabled: bool,
-    /// `ANTLER_RUST_API` 스위치(`ANTLER_RUST_GIT=0` 이어도 꺼진다). 꺼져 있으면 `jira:*` 는 서비스 없이 사이드카로 간다
-    api_enabled: bool,
-    /// Jira 서비스(앱이 스위치가 켜져 있을 때만 주입한다). 없으면 `jira:*` 는 사이드카가 처리한다
+    /// Jira 서비스(앱이 GitHub 서비스와 둘 다 만들어졌을 때만 주입한다). 없으면 `jira:*` 는 오류다
     jira: Mutex<Option<JiraHost>>,
-    /// GitHub 서비스(Jira 와 같은 조건으로 주입한다). 없으면 `gh:*` 는 사이드카가 처리한다
+    /// GitHub 서비스(Jira 와 같은 조건으로 주입한다). 없으면 `gh:*` 는 오류다
     github: Mutex<Option<GithubHost>>,
-    /// 두 서비스가 모두 있어 jira·gh 를 Rust 가 소유한다고 기록했다([`Router::claim_api`]). 서비스 없는 채널은 사이드카로 가지 않고 오류다
-    api_owned: AtomicBool,
-    /// 대화상자·클립보드·열기 포트(앱이 주입한다). 없거나 `ANTLER_RUST_GIT=0` 이면 [`APP_CHANNELS`] 는 사이드카가 처리한다
+    /// 대화상자·클립보드·열기 포트(앱이 주입한다). 없으면 [`APP_CHANNELS`] 는 처리하지 못함 오류다
     app: Mutex<Option<AppHost>>,
-    /// 환경 채널 포트(앱이 주입한다). 없거나 `ANTLER_RUST_GIT=0` 이면 [`ENV_CHANNELS`] 는 사이드카가 처리한다
+    /// 환경 채널 포트(앱이 주입한다). 없으면 [`ENV_CHANNELS`] 는 처리하지 못함 오류다
     env: Mutex<Option<EnvHost>>,
-    /// 설정 소유자(Phase 6b PR 9: 설정 파일의 유일한 작성자). 없거나 `ANTLER_RUST_GIT=0` 이면 [`CONFIG_CHANNELS`] 는 사이드카가 처리한다(그때는 사이드카가 파일을 쓴다)
+    /// 설정 소유자(Phase 6b PR 9: 설정 파일의 유일한 작성자). 없으면 [`CONFIG_CHANNELS`] 는 처리하지 못함 오류다
     config: Mutex<Option<Arc<ConfigHost>>>,
-    /// 앱 업데이트 서비스(Phase 6c PR 4). 없거나 `ANTLER_RUST_GIT=0` 이면 [`UPDATE_CHANNELS`] 는 사이드카가 처리한다
+    /// 앱 업데이트 서비스(Phase 6c PR 4). 없으면 [`UPDATE_CHANNELS`] 는 처리하지 못함 오류다
     update: Mutex<Option<Arc<dyn UpdateControl>>>,
     /// github 저장소별 조회 범위(저장소 id → 범위). 미러가 바뀌면 github 로 풀리지 않는 저장소 것을 치운다
     github_scopes: Mutex<HashMap<String, Arc<GithubScope>>>,
-    /// "삭제 중"인 github 저장소(id → 만료 시각). `repos:remove` 가 정리를 시작한 뒤 사이드카가 레코드를 지우고 미러가 바뀌기 전까지, 그 id 의 새 조회가
+    /// "삭제 중"인 github 저장소(id → 만료 시각). `repos:remove` 가 정리를 시작한 뒤 설정 소유자가 레코드를 지우고 미러가 바뀌기 전까지, 그 id 의 새 조회가
     /// 범위에 들어가 폴더를 다시 쥐지 못하게 한다. 미러가 바뀌어 github 로 풀리지 않게 되면 풀리고, 아니면 [`REMOVING_TTL`] 뒤에 풀린다
     github_removing: Mutex<HashMap<String, Instant>>,
 }
 
 impl Router {
-    pub fn new(enabled: bool, log: bool, mirror: RepoMirror) -> Self {
+    pub fn new(log: bool, mirror: RepoMirror) -> Self {
         let repo_state = RepoState::default();
         let user_sink: Arc<Mutex<Option<NoteSink>>> = Arc::default();
         let logs = LogService::new(mirror.clone());
@@ -656,12 +637,8 @@ impl Router {
             watch_polls: PollTimes::default(),
             watch_sink,
             watch_target: Mutex::default(),
-            enabled,
-            ssh_enabled: enabled,
-            api_enabled: enabled,
             jira: Mutex::default(),
             github: Mutex::default(),
-            api_owned: AtomicBool::new(false),
             app: Mutex::default(),
             env: Mutex::default(),
             config: Mutex::default(),
@@ -692,118 +669,66 @@ impl Router {
         }
     }
 
-    /// 스위치가 켜져 있는가(`ANTLER_RUST_GIT` 이 0 이 아니다)
-    pub fn enabled(&self) -> bool {
-        self.enabled
-    }
-
-    /// `jira:*` 스위치를 정한다(만든 직후에만). 기본은 git 스위치와 같다
-    pub fn with_api(mut self, enabled: bool) -> Self {
-        self.api_enabled = enabled;
-        self
-    }
-
-    /// `ssh` 스위치를 정한다(만든 직후에만). 기본은 git 스위치와 같다
-    pub fn with_ssh(mut self, enabled: bool) -> Self {
-        self.ssh_enabled = enabled;
-        self
-    }
-
-    /// `ANTLER_RUST_SSH` 스위치가 켜져 있는가(풀이 주입됐는지와는 별개 — 만들기 전에 이 값으로 정한다)
-    pub fn ssh_enabled(&self) -> bool {
-        self.enabled && self.ssh_enabled
-    }
-
-    /// Rust 가 ssh 저장소의 git 채널(fetch 제외)을 처리하는가: 스위치가 켜져 있고 풀이 주입됐다. **미러의 ssh 해석**(`RepoMirror::set_ssh`)과
+    /// Rust 가 ssh 저장소의 git 채널(fetch 제외)을 처리하는가: 풀이 주입됐다. **미러의 ssh 해석**(`RepoMirror::set_ssh`)과
     /// 미러의 ssh 해석·fetch 소유 종류가 모두 이 값 하나로 정해진다
     pub fn ssh_active(&self) -> bool {
-        self.enabled && self.ssh_enabled && self.ssh_pool().is_some()
+        self.ssh_pool().is_some()
     }
 
-    /// SSH 풀을 주입한다. 스위치가 꺼져 있으면 주입하지 않는다(연결 설정을 읽지 않고 ssh 는 사이드카가 전부 맡는다). 주입하면 미러가 ssh 를 Rust 로 풀기 시작한다.
-    /// 이후 fetch 서비스도 이 풀을 쓴다(호스트당 연결 하나)
+    /// SSH 풀을 주입한다. 주입하면 미러가 ssh 를 Rust 로 풀기 시작한다. 이후 fetch 서비스도 이 풀을 쓴다(호스트당 연결 하나)
     pub fn set_ssh_pool(&self, pool: Arc<SshPool>) {
-        if self.enabled && self.ssh_enabled {
-            *self.runtimes.pool.lock().unwrap_or_else(PoisonError::into_inner) = Some(pool);
-            self.mirror.set_ssh(true);
-        }
+        *self.runtimes.pool.lock().unwrap_or_else(PoisonError::into_inner) = Some(pool);
+        self.mirror.set_ssh(true);
     }
 
-    /// 주입된 SSH 풀(스위치가 꺼져 있으면 없다)
+    /// 주입된 SSH 풀(주입하지 않았으면 없다)
     pub fn ssh_pool(&self) -> Option<Arc<SshPool>> {
         self.runtimes.ssh_pool()
     }
 
-    /// `ANTLER_RUST_API` 스위치가 켜져 있는가(서비스가 만들어졌는지와는 별개 — 만들기 전에 이 값으로 정한다)
-    pub fn api_enabled(&self) -> bool {
-        self.api_enabled
-    }
-
-    /// Rust 가 `jira:*`·`gh:*` 를 처리하는가: 스위치가 켜져 있고 **두 서비스가 모두** 주입됐다. 채널 소유를 하나로 정하려고
-    /// 한쪽만 있으면 활성이 아니다(둘 다 사이드카). 채널을 Rust 가 받을지는 이 값 하나로 정한다
+    /// Rust 가 `jira:*`·`gh:*` 를 처리하는가: **두 서비스가 모두** 주입됐다. 채널 소유를 하나로 정하려고 한쪽만 있으면 활성이 아니다(둘 다 오류).
+    /// 채널을 Rust 가 받을지는 이 값 하나로 정한다
     pub fn api_active(&self) -> bool {
-        self.api_enabled && self.jira_port().is_some() && self.github_port().is_some()
+        self.jira_port().is_some() && self.github_port().is_some()
     }
 
-    /// 사이드카를 띄우기 직전에 부른다: [`Router::api_active`] 를 돌려주고, 켜졌으면 "사이드카에 jira·gh 를 맡기지 않았다(소유는 Rust)"를 기록한다.
-    /// 이후 이 상태에서 서비스가 없는 채널은 사이드카로 가지 않고 오류다(사이드카는 이미 그 채널을 처리하지 않는다)
-    pub fn claim_api(&self) -> bool {
-        let active = self.api_active();
-        self.api_owned.store(active, Ordering::SeqCst);
-        active
-    }
-
-    /// 앱 채널의 포트를 주입한다. 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 사이드카가 전부 맡는다
+    /// 앱 채널의 포트를 주입한다
     pub fn set_app(&self, host: AppHost) {
-        if self.enabled {
-            *self.app.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
-        }
+        *self.app.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
     }
 
     fn app_port(&self) -> Option<AppHost> {
         self.app.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    /// 환경 채널의 포트를 주입한다. 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 사이드카가 전부 맡는다
+    /// 환경 채널의 포트를 주입한다
     pub fn set_env(&self, host: EnvHost) {
-        if self.enabled {
-            *self.env.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
-        }
+        *self.env.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
     }
 
     fn env_port(&self) -> Option<EnvHost> {
         self.env.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    /// 설정 소유자를 주입한다(Phase 6b PR 9). 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 그때 설정 파일의 작성자는 사이드카 하나다.
-    /// 주입하면 [`CONFIG_CHANNELS`] 를 Rust 가 응답하고 사이드카로 보내지 않는다
+    /// 설정 소유자를 주입한다(Phase 6b PR 9). 주입하면 [`CONFIG_CHANNELS`] 를 Rust 가 응답한다
     pub fn set_config(&self, host: Arc<ConfigHost>) {
-        if self.enabled {
-            *self.config.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
-        }
+        *self.config.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
     }
 
     fn config_port(&self) -> Option<Arc<ConfigHost>> {
         self.config.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    /// 앱 업데이트 서비스를 주입한다(Phase 6c PR 4). 스위치가 꺼져 있으면(`ANTLER_RUST_GIT=0`) 주입하지 않는다 — 사이드카가 `update:*` 를 맡는다
+    /// 앱 업데이트 서비스를 주입한다(Phase 6c PR 4)
     pub fn set_update(&self, service: Arc<dyn UpdateControl>) {
-        if self.enabled {
-            *self.update.lock().unwrap_or_else(PoisonError::into_inner) = Some(service);
-        }
+        *self.update.lock().unwrap_or_else(PoisonError::into_inner) = Some(service);
     }
 
     fn update_port(&self) -> Option<Arc<dyn UpdateControl>> {
         self.update.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    /// Rust 가 설정 파일을 소유하는가(소유 술어 — 시작 때 `router.enabled()` 하나로 정해져 실행 중 바뀌지 않는다)
-    pub fn config_owned(&self) -> bool {
-        self.config_port().is_some()
-    }
-
-    /// GitHub 원격 전용 저장소의 캐시 실행기(저장소 추가·고아 복구가 `init` 을 돌린다). 서비스가 없거나 스위치가 꺼져 있으면 없다
+    /// GitHub 원격 전용 저장소의 캐시 실행기(저장소 추가·고아 복구가 `init` 을 돌린다). 서비스가 없으면 없다
     pub(crate) fn github_executor(&self) -> Option<GithubExecutor> {
         self.runtimes.github_exec()
     }
@@ -816,23 +741,21 @@ impl Router {
         self.github.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    /// Rust 가 `gh:*` 를 처리하는가: 스위치가 켜져 있고 GitHub 서비스가 주입됐다(앱은 Jira 와 둘 다 만들어졌을 때만 주입한다)
+    /// Rust 가 `gh:*` 를 처리하는가: GitHub 서비스가 주입됐다(앱은 Jira 와 둘 다 만들어졌을 때만 주입한다)
     pub fn github_active(&self) -> bool {
-        self.api_enabled && self.github_port().is_some()
+        self.github_port().is_some()
     }
 
-    /// GitHub 서비스를 주입한다. 스위치가 꺼져 있으면 주입하지 않는다(서비스·키체인이 없어야 한다)
+    /// GitHub 서비스를 주입한다
     pub fn set_github(&self, host: GithubHost) {
-        if self.api_enabled {
-            *self.github.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
-        }
+        *self.github.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
     }
 
     /// GitHub 원격 전용 저장소의 캐시 실행기를 주입한다(Phase 6b PR 6). **GitHub 서비스가 주입돼 있을 때만**(`github_active`) 받는다 — 토큰의 출처가 그 서비스 하나라서다.
-    /// 받으면 미러가 github 소스 저장소의 **조회·fetch·감시**를 Rust 로 풀기 시작한다(`rust_fetch_kinds` 의 github — 같은 플래그). 서비스가 없거나 스위치가 꺼져 있으면 아무것도 하지 않는다 — github 는 사이드카가 전부 맡는다.
-    /// 실행기가 토큰·사용자 네트워크 설정의 출처(`TokenSource`·`NetConfigSource`)와 캐시 기준 폴더를 쥔다. 호출은 `set_github` 뒤, 사이드카를 띄우기 전이다
+    /// 받으면 미러가 github 소스 저장소의 **조회·fetch·감시**를 Rust 로 풀기 시작한다(`rust_fetch_kinds` 의 github — 같은 플래그). 서비스가 없으면 아무것도 하지 않는다 — github 저장소는 풀 수 없다(`Unserved`).
+    /// 실행기가 토큰·사용자 네트워크 설정의 출처(`TokenSource`·`NetConfigSource`)와 캐시 기준 폴더를 쥔다. 호출은 `set_github` 뒤, 첫 설정 반영(`ConfigSync::push`) 전이다
     pub fn set_github_cache(&self, exec: GithubExecutor) {
-        if self.enabled && self.github_active() {
+        if self.github_active() {
             self.runtimes.set_github(exec);
             self.mirror.set_github(true);
         }
@@ -843,33 +766,25 @@ impl Router {
         self.mirror.github_resolved()
     }
 
-    /// Jira 서비스를 주입한다. 스위치가 꺼져 있으면 주입하지 않는다(서비스·키체인이 없어야 한다)
+    /// Jira 서비스를 주입한다
     pub fn set_jira(&self, host: JiraHost) {
-        if self.api_enabled {
-            *self.jira.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
-        }
+        *self.jira.lock().unwrap_or_else(PoisonError::into_inner) = Some(host);
     }
 
     fn fetch_port(&self) -> Option<Arc<dyn FetchControl>> {
         self.fetch.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
-    /// fetch 서비스를 주입한다. 앞서 도착해 있던 fetchPrefs 가 있으면 적용한다. 스위치가 꺼져 있으면 주입하지 않는다(이중 fetch 방지)
+    /// fetch 서비스를 주입한다. 앞서 도착해 있던 fetchPrefs 가 있으면 적용한다
     pub fn set_fetch(&self, service: Arc<dyn FetchControl>) {
-        if !self.enabled {
-            return;
-        }
         *self.fetch.lock().unwrap_or_else(PoisonError::into_inner) = Some(service.clone());
         if let Some(prefs) = self.pending_prefs.lock().unwrap_or_else(PoisonError::into_inner).take() {
             service.apply_prefs(prefs);
         }
     }
 
-    /// 사이드카의 fetchPrefs 를 서비스에 적용한다(서비스가 아직 없으면 마지막 것을 보관한다). 런타임 안에서 불러야 한다([`in_runtime_of`])
+    /// 설정에서 만든 fetch 설정을 서비스에 적용한다(서비스가 아직 없으면 마지막 것을 보관한다). 런타임 안에서 불러야 한다([`in_runtime_of`])
     pub fn apply_fetch_prefs(&self, prefs: FetchPrefs) {
-        if !self.enabled {
-            return;
-        }
         match self.fetch_port() {
             Some(service) => {
                 service.apply_prefs(prefs);
@@ -892,13 +807,10 @@ impl Router {
         }
     }
 
-    /// 환경변수로 켜고 끈다. `ANTLER_RUST_GIT=0` 이면 모든 채널을 사이드카로 보낸다(6c 에서 사이드카를 없앨 때까지 남는 되돌리기 스위치다).
-    /// 하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 Phase 6b PR 9 부터 읽지 않는다(결정 D5 — 사이드카가 설정을 쓰지 않으므로 그 갈래로는 돌아갈 수 없다).
-    /// `ANTLER_ROUTE_LOG=1` 이면 [`RUST_CHANNELS`] 채널이 어디로 갔는지 stderr 에 한 줄씩 남긴다(확인용 — 기본은 조용하다)
+    /// 환경변수로 로그만 켠다: `ANTLER_ROUTE_LOG=1` 이면 채널이 어디서 처리됐는지 stderr 에 한 줄씩 남긴다(확인용 — 기본은 조용하다)
     pub fn from_env(mirror: RepoMirror) -> Self {
-        let enabled = rust_git_enabled(std::env::var("ANTLER_RUST_GIT").ok().as_deref());
         let log = std::env::var("ANTLER_ROUTE_LOG").as_deref() == Ok("1");
-        Router::new(enabled, log, mirror)
+        Router::new(log, mirror)
     }
 
     /// 로그 커서의 유휴 시간·훑는 주기를 바꾼다(테스트용 — 프로세스 목록을 읽는 테스트가 느려도 커서가 먼저 닫히지 않게). 만든 직후에만 부른다
@@ -908,13 +820,13 @@ impl Router {
         self
     }
 
-    /// `git:log` 가 사이드카에 알릴 일(첫 페이지가 나갔다·이력이 바뀌었다)을 받는 곳. 앱은 사이드카에 `note` 메시지로 보낸다
+    /// `git:log` 의 알림(첫 페이지가 나갔다·이력이 바뀌었다)을 받는 관찰자 싱크(시험이 단다 — 앱은 달지 않는다)
     pub fn set_note_sink(&self, sink: NoteSink) {
         *self.user_sink.lock().unwrap_or_else(PoisonError::into_inner) = Some(sink);
     }
 
-    /// Rust 가 사이드카에 알릴 일(첫 페이지·이력 변경·fetch 변경)의 **유일한 길**. 공유 상태에 먼저 반영하고(동기), 그다음 [`set_note_sink`](Self::set_note_sink) 의 싱크로 보낸다.
-    /// 로그 서비스는 이것을 쓰고, fetch 호스트도 이것으로 알려야 한다(`AppFetchHost`) — 그래야 사이드카와 Rust 의 기억이 같은 시점에 낡은 것이 된다
+    /// Rust 의 알림(첫 페이지·이력 변경·fetch 변경)의 **유일한 길**. 공유 상태에 먼저 반영하고(동기), 그다음 [`set_note_sink`](Self::set_note_sink) 의 싱크로 보낸다.
+    /// 로그 서비스는 이것을 쓰고, fetch 호스트도 이것으로 알려야 한다(`AppFetchHost`) — 그래야 기억들이 같은 시점에 낡은 것이 된다
     pub fn note_sink(&self) -> NoteSink {
         fanout_sink(&self.repo_state, &self.mirror, &self.user_sink)
     }
@@ -958,7 +870,7 @@ impl Router {
     }
 
     /// 감시할 저장소를 정한다. **소유 판정은 fetch 와 같은 한 술어**(`resolve_fetch` — 종류 대조. 조회·fetch 도 같은 판정이다)라
-    /// Rust 가 맡는 저장소가 아니면(github·미러에 없음·검사에 걸림) `None` 이고 이전 감시를 멈춘다 — 사이드카가 맡지 않는 구간도 겹치는 구간도 없다.
+    /// Rust 가 맡는 저장소가 아니면(github·미러에 없음·검사에 걸림) `None` 이고 이전 감시를 멈춘다.
     /// 같은 저장소라도 대상(경로·호스트)이 달라졌으면 다시 시작한다. tokio 런타임 안에서 불러야 한다
     fn set_watch(&self, active: Option<&str>) {
         // 삭제 중인 github 저장소(`repos:remove` 가 정리를 시작했다)는 다시 감시하지 않는다 — 캐시 폴더를 지우기 전에 핸들을 다시 쥐지 않게
@@ -1066,8 +978,8 @@ impl Router {
         }
     }
 
-    /// `req:cancel` 의 Rust 쪽 일: 요청 id 의 레지스트리·Jira·GitHub 서비스 요청을 끊는다(없는 id 는 무시). 소유자가 있으면 응답까지, 없으면 사이드카에도 전달된다
-    pub(crate) fn cancel_request(&self, id: &str) {
+    /// `req:cancel` 의 Rust 쪽 일: 요청 id 의 레지스트리·Jira·GitHub 서비스 요청을 끊는다(없는 id 는 무시). `route` 가 이 호출로 응답한다
+    fn cancel_request(&self, id: &str) {
         if is_request_id(id) {
             self.cancels.cancel(id);
         }
@@ -1083,24 +995,20 @@ impl Router {
     }
 
     /// `repos:watch` 의 Rust 쪽 일: 다른 저장소(null 이면 전부)의 로그 커서를 닫고, 활성 저장소의 첫 페이지 문·감시·자동 fetch 대상을 맞춘다.
-    /// 소유자가 있으면 이 호출이 응답까지 하고, 없으면(사이드카가 설정을 쓴다) 사이드카가 응답한다. 런타임 안에서 불러야 한다
-    pub(crate) fn watch_repo(&self, active: Option<&str>) {
+    /// `route` 가 이 호출로 응답한다. 런타임 안에서 불러야 한다
+    fn watch_repo(&self, active: Option<&str>) {
         self.logs.close_others(active);
         // 활성화된 저장소의 첫 페이지 문을 닫고 기억한 시그니처를 버린다.
         // TS 의 `if (repoId && config.repo(repoId)) armFirstPage(repoId)` — Rust 가 푸는 저장소만(소비자가 Rust 쪽에 있는 저장소). null 은 arm 하지 않는다
-        if self.enabled {
-            if let Some(id) = active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))) {
-                self.repo_state.arm(id);
-            }
-            // 감시: arm 다음이다(기준 시그니처는 첫 페이지 문 뒤에 잡는다). Rust 가 맡는 저장소가 아니면 이전 감시를 멈춘다
-            self.set_watch(active);
+        if let Some(id) = active.filter(|id| matches!(self.mirror.resolve(id), Resolved::Rust(_))) {
+            self.repo_state.arm(id);
         }
-        // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl, 그리고 Rust 가 ssh·github 를 풀 때는 그것)만이고, 아니면 비운다(사이드카 쪽 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
+        // 감시: arm 다음이다(기준 시그니처는 첫 페이지 문 뒤에 잡는다). Rust 가 맡는 저장소가 아니면 이전 감시를 멈춘다
+        self.set_watch(active);
+        // 자동 fetch 대상. Rust 가 fetch 를 맡는 저장소(미러에 있고 소스 종류가 local·wsl, 그리고 Rust 가 ssh·github 를 풀 때는 그것)만이고, 아니면 비운다(풀 수 없는 저장소로 옮겨 갔을 때 이전 예약이 남지 않게).
         // TS 의 `setActive(repoId && config.repo(repoId) ? repoId : null)` 에 해당한다
-        if self.enabled {
-            if let Some(service) = self.fetch_port() {
-                service.set_active(active.filter(|id| matches!(self.mirror.resolve_fetch(id), Resolved::Rust(_))));
-            }
+        if let Some(service) = self.fetch_port() {
+            service.set_active(active.filter(|id| matches!(self.mirror.resolve_fetch(id), Resolved::Rust(_))));
         }
     }
 
@@ -1119,52 +1027,57 @@ impl Router {
         self.rust_handled.load(Ordering::Relaxed)
     }
 
-    /// 채널 하나를 라우팅한다. `args` 는 renderer 가 보낸 인자 배열 그대로다(표식 포함).
-    /// **관문**: Rust 가 설정을 소유한 실행([`Router::config_owned`])에서는 [`UPDATE_CHANNELS`] 밖의 채널이 사이드카로 가지 않는다 — 안쪽 라우팅이 `Routed::Sidecar` 로 돌려줘도
-    /// (Rust 가 풀지 못한 저장소·포트 없음·모양이 틀린 인자) 여기서 명시적 오류로 바꾼다. 사이드카는 설정을 모르므로 보내 봐야 엉뚱한 오류만 난다
-    pub async fn route(&self, channel: &str, args: &Value) -> Routed {
-        let routed = self.route_inner(channel, args).await;
-        if matches!(routed, Routed::Sidecar) && self.config_owned() && !UPDATE_CHANNELS.contains(&channel) {
-            let message = self.unserved_message(channel, args);
-            self.note(channel, "error(Rust 가 처리하지 못함)");
-            return Routed::Done(err_env(&message, "ERROR"));
+    /// 앱 경계: 채널 하나를 처리해 IpcEnvelope 를 돌려준다. [`Router::route`] 가 [`Routed::Unserved`] 를 돌려주면 — 목록에 없는 채널·미러에 없는 저장소·풀 수 없는 종류·모양이 틀린 인자·주입되지 않은 서비스 —
+    /// **명시적 오류 봉투**(`unserved_message`)로 바꾼다. 어디로도 넘기지 않는다
+    pub async fn invoke(&self, channel: &str, args: &Value) -> Value {
+        match self.route(channel, args).await {
+            Routed::Done(envelope) => envelope,
+            Routed::Unserved => {
+                self.note(channel, "error(Rust 가 처리하지 못함)");
+                err_env(&self.unserved_message(channel, args), "ERROR")
+            }
         }
-        routed
     }
 
-    /// 설정을 소유한 실행에서 Rust 가 풀지 못한 호출의 오류 문구. 문구는 TS `RepoService` 의 것을 옮겼다 — 미러에 없는 저장소는 `resolve` 의 `unknown repo: <id>`,
-    /// 미러에 있으나 이 PC 에서 풀 수 없는 종류는 `createExecutor` 의 문구(WSL 은 Windows 에서만·원격 전용 저장소는 서비스가 없으면), 풀 없는 ssh 는 환경 채널과 같은 문구다
+    /// Rust 가 풀지 못한 호출의 오류 문구. 문구는 TS `RepoService` 의 것을 옮겼다 — 미러에 없는 저장소는 `resolve` 의 `unknown repo: <id>`,
+    /// 미러에 있으나 이 PC 에서 풀 수 없는 종류는 `createExecutor` 의 문구(WSL 은 Windows 에서만·원격 전용 저장소는 서비스가 없으면), 풀 없는 ssh 는 환경 채널과 같은 문구다.
+    /// 목록에 없는 채널은 "알 수 없는 채널", 서비스·포트가 주입되지 않은 채널은 "사용할 수 없습니다"다
     fn unserved_message(&self, channel: &str, args: &Value) -> String {
-        if let Some(Value::String(id)) = args.as_array().and_then(|a| a.first()) {
-            return match self.mirror.kind_of(id).as_deref() {
-                None => format!("unknown repo: {}", id.chars().take(200).collect::<String>()),
-                Some("wsl") => "WSL 저장소는 Windows 에서만 열 수 있습니다".to_string(),
-                Some("github") => "GitHub 원격 저장소를 쓸 수 없는 환경입니다".to_string(),
-                Some("ssh") => "SSH 를 사용할 수 없습니다".to_string(),
-                Some(_) => "이 저장소는 처리할 수 없습니다".to_string(),
-            };
+        if RUST_CHANNELS.contains(&channel) {
+            if let Some(Value::String(id)) = args.as_array().and_then(|a| a.first()) {
+                return match self.mirror.kind_of(id).as_deref() {
+                    None => format!("unknown repo: {}", id.chars().take(200).collect::<String>()),
+                    Some("wsl") => "WSL 저장소는 Windows 에서만 열 수 있습니다".to_string(),
+                    Some("github") => "GitHub 원격 저장소를 쓸 수 없는 환경입니다".to_string(),
+                    Some("ssh") => "SSH 를 사용할 수 없습니다".to_string(),
+                    Some(_) => "이 저장소는 처리할 수 없습니다".to_string(),
+                };
+            }
+            return "잘못된 입력입니다".to_string();
         }
-        let known = [RUST_CHANNELS, API_CHANNELS, API_SIDECAR_CHANNELS, APP_CHANNELS, ENV_CHANNELS, CONFIG_CHANNELS].iter().any(|list| list.contains(&channel));
-        if known {
-            "잘못된 입력입니다".to_string()
-        } else {
-            format!("알 수 없는 채널: {channel}")
+        if [APP_CHANNELS, ENV_CHANNELS, CONFIG_CHANNELS, UPDATE_CHANNELS].iter().any(|list| list.contains(&channel)) {
+            return "이 기능을 사용할 수 없습니다".to_string();
         }
+        if API_CHANNELS.contains(&channel) {
+            return API_UNAVAILABLE.to_string();
+        }
+        format!("알 수 없는 채널: {channel}")
     }
 
-    async fn route_inner(&self, channel: &str, args: &Value) -> Routed {
-        // jira:*·gh:*(gh:repo 제외)는 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아닌 인자(토큰 포함 가능)가 사이드카 stdin 으로 가지 않게.
+    /// 채널 하나를 라우팅한다. `args` 는 renderer 가 보낸 인자 배열 그대로다(표식 포함). 앱은 [`Router::invoke`] 를 부른다
+    pub async fn route(&self, channel: &str, args: &Value) -> Routed {
+        // jira:*·gh:*(gh:repo 제외)는 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아닌 인자(토큰 포함 가능)를 다른 처리기가 보지 않게.
         // 배열이 아니면 빈 인자로 넘겨 서비스 검증이 거부한다(보안 리뷰)
         if API_CHANNELS.contains(&channel) {
             let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
             return if channel.starts_with("gh:") { self.gh_channel(channel, raw).await } else { self.jira_channel(channel, raw).await };
         }
-        // 앱 채널(폴더 선택·클립보드·링크·타이틀바 테마)은 설정·미러와 무관하다. 인자 모양과 무관하게 먼저 가로챈다 — 복사할 텍스트가 배열이 아닌 인자로도 사이드카 stdin 으로 가지 않게.
+        // 앱 채널(폴더 선택·클립보드·링크·타이틀바 테마)은 설정·미러와 무관하다. 인자 모양과 무관하게 먼저 가로챈다 — 복사할 텍스트가 배열이 아닌 인자로도 다른 처리기가 보지 않게.
         // 배열이 아니면 빈 인자로 넘겨 검증이 거부한다
         if APP_CHANNELS.contains(&channel) {
-            let Some(host) = self.app_port().filter(|_| self.enabled) else {
-                self.note(channel, "sidecar(ANTLER_RUST_GIT=0)");
-                return Routed::Sidecar;
+            let Some(host) = self.app_port() else {
+                self.note(channel, "unserved(앱 포트 없음)");
+                return Routed::Unserved;
             };
             self.note(channel, "rust");
             self.rust_handled.fetch_add(1, Ordering::Relaxed);
@@ -1172,85 +1085,67 @@ impl Router {
             let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
             return Routed::Done(app_host::app_envelope(host, channel, args).await);
         }
-        // 환경 채널(저장소 추가 창): 포트가 있고 스위치가 켜져 있으면 Rust 가 처리한다. ssh 종류는 풀이 있을 때만이고 아니면 사이드카가 처리한다(C4).
+        // 환경 채널(저장소 추가 창): 포트가 있으면 Rust 가 처리한다. ssh 종류는 풀이 없으면 env_host 가 "SSH 를 사용할 수 없습니다" 로 답한다.
         // 인자 모양과 무관하게 먼저 가로챈다 — 배열이 아니면 빈 인자로 넘겨 검증이 거부한다
         if ENV_CHANNELS.contains(&channel) {
             let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
             let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
-            let Some(host) = self.env_port().filter(|_| self.enabled) else {
-                self.note(channel, "sidecar(ANTLER_RUST_GIT=0)");
-                return Routed::Sidecar;
+            let Some(host) = self.env_port() else {
+                self.note(channel, "unserved(환경 포트 없음)");
+                return Routed::Unserved;
             };
-            let pool = self.ssh_pool().filter(|_| self.ssh_active());
-            // 풀이 없으면(홈을 알 수 없다) 설정을 소유하지 않은 실행은 사이드카가 처리하지만, Rust 가 설정을 소유하면 사이드카는 설정을 모르므로 Rust 가 "SSH 를 사용할 수 없습니다" 로 답한다
-            if pool.is_none() && env_host::needs_ssh(channel, &args) && !self.config_owned() {
-                self.note(channel, "sidecar(ssh 풀 없음)");
-                return Routed::Sidecar;
-            }
+            let pool = self.ssh_pool();
             self.note(channel, "rust");
             self.rust_handled.fetch_add(1, Ordering::Relaxed);
             return Routed::Done(env_host::env_envelope(host, pool, channel, args).await);
         }
-        // 설정 소유 채널(Phase 6b PR 9): 설정 소유자가 주입돼 있으면 Rust 가 응답하고 사이드카에 닿지 않는다. 배열이 아닌 인자도 사이드카로 보내지 않고 빈 인자로 검증한다
+        // 설정 소유 채널(Phase 6b PR 9): 설정 소유자가 주입돼 있으면 Rust 가 응답한다. 배열이 아닌 인자도 빈 인자로 검증한다
         if CONFIG_CHANNELS.contains(&channel) {
-            if let Some(host) = self.config_port().filter(|_| self.enabled) {
-                self.note(channel, "rust");
-                self.rust_handled.fetch_add(1, Ordering::Relaxed);
-                let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
-                let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
-                return Routed::Done(config_host::config_envelope(self, &host, channel, args).await);
-            }
-        }
-        // 앱 업데이트 채널(Phase 6c PR 4): 서비스가 주입돼 있으면 Rust 가 응답하고 사이드카에 닿지 않는다. 배열이 아닌 인자도 사이드카로 보내지 않고 빈 인자로 검증한다
-        if UPDATE_CHANNELS.contains(&channel) {
-            if let Some(service) = self.update_port().filter(|_| self.enabled) {
-                self.note(channel, "rust");
-                self.rust_handled.fetch_add(1, Ordering::Relaxed);
-                let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
-                let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
-                return Routed::Done(update_envelope(&*service, channel, args).await);
-            }
-        }
-        let Some(raw) = args.as_array() else { return Routed::Sidecar };
-        if channel == "req:cancel" {
-            // Rust 레지스트리를 먼저 취소하고, 요청이 어디서 돌든(사이드카 포함) 항상 사이드카에도 전달한다
-            if let Some(Value::String(id)) = raw.first() {
-                self.cancel_request(id);
-            }
-            return Routed::Sidecar;
-        }
-        if channel == "repos:watch" {
-            // 사이드카로 넘기기 전에 다른 저장소(또는 null 이면 전부)의 로그 커서를 닫는다 — 멈춘 git log 가 pack 파일 핸들을 쥐지 않게.
-            // 응답은 사이드카가 한다(renderer 는 기다리지 않는다)
-            let active = match raw.first() {
-                Some(Value::String(id)) => Some(id.as_str()),
-                _ => None,
+            let Some(host) = self.config_port() else {
+                self.note(channel, "unserved(설정 소유자 없음)");
+                return Routed::Unserved;
             };
-            self.watch_repo(active);
-            return Routed::Sidecar;
+            self.note(channel, "rust");
+            self.rust_handled.fetch_add(1, Ordering::Relaxed);
+            let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
+            return Routed::Done(config_host::config_envelope(self, &host, channel, args).await);
         }
-        if channel == "repos:update" || channel == "repos:remove" {
-            // TS 핸들러가 저장소를 바꾸기 전에 부르는 `invalidateGhRemotes(repoId)` — 모든 GitHub remote 목록 캐시만 비운다(`gh:repo` 추론 결과는 TS 도 60초 그대로다).
-            // 응답은 사이드카가 한다. 사이드카 쪽 캐시는 그 핸들러가 직접 비운다
-            if let Some(Value::String(id)) = raw.first() {
-                self.invalidate_gh_remotes(Some(id));
-                // GitHub 원격 전용 저장소를 지우면 사이드카의 핸들러가 fetch·감시를 멈춘 뒤 캐시 폴더를 지운다(`removeGithubCache`). 폴더를 지우려면 **이 쪽(Rust)이 쥔 핸들**
-                // (진행 중인 조회의 git 프로세스·열려 있는 로그 커서)이 먼저 풀려 있어야 한다 — 넘기기 전에 정리하고 끝나기를 기다린다
-                if channel == "repos:remove" && self.enabled {
-                    self.release_github_repo(id).await;
+        // 앱 업데이트 채널(Phase 6c PR 4): 서비스가 주입돼 있으면 Rust 가 응답한다. 배열이 아닌 인자도 빈 인자로 검증한다
+        if UPDATE_CHANNELS.contains(&channel) {
+            let Some(service) = self.update_port() else {
+                self.note(channel, "unserved(업데이트 서비스 없음)");
+                return Routed::Unserved;
+            };
+            self.note(channel, "rust");
+            self.rust_handled.fetch_add(1, Ordering::Relaxed);
+            let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let args: Vec<Option<Value>> = decode_args(raw).into_iter().map(|a| a.cloned()).collect();
+            return Routed::Done(update_envelope(&*service, channel, args).await);
+        }
+        // 라우터 상태만 만지는 채널: 요청 취소와 활성 저장소 전환. renderer 는 응답을 기다리지 않는다(`void`) — 배열이 아닌 인자는 빈 인자로 본다
+        if ROUTER_CHANNELS.contains(&channel) {
+            let raw = args.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            let first = decode_args(raw).first().copied().flatten().and_then(Value::as_str);
+            if channel == "req:cancel" {
+                // Rust 레지스트리·Jira·GitHub 서비스의 같은 id 요청을 끊는다
+                if let Some(id) = first {
+                    self.cancel_request(id);
                 }
+            } else {
+                // 다른 저장소(null 이면 전부)의 로그 커서를 닫는다 — 멈춘 git log 가 pack 파일 핸들을 쥐지 않게. 활성 저장소가 아니면(null) 전부 멈춘다
+                self.watch_repo(first);
             }
-            return Routed::Sidecar;
+            self.note(channel, "rust");
+            self.rust_handled.fetch_add(1, Ordering::Relaxed);
+            return Routed::Done(json!({ "ok": true }));
         }
+        let Some(raw) = args.as_array() else { return Routed::Unserved };
         if !RUST_CHANNELS.contains(&channel) {
-            return Routed::Sidecar;
-        }
-        if !self.enabled {
-            self.note(channel, "sidecar(ANTLER_RUST_GIT=0)");
-            return Routed::Sidecar;
+            return Routed::Unserved;
         }
         let args = decode_args(raw);
-        // GitHub 원격 전용 저장소의 조회는 그 저장소의 범위 안에서 돈다(`repos:remove` 가 끊을 수 있게). `git:fetch` 는 소유가 사이드카라 범위에 들이지 않는다
+        // GitHub 원격 전용 저장소의 조회는 그 저장소의 범위 안에서 돈다(`repos:remove` 가 끊을 수 있게). `git:fetch` 는 fetch 서비스가 따로 범위를 쥐므로 여기에 들이지 않는다
         let scope = if channel == "git:fetch" {
             None
         } else {
@@ -1272,7 +1167,7 @@ impl Router {
                 "git:repoExtras" | "git:lfsPaths" => self.git_extras_channel(channel, &args).await,
                 "gh:repo" => self.gh_repo_channel(&args).await,
                 "git:wipStatus" | "git:wipDiff" => self.git_wip_channel(channel, &args).await,
-                _ => Routed::Sidecar,
+                _ => Routed::Unserved,
             }
         });
         match scope {
@@ -1324,10 +1219,10 @@ impl Router {
     /// 열려 있는 로그 커서·앵커를 닫고, 그 저장소의 git 프로세스가 모두 끝나기를 기다린다
     /// (실행기가 센다 — 트리 종료는 동기지만 파일 핸들이 풀리는 데 짧은 틈이 있어, 최대 [`SCOPE_DRAIN_TIMEOUT`] 까지만 기다린다). 이 뒤에 설정 소유자(`config_host::remove_repo` — Phase 6b PR 9)가 링크·경로 일치를 확인하고 캐시 폴더를 지운다:
     /// "멈춘 뒤 지운다"는 순서를 이 호출이 지켜야 한다(계획 §3.4·§13 C2). 폴더를 못 지워도 레코드는 지우고 남은 폴더는 다음 시작 때 고아 정리가 지운다
-    pub(crate) async fn release_github_repo(&self, repo_id: &str) {
+    pub async fn release_github_repo(&self, repo_id: &str) {
         let Resolved::Rust(target @ Target::Github { .. }) = self.mirror.resolve(repo_id) else { return };
         let path = target.path().to_string();
-        // "삭제 중" 표식을 **먼저** 단다 — 이 뒤에 들어오는 새 조회는 범위에 들지 못하고 거부된다(사이드카가 레코드를 지워 미러가 바뀔 때까지)
+        // "삭제 중" 표식을 **먼저** 단다 — 이 뒤에 들어오는 새 조회는 범위에 들지 못하고 거부된다(설정 소유자가 레코드를 지워 미러가 바뀔 때까지)
         self.github_removing.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), Instant::now() + REMOVING_TTL);
         // fetch 를 먼저 멈추고 끝나기를 기다린다(최대 5초 — TS `forgetAndWait`). 서비스도 같은 저장소의 새 fetch 를 거부한다. 그다음 감시를 멈춘다(`watch_target` 과 함께 — 같은 잠금 안에서)
         if let Some(service) = self.fetch_port() {
@@ -1365,22 +1260,11 @@ impl Router {
         .await;
     }
 
-    /// 서비스가 없는 `jira:*`·`gh:*` 채널의 행선지. Rust 가 소유(사이드카를 env=1 로 띄움)했거나 **설정을 소유**(Phase 6b PR 9)했는데 서비스가 없으면 오류다 —
-    /// 사이드카는 이 채널을 받지 않거나(env=1) 설정·토큰을 모르고(설정 소유), 인자(`gh:loginPat` 의 토큰)를 그쪽으로 보낼 이유도 없다.
-    /// 아니면(스위치 꺼짐 — 사이드카가 설정도 서비스도 맡는다) 사이드카가 처리한다
-    fn api_unserved(&self, channel: &str) -> Routed {
-        if self.api_owned.load(Ordering::SeqCst) || self.config_owned() {
-            self.note(channel, "error(서비스 없음)");
-            return Routed::Done(err_env(API_UNAVAILABLE, "ERROR"));
-        }
-        self.note(channel, "sidecar(ANTLER_RUST_GIT=0)");
-        Routed::Sidecar
-    }
-
-    /// `jira:*` 한 채널. 서비스가 없으면(스위치 꺼짐·만들지 못함) 사이드카다
+    /// `jira:*` 한 채널. 서비스를 만들지 못했으면(키체인 오류 등) `Unserved` 이고 `invoke` 가 [`API_UNAVAILABLE`] 오류로 답한다 — 인자(`gh:loginPat` 의 토큰)를 다른 곳으로 보낼 길은 없다
     async fn jira_channel(&self, channel: &str, raw: &[Value]) -> Routed {
         let Some(host) = self.jira_port().filter(|_| self.api_active()) else {
-            return self.api_unserved(channel);
+            self.note(channel, "unserved(서비스 없음)");
+            return Routed::Unserved;
         };
         self.note(channel, "rust");
         self.rust_handled.fetch_add(1, Ordering::Relaxed);
@@ -1388,10 +1272,11 @@ impl Router {
         Routed::Done(api_host::jira_envelope(host, self.cancels.clone(), channel.to_string(), args).await)
     }
 
-    /// `gh:*` 한 채널(`gh:repo` 는 오지 않는다). 서비스가 없으면(스위치 꺼짐·만들지 못함) 사이드카다
+    /// `gh:*` 한 채널(`gh:repo` 는 오지 않는다). 서비스가 없으면(만들지 못함) `Unserved` 다
     async fn gh_channel(&self, channel: &str, raw: &[Value]) -> Routed {
         let Some(host) = self.github_port().filter(|_| self.api_active()) else {
-            return self.api_unserved(channel);
+            self.note(channel, "unserved(서비스 없음)");
+            return Routed::Unserved;
         };
         self.note(channel, "rust");
         self.rust_handled.fetch_add(1, Ordering::Relaxed);
@@ -1407,13 +1292,13 @@ impl Router {
 
     /// `git:commit(repoId, hash, requestId?)`
     async fn git_commit(&self, args: &[Option<&Value>]) -> Routed {
-        // 저장소 id 가 문자열이 아니면 사이드카가 TS 와 같은 오류를 만든다
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        // 저장소 id 가 문자열이 아니면 `invoke` 가 오류로 답한다
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note("git:commit", "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note("git:commit", "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1439,12 +1324,12 @@ impl Router {
 
     /// `git:log(repoId, query, requestId?)`. query 는 renderer 가 보낸 값이라 숫자·scope 형식을 검증한 뒤에야 git 인자가 된다
     async fn git_log(&self, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note("git:log", "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note("git:log", "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1476,15 +1361,14 @@ impl Router {
     }
 
     /// `git:fetch(repoId, manual)`. `manual` 은 정확히 `true` 일 때만 참이다(`handlers.ts` 의 `manual === true`) — renderer 가 주장하는 값이라 다른 모양은 모두 자동 fetch 다.
-    /// 저장소의 경로·kind 는 미러에서만 얻고(서비스가 다시 미러로 푼다), 미러에 없거나 github(또는 ssh 스위치가 꺼진 ssh)면 사이드카가 처리한다(`resolve_fetch` 는 소스 종류로 거른다).
-    /// local·wsl·(켜진) ssh 이면 **절대 사이드카로 보내지 않는다** — 보내서 둘이 fetch 하는 길이 없어야 한다
+    /// 저장소의 경로·kind 는 미러에서만 얻고(서비스가 다시 미러로 푼다), 미러에 없거나 풀 수 없는 github·ssh 면 풀 수 없음 오류다(`resolve_fetch` 는 소스 종류로 거른다).
     async fn git_fetch(&self, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         match self.mirror.resolve_fetch(repo_id) {
             Resolved::Rust(_) => {}
-            Resolved::Sidecar => {
-                self.note("git:fetch", "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note("git:fetch", "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         }
@@ -1504,12 +1388,12 @@ impl Router {
     /// 파일 단위 채널. 인자는 `git:compare(repoId, from, to, requestId?)`, `git:fileDiff|fileHistory|blame(repoId, req, requestId?)`.
     /// 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다) 통과한 값만 `git::file_channels` 의 argv 빌더로 간다
     async fn git_file_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note(channel, "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note(channel, "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1580,14 +1464,14 @@ impl Router {
     }
 
     /// 코드 탐색기 채널: `git:resolveRev(repoId, ref)`·`git:tree(repoId, {rev, dir}, requestId?)`·`git:blob(repoId, {rev, path}, requestId?)`·`git:onRemote(repoId, rev)`.
-    /// 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다) 통과한 값만 `git::code_browse` 의 argv 빌더로 간다. github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카)
+    /// 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다) 통과한 값만 `git::code_browse` 의 argv 빌더로 간다. github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 풀 수 없음 오류)
     async fn git_code_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note(channel, "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note(channel, "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1689,16 +1573,16 @@ impl Router {
         }
     }
 
-    /// 사이드바 ref 채널: `git:refs(repoId)`·`git:refsDetails(repoId)`. 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카).
+    /// 사이드바 ref 채널: `git:refs(repoId)`·`git:refsDetails(repoId)`. 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 풀 수 없음 오류).
     /// TS `RepoService` 와 같다: 큐 슬롯 안에서 git(키 `refs:<id>`·`refsDetails:<id>` 로 같은 요청을 합친다 — 취소 신호가 없다). 캐시는 없다.
     /// `refsDetails` 만 첫 로그 페이지 문(`RepoState::after_first_page`)을 **큐에 들어가기 전에** 기다린다 — 비싼 조회가 첫 화면을 늦추지 않게(문이 없으면 바로 간다)
     async fn git_refs_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note(channel, "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note(channel, "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1738,14 +1622,14 @@ impl Router {
     }
 
     /// 검색·활동 채널: `git:search(repoId, query, scope?, requestId?)`·`git:activity(repoId, scope?, requestId?)`. 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다)
-    /// 통과한 값만 `git::search`·`git::activity` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다(renderer 가 새 질의·범위를 보내면 이전 것을 취소한다). github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카)
+    /// 통과한 값만 `git::search`·`git::activity` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다(renderer 가 새 질의·범위를 보내면 이전 것을 취소한다). github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 풀 수 없음 오류)
     async fn git_history_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note(channel, "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note(channel, "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1776,14 +1660,14 @@ impl Router {
     }
 
     /// LFS·gitflow 채널: `git:repoExtras(repoId)`·`git:lfsPaths(repoId, {rev?, paths}, requestId?)`. 검증이 먼저고(실패하면 git·레지스트리를 건드리지 않는다)
-    /// 통과한 값만 `git::lfs` 의 argv 빌더로 간다. `lfsPaths` 만 requestId 로 취소할 수 있다. 캐시·합치기는 없다(TS 도 같다 — 설정이 바뀔 수 있다). github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 사이드카)
+    /// 통과한 값만 `git::lfs` 의 argv 빌더로 간다. `lfsPaths` 만 requestId 로 취소할 수 있다. 캐시·합치기는 없다(TS 도 같다 — 설정이 바뀔 수 있다). github 소스(원격 전용 저장소)도 캐시 실행기가 주입돼 있으면 같은 경로다(미러가 풀지 않으면 풀 수 없음 오류)
     async fn git_extras_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note(channel, "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note(channel, "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1822,15 +1706,15 @@ impl Router {
         }
     }
 
-    /// `gh:repo(repoId)` — 저장소의 GitHub remote(없으면 `null`). 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), 캐시 실행기가 없는 github kind·미러에 없는 id 는 사이드카가 답한다
+    /// `gh:repo(repoId)` — 저장소의 GitHub remote(없으면 `null`). 인자는 저장소 id 뿐이라 검증할 값이 없고(경로·kind 는 미러에서만), 캐시 실행기가 없는 github kind·미러에 없는 id 는 풀 수 없음 오류다
     /// (원격 전용 저장소는 레코드가 어느 GitHub 저장소인지 안다 — git 을 부르지 않는다)
     async fn gh_repo_channel(&self, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note("gh:repo", "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note("gh:repo", "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -1842,20 +1726,17 @@ impl Router {
         })
     }
 
-    /// Rust 가 git 을 돌릴 저장소인가. `Ok(None)` 이면 사이드카의 몫(스위치 꺼짐·미러에 없음·github·풀 없는 ssh)이고, `Err` 는 미러가 거부한 저장소(경로·호스트·배포판 검사)다 —
-    /// 그 저장소에는 사이드카도 git 을 돌리지 않는다. 채널 라우팅과 GitHub 서비스의 저장소 질의가 **같은 술어**(`RepoMirror::resolve`)를 쓴다
+    /// Rust 가 git 을 돌릴 저장소인가. `Ok(None)` 이면 풀 수 없다(미러에 없음·풀 없는 ssh·실행기 없는 github — 호출자의 대체 질의가 답한다)이고, `Err` 는 미러가 거부한 저장소(경로·호스트·배포판 검사)다.
+    /// 채널 라우팅과 GitHub 서비스의 저장소 질의가 **같은 술어**(`RepoMirror::resolve`)를 쓴다
     fn rust_target(&self, repo_id: &str) -> Result<Option<Target>, ExecError> {
-        if !self.enabled {
-            return Ok(None);
-        }
         match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => Ok(Some(t)),
-            Resolved::Sidecar => Ok(None),
+            Resolved::Unserved => Ok(None),
             Resolved::Invalid(message) => Err(ExecError::Other { message }),
         }
     }
 
-    /// GitHub 서비스의 `gh_repo` 질의(`RepoQuery`): Rust 가 맡는 저장소면 `Some`(결과 또는 오류), 아니면 `None`(호출자가 사이드카에 묻는다)
+    /// GitHub 서비스의 `gh_repo` 질의(`RepoQuery`): Rust 가 맡는 저장소면 `Some`(결과 또는 오류), 아니면 `None`(호출자가 대체 질의에 묻는다)
     pub async fn gh_repo(&self, repo_id: &str) -> Option<Result<Option<GhRepoRef>, ExecError>> {
         match self.rust_target(repo_id) {
             Ok(Some(target)) => Some(self.scoped(repo_id, &target, self.gh_repo_of(repo_id, &target)).await),
@@ -1898,7 +1779,7 @@ impl Router {
         Some(
             self.scoped(repo_id, &target, async {
                 let list = self.remote_list(repo_id, &target, Some(cancel)).await?;
-                // 사이드카 경로(repoq)와 같은 응답 모양 상한 — remote 100개·이름 200자. 악성 `.git/config` 의 remote 수십만 개가 10분 캐시에 남지 않게
+                // 응답 모양 상한 — remote 100개·이름 200자. 악성 `.git/config` 의 remote 수십만 개가 10분 캐시에 남지 않게
                 let value: Vec<GhRepoRef> = pick_github_remotes(&list).into_iter().filter(|r| r.remote.chars().count() <= GH_REMOTE_NAME_MAX).take(GH_REMOTES_MAX).collect();
                 self.gh_remotes_cache.lock().unwrap_or_else(PoisonError::into_inner).insert(repo_id.to_string(), (Instant::now(), value.clone()));
                 Ok(value)
@@ -1925,7 +1806,7 @@ impl Router {
     }
 
     /// 아바타 조회용 `pushed_shas_by_author` 질의: 그 작성자의 push 된 커밋 해시. Rust 가 맡는 저장소면 `Some`, 아니면 `None`.
-    /// 요청 검증(이메일·개수)은 사이드카의 `repoq` 검사와 같고, 큐 슬롯을 기다리는 동안과 git 실행 중 모두 `cancel` 이 닿는다
+    /// 요청 검증(이메일·개수)은 TS `repoq` 검사와 같고, 큐 슬롯을 기다리는 동안과 git 실행 중 모두 `cancel` 이 닿는다
     pub async fn pushed_shas_by_author(&self, repo_id: &str, email: &str, limit: usize, cancel: &CancellationToken) -> Option<Result<Vec<String>, ExecError>> {
         let target = match self.rust_target(repo_id) {
             Ok(Some(t)) => t,
@@ -1962,12 +1843,12 @@ impl Router {
     /// TS 의 `isGithub` 빈 결과 분기를 옮겼다). `wipDiff` 의 요청 검증은 untracked 허용 목록을 보므로 이 라우터가 목록을 쥔 채로 하고(실패하면 git·레지스트리를 건드리지 않는다),
     /// 통과한 값만 `git::wip` 의 argv 빌더로 간다. 둘 다 requestId 로 취소할 수 있다
     async fn git_wip_channel(&self, channel: &str, args: &[Option<&Value>]) -> Routed {
-        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Sidecar };
+        let Some(Some(Value::String(repo_id))) = args.first() else { return Routed::Unserved };
         let target = match self.mirror.resolve(repo_id) {
             Resolved::Rust(t) => t,
-            Resolved::Sidecar => {
-                self.note(channel, "sidecar");
-                return Routed::Sidecar;
+            Resolved::Unserved => {
+                self.note(channel, "unserved");
+                return Routed::Unserved;
             }
             Resolved::Invalid(message) => return Routed::Done(err_env(&message, "ERROR")),
         };
@@ -2192,24 +2073,20 @@ mod tests {
         MirrorRepo { id: id.into(), kind: kind.into(), path: path.into(), distro: None, ssh_host: None }
     }
 
-    fn is_sidecar(r: &Routed) -> bool {
-        matches!(r, Routed::Sidecar)
+    fn is_unserved(r: &Routed) -> bool {
+        matches!(r, Routed::Unserved)
+    }
+
+    /// `req:cancel`·`repos:watch` 의 응답(설정 소유자 없이 라우터가 `{ok:true}` 로 답한다)
+    fn acked(r: &Routed) -> bool {
+        matches!(r, Routed::Done(v) if v == &json!({ "ok": true }))
     }
 
     fn envelope(r: Routed) -> Value {
         match r {
             Routed::Done(v) => v,
-            Routed::Sidecar => panic!("사이드카로 갔다"),
+            Routed::Unserved => panic!("Rust 가 풀지 못했다"),
         }
-    }
-
-    #[test]
-    fn 스위치는_0_만_끈다() {
-        assert!(rust_git_enabled(None));
-        assert!(rust_git_enabled(Some("1")));
-        assert!(rust_git_enabled(Some("")));
-        assert!(rust_git_enabled(Some("false")));
-        assert!(!rust_git_enabled(Some("0")));
     }
 
     fn ssh_repo(id: &str, host: &str) -> MirrorRepo {
@@ -2217,28 +2094,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ssh_는_스위치와_풀이_둘_다_있어야_rust_로_간다() {
+    async fn ssh_는_풀이_있어야_rust_로_풀린다() {
         let m = mirror_of(vec![ssh_repo("bad", "-x"), ssh_repo("ok", "devbox")]);
-        let r = Router::new(true, false, m.clone());
-        // 풀이 없다 — ssh 는 사이드카
+        let r = Router::new(false, m.clone());
+        // 풀이 없다 — ssh 는 풀 수 없다
         assert!(!r.ssh_active());
-        assert!(is_sidecar(&r.route("git:commit", &json!(["bad", "abcd1234"])).await));
+        assert!(is_unserved(&r.route("git:commit", &json!(["bad", "abcd1234"])).await));
         r.set_ssh_pool(SshPool::for_home("C:\\nonexistent-antler-home"));
         assert!(r.ssh_active());
         // 호스트 검사에 걸리면 연결하지 않고 ERROR 다(같은 판정이 미러에서 한 번만 난다)
         let env = envelope(r.route("git:commit", &json!(["bad", "abcd1234"])).await);
         assert_eq!((env["ok"].clone(), env["error"].clone()), (json!(false), json!("잘못된 SSH 호스트입니다")));
-        // 스위치가 꺼져 있으면(ANTLER_RUST_SSH=0) 풀을 주입해도 무시한다
-        let off = Router::new(true, false, mirror_of(vec![ssh_repo("ok", "devbox")])).with_ssh(false);
-        off.set_ssh_pool(SshPool::for_home("C:\\nonexistent-antler-home"));
-        assert!(!off.ssh_active() && off.ssh_pool().is_none() && !off.ssh_enabled());
-        assert!(is_sidecar(&off.route("git:commit", &json!(["ok", "abcd1234"])).await));
-        // ANTLER_RUST_GIT=0(라우터 전체가 꺼짐)이면 함께 꺼진다
-        let git_off = Router::new(false, false, mirror_of(vec![ssh_repo("ok", "devbox")]));
-        git_off.set_ssh_pool(SshPool::for_home("C:\\nonexistent-antler-home"));
-        assert!(!git_off.ssh_active() && !git_off.ssh_enabled());
-        assert!(is_sidecar(&git_off.route("git:commit", &json!(["ok", "abcd1234"])).await));
-        assert_eq!(off.rust_handled() + git_off.rust_handled(), 0);
     }
 
     #[test]
@@ -2261,34 +2127,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn 사이드카로_가는_경우() {
+    async fn 풀_수_없는_호출은_unserved_이고_invoke_가_명시적_오류로_바꾼다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache")]);
-        let r = Router::new(true, false, m.clone());
-        // 채널이 등록되지 않았다(PR 6·7 까지 사이드카에 남는 git 채널은 피하고 6b 까지 남는 비 git 채널을 쓴다)
-        assert!(!RUST_CHANNELS.contains(&"config:get"));
-        assert!(is_sidecar(&r.route("config:get", &json!(["a"])).await));
+        let r = Router::new(false, m.clone());
+        // 설정 소유자가 주입되지 않았다
+        assert!(CONFIG_CHANNELS.contains(&"config:get"));
+        assert!(is_unserved(&r.route("config:get", &json!(["a"])).await));
+        let env = r.invoke("config:get", &json!(["a"])).await;
+        assert_eq!(env, json!({ "ok": false, "error": "이 기능을 사용할 수 없습니다", "code": "ERROR" }));
+        // 목록에 없는 채널은 "알 수 없는 채널"(첫 인자가 문자열이어도 저장소 오류가 아니다)
+        let env = r.invoke("nope:channel", &json!(["a"])).await;
+        assert_eq!(env, json!({ "ok": false, "error": "알 수 없는 채널: nope:channel", "code": "ERROR" }));
+        // 미러에 없는 저장소·ssh(풀 없음)·github(실행기 없음)
+        assert_eq!(r.invoke("git:commit", &json!(["nope", "abcd"])).await["error"], "unknown repo: nope");
+        assert_eq!(r.invoke("git:commit", &json!(["s", "abcd"])).await["error"], "SSH 를 사용할 수 없습니다");
+        assert_eq!(r.invoke("git:commit", &json!(["g", "abcd"])).await["error"], "GitHub 원격 저장소를 쓸 수 없는 환경입니다");
+        assert_eq!(r.invoke("git:commit", &json!([])).await["error"], "잘못된 입력입니다");
+        // 서비스가 주입되지 않은 jira·gh 채널은 Rust 가 오류로 답한다(처리한 호출로 세지 않는다)
+        assert_eq!(r.invoke("jira:issue", &json!(["X-1"])).await["error"], API_UNAVAILABLE);
+        assert_eq!(r.invoke("update:get", &json!([])).await["error"], "이 기능을 사용할 수 없습니다");
         // 미러에 없는 저장소·ssh·github
         for id in ["nope", "s", "g"] {
-            assert!(is_sidecar(&r.route("git:commit", &json!([id, "abcd"])).await), "{id}");
+            assert!(is_unserved(&r.route("git:commit", &json!([id, "abcd"])).await), "{id}");
         }
         // 저장소 id 가 문자열이 아니거나 없다
         for args in [json!([]), json!([null]), json!([5, "abcd"]), json!([{ UNDEFINED_ARG: true }, "abcd"]), json!({ "a": 1 }), json!("x")] {
-            assert!(is_sidecar(&r.route("git:commit", &args).await), "{args}");
+            assert!(is_unserved(&r.route("git:commit", &args).await), "{args}");
         }
-        // 스위치를 끄면 미러에 있어도 사이드카
-        let off = Router::new(false, false, m);
-        assert!(is_sidecar(&off.route("git:commit", &json!(["a", "abcd"])).await));
-        assert_eq!(off.rust_handled() + r.rust_handled(), 0);
+        assert_eq!(r.rust_handled(), 0);
     }
 
-    /// 코드 탐색기 채널의 소유 판정은 다른 git 채널과 같은 한 술어(`mirror.resolve` — 미러에 있고 local·wsl·(켜진) ssh 인 저장소)와 스위치뿐이다.
-    /// 사이드카는 이 채널을 따로 소유하지 않는다(소유 env 가 없다): 미러가 사이드카로 푸는 저장소(없는 id·github·풀 없는 ssh)와 스위치가 꺼진 라우터만 사이드카로 간다
+    /// 코드 탐색기 채널의 소유 판정은 다른 git 채널과 같은 한 술어(`mirror.resolve` — 미러에 있고 local·wsl·(풀이 있는) ssh 인 저장소)뿐이다.
+    /// 미러가 풀지 못하는 저장소(없는 id·github·풀 없는 ssh)만 풀 수 없음(`Unserved`)이다
     #[tokio::test]
     async fn 코드_탐색기_채널의_소유는_다른_git_채널과_같은_한_술어다() {
         let rev = "a".repeat(40);
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
-        let r = Router::new(true, false, m.clone());
-        let off = Router::new(false, false, m);
+        let r = Router::new(false, m.clone());
         let calls = |id: &str| {
             [
                 ("git:resolveRev", json!([id, "HEAD"])),
@@ -2302,99 +2177,88 @@ mod tests {
         }
         for id in ["nope", "s", "g"] {
             for (ch, args) in calls(id) {
-                assert!(is_sidecar(&r.route(ch, &args).await), "{id} {ch}");
+                assert!(is_unserved(&r.route(ch, &args).await), "{id} {ch}");
             }
         }
-        for (ch, args) in calls("a") {
-            assert!(is_sidecar(&off.route(ch, &args).await), "{ch}");
-        }
-        // 미러 검사에 걸린 저장소는 사이드카가 아니라 ERROR 다(다른 채널과 같다)
+        // 미러 검사에 걸린 저장소는 풀 수 없음이 아니라 ERROR 다(다른 채널과 같다)
         for (ch, args) in calls("unc") {
             let env = envelope(r.route(ch, &args).await);
             assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
         }
-        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+        assert_eq!(r.rust_handled(), 0);
     }
 
     /// 사이드바 ref 채널(`git:refs`·`git:refsDetails`)의 소유도 같은 한 술어다 — 인자는 저장소 id 뿐이다
     #[tokio::test]
     async fn ref_채널의_소유는_다른_git_채널과_같은_한_술어다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
-        let r = Router::new(true, false, m.clone());
-        let off = Router::new(false, false, m);
+        let r = Router::new(false, m.clone());
         for ch in ["git:refs", "git:refsDetails"] {
             assert!(RUST_CHANNELS.contains(&ch), "{ch}");
             for id in ["nope", "s", "g"] {
-                assert!(is_sidecar(&r.route(ch, &json!([id])).await), "{id} {ch}");
+                assert!(is_unserved(&r.route(ch, &json!([id])).await), "{id} {ch}");
             }
-            assert!(is_sidecar(&off.route(ch, &json!(["a"])).await), "{ch}");
             let env = envelope(r.route(ch, &json!(["unc"])).await);
             assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
         }
-        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+        assert_eq!(r.rust_handled(), 0);
     }
 
-    /// 검색·활동 채널의 소유도 같은 한 술어다 — 새로 만든 소유 판정이 없다(사이드카에는 이 채널의 소유 env 가 없다)
+    /// 검색·활동 채널의 소유도 같은 한 술어다 — 새로 만든 소유 판정이 없다
     #[tokio::test]
     async fn 검색_활동_채널의_소유는_다른_git_채널과_같은_한_술어다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
-        let r = Router::new(true, false, m.clone());
-        let off = Router::new(false, false, m);
+        let r = Router::new(false, m.clone());
         for (ch, tail) in [("git:search", json!(["q"])), ("git:activity", json!([]))] {
             assert!(RUST_CHANNELS.contains(&ch), "{ch}");
             let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
             for id in ["nope", "s", "g"] {
-                assert!(is_sidecar(&r.route(ch, &call(id)).await), "{id} {ch}");
+                assert!(is_unserved(&r.route(ch, &call(id)).await), "{id} {ch}");
             }
-            assert!(is_sidecar(&off.route(ch, &call("a")).await), "{ch}");
             let env = envelope(r.route(ch, &call("unc")).await);
             assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
         }
-        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+        assert_eq!(r.rust_handled(), 0);
     }
 
-    /// LFS·gitflow 채널의 소유도 같은 한 술어다 — 사이드카에는 이 채널의 소유 env 가 없다
+    /// LFS·gitflow 채널의 소유도 같은 한 술어다
     #[tokio::test]
     async fn lfs_채널의_소유는_다른_git_채널과_같은_한_술어다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
-        let r = Router::new(true, false, m.clone());
-        let off = Router::new(false, false, m);
+        let r = Router::new(false, m.clone());
         for (ch, tail) in [("git:repoExtras", json!([])), ("git:lfsPaths", json!([{ "paths": ["a"] }]))] {
             assert!(RUST_CHANNELS.contains(&ch), "{ch}");
             let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
             for id in ["nope", "s", "g"] {
-                assert!(is_sidecar(&r.route(ch, &call(id)).await), "{id} {ch}");
+                assert!(is_unserved(&r.route(ch, &call(id)).await), "{id} {ch}");
             }
-            assert!(is_sidecar(&off.route(ch, &call("a")).await), "{ch}");
             let env = envelope(r.route(ch, &call("unc")).await);
             assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
         }
-        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+        assert_eq!(r.rust_handled(), 0);
     }
 
-    /// 작업 트리 채널의 소유도 같은 한 술어다 — 사이드카에는 이 채널의 소유 env 가 없다
+    /// 작업 트리 채널의 소유도 같은 한 술어다
     #[tokio::test]
     async fn 작업_트리_채널의_소유는_다른_git_채널과_같은_한_술어다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv"), repo("g", "github", "/cache"), repo("unc", "local", "\\\\evil\\share\\repo")]);
-        let r = Router::new(true, false, m.clone());
-        let off = Router::new(false, false, m);
+        let r = Router::new(false, m.clone());
         for (ch, tail) in [("git:wipStatus", json!([])), ("git:wipDiff", json!([{ "area": "unstaged", "path": "a.txt" }]))] {
             assert!(RUST_CHANNELS.contains(&ch), "{ch}");
             let call = |id: &str| Value::Array(std::iter::once(json!(id)).chain(tail.as_array().unwrap().iter().cloned()).collect());
             for id in ["nope", "s", "g"] {
-                assert!(is_sidecar(&r.route(ch, &call(id)).await), "{id} {ch}");
+                assert!(is_unserved(&r.route(ch, &call(id)).await), "{id} {ch}");
             }
-            assert!(is_sidecar(&off.route(ch, &call("a")).await), "{ch}");
             let env = envelope(r.route(ch, &call("unc")).await);
             assert_eq!((env["ok"].clone(), env["code"].clone()), (json!(false), json!("ERROR")), "{ch}");
         }
-        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+        assert_eq!(r.rust_handled(), 0);
     }
 
     #[tokio::test]
     async fn 미러의_경로가_검사에_걸리면_error_로_돌려준다() {
         let m = mirror_of(vec![repo("unc", "local", "\\\\evil\\share\\repo")]);
-        let r = Router::new(true, false, m);
+        let r = Router::new(false, m);
         let env = envelope(r.route("git:commit", &json!(["unc", "abcd1234"])).await);
         assert_eq!(env["ok"], false);
         assert_eq!(env["code"], "ERROR");
@@ -2404,7 +2268,7 @@ mod tests {
     async fn 해시가_잘못되면_git_을_띄우기_전에_error() {
         // 저장소 경로가 없는 곳이다 — 검증이 먼저 걸러야 한다(git 을 띄웠다면 GIT 이나 다른 오류가 난다)
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler")]);
-        let r = Router::new(true, false, m);
+        let r = Router::new(false, m);
         let hostile: Vec<Value> = vec![
             json!("-x"),
             json!("--output=pwned.txt"),
@@ -2429,21 +2293,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn req_cancel_은_항상_사이드카에도_간다() {
-        let r = Router::new(true, false, RepoMirror::default());
-        assert!(is_sidecar(&r.route("req:cancel", &json!(["x"])).await));
-        assert!(is_sidecar(&r.route("req:cancel", &json!([])).await));
-        assert!(is_sidecar(&r.route("req:cancel", &json!([5])).await));
-        // 스위치가 꺼져 있어도 마찬가지
-        let off = Router::new(false, false, RepoMirror::default());
-        assert!(is_sidecar(&off.route("req:cancel", &json!(["x"])).await));
+    async fn req_cancel_은_설정_소유자_없이_라우터가_응답한다() {
+        let r = Router::new(false, RepoMirror::default());
+        assert!(acked(&r.route("req:cancel", &json!(["x"])).await));
+        assert!(acked(&r.route("req:cancel", &json!([])).await));
+        assert!(acked(&r.route("req:cancel", &json!([5])).await));
+        // 배열이 아닌 인자도 빈 인자로 보고 응답한다
+        assert!(acked(&r.route("req:cancel", &json!("x")).await));
+        assert_eq!(r.rust_handled(), 4);
     }
 
     #[tokio::test]
     async fn 등록_전에_온_cancel_은_등록한_요청을_취소한다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler")]);
-        let r = Router::new(true, false, m);
-        assert!(is_sidecar(&r.route("req:cancel", &json!(["early"])).await));
+        let r = Router::new(false, m);
+        assert!(acked(&r.route("req:cancel", &json!(["early"])).await));
         // git 을 띄우지 않고 ABORTED — 경로가 없어서 띄웠다면 GIT/ERROR 가 난다
         let env = envelope(r.route("git:commit", &json!(["a", "abcd1234", "early"])).await);
         assert_eq!(env["code"], "ABORTED");
@@ -2454,18 +2318,18 @@ mod tests {
     #[tokio::test]
     async fn 등록_전에_온_cancel_은_로그_요청도_git_없이_취소하고_첫_페이지를_알린다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler")]);
-        let r = Router::new(true, false, m);
+        let r = Router::new(false, m);
         let notes: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
         let sink = notes.clone();
         r.set_note_sink(Arc::new(move |op, id| sink.lock().unwrap().push((op.as_str().to_string(), id.to_string()))));
-        assert!(is_sidecar(&r.route("req:cancel", &json!(["early"])).await));
+        assert!(acked(&r.route("req:cancel", &json!(["early"])).await));
         // skip 0 — 취소돼도 백그라운드 조회를 풀어 준다(TS 는 실패해도 openFirstPage). git·커서는 만들지 않는다
         let env = envelope(r.route("git:log", &json!(["a", { "skip": 0, "count": 10 }, "early"])).await);
         assert_eq!(env["code"], "ABORTED");
         assert_eq!(r.log_cursor_count(), 0);
         assert_eq!(*notes.lock().unwrap(), [("logFirstPage".to_string(), "a".to_string())]);
         // skip > 0 이면 알리지 않는다
-        assert!(is_sidecar(&r.route("req:cancel", &json!(["early2"])).await));
+        assert!(acked(&r.route("req:cancel", &json!(["early2"])).await));
         let env = envelope(r.route("git:log", &json!(["a", { "skip": 5, "count": 10 }, "early2"])).await);
         assert_eq!(env["code"], "ABORTED");
         assert_eq!(notes.lock().unwrap().len(), 1);
@@ -2476,39 +2340,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repos_watch_는_rust_가_푸는_저장소만_arm_하고_응답은_사이드카가_한다() {
+    async fn repos_watch_는_rust_가_푸는_저장소만_arm_하고_라우터가_응답한다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("g", "github", "x/y"), repo("s", "ssh", "/srv")]);
-        let r = Router::new(true, false, m.clone());
-        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        let r = Router::new(false, m.clone());
+        assert!(acked(&r.route("repos:watch", &json!(["a"])).await));
         assert!(r.repo_state().is_armed("a"));
         // github·풀 없는 ssh·미러에 없는 id·null 은 arm 하지 않는다
         for args in [json!(["g"]), json!(["s"]), json!(["nope"]), json!([null]), json!([])] {
-            assert!(is_sidecar(&r.route("repos:watch", &args).await), "{args}");
+            assert!(acked(&r.route("repos:watch", &args).await), "{args}");
         }
         for id in ["g", "s", "nope"] {
             assert!(!r.repo_state().is_armed(id), "{id}");
         }
-        // 스위치가 꺼져 있으면 arm 하지 않는다
-        let off = Router::new(false, false, m);
-        assert!(is_sidecar(&off.route("repos:watch", &json!(["a"])).await));
-        assert!(!off.repo_state().is_armed("a"));
     }
 
     #[tokio::test]
     async fn repos_watch_가_다시_arm_하면_기억한_시그니처를_버린다() {
         use crate::git::repo_state::SigError;
-        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
+        let r = Router::new(false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
         let sig = crate::git::signature::Signature::from_parts(b"x", b"", b"");
         r.repo_state().compute_signature("a", async move { Ok::<_, SigError>(sig) }).await.unwrap();
         assert_eq!(r.repo_state().known_signature("a"), Some(sig));
-        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        assert!(acked(&r.route("repos:watch", &json!(["a"])).await));
         assert_eq!(r.repo_state().known_signature("a"), None);
     }
 
     #[tokio::test]
-    async fn 알림은_상태에_먼저_반영한_뒤_사이드카_싱크로_간다() {
+    async fn 알림은_상태에_먼저_반영한_뒤_관찰자_싱크로_간다() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("g", "github", "x/y")]);
-        let r = Router::new(true, false, m);
+        let r = Router::new(false, m);
         let state = r.repo_state().clone();
         // (op, 저장소, 문이 닫혀 있는가, 시그니처를 기억하는가)
         type Seen = (String, String, bool, bool);
@@ -2524,11 +2384,11 @@ mod tests {
             state.arm(id);
             state.compute_signature(id, async move { Ok(sig) }).await.unwrap();
         }
-        // fetch 변경: 시그니처를 버린 뒤에 사이드카로 간다
+        // fetch 변경: 시그니처를 버린 뒤에 싱크로 간다
         notes(NoteOp::FetchChanged, "a");
-        // 첫 페이지: 문을 연 뒤에 사이드카로 간다
+        // 첫 페이지: 문을 연 뒤에 싱크로 간다
         notes(NoteOp::FirstPage, "a");
-        // 미러에서 Rust 가 풀지 않는 저장소는 상태를 만지지 않지만 사이드카에는 그대로 간다
+        // 미러에서 Rust 가 풀지 않는 저장소는 상태를 만지지 않지만 싱크에는 그대로 간다
         notes(NoteOp::Stale, "g");
         notes(NoteOp::FirstPage, "g");
         assert_eq!(
@@ -2544,7 +2404,7 @@ mod tests {
 
     #[tokio::test]
     async fn 싱크를_달지_않아도_알림은_상태에_반영되고_나중에_단_싱크도_받는다() {
-        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
+        let r = Router::new(false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
         let notes = r.note_sink();
         r.repo_state().arm("a");
         notes(NoteOp::FirstPage, "a");
@@ -2559,43 +2419,41 @@ mod tests {
 
     #[tokio::test]
     async fn 로그_타이밍을_바꿔도_로그의_첫_페이지_알림이_상태를_연다() {
-        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")])).with_log_timing(Duration::from_secs(60), Duration::from_secs(60));
+        let r = Router::new(false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")])).with_log_timing(Duration::from_secs(60), Duration::from_secs(60));
         let state = r.repo_state().clone();
         let seen: Arc<Mutex<Vec<bool>>> = Arc::default();
         let (log, probe) = (seen.clone(), state.clone());
         r.set_note_sink(Arc::new(move |_, id| log.lock().unwrap().push(probe.is_armed(id))));
-        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        assert!(acked(&r.route("repos:watch", &json!(["a"])).await));
         assert!(state.is_armed("a"));
-        assert!(is_sidecar(&r.route("req:cancel", &json!(["early"])).await));
+        assert!(acked(&r.route("req:cancel", &json!(["early"])).await));
         let env = envelope(r.route("git:log", &json!(["a", { "skip": 0, "count": 10 }, "early"])).await);
         assert_eq!(env["code"], "ABORTED");
-        // 로그가 낸 logFirstPage 가 문을 열었고(싱크 시점에 이미 열려 있다) 사이드카에도 갔다
+        // 로그가 낸 logFirstPage 가 문을 열었고(싱크 시점에 이미 열려 있다) 싱크에도 갔다
         assert_eq!(*seen.lock().unwrap(), [false]);
         assert!(!state.is_armed("a"));
     }
 
     #[tokio::test]
     async fn 종료하면_기다리던_첫_페이지_문이_풀린다() {
-        let r = Router::new(true, false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
-        assert!(is_sidecar(&r.route("repos:watch", &json!(["a"])).await));
+        let r = Router::new(false, mirror_of(vec![repo("a", "local", "/nonexistent-antler")]));
+        assert!(acked(&r.route("repos:watch", &json!(["a"])).await));
         assert!(r.repo_state().is_armed("a"));
         r.shutdown();
         assert!(!r.repo_state().is_armed("a"));
     }
 
     #[tokio::test]
-    async fn log_채널도_미러에_없거나_스위치가_꺼지면_사이드카() {
+    async fn log_채널도_미러에_없거나_풀_수_없으면_unserved() {
         let m = mirror_of(vec![repo("a", "local", "/nonexistent-antler"), repo("s", "ssh", "/srv")]);
-        let r = Router::new(true, false, m.clone());
+        let r = Router::new(false, m.clone());
         for id in ["nope", "s"] {
-            assert!(is_sidecar(&r.route("git:log", &json!([id, { "skip": 0, "count": 1 }])).await), "{id}");
+            assert!(is_unserved(&r.route("git:log", &json!([id, { "skip": 0, "count": 1 }])).await), "{id}");
         }
         for args in [json!([]), json!([null]), json!([5, { "skip": 0, "count": 1 }])] {
-            assert!(is_sidecar(&r.route("git:log", &args).await), "{args}");
+            assert!(is_unserved(&r.route("git:log", &args).await), "{args}");
         }
-        let off = Router::new(false, false, m);
-        assert!(is_sidecar(&off.route("git:log", &json!(["a", { "skip": 0, "count": 1 }])).await));
-        assert_eq!(r.rust_handled() + off.rust_handled(), 0);
+        assert_eq!(r.rust_handled(), 0);
     }
 
     #[test]

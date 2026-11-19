@@ -89,7 +89,7 @@ pub fn ssh_hosts_for_home(home: &str) -> Vec<SshHostInfo> {
         .collect()
 }
 
-/// 확인 창의 메시지 상자 인자(사이드카 `electronShim` 이 `handlers.ts` 의 옵션으로 만드는 것과 같다: kind `info`·본문은 message 와 detail 을 빈 줄로 이은 것·`[연결][취소]`·취소가 기본).
+/// 확인 창의 메시지 상자 인자(옛 사이드카 shim 이 `handlers.ts` 의 옵션으로 만들던 것과 같다: kind `info`·본문은 message 와 detail 을 빈 줄로 이은 것·`[연결][취소]`·취소가 기본).
 /// 화면에 찍는 호스트 이름은 서식 문자(bidi 제어·제로폭)를 `\u{…}` 로 바꿔 보여 준다 — 연결하는 값은 바뀌지 않는다
 pub fn ssh_confirm_arg(host: &str) -> Value {
     let shown: String = host.chars().map(|c| if is_format_char(c) { format!("\\u{{{:04X}}}", c as u32) } else { c.to_string() }).collect();
@@ -100,16 +100,6 @@ pub fn ssh_confirm_arg(host: &str) -> Value {
         "buttons": ["연결", "취소"],
         "cancelId": 1,
     })
-}
-
-/// 이 호출을 사이드카가 아니라 Rust 가 SSH 풀로 처리해야 하는가(ssh 종류 — `env:listDir` 는 항상 ssh). 풀이 없으면 설정을 소유하지 않은 실행에서만 라우터가 이 호출을 사이드카로 보낸다(계획 §13 C4 — PR 9 부터 설정을 소유한 실행은 Rust 가 오류로 답한다).
-/// local·wsl 과 `env:wslDistros`·`env:sshHosts` 는 풀과 무관하다
-pub fn needs_ssh(channel: &str, args: &[Option<Value>]) -> bool {
-    match channel {
-        "env:listDir" => true,
-        "env:test" | "repos:scan" => args.first().and_then(Option::as_ref).and_then(|a| a.get("kind")).and_then(Value::as_str) == Some("ssh"),
-        _ => false,
-    }
 }
 
 fn utf16_len(s: &str) -> usize {
@@ -322,21 +312,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ssh_가_필요한_호출은_ssh_종류와_env_list_dir_뿐이다() {
-        let a = |v: Value| vec![Some(v)];
-        assert!(needs_ssh("env:listDir", &[]));
-        assert!(needs_ssh("env:listDir", &a(json!({ "sshHost": "x" }))));
-        assert!(needs_ssh("env:test", &a(json!({ "kind": "ssh" }))));
-        assert!(needs_ssh("repos:scan", &a(json!({ "kind": "ssh", "path": "~" }))));
-        for v in [json!({ "kind": "local" }), json!({ "kind": "wsl" }), json!({}), json!(null), json!("ssh"), json!({ "kind": 1 })] {
-            assert!(!needs_ssh("env:test", &a(v.clone())) && !needs_ssh("repos:scan", &a(v)));
-        }
-        assert!(!needs_ssh("env:test", &[]));
-        assert!(!needs_ssh("env:wslDistros", &[]) && !needs_ssh("env:sshHosts", &[]));
-    }
-
-    #[test]
-    fn 확인_창_인자는_사이드카_모양이고_서식_문자는_드러난다() {
+    fn 확인_창_인자는_네이티브_대화상자_모양이고_서식_문자는_드러난다() {
         let a = ssh_confirm_arg("host\u{202E}x");
         assert_eq!(a["kind"], "info");
         assert_eq!(a["title"], "SSH 연결 확인");

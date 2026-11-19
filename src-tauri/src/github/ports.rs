@@ -15,7 +15,7 @@ pub struct GhRepoRef {
     pub remote: String,
 }
 
-/// 사이드카에 묻는 저장소 정보. 오류는 사용자에게 보여 줄 수 있는 문장이다(서비스가 그대로 `ERROR` 로 돌려준다)
+/// 서비스가 묻는 저장소 정보(라우터·설정 저장소가 답한다). 오류는 사용자에게 보여 줄 수 있는 문장이다(서비스가 그대로 `ERROR` 로 돌려준다)
 pub trait RepoQuery: Send + Sync {
     /// `gh:repo`: 저장소의 GitHub remote(없으면 `None`)
     fn gh_repo<'a>(&'a self, repo_id: &'a str) -> BoxFuture<'a, Result<Option<GhRepoRef>, String>>;

@@ -1,9 +1,9 @@
 //! GitHub 서비스가 저장소 정보를 묻는 길의 **소유 분기**(Phase 6a PR 8). [`RepoQuery`](crate::github::ports::RepoQuery) 의 실제 구현이다.
 //!
 //! - Rust 가 git 을 맡는 저장소(local·WSL·SSH, 그리고 GitHub 서비스와 캐시 실행기가 주입된 github kind — 라우터의 한 술어 `RepoMirror::resolve`)의 `gh_repo`·`gh_remotes`·`pushed_shas_by_author` 는 **Rust 의 라우터가 직접** 답한다.
-//!   사이드카는 그 저장소에 git 을 돌리지 않는다(SSH 호스트당 연결이 앱 하나다). 실행기·큐·캐시는 채널 핸들러(`gh:repo`)가 쓰는 라우터의 것 그대로다.
-//! - 그 밖(캐시 실행기가 없는 github kind·미러에 없는 id)은 설정을 소유한 Rust 가 답한다([`ConfigRepos`] — Phase 6b PR 9 부터 사이드카에 묻지 않는다. 사이드카는 설정을 모른다). 사이드카 위임(`repoq`)은 PR 10 에서 없앴다.
-//! - 미러가 **거부한** 저장소(경로·호스트·배포판 검사에 걸림)는 위임하지 않는다 — 오류다. 위임하면 미러가 막은 경로에 사이드카가 git 을 돌린다.
+//!   다른 곳이 그 저장소에 git 을 돌리지 않는다(SSH 호스트당 연결이 앱 하나다). 실행기·큐·캐시는 채널 핸들러(`gh:repo`)가 쓰는 라우터의 것 그대로다.
+//! - 그 밖(캐시 실행기가 없는 github kind·미러에 없는 id)은 설정을 소유한 Rust 가 답한다([`ConfigRepos`]).
+//! - 미러가 **거부한** 저장소(경로·호스트·배포판 검사에 걸림)는 위임하지 않는다 — 오류다. 위임하면 미러가 막은 경로를 다른 곳이 읽을 수 있다.
 //! - `github_client_id`·`repo_ids`(설정 읽기)는 Phase 6b PR 9 부터 설정을 소유한 Rust 가 답한다([`ConfigRepos`]). `invalidate_gh_remotes` 는 Rust 캐시를 비운다.
 //!
 //! 라우터는 앱이 `app.manage` 로 가져가므로 이 구현은 라우터를 호출 때 찾는다([`RouterSource`]). 서비스는 라우터보다 먼저 만들어진다.
@@ -27,7 +27,7 @@ pub trait RouterSource: Send + Sync + 'static {
     type Guard<'a>: Deref<Target = Router> + Send
     where
         Self: 'a;
-    /// 라우터가 아직 없으면(앱 시작 중) `None` — 그동안은 전부 사이드카에 묻는다
+    /// 라우터가 아직 없으면(앱 시작 중) `None` — 그동안은 전부 대체 질의에 묻는다
     fn router(&self) -> Option<Self::Guard<'_>>;
 }
 
@@ -131,9 +131,9 @@ impl<S: RouterSource> RepoQuery for RoutedRepos<S> {
     }
 }
 
-/// 설정을 Rust 가 소유할 때(Phase 6b PR 9) [`RoutedRepos`] 의 대체 질의: 저장소 정보를 사이드카에 묻지 않고 **설정에서 직접** 읽는다.
+/// 설정을 Rust 가 소유할 때(Phase 6b PR 9) [`RoutedRepos`] 의 대체 질의: 저장소 정보를 **설정에서 직접** 읽는다.
 /// `github_client_id`·`repo_ids` 는 설정의 `ui.githubClientId`·저장소 목록이고, 라우터가 풀지 못하는 저장소(WSL 이 아닌 OS 의 WSL·풀 없는 SSH·미러가 막은 경로)의 git 질의는 답이 없다 —
-/// 사이드카는 이제 설정을 모르므로 묻지 않는다(`gh_repo` 는 없음, 목록은 빈 목록).
+/// 라우터가 풀지 못한 저장소는 답이 없다(`gh_repo` 는 없음, 목록은 빈 목록).
 pub struct ConfigRepos {
     store: Arc<crate::config::ConfigStore>,
 }

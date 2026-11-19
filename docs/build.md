@@ -58,11 +58,11 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 ### Tauri 판 패키징(발행 없음 — Phase 6c PR 2)
 
 `.github/workflows/tauri-package.yml` 이 Tauri 판 설치본을 빌드해 **워크플로 아티팩트로만** 올린다. 릴리스·태그를 만들지 않고 쓰기 권한도 없으며, `release.yml`·야간 릴리스와 이어져 있지 않다(야간 릴리스는 계속 Electron 판을 낸다 — 전환은 마지막 `feat!:` PR 의 몫, [tauri.md](tauri.md#pr-2--tauri-패키징-워크플로발행-없음)).
-산출물은 아직 **배포 후보가 아니다**: Tauri 판이 Node 사이드카에 기대기 때문이다(사이드카 제거 전). 아티팩트 이름에 `-dev-sidecar` 가 붙는다.
+산출물은 **배포 후보다**: Phase 6c PR 5 에서 Node 사이드카를 없애 Tauri 판은 Node 런타임에 기대지 않는다(발행은 리허설·마지막 `feat!:` PR 이후).
 
 실행: Actions 탭 → `tauri-package` → Run workflow(선택 입력 `version`, 비우면 `0.0.0-ci.<실행 번호>`). 워크플로 파일이 기본 브랜치에 있어야 실행되므로 PR 에서는 돌지 않는다.
 
-| 갈래 | 러너 | 산출물(아티팩트 `tauri-installers-<갈래>-dev-sidecar`) |
+| 갈래 | 러너 | 산출물(아티팩트 `tauri-installers-<갈래>`) |
 |---|---|---|
 | windows | `windows-latest` | `Antler-Setup-<버전>-x64.exe`(NSIS, 사용자별 설치) · 서명 키가 있으면 `.exe.sig`·`latest.json` · `latest.yml` (서명·매니페스트는 `sign` 잡) |
 | mac-arm64 · mac-x64 | `macos-latest`(arm64 러너에서 둘 다 빌드) | `Antler-<버전>-arm64.dmg` · `Antler-<버전>-x64.dmg` (ad-hoc 서명 `-`) |

@@ -340,6 +340,12 @@ export const IPC_CHANNELS = [
 
 export const IPC_EVENTS = ['repo:changed', 'fetch:status', 'theme:system', 'update:state'] as const satisfies readonly IpcEvent[]
 
+/**
+ * 인자 배열의 빈 자리(undefined) 표식. JSON 은 배열 속 undefined 를 null 로 바꾸므로 Tauri bridge 가 이 키 하나짜리 객체로 보내고
+ * Rust 라우터가 undefined 로 되돌린다(src/renderer/tauri/bridge.ts 의 encodeArgs, src-tauri/src/router.rs 의 `UNDEFINED_ARG`).
+ */
+export const UNDEFINED_ARG = '__antlerUndefinedArg'
+
 /** invoke 결과 래퍼. Electron 기본 에러 문자열("Error invoking remote method…")을 피하려고 쓴다. */
 export type IpcEnvelope<T> = { ok: true; data: T } | { ok: false; error: string; code?: string }
 

@@ -3,8 +3,7 @@ name: tauri-package
 # Tauri 판 설치본을 빌드해 워크플로 아티팩트로 올린다. **발행하지 않는다**: 릴리스·태그를 만들지 않고 쓰기 권한도 없다.
 # release.yml(Electron)과 이어져 있지 않다 — 야간 릴리스는 계속 Electron 판을 낸다. 전환은 마지막 `feat!:` PR 이 한다(docs/tauri.md "Phase 6c").
 #
-# 산출물은 아직 배포 후보가 아니다: Tauri 판이 Node 사이드카(PATH 의 node)에 기대기 때문이다. 사이드카 제거(6c PR 5) 전에는 배포하지 않는다.
-# 그래서 아티팩트 이름에 `-dev-sidecar` 를 붙인다.
+# 산출물은 배포 후보다: Node 사이드카를 없앤(6c PR 5) 뒤라 Tauri 판은 Node 런타임에 기대지 않는다. 그래도 발행은 마지막 `feat!:` PR 과 리허설이 끝난 뒤다.
 #
 # 실행: Actions 탭에서 수동 실행(workflow_dispatch)만. 워크플로 파일이 기본 브랜치에 있어야 실행되고, Environment `release` 는 main 이 아닌 브랜치에
 # 시크릿을 주지 않을 수 있어 PR 에서는 돌리지 않는다. 그래서 머지 뒤 한 번 눌러 아티팩트를 확인한다(docs/build.md).
@@ -178,19 +177,19 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
-          name: tauri-installers-mac-arm64-dev-sidecar
+          name: tauri-installers-mac-arm64
           path: in/mac-arm64
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
-          name: tauri-installers-mac-x64-dev-sidecar
+          name: tauri-installers-mac-x64
           path: in/mac-x64
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         continue-on-error: true
         with:
-          name: tauri-installers-linux-dev-sidecar
+          name: tauri-installers-linux
           path: in/linux
 
       # out/ 에 쓰는 것은 이 단계뿐이다. 각 아티팩트에서 기대 이름 하나만(Windows exe 는 win 아티팩트에서만, dmg·deb 는 각자의 아티팩트에서만) 일반 파일일 때 복사한다:
@@ -278,7 +277,7 @@ jobs:
       - name: 아티팩트 업로드
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: tauri-installers-dev-sidecar
+          name: tauri-installers
           # out/ 의 예상 파일만(없는 것은 무시 — 서명·갈래 실패는 위 단계의 경고로 드러난다). 설치본은 필수라 하나도 없으면 실패한다
           path: |
             out/Antler-Setup-${{ env.VERSION }}-x64.exe
@@ -419,6 +418,6 @@ jobs:
       - name: 아티팩트 업로드
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: tauri-installers-${{ matrix.asset }}-dev-sidecar
+          name: tauri-installers-${{ matrix.asset }}
           path: out/*
           if-no-files-found: error

@@ -8,7 +8,7 @@
 //!   (TS 는 `w.on('error', () => {})` — 디렉터리가 사라지면 안전망 폴링이 처리한다). 넘침(rescan 표시)은 무엇이 바뀌었는지 모르므로 확인한다.
 //! - **막지 않기**: `has_head`(stat)·감시 등록(notify 가 등록 확인을 기다린다)은 blocking 풀에서 돌린다 — 느린 네트워크 드라이브가 tokio 워커를 붙잡지 않는다.
 //! - **닫기**: notify 의 `Drop` 은 스레드에 정지만 알리고 돌아온다(join 하지 않는다). 핸들 `Drop` 은 **닫기 요청을 즉시** 하고, 완료(notify 스레드가 이벤트 핸들러를 놓는 때)는
-//!   tokio 런타임 밖이거나 종료 중([`NotifyDirs`] 의 `begin_shutdown`)일 때만 [`CLOSE_WAIT`] 까지 기다린다. 런타임 안에서는 기다리지 않는다 — 사이드카 리더 스레드·`watch_target` 잠금 안에서 최대 1.5초를 붙잡지 않게.
+//!   tokio 런타임 밖이거나 종료 중([`NotifyDirs`] 의 `begin_shutdown`)일 때만 [`CLOSE_WAIT`] 까지 기다린다. 런타임 안에서는 기다리지 않는다 — 런타임 밖 스레드·`watch_target` 잠금 안에서 최대 1.5초를 붙잡지 않게.
 //!   스레드가 곧 끝난다는 것은 [`NotifyDirs::live`] 가 보여 준다.
 //! - **링크·네트워크**: `has_head` 는 링크를 따라가지 않는다(`symlink_metadata` — 디렉터리 자체와 `HEAD` 가 실제 디렉터리·파일일 때만). notify 도 감시 안의 링크를 따라가지 않는다(`follow_symlinks(false)`).
 
@@ -78,7 +78,7 @@ impl Drop for NotifyHandle {
     fn drop(&mut self) {
         // 닫기 요청은 즉시 — notify 가 스레드에 정지를 알리고 돌아온다
         drop(self.watcher.take());
-        // 완료를 기다리는 것은 종료 중이거나 tokio 런타임 밖일 때뿐이다. 런타임 안(사이드카 리더 스레드·`watch_target` 잠금 안·태스크)에서는
+        // 완료를 기다리는 것은 종료 중이거나 tokio 런타임 밖일 때뿐이다. 런타임 안(`watch_target` 잠금 안·태스크)에서는
         // 최대 1.5초를 붙잡아 다른 요청을 막으므로 기다리지 않는다 — 스레드는 곧 끝나고 `NotifyDirs::live` 가 그 사실을 보여 준다
         if !self.shutdown.load(Ordering::SeqCst) && tokio::runtime::Handle::try_current().is_ok() {
             return;

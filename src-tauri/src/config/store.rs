@@ -5,7 +5,7 @@
 //!   받는 쪽(미러)이 오래된 세대를 버리므로 순서가 뒤집혀도 낡은 값이 이기지 않는다.
 //! - 설정은 [`Json`] 트리다(`model.rs`). 반환값·알림에는 `undefined` 자리를 뺀 값이 간다.
 //!
-//! Phase 6b PR 9 에서 앱에 연결했다 — Rust 가 설정 파일의 유일한 작성자이고(`ANTLER_RUST_GIT=0` 이면 열지 않고 사이드카가 쓴다), 변경 알림이 `config::sync` 로 미러·fetch 설정을 맞춘다.
+//! Phase 6b PR 9 에서 앱에 연결했다 — Rust 가 설정 파일의 유일한 작성자이고(Phase 6c PR 5 부터 되돌리기 경로는 없다), 변경 알림이 `config::sync` 로 미러·fetch 설정을 맞춘다.
 use std::fs;
 use std::io;
 use std::panic::{catch_unwind, AssertUnwindSafe};

@@ -1,4 +1,4 @@
-//! 설정이 바뀔 때 미러(`RepoMirror`)와 fetch 설정(`FetchPrefs`)을 맞추는 곳(Phase 6b PR 9). 사이드카가 `repos`·`fetchPrefs` 줄로 보내던 것을 Rust 가 원천으로서 직접 넘긴다.
+//! 설정이 바뀔 때 미러(`RepoMirror`)와 fetch 설정(`FetchPrefs`)을 맞추는 곳(Phase 6b PR 9). Rust 가 원천으로서 직접 넘긴다.
 //!
 //! - **변경 알림에서 동기로 불린다**(`ConfigStore::set_on_change`) — 채널 응답보다 먼저 미러가 바뀌어 renderer 의 다음 호출이 옛 미러를 보지 않는다.
 //! - **링크·기본 브랜치는 `RepoMirror::apply_message` 의 같은 경로**(`sanitize_github_link`·`is_safe_branch`)로 들어간다 — `mirror_of` 가 만든 값을 그 길 밖으로 넘기지 않는다
@@ -41,7 +41,7 @@ pub struct ConfigSync {
     state: Mutex<State>,
 }
 
-/// 미러 항목 하나를 `repos` 메시지의 한 줄로(`src/sidecar/protocol.ts` 의 `MirrorRepo` 와 같은 모양)
+/// 미러 항목 하나를 `repos` 메시지의 한 줄로(`tests/fixtures/rustPortSpecs.ts` 의 `MirrorRepo` 와 같은 모양)
 fn entry_json(e: &MirrorEntry) -> Value {
     let mut o = Map::new();
     o.insert("id".into(), json!(e.repo.id));
@@ -68,7 +68,7 @@ fn entry_json(e: &MirrorEntry) -> Value {
     Value::Object(o)
 }
 
-/// `{t:"repos", gen, repos}` — 사이드카가 보내던 줄과 같은 모양(`RepoMirror::apply_message` 가 받는다)
+/// `{t:"repos", gen, repos}` — 미러 메시지 모양(`RepoMirror::apply_message` 가 받는다)
 pub fn repos_message(gen: u64, entries: &[MirrorEntry]) -> Value {
     json!({ "t": "repos", "gen": gen, "repos": entries.iter().map(entry_json).collect::<Vec<_>>() })
 }
@@ -95,7 +95,7 @@ impl ConfigSync {
         if config_gen.is_some() {
             st.config_gen = config_gen;
         }
-        // 미러 먼저, 그다음 fetch 설정이다 — 저장소가 사라진 설정을 승인 맵이 앞서가지 않게(사이드카 때와 같은 순서)
+        // 미러 먼저, 그다음 fetch 설정이다 — 저장소가 사라진 설정을 승인 맵이 앞서가지 않게(TS 와 같은 순서)
         let entries = mirror_of(config);
         if st.last_mirror.as_ref() != Some(&entries) {
             st.mirror_gen += 1;
@@ -157,7 +157,7 @@ mod tests {
         sync.push(Some(2), &cfg(r#"[{"id":"b","sourceId":"local","path":"C:\\b","name":"B"}]"#, "{}"));
         sync.push(Some(1), &cfg(r#"[{"id":"a","sourceId":"local","path":"C:\\a","name":"A"}]"#, "{}"));
         assert!(matches!(mirror.resolve("b"), Resolved::Rust(_)));
-        assert!(matches!(mirror.resolve("a"), Resolved::Sidecar));
+        assert!(matches!(mirror.resolve("a"), Resolved::Unserved));
         assert_eq!(changed.load(Ordering::SeqCst), 1);
     }
 

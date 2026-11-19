@@ -27,7 +27,7 @@ const REVIEWS_MAX_PAGES: usize = 3;
 const EMPTY_PAGE_MAX_EXTRA: usize = 5;
 const KEY_PULLS_MAX: usize = 20;
 
-/// `owner/repo`. 사이드카가 준 값이 URL 경로(`..` 등)로 새지 않게 [`Slug::parse`] 로만 만든다(필드는 비공개)
+/// `owner/repo`. 저장소 정보가 준 값이 URL 경로(`..` 등)로 새지 않게 [`Slug::parse`] 로만 만든다(필드는 비공개)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Slug {
     owner: String,

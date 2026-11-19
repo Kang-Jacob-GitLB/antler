@@ -2,9 +2,9 @@
 //! 실제 git 을 띄우되 네트워크는 쓰지 않는다 — `file:///` 소스 저장소와 127.0.0.1 의 응답 없는 서버뿐이다(실제 GitHub 에는 닿지 않는다).
 //!
 //! 보는 것:
-//! - 소유: 스위치(`ANTLER_RUST_GIT`)·GitHub 서비스·캐시 실행기가 모두 있을 때만 조회(PR 6)와 fetch·감시(PR 7, `tests/github_fetch.rs`)를 Rust 가 맡는다 — 아니면 모두 사이드카다.
+//! - 소유: GitHub 서비스·캐시 실행기가 모두 있을 때만 조회(PR 6)와 fetch·감시(PR 7, `tests/github_fetch.rs`)를 Rust 가 맡는다 — 아니면 풀 수 없다(`Unserved`).
 //! - 패리티: 같은 저장소의 local 결과와 같은 채널 결과(TS 는 같은 `RepoService` 코드를 실행기만 바꿔 탄다), 그리고 github 만의 갈래(refs 의 worktrees·refsDetails 의 서브모듈·onRemote·wip·gh:repo·lenient).
-//! - `repos:remove`: 진행 중인 조회·열린 로그 커서를 정리해 사이드카가 지우기 전에 캐시 폴더를 쥔 핸들이 없다.
+//! - `repos:remove`: 진행 중인 조회·열린 로그 커서를 정리해 설정 소유자가 지우기 전에 캐시 폴더를 쥔 핸들이 없다.
 //! - 비밀: 토큰은 어떤 응답·오류에도 없다.
 //!
 //! 격리: 이 바이너리가 시작될 때(`isolate`) 깨끗한 전역 설정과 `GIT_CONFIG_NOSYSTEM` 을 넣고 프록시·askpass 환경을 비운다.
@@ -85,12 +85,17 @@ fn token_exec(cache: &Cache, protocol: &str) -> GithubExecutor {
 async fn call(r: &Router, ch: &str, args: Value) -> Value {
     match r.route(ch, &args).await {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("{ch} {args} 가 사이드카로 갔다"),
+        Routed::Unserved => panic!("{ch} {args} 를 풀지 못했다"),
     }
 }
 
-fn is_sidecar(r: Routed) -> bool {
-    matches!(r, Routed::Sidecar)
+fn is_unserved(r: Routed) -> bool {
+    matches!(r, Routed::Unserved)
+}
+
+/// `repos:watch`·`req:cancel` 의 응답(라우터가 `{ok:true}` 로 답한다)
+fn is_acked(r: Routed) -> bool {
+    matches!(r, Routed::Done(v) if v == json!({ "ok": true }))
 }
 
 fn data(env: &Value) -> &Value {
@@ -156,7 +161,7 @@ impl Rig {
         ];
         let links = std::collections::HashMap::from([(G.to_string(), GhLink { owner: "octocat".into(), repo: "hello".into() })]);
         assert!(mirror.apply_with_links(1, repos, links));
-        let router = Router::new(true, false, mirror.clone());
+        let router = Router::new(false, mirror.clone());
         router.set_github(gh_host());
         let exec = token_exec(&cache, protocol);
         router.set_github_cache(exec.clone());
@@ -179,23 +184,23 @@ impl Drop for Rig {
 // ---------------------------------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn github_저장소의_조회_fetch_감시는_같은_스위치로_rust_가_처리한다() {
+async fn github_저장소의_조회_fetch_감시는_같은_조건으로_rust_가_처리한다() {
     let rig = Rig::new("file").await;
     let r = &rig.router;
     assert!(r.github_cache_active());
     let env = call(r, "git:commit", json!([G, rig.src.second])).await;
     assert_eq!(data(&env)["hash"], rig.src.second);
     assert_eq!(r.rust_handled(), 1);
-    // fetch·감시의 소유도 같은 스위치로 Rust 다(Phase 6b PR 7) — `rust_fetch_kinds` 의 github 와 미러의 조회 해석이 같은 플래그 하나다.
-    // 이 시험의 라우터에는 fetch 서비스가 없어 `git:fetch` 는 "준비되지 않았다" 오류다(사이드카로 가지 않는다 — 사이드카는 이 저장소의 fetch 를 맡지 않는다). 서비스가 붙은 흐름은 `tests/github_fetch.rs`
+    // fetch·감시의 소유도 같은 조건으로 Rust 다(Phase 6b PR 7) — `rust_fetch_kinds` 의 github 와 미러의 조회 해석이 같은 플래그 하나다.
+    // 이 시험의 라우터에는 fetch 서비스가 없어 `git:fetch` 는 "준비되지 않았다" 오류다(어디로도 넘기지 않는다). 서비스가 붙은 흐름은 `tests/github_fetch.rs`
     let fetch = call(r, "git:fetch", json!([G, true])).await;
     assert_eq!(fetch["ok"], false, "{fetch}");
-    assert!(is_sidecar(r.route("repos:watch", &json!([G])).await));
+    assert!(is_acked(r.route("repos:watch", &json!([G])).await));
     assert_eq!(r.watching().as_deref(), Some(G), "github 저장소도 Rust 가 감시한다");
     // local 저장소로 옮기면 감시가 바뀐다
-    assert!(is_sidecar(r.route("repos:watch", &json!([L])).await));
+    assert!(is_acked(r.route("repos:watch", &json!([L])).await));
     assert_eq!(r.watching().as_deref(), Some(L));
-    assert!(is_sidecar(r.route("repos:watch", &json!([G])).await));
+    assert!(is_acked(r.route("repos:watch", &json!([G])).await));
     assert_eq!(r.watching().as_deref(), Some(G));
     // 소유 술어: 종류 목록의 github 는 같은 플래그(github_cache_active)를 따른다
     assert!(antler_lib::router::rust_fetch_kinds(false, true).contains("github") && !antler_lib::router::rust_fetch_kinds(true, false).contains("github"));
@@ -203,7 +208,7 @@ async fn github_저장소의_조회_fetch_감시는_같은_스위치로_rust_가
 }
 
 #[tokio::test]
-async fn 스위치_서비스_실행기_중_하나라도_없으면_github_는_사이드카다() {
+async fn 서비스_실행기_중_하나라도_없으면_github_는_풀_수_없다() {
     let src_dir = TempDirPath::new("none");
     let repos = || {
         let m = RepoMirror::default();
@@ -213,30 +218,25 @@ async fn 스위치_서비스_실행기_중_하나라도_없으면_github_는_사
     let cache = Cache::new();
     let args = json!([G, "abcdef12"]);
     // 실행기를 주입하지 않았다
-    let r = Router::new(true, false, repos());
+    let r = Router::new(false, repos());
     r.set_github(gh_host());
-    assert!(is_sidecar(r.route("git:commit", &args).await));
+    assert!(is_unserved(r.route("git:commit", &args).await));
     assert!(!r.github_cache_active());
     // GitHub 서비스보다 먼저 주입하면 무시된다(토큰의 출처가 그 서비스 하나다)
-    let r = Router::new(true, false, repos());
+    let r = Router::new(false, repos());
     r.set_github_cache(token_exec(&cache, "file"));
     r.set_github(gh_host());
     assert!(!r.github_cache_active());
-    assert!(is_sidecar(r.route("git:commit", &args).await));
-    // 서비스 없이(ANTLER_RUST_API=0 에 해당) 실행기만
-    let r = Router::new(true, false, repos()).with_api(false);
-    r.set_github(gh_host());
-    r.set_github_cache(token_exec(&cache, "file"));
-    assert!(!r.github_cache_active());
-    assert!(is_sidecar(r.route("git:commit", &args).await));
-    // ANTLER_RUST_GIT=0: 전부 사이드카
-    let r = Router::new(false, false, repos());
-    r.set_github(gh_host());
+    assert!(is_unserved(r.route("git:commit", &args).await));
+    // 서비스 없이 실행기만
+    let r = Router::new(false, repos());
     r.set_github_cache(token_exec(&cache, "file"));
     assert!(!r.github_cache_active());
     for ch in RUST_CHANNELS {
-        assert!(is_sidecar(r.route(ch, &json!([G, "abcdef12"])).await), "{ch}");
+        assert!(is_unserved(r.route(ch, &json!([G, "abcdef12"])).await), "{ch}");
     }
+    // 앱 경계는 명시적 오류로 답한다
+    assert_eq!(r.invoke("git:commit", &args).await["error"], "GitHub 원격 저장소를 쓸 수 없는 환경입니다");
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -366,10 +366,10 @@ async fn github_만의_갈래는_ts_repo_service_와_같다() {
     let env = call(r, "gh:repo", json!([G])).await;
     assert_eq!(env, json!({ "ok": true, "data": { "owner": "octocat", "repo": "hello", "remote": "origin" } }));
     assert_eq!(call(r, "gh:repo", json!([L])).await, json!({ "ok": true, "data": null }));
-    // GitHub 서비스가 채널을 거치지 않고 묻는 길(`RoutedRepos` → `Router::gh_repo`)도 같은 답이다 — 사이드카에 묻지 않는다
+    // GitHub 서비스가 채널을 거치지 않고 묻는 길(`RoutedRepos` → `Router::gh_repo`)도 같은 답이다
     let by_service = r.gh_repo(G).await.expect("Rust 가 맡는다").expect("링크로 답한다");
     assert_eq!(by_service, Some(GhRepoRef { owner: "octocat".into(), repo: "hello".into(), remote: "origin".into() }));
-    // origin 이 GitHub 주소가 아니라 remote 추론으로는 아무것도 없다(file://) — 그래도 Rust 가 git 으로 답한다(사이드카로 넘기지 않는다)
+    // origin 이 GitHub 주소가 아니라 remote 추론으로는 아무것도 없다(file://) — 그래도 Rust 가 git 으로 답한다(대체 질의로 넘기지 않는다)
     assert_eq!(r.gh_remotes(G, &CancellationToken::new()).await.expect("Rust 가 맡는다").expect("git 으로 읽는다"), Vec::<GhRepoRef>::new());
     assert!(r.pushed_shas_by_author(G, "a@b.c", 5, &CancellationToken::new()).await.expect("Rust 가 맡는다").is_ok());
 }
@@ -400,14 +400,14 @@ async fn 링크가_없는_github_레코드의_gh_repo_는_remote_에서_추론�
     // 같은 캐시를 링크 없이 미러에 올린다
     let mirror = RepoMirror::default();
     assert!(mirror.apply(1, vec![MirrorRepo { id: "nolink".into(), kind: "github".into(), path: rig.dir.as_str().to_string(), distro: None, ssh_host: None }]));
-    let r = Router::new(true, false, mirror);
+    let r = Router::new(false, mirror);
     r.set_github(gh_host());
     r.set_github_cache(token_exec(&rig.cache, "file"));
     // origin 은 file:// 이라 추론할 GitHub 저장소가 없다
     assert_eq!(call(&r, "gh:repo", json!(["nolink"])).await, json!({ "ok": true, "data": null }));
     // origin 을 GitHub 주소로 바꾸면 git remote 에서 추론한다(링크가 없을 때만 git 을 부른다)
     rig.git(&["remote", "set-url", "origin", "https://github.com/Octo/Repo.git"]);
-    let r2 = Router::new(true, false, {
+    let r2 = Router::new(false, {
         let m = RepoMirror::default();
         assert!(m.apply(1, vec![MirrorRepo { id: "nolink2".into(), kind: "github".into(), path: rig.dir.as_str().to_string(), distro: None, ssh_host: None }]));
         m
@@ -635,25 +635,25 @@ async fn repos_remove_는_진행_중인_조회와_열린_로그_커서를_정리
     let other = call(&r, "git:commit", json!([L, rig.src.second])).await;
     assert_eq!(other["ok"], true);
 
-    // 사이드카로 넘기기 전에 Rust 쪽 핸들을 푼다
-    assert!(is_sidecar(r.route("repos:remove", &json!([G])).await));
-    let Routed::Done(env) = tokio::time::timeout(Duration::from_secs(10), stuck).await.expect("끊긴 조회가 끝난다").unwrap() else { panic!("사이드카로 갔다") };
+    // 설정 소유자의 삭제(`config_host::remove_repo`)가 부르는 정리: Rust 쪽 핸들을 푼다
+    r.release_github_repo(G).await;
+    let Routed::Done(env) = tokio::time::timeout(Duration::from_secs(10), stuck).await.expect("끊긴 조회가 끝난다").unwrap() else { panic!("Rust 가 풀지 못했다") };
     assert_eq!(env["ok"], false, "{env}");
     assert_eq!(env["code"], "ABORTED", "{env}");
     // route 가 돌아온 시점에 그 저장소의 git 프로세스는 모두 끝나 있다(drain 이 프로세스 종료를 기다렸다)
     assert_eq!(rig.exec.live_processes(rig.dir.as_str()), 0, "정리가 끝났는데 git 이 남았다");
     assert_eq!(r.log_cursor_count(), 0, "열린 커서가 남았다");
-    // 사이드카가 지우는 시점: 사이드카와 같은 재시도 예산(10회×100ms)으로 지워져야 한다 — 커서나 멈춘 git 이 살아 있으면 Windows 는 폴더를 지우지 못한다.
+    // 폴더를 지우는 시점: TS 와 같은 재시도 예산(10회×100ms)으로 지워져야 한다 — 커서나 멈춘 git 이 살아 있으면 Windows 는 폴더를 지우지 못한다.
     // 앱에 연결하지 않은 Rust 판 삭제 함수(`remove_github_cache`)를 실제 캐시에 써 본다
     let dir = PathBuf::from(rig.dir.as_str());
     assert_eq!(remove_github_cache(&rig.dir), Ok(true), "캐시 폴더를 쥔 핸들이 남았다");
     assert!(!dir.exists());
-    // 사이드카가 레코드를 지워 미러가 바뀌기 전까지 그 id 의 새 조회는 "삭제 중"으로 거부된다(범위에 들어 폴더를 다시 쥐지 않는다)
+    // 설정 소유자가 레코드를 지워 미러가 바뀌기 전까지 그 id 의 새 조회는 "삭제 중"으로 거부된다(범위에 들어 폴더를 다시 쥐지 않는다)
     let env = call(&r, "git:commit", json!([G, rig.src.second])).await;
     assert_eq!(env["ok"], false, "{env}");
     assert!(env["error"].as_str().unwrap_or_default().contains("삭제하는 중"), "{env}");
     assert_eq!(rig.exec.live_processes(rig.dir.as_str()), 0);
-    // 미러에서 사라지면(사이드카가 지웠다) 표식이 풀리고, 같은 id 가 다시 github 로 풀리면 새 범위를 받는다(끊긴 범위를 재사용하지 않는다) — 폴더가 없으니 git 오류일 뿐 ABORTED 가 아니다
+    // 미러에서 사라지면(레코드가 지워졌다) 표식이 풀리고, 같은 id 가 다시 github 로 풀리면 새 범위를 받는다(끊긴 범위를 재사용하지 않는다) — 폴더가 없으니 git 오류일 뿐 ABORTED 가 아니다
     let local = MirrorRepo { id: L.into(), kind: "local".into(), path: rig.src.dir("octocat", "hello").to_string_lossy().into_owned(), distro: None, ssh_host: None };
     assert!(rig.mirror.apply(2, vec![local.clone()]));
     r.on_mirror_changed();
@@ -669,7 +669,7 @@ async fn repos_remove_는_진행_중인_조회와_열린_로그_커서를_정리
 async fn repos_remove_뒤_미러가_바뀌기_전까지_그_id_의_새_조회를_거부한다() {
     let rig = Rig::new("file").await;
     let r = &rig.router;
-    assert!(is_sidecar(r.route("repos:remove", &json!([G])).await));
+    r.release_github_repo(G).await;
     for ch_args in [("git:commit", json!([G, rig.src.second])), ("git:log", json!([G, { "count": 1, "skip": 0 }]))] {
         let env = call(r, ch_args.0, ch_args.1).await;
         assert_eq!(env["ok"], false, "{env}");
@@ -687,11 +687,9 @@ async fn repos_remove_는_github_가_아닌_저장소와_모르는_id_에는_아
     let env = call(r, "git:log", json!([L, { "count": 1, "skip": 0 }, "req-log"])).await;
     assert_eq!(data(&env)["hasMore"], true);
     assert_eq!(r.log_cursor_count(), 1);
-    for id in [json!(L), json!("nope"), json!(5), json!(null)] {
-        assert!(is_sidecar(r.route("repos:remove", &json!([id])).await));
+    for id in [L, "nope", ""] {
+        r.release_github_repo(id).await;
     }
-    assert!(is_sidecar(r.route("repos:remove", &json!([])).await));
-    assert!(is_sidecar(r.route("repos:remove", &json!("g")).await));
     assert_eq!(r.log_cursor_count(), 1, "local 저장소의 커서는 그대로다");
 }
 
@@ -818,10 +816,10 @@ fn github_실행_대상은_미러_한_곳에서만_만들고_앱은_서비스_�
     let router = src("src/router.rs");
     let kinds = prod(&router).split("pub fn rust_fetch_kinds").nth(1).unwrap().split("\n}\n").next().unwrap();
     assert!(kinds.contains("github_active") && kinds.matches("github").count() >= 3, "{kinds}");
-    // 앱 배선: 실행기는 GitHub 서비스(set_github) 뒤에, 사이드카를 띄우기 전에 주입한다
+    // 앱 배선: 실행기는 GitHub 서비스(set_github) 뒤에, 라우터를 등록하기 전에 주입한다
     let lib = src("src/lib.rs");
-    let (host, cache, spawn) = (lib.find("router.set_github(api_host::GithubHost").unwrap(), lib.find("router.set_github_cache(").unwrap(), lib.find("sidecar::Sidecar::spawn(").unwrap());
-    assert!(host < cache && cache < spawn);
+    let (host, cache, manage) = (lib.find("router.set_github(api_host::GithubHost").unwrap(), lib.find("router.set_github_cache(").unwrap(), lib.find("app.manage(router)").unwrap());
+    assert!(host < cache && cache < manage);
     assert_eq!(prod(&lib).matches("GithubExecutor::new(").count(), 1);
     // fetch 서비스의 실행기 공장은 github 에 일반 실행기를 주지 않는다 — 라우터가 받은 캐시 실행기의 복제이고, 없으면 닫힌 실행기다
     let arm = lib.split("Target::Github { .. } =>").nth(1).unwrap().split("};").next().unwrap();

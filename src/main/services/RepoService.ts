@@ -608,7 +608,7 @@ export class RepoService {
 
   /**
    * Tauri 판: Rust 가 `git:log` 를 직접 처리할 때 이 서비스는 로그 경로를 거치지 않으므로, Rust 가 알려 주는 것을 같은 효과로 옮긴다
-   * (src/sidecar/note.ts). Electron 판 코드 경로는 부르지 않는다.
+   * (옛 사이드카의 note 처리기가 불렀다 — 제거됨). Electron 판 코드 경로는 부르지 않는다.
    * - logFirstPage: 첫 로그 페이지가 나갔다 — `log()` 의 skip 0 처리와 같다
    * - logStale: 이어 읽으려던 위치의 커밋이 바뀌었다 — `log()` 의 StaleLogError 처리와 같다
    */

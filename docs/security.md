@@ -43,8 +43,8 @@
   공격자가 설정을 정할 수 있는 저장소를 여는 일반적인 한계다(Antler 는 네트워크 공유 저장소 경로 자체는 거부한다).
   (2) 사용자가 "알 수 없는 설정" 확인 창에서 허용하면, 저장소의 `http.<url>.*` 같은 키가 우리가 `-c` 로 준 기본값을 덮을 수 있다 — 허용은 사용자의 결정이다.
   (3) renderer 가 주장하는 `manual` 값은 main 이 검증할 수 없다. 침해된 renderer 가 수동 fetch 를 요청해도 알 수 없는 설정은 main 의 확인 창에서 사용자가 눌러야 한다.
-  **Tauri 판**: local·WSL 저장소의 fetch 가드(허용 목록·URL 판정·상태 기계)는 Rust(`src-tauri/src/git/fetch/`)에 있고, 사이드카의 FetchService 는 그 저장소를 맡지 않는다(이중 fetch 없음).
-  확인 창은 webview 가 아니라 Rust 네이티브 대화상자(`dialogs::message_box`)이며 renderer 에는 그것을 띄우거나 누를 경로가 없다. 승인은 설정 파일의 유일한 작성자인 Rust 가 직접 남기고(Phase 6b PR 9 — 사이드카에 부탁하던 `fetchApprove` 줄은 PR 10 에서 없앴다), renderer 의 값은 그 경로로 가지 않는다 — 자세한 것은 docs/tauri.md "fetch 라우팅".
+  **Tauri 판**: local·WSL 저장소의 fetch 가드(허용 목록·URL 판정·상태 기계)는 Rust(`src-tauri/src/git/fetch/`)에 있다(Node 사이드카는 Phase 6c PR 5 에서 없앴다 — fetch 를 맡는 쪽이 Rust 하나라 이중 fetch 가 없다).
+  확인 창은 webview 가 아니라 Rust 네이티브 대화상자(`dialogs::message_box`)이며 renderer 에는 그것을 띄우거나 누를 경로가 없다. 승인은 설정 파일의 유일한 작성자인 Rust 가 직접 남기고(Phase 6b PR 9), renderer 의 값은 그 경로로 가지 않는다 — 자세한 것은 docs/tauri.md "fetch 라우팅".
 - 코드 탐색기: 저장소 문서(README 등)의 외부 링크는 사용자가 누를 때만 `code:openLink` 로 연다 — https 만, 사용자 정보가 든 URL 은 거부, 마우스를 올리면 실제 주소를 보여 준다.
 - 경로·diff: `GIT_LITERAL_PATHSPECS=1` 이라 renderer 가 보낸 경로가 pathspec 매직으로 해석되지 않고,
   `--no-textconv`·`--no-ext-diff` 로 저장소 설정이 외부 프로그램을 실행하지 못하게 한다.
@@ -97,8 +97,8 @@
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
 **Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
-Jira 토큰은 Rust 프로세스 밖(renderer·사이드카)으로 나가지 않는다 — 설정을 Rust 가 소유한 실행의 사이드카는 `update:*` 7채널만 받고(Phase 6b PR 10, 시험 `tests/sidecar_scope.rs`) 그 밖의 채널은 라우터가 사이드카로 보내지 않고 Rust 가 명시적 오류로 답한다 — 서비스를 만들지 못했거나 포트가 없어도 토큰 인자가 사이드카 stdin 으로 가는 길이 없다.
-GitHub 토큰은 renderer 로도 **사이드카로도 가지 않는다**(Phase 6b PR 9 부터 사이드카로 보내던 메모리 사본 `ghToken` 줄이 없다 — 원격 전용 저장소의 fetch·조회 인증은 Rust 의 캐시 실행기가 환경 변수로만 쓴다). 하위 스위치 `ANTLER_RUST_API`·`ANTLER_RUST_SSH` 는 은퇴했고(사이드카에 넘기던 env `ANTLER_RUST_API`·`ANTLER_RUST_SSH`·`ANTLER_RUST_FETCH_KINDS` 도 PR 10 에서 없앴다) `ANTLER_RUST_GIT=0` 만 6c 까지 산다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
+Jira 토큰은 Rust 프로세스 밖(renderer 포함)으로 나가지 않는다 — Phase 6c PR 5 에서 Node 사이드카를 없애 토큰 인자를 받을 다른 프로세스가 없다. 모든 채널은 Rust 가 처리하고, 목록에 없는 채널·서비스를 만들지 못했거나 포트가 없는 채널은 Rust 가 명시적 오류 봉투로 답한다(`Router::invoke`, 시험 `tests/channel_scope.rs` — IPC 채널 전부가 처리 목록 중 하나에만 있다).
+GitHub 토큰도 renderer 로 가지 않는다(원격 전용 저장소의 fetch·조회 인증은 Rust 의 캐시 실행기가 환경 변수로만 쓴다). 되돌리기 스위치(`ANTLER_RUST_*`)는 사이드카와 함께 없앴다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
 리다이렉트를 따라가지 않으며, `jira:openExternal` 은 연결한 사이트의 https 주소만, `gh:openExternal` 은 `https://github.com` 의 주소만 연다. 자세한 것은 docs/tauri.md "PR 6"·"PR 9".
 
 **Tauri 판의 SSH**(`src-tauri/src/git/exec/ssh/`, `russh`): Electron 판(`ssh2` + 자체 설정 파서)과 같은 규칙을 Rust 로 옮겼다. 호스트 키는 known_hosts 로만 검증한다(TOFU 없음 — 모르는 호스트·키가 바뀐 호스트·폐기된 키는 거부하고
@@ -109,11 +109,11 @@ ssh CLI 로 직접 수락하라고 안내한다. ProxyJump 는 홉마다 검증)
 쓰기 계열 SFTP 요청은 부르지 않는다. 서버가 주는 값은 믿지 않는다 — 패킷 256KiB·읽는 항목 20,000개·이름 1024바이트 상한, `/`·NUL 이 든 이름은 건너뛰고, `.`·`..` 만 되풀이하는 응답(연속 2회)과 빈 응답은 오류로 끝내고, 서버가 준 오류 문구는 제어·방향 서식 문자를 지우고 300자로 자르며, 이름순은 전순서라 악성 이름으로 정렬이 패닉하지 않고, `realpath` 결과는 절대 경로·NUL 없음·4096 이하여야 한다. 시간 제한(전체 30초)이 있고 읽지 않는 채널로 세션이 멈추지 않게 채널은 항상 비운다. 서버가 여는 채널 거부는 그대로다.
 **ssh 저장소의 fetch**: 위 fetch 규칙(refspec 고정·`--refmap=`·허용 목록·훅 차단·원격 계정의 사용자 `core.sshCommand` 또는 `BatchMode` 기본)이 원격에서도 그대로이고, 훅 경로는 `/dev/null` 이다. 이 PC 의 `GIT_SSH_COMMAND`·`GIT_SSH` 는 원격으로 가지 않는다.
 SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패)는 문구가 아니라 오류 종류로 network(백오프)로 분류한다 — 호스트 키 불일치가 "인증 일시 정지"로 오분류되지 않는다. 원격 git 이 낸 인증 오류는 문구로 auth 다.
-호스트가 미러에서 빠지면 연결과 fetch 서비스의 실행기를 함께 닫는다. 연결 확인 창은 저장소를 **추가하는 흐름에서만** 뜨고(`env:test`·`env:listDir`·`repos:scan` 은 Rust `env_host.rs` 가, `repos:add` 는 PR 9 전까지 사이드카가 묻는다 — 승인은 프로세스 메모리이고 취소가 기본 버튼이다. 모르는 호스트·바뀐 키는 이 흐름에서도 거부하고 지문과 `ssh <별칭>` 안내를 보이며 `known_hosts` 에 쓰지 않는다), fetch 중에는 원격 설정의 위험 항목에 대한 확인 창(local·WSL 과 같은 것)만 뜬다. 자세한 것은 docs/tauri.md "SSH(Phase 5)".
+호스트가 미러에서 빠지면 연결과 fetch 서비스의 실행기를 함께 닫는다. 연결 확인 창은 저장소를 **추가하는 흐름에서만** 뜨고(`env:test`·`env:listDir`·`repos:scan` 은 Rust `env_host.rs` 가, `repos:add` 는 설정 소유자(`config_host.rs`)가 같은 `EnvHost` 로 묻는다 — 승인은 프로세스 메모리이고 취소가 기본 버튼이다. 모르는 호스트·바뀐 키는 이 흐름에서도 거부하고 지문과 `ssh <별칭>` 안내를 보이며 `known_hosts` 에 쓰지 않는다), fetch 중에는 원격 설정의 위험 항목에 대한 확인 창(local·WSL 과 같은 것)만 뜬다. 자세한 것은 docs/tauri.md "SSH(Phase 5)".
 
 **저장소 감시**(Electron `RepoWatcher.ts`, Tauri `src-tauri/src/git/{watcher,fs_watch}.rs` — notify): 활성 저장소 하나의 `.git`(워크트리면 공통 디렉터리까지)만 재귀로 감시하고 변화는 **ref 시그니처가 바뀌었을 때만** 알린다(이벤트가 git 을 부르는 폭주가 되지 않게 400ms 디바운스·확인 사이 최소 2초·확인 제한 20초, 이벤트는 쌓지 않고 합친다).
 `.git` 파일의 `gitdir`/`commondir` 은 저장소(공격자)가 정하므로 **UNC(네트워크)·NT 네임스페이스(`\??\UNC\…`) 경로이거나, 디렉터리·`HEAD` 가 링크이거나, `HEAD` 가 없는 디렉터리는 감시하지 않는다**(링크를 따라가지 않고 `lstat` 로 본다 — stat 만으로도 SMB 접속이 일어난다. notify 도 `follow_symlinks(false)`) — 홈 전체·네트워크 경로를 가리켜 재귀 감시를 이벤트 폭주(DoS)로 만들지 못하게 한다. `objects/` 이벤트는 무시한다.
-WSL 은 4초, SSH 는 30초 폴링만 한다(`.git` 을 직접 보지 않는다). WSL 폴링은 **등록된 배포판이 있을 때만** 한다(레지스트리 확인 — WSL 을 지운 PC 의 `wsl.exe` 스텁이 설치 창을 띄우지 않게). Tauri 판에서 감시 소유는 fetch 와 같은 한 술어(소스 종류 대조 — Rust 가 맡는 종류는 Rust 만, 나머지는 사이드카만)라 이중 감시도 무감시 구간도 없다.
+WSL 은 4초, SSH 는 30초 폴링만 한다(`.git` 을 직접 보지 않는다). WSL 폴링은 **등록된 배포판이 있을 때만** 한다(레지스트리 확인 — WSL 을 지운 PC 의 `wsl.exe` 스텁이 설치 창을 띄우지 않게). Tauri 판에서 감시 소유는 fetch 와 같은 한 술어(소스 종류 대조 — Rust 가 맡는 종류는 Rust 만, 나머지는 감시하지 않는다)라 이중 감시도 무감시 구간도 없다.
 
 ## GitHub 원격 전용 저장소의 예외
 
@@ -146,9 +146,9 @@ command scope(`GIT_CONFIG_KEY_n`)는 로컬 config 보다 우선하므로 토큰
 **남는 위험**: 로컬 config 의 더 구체적인 URL 범위 키(`http.https://github.com/<owner>/<repo>.git.sslVerify`)는 호스트 범위 고정값을 이긴다(git 의 URL 일치는 경로가 긴 쪽이 우선 — 실측 확인). 원격 URL 의 대소문자가 캐시 경로(소문자)와 달라 `githubEnv` 가 그 URL 을 알 수 없어 고정하지 않았다.
 `http.sslCAInfo`·`http.curloptResolve`·`http.proxySSLVerify` 를 로컬 config 에 심는 경우도 같은 수준(네트워크 위치까지 필요)의 잔여 위험이다.
 
-Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`)은 같은 예외를 세 겹으로 가둔다. 앱에는 **조회 채널(PR 6)과 fetch·감시(PR 7)** 가 연결돼 있다(추가·삭제·고아 정리는 설정 소유 PR 9 까지 Node 사이드카).
+Tauri 판의 Rust 이식(`src-tauri/src/git/github_cache.rs`·`git/exec/github.rs`)은 같은 예외를 세 겹으로 가둔다. 앱에는 **조회 채널(PR 6)과 fetch·감시(PR 7)** 가 연결돼 있다(추가·삭제·고아 정리는 설정 소유자가 한다 — Phase 6b PR 9).
 fetch 는 일반 저장소의 허용 목록을 타지 않는 **별도 갈래**다(`git/fetch/service/github.rs`): 레코드의 owner/repo 와 캐시 경로가 맞지 않으면 일반 흐름으로 가지 않고 차단하고, 설정이 앱이 만든 것과 **정확히 일치**하지 않으면(`include.path` 등 다른 키·remote 둘) 확인 없이 차단하며,
-fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=false`·remote `origin` 하나·고정 refspec·`--refmap=`)뿐이다. fetch·조회·감시의 소유 판정은 같은 함수·같은 플래그 하나(`RepoMirror::resolve_fetch`)이고 설정을 소유한 실행의 사이드카는 fetch 서비스·감시자를 만들지 않으므로 이중 fetch·무감시가 없다.
+fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=false`·remote `origin` 하나·고정 refspec·`--refmap=`)뿐이다. fetch·조회·감시의 소유 판정은 같은 함수·같은 플래그 하나(`RepoMirror::resolve_fetch`)이고 그 술어 하나가 fetch·감시를 가르므로 이중 fetch·무감시가 없다.
 라우터는 GitHub 서비스(토큰의 출처)와 캐시 실행기가 주입됐고 스위치가 켜져 있을 때만 github 저장소를 푼다(`Router::set_github_cache`). 토큰은 Rust 안에서만 읽혀 실행기의 환경 변수로만 가고 어떤 응답·오류 봉투에도 실리지 않으며(시험 `tests/github_route.rs`),
 `repos:remove` 는 캐시 폴더를 지우기 전에(PR 9 부터 폴더도 Rust 가 지운다 — 아래 "설정 소유") fetch(멈추고 끝나기를 기다린다 — 최대 5초)·감시·진행 중 조회·활동 시그니처 계산을 끊고 로그 커서를 닫은 뒤, 그 저장소의 git 프로세스가 끝나기를(실행기가 센다, 최대 5초) 기다린다.
 보장은 "트리 종료를 요청했고 호출이 돌아왔다"까지이고 파일 핸들이 풀리는 짧은 틈은 `remove_github_cache` 의 재시도(10회×100ms)가 흡수한다. 정리를 시작한 id 에는 "삭제 중" 표식이 달려 새 조회가 폴더를 다시 쥐지 못한다(미러가 바뀌면 풀리고, 아니면 30초 뒤). 세 겹은 이렇다:
@@ -162,8 +162,7 @@ fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=fal
 
 ## Tauri 판의 설정 소유(Phase 6b PR 9)
 
-**한 실행 동안 설정 파일(`antler.config.json`)을 쓰는 쪽은 하나다.** `ANTLER_RUST_GIT≠0` 이면 Rust(`src-tauri/src/config/`·`config_host.rs`)가 유일한 작성자이고, 사이드카는 `ANTLER_RUST_CONFIG=1` 로 떠서 파일을 열지도 쓰지도 않는다(읽기 전용 빈 설정 — 변경자가 던진다)·미러와 fetch 설정을 보내지 않는다·설정 소유 채널(`config:*`·`repos:*`·`external:*`·`req:cancel`)을 받지 않는다·**고아 캐시를 정리하지 않는다**(빈 설정이면 모든 캐시가 고아로 보인다).
-`ANTLER_RUST_GIT=0` 이면 Rust 는 파일을 열지 않고 사이드카가 쓴다(소유 술어는 시작 때 `router.enabled()` 하나 — 소스 검사가 `ConfigStore::open` 이 그 분기 안의 한 곳임을 강제한다). Rust 는 소유할 때 사이드카가 보낸 `repos`·`fetchPrefs` 줄을 버린다.
+**한 실행 동안 설정 파일(`antler.config.json`)을 쓰는 쪽은 하나다.** Rust(`src-tauri/src/config/`·`config_host.rs`)가 유일한 작성자다(Phase 6c PR 5 에서 Node 사이드카를 없애 되돌리기 경로도 없다). 소스 검사가 `ConfigStore::open` 이 앱 시작의 한 곳임을 강제한다(`tests/config_route.rs`).
 - 쓰기: 임시 파일 → `sync_all` → rename 의 원자적 쓰기, 디스크에 먼저 쓰고 성공했을 때만 메모리를 바꾼다, JSON 깊이 상한(`MAX_DEPTH`)을 넘는 값은 저장하지 않는다, 손상된 파일은 덮어쓰기 전에 `.corrupt-*.bak` 로 보존하고 `load_failed` 면 캐시를 정리하지 않는다.
 - **renderer 입력은 모두 검증한다**(TS `handlers.ts` 와 같은 규칙 이상): 환경·경로·호스트(`check_env_input` — NT 네임스페이스·UNC(WSL 제외)·NUL·길이·`-` 시작 호스트·WSL 설치 목록 대조), 그룹 200자, `addMany` 500개·같은 환경, `addGithub` 200개·`validate_github_link`, `setUi` 검증기(`editorExePath`·`skippedUpdateVersion` 키 거부).
   **`config:setUi` 로는 승인(`fetchApprovals`·`trustedConfigs`)을 위조할 수 없다** — 패치는 `ui` 아래로만 들어간다. 승인을 쓰는 곳은 fetch 서비스의 두 지점(수동 fetch 성공 뒤·"항상 허용" 뒤)이 부르는 `FetchHost::approve` 구현(`fetch_host.rs`) 한 곳이고 소스 검사가 강제한다(저장소 존재·소문자 hex 64 를 다시 확인).

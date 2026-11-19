@@ -7,8 +7,8 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 ## 결정 사항
 
 - **동기는 백엔드를 Rust 로 옮기는 것 자체**다(크기·메모리가 아니다). 성능은 Electron 판보다 나빠지지 않았는지만 본다.
-- **점진 이관**: `src/main`(Node)을 영역별로 Rust 로 옮긴다. 이관 중에는 아직 안 옮긴 채널을 개발 전용 Node 사이드카가 받고,
-  **배포는 Node 가 완전히 빠진 뒤에만** 한다.
+- **점진 이관**: `src/main`(Node)을 영역별로 Rust 로 옮겼다. 이관 중에는 아직 안 옮긴 채널을 개발 전용 Node 사이드카가 받았고,
+  **Phase 6c PR 5 에서 사이드카를 없앴다** — Tauri 판은 모든 채널을 Rust 가 처리하고 Node 런타임에 기대지 않는다(배포는 리허설·마지막 `feat!:` PR 이후).
 - Windows **portable 배포는 없앤다**(Tauri 번들러에 portable 타깃이 없다). NSIS 설치본만 낸다.
 - **창 컨트롤은 앱이 직접 그린다.** Tauri 에는 Electron `titleBarOverlay` 에 해당하는 기능이 없다.
   Win11 스냅 레이아웃은 최대화 버튼에 620ms 머물면 Win+Z 를 보내 띄운다(`src-tauri/src/snap.rs`, 창에 포커스가 있을 때만).
@@ -19,7 +19,7 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 
 | 단계 | 내용 | 상태 |
 |---|---|---|
-| 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
+| 0 | renderer 를 그대로 Tauri 에 올리고(사이드카 중계 — 6c PR 5 에서 제거) 창 컨트롤·측정 경로 확인 | 진행 중 — 화면 동작 확인, 성능 비교 남음 |
 | 1 | 측정 자동화(`drive.mjs --tauri`), 창 상태·테마·폴더 선택 등 Electron 전용 기능 대체, 골든 테스트(TS↔Rust 같은 fixture 결과 비교) | 골든 장치 완료(아래 "골든 테스트") |
 | 2 | git 핵심(실행기·파서·LogCursor 스트리밍·상세/diff·RepoWatcher)을 Rust 로 | 파서 12개(log·refs·stash·worktree·nulRecords·diff·wipStatus·changes·commit·blame·fileHistory·submodule) 이식·골든 일치(건너뜀 0), 실행기(Local·WSL·ProcessQueue·wslPaths) 이식(아래 "실행기"), 라우터·미러·취소 레지스트리와 첫 채널 `git:commit`(아래 "라우터"), `git:log` 와 LogCursor 스트리밍(아래 "git:log"), `git:compare`·`git:fileDiff`·`git:fileHistory`·`git:blame`(아래 "파일 단위 채널") — 나머지 채널·RepoWatcher 는 남음 |
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
@@ -34,12 +34,13 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 ```
 renderer(src/renderer/src, 그대로)
   └ window.antler ← src/renderer/tauri/bridge.ts   (preload 대신. 허용 목록 검사·envelope 해제·창 버튼·툴바 드래그)
-       └ invoke('antler_invoke') → src-tauri(Rust) → stdio JSON-lines → src/sidecar(Node, 개발 전용)
-                                                                         └ src/main 의 registerIpc 를 그대로 재사용(electron 은 shim)
+       └ invoke('antler_invoke') → src-tauri(Rust) → Router::invoke → 채널 처리(git·jira·github·설정·환경·앱·업데이트 …)
 ```
 
-- `src/sidecar/electronShim.ts`: 확인 창(`dialog.showMessageBox`)·폴더/파일 선택(`showOpenDialog`)은 Rust 에 `host` 요청(`messageBox`·`pickPath`)으로 부탁하고
-  `src-tauri/src/dialogs.rs` 가 `tauri-plugin-dialog` 의 Rust API 로 **네이티브 대화상자**(부모 = 메인 창, 모달)를 띄운다. webview 안 HTML 이 아니라서 침해된
+(옛 구조: 이 뒤에 stdio JSON-lines 로 Node 사이드카(`src/sidecar`)가 이어졌다. Phase 6c PR 5 에서 없앴다 — 아래 "PR 5".)
+
+- 확인 창(fetch·SSH)·폴더/파일 선택은 Rust 가 직접(`env_host`·`fetch_host`·`config_host` 의 포트) `src-tauri/src/dialogs.rs` 로 부탁해
+  `tauri-plugin-dialog` 의 Rust API 로 **네이티브 대화상자**(부모 = 메인 창, 모달)를 띄운다. webview 안 HTML 이 아니라서 침해된
   renderer 가 스스로 누를 수 없고, 플러그인의 JS command 는 capability 에 주지 않았다. 확인 창은 **어떤 실패(창 없음·잘못된 응답·범위 밖 값·닫기·Esc)에서도 cancelId** 로
   답한다. 확인 창 규칙:
   - 버튼은 1~3개(문구가 서로 달라야 한다 — 눌린 버튼을 문구로 구분한다). Esc·창 닫기·취소 버튼은 모두 거부다.
@@ -53,11 +54,10 @@ renderer(src/renderer/src, 그대로)
     응답 인덱스는 원래 `buttons` 기준으로 되돌려 준다.
   - **체크박스는 지원하지 않는다**(`checkboxChecked` 는 항상 `false`). 지금 호출부는 쓰지 않으며, 앞으로 체크가 권한을 넓히는 용도로 쓰이면 false 가 안전한 쪽이다.
   - `message` 와 `detail` 은 빈 줄로 이어 한 본문으로 보인다.
-- `host` 요청의 `arg` 는 JSON 값, 응답 `hostres` 는 `ok` 와 함께 `value` 를 돌려줄 수 있다(`src/sidecar/protocol.ts`).
 - 창 위치·크기·최대화는 `tauri-plugin-window-state` 가 기억한다(`StateFlags::SIZE | POSITION | MAXIMIZED`, visible·decorations·fullscreen 제외).
   파일은 `app_config_dir` 의 `.window-state.json`(`%APPDATA%\com.antler.app`)이고, 종료 때 저장한다. **`ANTLER_USER_DATA` 가 있는 실행(측정·자동화)에서는 등록하지 않는다.**
   최소 960×600·기본 1440×900 은 창 생성 코드가 그대로 정한다.
-- 채널 허용 목록은 bridge 와 사이드카 두 곳에서 검사한다(`__TAURI__` 로 bridge 를 건너뛸 수 있으므로 사이드카가 최종 관문).
+- 채널 허용 목록은 bridge 와 Rust 라우터(채널 처리 목록 일곱 개 — 목록에 없는 채널은 명시적 오류) 두 곳에서 검사한다(`__TAURI__` 로 bridge 를 건너뛸 수 있으므로 라우터가 최종 관문).
 - 창 수준 가드: 앱 밖 주소로 이동·새 창·권한 요청을 모두 거부한다(`src-tauri/src/lib.rs`). capability 는 실제로 쓰는 창·이벤트 권한만 준다
   (`core:default` 는 tray·menu·path·devtools 까지 열어 preload 허용 목록보다 넓다).
 - userData 는 Tauri 의 `app_data_dir`(`%APPDATA%\com.antler.app`)이다. Electron 판(`%APPDATA%\Antler`)과 공유하지 않는다.
@@ -66,7 +66,7 @@ renderer(src/renderer/src, 그대로)
 ## 명령
 
 ```bash
-pnpm tauri:build        # 사이드카·renderer 빌드 후 src-tauri/target/release/antler.exe (설치본 없음)
+pnpm tauri:build        # renderer 빌드 후 src-tauri/target/release/antler.exe (설치본 없음)
 pnpm tauri:build:cdp    # 위 + ANTLER_CDP_PORT 로 원격 디버깅 포트를 열 수 있는 빌드(측정·자동화용, 배포 금지)
 pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 실행해 확인하지 않았다
 
@@ -75,12 +75,10 @@ npx vitest run tests/golden.test.ts                   # TS 파서가 골든과 �
 cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 같은 골든과 같은지(건너뛴 수 출력)
 cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net   # CI 와 같은 전체(라우터·채널 패리티·로그 커서 포함)
 UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts   # 채널 골든(tests/golden/channels, exec/channels.json) 다시 쓰기
-ANTLER_RUST_GIT=0 <exe>                               # 라우터를 끄고 모든 채널을 사이드카로(되돌리기 스위치)
-ANTLER_RUST_API=0 <exe>                               # jira:* 만 사이드카로(서비스·키체인 없음). ANTLER_RUST_GIT=0 이어도 함께 꺼진다
 UPDATE_GOLDEN=1 npx vitest run tests/goldenJiraChannels.test.ts   # jira:* 채널 골든(tests/golden/channels/jira.json) 다시 쓰기
 ```
 
-요구 사항: Rust(stable, MSVC), WebView2 런타임, PATH 의 node(또는 `ANTLER_NODE`). 환경 변수 `ANTLER_USER_DATA` 로 userData 를,
+요구 사항: Rust(stable, MSVC), WebView2 런타임(실행에 Node 는 필요 없다 — 빌드에만 Node·pnpm). 환경 변수 `ANTLER_USER_DATA` 로 userData 를,
 `ANTLER_GPU=1` 로 하드웨어 가속을, `ANTLER_MEASURE=1` 로 첫 커밋 행 시각 기록(`window.__ANTLER_FIRST_ROW__`)을 켠다.
 
 ## 골든 테스트(Phase 1)
@@ -149,7 +147,7 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
 - 오류는 `ExecError`(`Git`·`Aborted`·`SpawnFailed`) → envelope code `GIT`·`ABORTED`·`ERROR`. WSL 은 wsl.exe 자신의 실패(종료 코드 -1, stderr 빔)를 stdout 의 WSL 메시지로 바꾼다.
 - `ProcessQueue`: local 6 / wsl 4 동시성(저장소마다 하나), 같은 키 요청은 `Shared` 로 합치고(키가 있는 요청에는 취소 신호를 걸지 않는다), 기다리는 쪽이 모두 사라지면 프로세스도 정리된다.
 - **git 을 띄우는 `Command::new` 는 `process.rs` 한 곳뿐이다.** `src-tauri/clippy.toml` 의 `disallowed-methods` 가 `std::process::Command::new`·`tokio::process::Command::new` 를 막고,
-  예외(`sidecar.rs` 의 Node 사이드카, `process.rs` 의 git·taskkill, 테스트 헬퍼)는 `#[allow(clippy::disallowed_methods)]` 와 이유 주석을 단다.
+  예외(`process.rs` 의 git·taskkill, 테스트 헬퍼)는 `#[allow(clippy::disallowed_methods)]` 와 이유 주석을 단다.
 - 골든 `tests/golden/exec/env.json`(`UPDATE_GOLDEN=1 npx vitest run tests/goldenExec.test.ts`): TS 의 전역 인자·`GIT_ENV`(순서 포함)·로컬 spawn 인자와 환경·`wsl.exe` 인자와 `WSL_UTF8`·`wslArgv` 샘플. `src-tauri/tests/exec.rs` 가 Rust 상수와 비교한다.
 - 테스트 격리: `src-tauri/tests/exec.rs` 의 `isolate`(ctor — 어떤 테스트보다 먼저 한 번)가 `GIT_CONFIG_GLOBAL`(커밋된 `src-tauri/tests/gitconfig`)·
   `GIT_CONFIG_NOSYSTEM`·`GCM_INTERACTIVE` 를 테스트 프로세스 환경에 넣는다. `.cargo/config.toml` 의 `[env]` 는 쓰지 않는다 —
@@ -159,6 +157,9 @@ TS 입력이 여럿이거나 상태가 있는 파서는 manifest `args` 로 맞�
   수동(트리 kill): `ANTLER_BIG_REPO=<큰 저장소> cargo test --manifest-path src-tauri/Cargo.toml --test exec -- --ignored --nocapture --test-threads=1` — powershell 로 프로세스 트리를 읽는다.
 
 ## 라우터(Phase 2, `src-tauri/src/router.rs`)
+
+> **Phase 6c PR 5 이후**: 이 절의 사이드카 경로(`Routed::Sidecar`)·되돌리기 스위치(`ANTLER_RUST_GIT`·`ANTLER_RUST_API`·`ANTLER_RUST_SSH`)·"사이드카에 그대로 넘긴다" 서술은 **역사**다. 지금은 모든 채널을 Rust 가 처리하고
+> Rust 가 풀지 못한 호출은 `Routed::Unserved` → `Router::invoke` 가 명시적 오류 봉투로 바꾼다(아래 "PR 5").
 
 `antler_invoke` 는 이제 라우터를 거친다. 채널이 Rust 에서 처리할 수 있는 것이면 Rust 가 envelope 를 만들고, 아니면 사이드카에 인자를 **그대로** 넘긴다.
 
@@ -2200,6 +2201,8 @@ GitHub 저장소의 경로는 정화가 이 앱의 캐시 경로로 다시 계�
 
 ### PR 10 — 사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만 받는다(`router.rs` 관문·`src/sidecar/`, 앱에 연결한다)
 
+> **Phase 6c PR 5 가 이 절의 사이드카·`legacy.ts`·`ANTLER_RUST_GIT=0`·관문(`route` 가 `Routed::Sidecar` 를 오류로 바꾸던 것)을 모두 없앴다**(아래 "PR 5"). 이 절은 그 이전 상태의 기록이다.
+
 새 크레이트·IPC 채널 없음. **불변식: Rust 가 설정을 소유한 실행(`ANTLER_RUST_CONFIG=1`, 곧 `ANTLER_RUST_GIT≠0`)에서 사이드카로 가는 채널 집합 = `update:*` 7개(`UPDATE_CHANNELS`).** 앱 업데이트는 6c 에서 Rust 로 옮기므로 그때까지 사이드카가 `UpdateService` 하나를 쥔다.
 `ANTLER_RUST_GIT=0` 전체 되돌리기(C1)는 6c 까지 그대로 산다 — 그 실행은 사이드카가 모든 채널을 처리한다.
 
@@ -2260,7 +2263,7 @@ Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가
 | 3 | `refactor:` | 단일 인스턴스(`tauri-plugin-single-instance` — 새 크레이트) | 있음 | A | **완료** — 아래 "PR 3" |
 | 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | **완료(공개 키 대기)** — 아래 "PR 4". 운영 공개 키(`UPDATE_PUBKEY`)가 비어 있어 확인만 동작하고 내려받기·설치는 fail-closed |
 | 4b | `refactor:` | macOS dmg·Linux deb **수동 경로**(`manual-dmg`·`manual-file` 모드): 같은 매니페스트·서명 검증, 설치만 "검증한 파일을 저장해 연다"로. 플랫폼 판정·매니페스트 키·`sign` 잡이 dmg·deb 도 서명 | 있음 | 직렬(4 뒤) | **완료** — 아래 "PR 4b". 사용자 결정 U4 가 PR 4 에 적었으나 PR 4 가 NSIS 만 해서 분리됐다 |
-| 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | |
+| 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | **완료(사람 확인 대기)** — 아래 "PR 5". **머지 전 §9-0 사람 확인 필요** |
 | R | (PR 아님) | 리허설: PR 6 브랜치 머리에 `v2.0.0-rc.N` 태그로 프리릴리스를 발행해 사람이 이관·자기 업데이트를 확인 | — | 5 뒤, 6 머지 전 | |
 | 6 | `feat!:` | Electron 제거 + 릴리스 전환(`release.yml` 을 Tauri 로, 골든 동결, 메이저 노트, 초안 발행 게이트·공개 전 릴리스 동결 가드) | 있음 | 직렬(R 뒤) | |
 
@@ -2523,6 +2526,53 @@ debian-binary`, dmg: 끝 512바이트의 `koly` — `Target::check_bytes`). 서�
 - `download-artifact` 의 `pattern` 이 일치하는 것이 없을 때의 동작을 확인하지 못해 `continue-on-error` 로 감쌌다(진짜 실패도 삼킨다 — 이어지는 매니페스트 단계가 설치본이 없으면 경고한다).
 - macOS 앱 번들 판정은 경로 모양(`.app/Contents/MacOS/`)이다 — 번들 밖으로 복사한 실행 파일·이름이 `.app` 인 다른 폴더는 의도와 다르게 판정될 수 있으나 어느 쪽이든 서명 검증을 거친다.
 - 수동 경로는 앱이 스스로 설치하지 않으므로 사용자가 열린 설치기를 끝내지 않으면 구버전이 계속 돈다(같은 알림이 6시간마다 뜬다 — TS 와 같다).
+### PR 5 — Node 사이드카와 되돌리기 스위치 제거(앱에 연결한다 · **사람 확인 대기**)
+
+> **머지 전에 §9-0 사람 확인이 필요하다.** 이 PR 은 `ANTLER_RUST_GIT=0` 되돌리기를 없앤다 — "스위치를 끈 판과 같은지"를 비교하는 확인은 **이 PR 을 머지하기 전에만** 할 수 있다(머지 뒤에는 돌아갈 사이드카가 없다).
+> 이 PR 은 `pnpm tauri:build:cdp` + `drive.mjs --tauri` 시나리오를 **돌리지 않았다**(메모리 사정) — 아래 "사람 확인" 이 그 몫이다.
+
+새 크레이트·IPC 채널 없음. Electron 판(`src/main`·`src/preload`·`electron-builder.yml`)은 그대로 둔다 — 제거는 PR 6(`feat!:`). 이 PR 로 Tauri 판은 Node 런타임에 기대지 않으므로 PR 2 의 패키징 산출물이 **배포 후보**가 된다(아티팩트 이름의 `-dev-sidecar` 접미사도 뗐다).
+
+**지운 것**
+
+| 대상 | 내용 |
+|---|---|
+| `src-tauri/src/sidecar.rs` | Node 프로세스 기동·stdio JSON-lines 중계·`host` 요청(`openExternal`·`clipboard`·`messageBox`·`pickPath`)·포커스 전달 전부. `lib.rs` 의 `Sidecar::spawn`·`app.manage(sidecar)`·`on_window_event` 의 사이드카 포커스·`exit_cleanup` 의 `kill` 삭제. `commands.rs` 는 `State<Router>` 하나만 받는다 |
+| `src/sidecar/` 전체 | `index.ts`·`legacy.ts`(되돌리기 조립)·`electronShim.ts`·`protocol.ts`·`configOwns.ts`·`updateIpc.ts`·`mirror.ts`·`fetchPrefs.ts` 와 `vite.sidecar.config.mts`·`package.json` 의 `tauri:sidecar`·`tauri.conf.json` 의 사이드카 빌드(`beforeDevCommand`·`beforeBuildCommand`)·`tsconfig.node.json` 의 include |
+| 되돌리기 스위치 | `ANTLER_RUST_GIT`(`rust_git_enabled`·`Router::enabled`)·`ANTLER_RUST_API`(`api_enabled`·`with_api`)·`ANTLER_RUST_SSH`(`ssh_enabled`·`with_ssh`)·`ANTLER_RUST_CONFIG`·`ANTLER_NODE`·`claim_api`/`api_owned`·`config_owned`(소유는 항상 참이다). `Router::new(enabled, log, mirror)` → `Router::new(log, mirror)`(시험의 off 라우터·스위치 분기 시험 삭제) |
+| 시험 | vitest `sidecar{ConfigOwns,FetchPrefs,Mirror,UpdateIpc}.test.ts` 4개. 골든 생성기가 `src/sidecar` 를 import 하던 `goldenConfig`·`goldenFetch` 는 동결한 사양 `tests/fixtures/rustPortSpecs.ts`(`mirrorOf`·`fetchPrefsOf`·`messageBoxArgOf` — 시험 전용)로 옮겼다(골든 JSON 은 그대로) |
+| 옮긴 것 | `UNDEFINED_ARG` → `src/shared/ipc.ts`(bridge 가 import). 소스 검사·`Resolved::Sidecar`·`Routed::Sidecar` → `Unserved`(풀지 못함) |
+
+**라우터** — 목록에 없는 채널은 오류다. 처리 갈래는 **일곱 목록**이다: `RUST_CHANNELS`(git·`gh:repo`)·`API_CHANNELS`(jira·gh)·`APP_CHANNELS`·`ENV_CHANNELS`·`CONFIG_CHANNELS`(9개)·`ROUTER_CHANNELS`(`req:cancel`·`repos:watch` 2개)·`UPDATE_CHANNELS`.
+- `Router::route` 는 `Routed::Done(봉투)` 또는 `Routed::Unserved`(Rust 가 풀지 못함 — 목록에 없는 채널·미러에 없는 저장소 id·풀 없는 ssh·실행기 없는 github·모양이 틀린 인자·주입되지 않은 포트/서비스)를 돌려주고, 앱 경계 `Router::invoke` 가 `Unserved` 를 **명시적 오류 봉투**(`ERROR`)로 바꾼다. 문구: `unknown repo: <id>`·`WSL 저장소는 Windows 에서만 열 수 있습니다`·`GitHub 원격 저장소를 쓸 수 없는 환경입니다`·`SSH 를 사용할 수 없습니다`·`잘못된 입력입니다`·`이 기능을 사용할 수 없습니다`(포트 없음)·`연결 서비스를 사용할 수 없습니다`(jira·gh 서비스 없음)·`알 수 없는 채널: <이름>`.
+- `req:cancel`·`repos:watch` 는 라우터 상태만 만져 **설정 소유자 없이 라우터가 직접** 처리한다(`{ok:true}`) — 이전에는 설정 소유 채널 11개에 들어 있었고 `config_host` 가 같은 일을 했다. `CONFIG_CHANNELS` 는 9개다.
+- `repos:update`·`repos:remove` 를 사이드카로 넘기던 라우터의 앞처리(`invalidate_gh_remotes`·`release_github_repo`)는 지웠다 — 설정 소유자(`config_host`)가 같은 호출을 한다(`release_github_repo` 는 시험이 쓰도록 `pub`).
+- 환경 채널의 ssh 갈래: 풀이 없으면 `env_host` 가 `SSH 를 사용할 수 없습니다` 로 답한다(이전에는 설정을 소유하지 않은 라우터만 사이드카로 보냈다 — 운영 동작은 같다). `env_host::needs_ssh` 삭제.
+- 미러·`lib.rs`: 설정 파일·SSH 풀·jira/github/fetch/update 서비스를 **항상** 만든다(스위치 분기 없음). 설정 알림이 미러·fetch 설정을 직접 맞춘다(PR 9 그대로).
+
+**시험**
+- **채널 합집합 강제**: `src-tauri/tests/channel_scope.rs`(옛 `sidecar_scope.rs`) — `IPC_CHANNELS`(`tests/golden/exec/channels.json`)의 모든 채널이 위 일곱 목록 **정확히 하나**에 있고, 합집합이 IPC 채널과 같고, 목록끼리 겹치지 않는다(`ipc_채널의_합집합은_rust_처리_목록_일곱_개와_정확히_같고_목록끼리_겹치지_않는다`). 새 채널을 IPC 에 더하고 처리 갈래를 빠뜨리면 여기서 먼저 깨진다.
+- 같은 파일: 설정 소유자만 단 라우터에 IPC 전 채널 × 인자 모양 표를 넣어 항상 봉투가 돌아오는지·포트 없는 갈래는 `Unserved`·목록 밖 채널의 오류 문구·풀지 못한 호출의 TS 와 같은 문구, **소스 검사**(`src-tauri/src` 전체의 운영 코드에 `Sidecar`·`ANTLER_RUST_`·`ANTLER_NODE`·`claim_api`·`config_owned` 등이 없다 · `src-tauri/src/sidecar.rs`·`src/sidecar`·`vite.sidecar.config.mts` 부재 · `tauri.conf.json`·`Cargo.toml`·`package.json`·`tsconfig.node.json`·CI 의 사이드카 항목 부재 · `commands.rs` 는 `router.invoke` 하나).
+- 기존 Rust 시험의 스위치 분기(off 라우터·`with_api`·`with_ssh`·`ANTLER_RUST_*` 소스 검사)는 지우거나 "항상 Rust"로 고쳤다. `req:cancel`·`repos:watch` 의 `Routed::Sidecar` 단언은 `{ok:true}` 응답 단언으로, 나머지는 `Unserved`(풀지 못함)·`invoke` 의 오류 봉투 단언으로.
+- `tauri.yml` 의 `cargo test` 목록에서 `sidecar_scope` 를 `channel_scope` 로, RELEVANT 에서 `^src/sidecar/` 를 뺐다.
+
+**`src/main` 의 사이드카용 분기**(Electron 이 쓴다) — `ConfigStore` 의 `readOnly`·`RepoService.noteLog`·`RepoWatcher`/`FetchService` 의 `owns` 인자는 사이드카만 쓰던 죽은 갈래지만, `tests/repoService.test.ts`·`tests/goldenChannels.test.ts`(`noteLog`)와 `FetchService`·`RepoWatcher` 의 `owns` 기본값(`() => true`, Electron 이 쓰는 생성자)이 그대로 타고 있어 **이 PR 에서는 건드리지 않았다**(`readOnly` 시험은 확인하지 않고 남겼다). PR 6 에서 Electron 판과 함께 정리한다. `src/main` 의 주석 3곳(`ConfigStore.ts`·`RepoService.ts`·`RepoWatcher.ts`)은 지워진 `src/sidecar` 파일을 가리킨다(주석뿐이라 동작 무관 — PR 6 에서 함께 삭제).
+
+**TS 와 다른 점 / 남은 것**
+- `Router::set_note_sink`·`user_sink`(알림 관찰자)는 앱이 달지 않는다 — 시험이 상태 반영 순서를 보는 데만 쓴다(사이드카에 `note` 를 보내던 길이었다).
+- 남은 "사이드카" 문구는 Rust 소스에서 `src-tauri/src/update/` 2줄(병렬 PR 4b 가 다루는 곳이라 이 PR 이 건드리지 않았다)과 "옛 사이드카 shim" 을 가리키는 주석 2줄(`env_host.rs`·`git/fetch/confirm_text.rs`)과 `router.rs`·`git/mod.rs` 의 "없앴다" 설명뿐이다. 소스 검사는 주석·시험 모듈을 뺀 운영 코드(`src-tauri/src` 전부, `update/` 포함)만 본다.
+- `cdp` 기능 배포 차단·서명 키 같은 패키징 전제는 PR 2·6 의 몫이다(이 PR 로 달라지지 않는다).
+
+**사람 확인(자동화 불가 — 이 PR 에서는 앱을 띄우지 않았다)**
+- **[머지 전 필수] §9-0**: 되돌리기 스위치(`ANTLER_RUST_GIT=0`)와 비교해야 보이는 항목을 머지 전에 끝낸다 — 실제 sshd·WSL 저장소에서 그래프·커밋 상세·파일 diff·fetch, 확인 창(fetch 가드·SSH 연결)·대화상자(폴더/에디터 선택), 감시 중복 없음(외부 커밋 알림이 한 번), GitHub 원격 전용 저장소 추가→fetch→삭제, 업데이트 확인. 위 6b PR 별 사람 확인 목록과 이 문서 "남은 일"의 직접 확인 항목이 그 대상이다.
+- `pnpm tauri:build:cdp` 후 `node scripts/drive.mjs <저장소> --tauri src-tauri/target/release/antler.exe` 시나리오 통과(콜드 스타트·사이드바·찾아가기·필터·검색·스크롤) — 이 PR 에서 돌리지 않았다.
+- **`node` 를 PATH 에서 뺀 셸**에서 `tauri:build:cdp` 산출물을 실행해 앱이 정상 동작하는지(Node 의존이 남지 않았는지 — 계획 §11 "합리적" 등급 가정).
+- `ANTLER_ROUTE_LOG=1` 로 실행해 `[route] … -> rust` 가 모든 채널에서 찍히고 `sidecar` 가 어디에도 나오지 않는지(`unserved(...)`/`error(...)` 줄이 정상 사용 중에는 나오지 않는지).
+- 서비스를 만들지 못한 PC(키체인 오류)·홈 디렉터리를 모르는 PC 에서 `연결 서비스를 사용할 수 없습니다`·`SSH 를 사용할 수 없습니다` 가 보이는지(이 PC 에서는 재현하지 못했다).
+
+**남은 위험**
+- 스위치·사이드카 분기를 지우다 "꺼짐" 쪽 코드가 켜짐 경로로 남는 것 — 합집합 시험·소스 검사·라우팅 로그로 막았지만, 실제 앱에서의 비교는 위 §9-0 이 유일한 안전망이다.
+- 풀지 못한 호출의 오류 문구는 TS 와 종류별로 같지만 인자 모양 오류는 `잘못된 입력입니다` 하나다(PR 10 에서 정한 그대로).
 
 ## Phase 0 에서 확인한 것
 
@@ -2585,5 +2635,4 @@ B 469–477 / 185–195(small), 446–448 / 167–168(big).
 - 직접 확인 필요(SSH PR 3): 실제 sshd 에 있는 저장소를 열어 그래프·로그(더 보기)·커밋 상세·파일 diff·파일 이력·blame 이 TS 판과 같이 나오는지, 큰 저장소의 `file_diff` 가 상한 오류 없이 열리는지,
   `ANTLER_RUST_SSH=0` 으로 실행하면 같은 저장소가 사이드카(ssh2)로 열리는지(`ANTLER_ROUTE_LOG=1` 로 `[route] git:log -> rust|sidecar` 확인), ssh 저장소를 삭제한 뒤 연결이 닫히는지(원격 `who`·`ss`), ssh 저장소의 fetch 가 한 번만 일어나는지(PR 4 부터 Rust 만 — 위 "사람 확인 필요(SSH PR 4)").
 - 직접 확인 필요: 확인 창(fetch·SSH)과 폴더·에디터 선택 대화상자가 실제로 뜨고 버튼 응답이 맞는지, 창 위치·크기·최대화가 재시작 뒤 복원되는지(자동 확인은 대화상자를 띄우지 않고 요청·응답 형식만 봤다).
-- 배포 전 필수: 사이드카 경로가 빌드 머신 절대 경로로 박혀 있다(`src-tauri/src/sidecar.rs`) — Node 를 걷어 내면 사라지지만,
-  그 전에 배포해야 한다면 resource 경로로 바꾼다. `cdp` 기능은 배포 빌드에서 켜지지 않게 CI 에서 막는다.
+- 배포 전 필수: `cdp` 기능은 배포 빌드에서 켜지지 않게 CI 에서 막는다(사이드카 경로 문제는 Phase 6c PR 5 에서 사이드카와 함께 사라졌다).

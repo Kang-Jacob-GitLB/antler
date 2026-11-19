@@ -5,7 +5,7 @@
 //! - fetch: 첫 fetch 의 성공·HEAD 맞추기·기본 브랜치 기록 부탁 1회, 설정이 달라진 캐시·어긋난 레코드의 차단(확인 창 없이, 네트워크 없이),
 //!   401·403·404 는 인증 정지(백오프 아님)이고 로그인 변경이 다시 열며, 5xx 는 네트워크 실패, 리다이렉트는 따라가지 않고 토큰이 새지 않는다.
 //! - 60분 제한: 아직 ref 가 없는 첫 fetch 는 60분, 아니면 60초이고 큐 슬롯을 얻은 뒤부터 잰다(멈춘 시계 + 가짜 실행기).
-//! - 소유 판정: 사이드카 env(`ANTLER_RUST_FETCH_KINDS`)와 미러의 `resolve_fetch` 가 같은 술어 — 이중 fetch·이중 감시·무감시가 없다(`ANTLER_RUST_GIT=0`·서비스 없음 포함).
+//! - 소유 판정: 종류 목록(`rust_fetch_kinds`)과 미러의 `resolve_fetch` 가 같은 술어 — 이중 fetch·이중 감시·무감시가 없다(서비스 없음 포함).
 //! - 감시: bare 캐시 폴더의 ref 변화를 notify 로 알아챈다.
 //! - `repos:remove`: 진행 중인 fetch 를 멈추고 끝나기를 기다린 뒤라 캐시 폴더가 바로 지워지고, 감시·새 fetch 도 막힌다.
 //! - 비밀: 토큰은 어떤 이벤트·오류에도 없다.
@@ -222,7 +222,7 @@ impl Rig {
         };
         let svc = FetchService::new(host.clone(), mirror.clone(), make_runner, Some(cache.hooks.clone())).with_github_cache(cache.cache_dir.clone()).with_github_origin_for_test(origin.clone());
         let dirs = NotifyDirs::new();
-        let router = Router::new(true, false, mirror.clone()).with_dir_watch(Arc::new(dirs.clone()));
+        let router = Router::new(false, mirror.clone()).with_dir_watch(Arc::new(dirs.clone()));
         router.set_github(gh_host());
         router.set_github_cache(exec.clone());
         router.set_fetch(Arc::new(svc.clone()));
@@ -247,12 +247,17 @@ impl Drop for Rig {
 async fn route_done(r: &Router, ch: &str, args: Value) -> Value {
     match r.route(ch, &args).await {
         Routed::Done(v) => v,
-        Routed::Sidecar => panic!("{ch} {args} 가 사이드카로 갔다"),
+        Routed::Unserved => panic!("{ch} {args} 를 풀지 못했다"),
     }
 }
 
-fn is_sidecar(r: &Routed) -> bool {
-    matches!(r, Routed::Sidecar)
+fn is_unserved(r: &Routed) -> bool {
+    matches!(r, Routed::Unserved)
+}
+
+/// `repos:watch`·`req:cancel` 의 응답(라우터가 `{ok:true}` 로 답한다)
+fn is_acked(r: &Routed) -> bool {
+    matches!(r, Routed::Done(v) if v == &json!({ "ok": true }))
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -270,7 +275,7 @@ async fn 첫_fetch_는_받고_head_를_맞추고_기본_브랜치_기록을_한_
     // HEAD 가 받아 온 기본 브랜치를 가리킨다(그래서 로그·사이드바가 열린다)
     assert_eq!(rig.git(&["symbolic-ref", "HEAD"]), "refs/remotes/origin/main");
     assert_eq!(rig.git(&["rev-parse", "HEAD"]), src.second);
-    // 레코드의 기본 브랜치가 비어 있었으므로 기록을 1회 부탁한다. ref 가 바뀌었으니 사이드카의 기억을 먼저 버리고(note) 그다음 repo:changed 다
+    // 레코드의 기본 브랜치가 비어 있었으므로 기록을 1회 부탁한다. ref 가 바뀌었으니 기억을 먼저 버리고(note) 그다음 repo:changed 다
     assert_eq!(rig.host.branches(), [(G.to_string(), "main".to_string())]);
     let evs = rig.host.events();
     let note = evs.iter().position(|e| *e == Ev::Note("fetchChanged".into(), G.into())).expect("note");
@@ -281,7 +286,7 @@ async fn 첫_fetch_는_받고_head_를_맞추고_기본_브랜치_기록을_한_
     // 설정은 fetch 뒤에도 정확히 일치한다(다음 fetch 의 검사가 통과한다) — 두 번째 fetch 는 바뀐 것이 없다
     let again = rig.svc.fetch(G, false).await;
     assert!(again.error.is_none() && again.blocked.is_none(), "{again:?}");
-    // 사이드카가 기록해 미러가 새 브랜치를 알게 되면(PR 9 전까지 사이드카가 쓴다) 같은 브랜치를 다시 부탁하지 않는다. 미러가 아직 모르는 동안은 한 번 더 갈 수 있다(사이드카가 같은 값이면 아무것도 하지 않는다)
+    // 설정에 기록돼 미러가 새 브랜치를 알게 되면 같은 브랜치를 다시 부탁하지 않는다. 미러가 아직 모르는 동안은 한 번 더 갈 수 있다(같은 값이면 아무것도 하지 않는다)
     let (links, branches) = (HashMap::from([(G.to_string(), GhLink { owner: "octocat".into(), repo: "hello".into() })]), HashMap::from([(G.to_string(), "main".to_string())]));
     assert!(rig.mirror.apply_with_branches(2, vec![github_record(G, rig.dir.as_str())], links, branches));
     let again = rig.svc.fetch(G, false).await;
@@ -693,38 +698,32 @@ async fn 소유_판정은_종류_목록과_일치하고_이중_fetch_도_무감�
     let cache = Cache::new();
     let dir = cache.repo("octocat", "hello");
     let links = || HashMap::from([(G.to_string(), GhLink { owner: "octocat".into(), repo: "hello".into() })]);
-    // (ANTLER_RUST_GIT, ANTLER_RUST_API, 캐시 실행기 주입, GitHub 서비스 주입)
-    for (git_on, api_on, with_exec, with_service) in [
-        (true, true, true, true),
-        (false, true, true, true),   // ANTLER_RUST_GIT=0
-        (true, false, true, true),   // ANTLER_RUST_API=0
-        (true, true, false, true),   // 실행기 없음
-        (true, true, true, false),   // GitHub 서비스 없음(토큰의 출처가 없다)
-        (false, false, false, false),
+    // (캐시 실행기 주입, GitHub 서비스 주입)
+    for (with_exec, with_service) in [
+        (true, true),
+        (false, true),  // 실행기 없음
+        (true, false),  // GitHub 서비스 없음(토큰의 출처가 없다)
+        (false, false),
     ] {
         let mirror = RepoMirror::default();
         assert!(mirror.apply_with_links(1, vec![github_record(G, dir.as_str())], links()));
-        let router = Router::new(git_on, false, mirror.clone()).with_api(api_on);
+        let router = Router::new(false, mirror.clone());
         if with_service {
             router.set_github(gh_host());
         }
         if with_exec {
             router.set_github_cache(token_exec(&cache, "file"));
         }
-        // 종류 목록의 github(스위치가 켜졌을 때만) ⇔ Rust 가 맡는가(미러의 소유 판정) ⇔ 라우터의 조회 해석
-        let kinds = router.enabled().then(|| rust_fetch_kinds(router.ssh_active(), router.github_cache_active()));
-        let listed = kinds.is_some_and(|k| k.split(',').any(|x| x == "github"));
+        // 종류 목록의 github ⇔ Rust 가 맡는가(미러의 소유 판정) ⇔ 라우터의 조회 해석
+        let kinds = rust_fetch_kinds(router.ssh_active(), router.github_cache_active());
+        let listed = kinds.split(',').any(|x| x == "github");
         let rust_owns = matches!(mirror.resolve_fetch(G), Resolved::Rust(Target::Github { .. }));
-        assert_eq!(rust_owns, listed, "git={git_on} api={api_on} exec={with_exec} service={with_service}: kinds={kinds:?}");
-        assert_eq!(rust_owns, matches!(mirror.resolve(G), Resolved::Rust(Target::Github { .. })), "조회 해석과 fetch 소유가 같은 스위치다");
-        assert_eq!(rust_owns, git_on && api_on && with_exec && with_service);
-        // 되돌리기(스위치 꺼짐)면 사이드카가 전부 맡는다
-        if !git_on {
-            assert!(!rust_owns);
-        }
-        // 라우팅: 소유하면 Rust(서비스가 없으면 오류), 아니면 사이드카
+        assert_eq!(rust_owns, listed, "exec={with_exec} service={with_service}: kinds={kinds:?}");
+        assert_eq!(rust_owns, matches!(mirror.resolve(G), Resolved::Rust(Target::Github { .. })), "조회 해석과 fetch 소유가 같은 조건이다");
+        assert_eq!(rust_owns, with_exec && with_service);
+        // 라우팅: 소유하면 Rust(fetch 서비스가 없으면 오류), 아니면 풀 수 없음
         let routed = router.route("git:fetch", &json!([G, true])).await;
-        assert_eq!(is_sidecar(&routed), !rust_owns, "git:fetch git={git_on} api={api_on} exec={with_exec} service={with_service}");
+        assert_eq!(is_unserved(&routed), !rust_owns, "git:fetch exec={with_exec} service={with_service}");
         router.shutdown();
     }
     // 종류 목록: 같은 입력이면 같은 문자열(미러의 소유 판정이 한 함수다)
@@ -740,7 +739,7 @@ async fn git_fetch_채널은_github_저장소를_rust_서비스가_받는다() {
     assert_eq!(env["data"]["repoId"], G);
     assert!(env["data"]["lastOkAt"].is_u64() && env["data"]["error"].is_null() && env["data"]["blocked"].is_null(), "{env}");
     assert_eq!(rig.git(&["rev-parse", "HEAD"]), rig.src.as_ref().unwrap().second);
-    // 사이드카로 보내지 않았다 — 사이드카는 이 저장소의 fetch 를 맡지 않는다
+    // 어디로도 넘기지 않는다
     assert!(rig.router.rust_handled() >= 1);
 }
 
@@ -756,7 +755,7 @@ async fn rust_감시가_bare_캐시_저장소의_ref_변화를_알아챈다() {
     let sink = changes.clone();
     rig.router.set_change_sink(Arc::new(move |id| sink.lock().unwrap_or_else(PoisonError::into_inner).push(id.to_string())));
     // 저장소를 연다: 감시 시작 + 첫 로그 페이지(기준 시그니처가 바로 잡히게)
-    assert!(is_sidecar(&rig.router.route("repos:watch", &json!([G])).await));
+    assert!(is_acked(&rig.router.route("repos:watch", &json!([G])).await));
     let log = route_done(&rig.router, "git:log", json!([G, { "skip": 0, "count": 5 }])).await;
     assert_eq!(log["ok"], true, "{log}");
     assert_eq!(rig.router.watching().as_deref(), Some(G), "github 저장소도 Rust 가 감시한다");
@@ -778,7 +777,7 @@ async fn repos_remove_는_진행_중인_fetch_와_감시를_멈추고_기다려_
     let server = StubServer::start(Stub::Hang);
     let rig = Rig::http(&server).await;
     // 감시 중이고(github 도 Rust 가 감시한다), 응답 없는 서버에 fetch 가 걸려 있다
-    assert!(is_sidecar(&rig.router.route("repos:watch", &json!([G])).await));
+    assert!(is_acked(&rig.router.route("repos:watch", &json!([G])).await));
     assert_eq!(rig.router.watching().as_deref(), Some(G));
     let running = rig.svc.fetch(G, false);
     wait_for("fetch 가 서버에 걸림", || !server.requests().is_empty() && rig.svc.status(G).fetching).await;
@@ -788,8 +787,8 @@ async fn repos_remove_는_진행_중인_fetch_와_감시를_멈추고_기다려_
     wait_for("감시 디렉터리 열림", || rig.dirs.live() >= 1).await;
 
     let started = Instant::now();
-    // 사이드카가 레코드를 지우기 전의 Rust 쪽 정리다 — 응답은 사이드카가 한다
-    assert!(is_sidecar(&rig.router.route("repos:remove", &json!([G])).await));
+    // 설정 소유자의 삭제(`config_host::remove_repo`)가 레코드·폴더를 지우기 전에 부르는 Rust 쪽 정리다
+    rig.router.release_github_repo(G).await;
     assert!(started.elapsed() < Duration::from_secs(4), "forget_and_wait 의 상한(5초)이 아니라 취소로 끝나야 한다: {:?}", started.elapsed());
     // fetch 는 끝났고(취소는 오류가 아니다), 프로세스·감시는 없다
     let status = running.await;
@@ -804,7 +803,7 @@ async fn repos_remove_는_진행_중인_fetch_와_감시를_멈추고_기다려_
     // 레코드가 지워지기 전의 틈: 새 fetch 도 새 감시도 폴더를 다시 쥐지 못한다
     let again = rig.svc.fetch(G, false).await;
     assert_eq!(again.error.as_deref(), Some(REMOVING), "{again:?}");
-    assert!(is_sidecar(&rig.router.route("repos:watch", &json!([G])).await));
+    assert!(is_acked(&rig.router.route("repos:watch", &json!([G])).await));
     assert_eq!(rig.router.watching(), None, "삭제 중인 저장소는 다시 감시하지 않는다");
     rig.host.assert_no_secret();
 }
@@ -909,7 +908,6 @@ fn 원격_url_출처_주입은_test_hooks_뒤에만_있고_프로덕션은_https
 #[test]
 fn 기본_브랜치는_설정에_직접_쓰고_저장소_소스_이름을_다시_검사한다() {
     // Phase 6b PR 9: Rust 가 설정의 유일한 작성자라 사이드카에 기록을 부탁하는 줄(`githubBranch`)은 더는 만들지 않는다
-    assert!(!prod_code("src/sidecar.rs").contains("githubBranch"), "사이드카로 가는 줄이 없다");
     let host = prod_code("src/fetch_host.rs");
     assert_eq!(host.matches(".set_github_default_branch(").count(), 1, "기록은 호스트 구현 한 곳");
     // 쓰기 전에 저장소 존재·github 소스·`is_safe_branch` 를 다시 본다(사이드카 핸들러와 같은 검사)
@@ -919,13 +917,12 @@ fn 기본_브랜치는_설정에_직접_쓰고_저장소_소스_이름을_다시
 }
 
 #[test]
-fn 앱_배선은_github_실행기_뒤에_fetch_서비스를_만들고_사이드카에는_소유_여부만_넘긴다() {
+fn 앱_배선은_github_실행기_뒤에_fetch_서비스를_만든다() {
     let lib = read_src("src/lib.rs");
     let cache = lib.find("router.set_github_cache(").expect("캐시 실행기 주입");
     let service = lib.find("router.set_fetch(").expect("fetch 서비스 주입");
-    let spawn = lib.find("Sidecar::spawn(").expect("사이드카 기동");
-    assert!(cache < service && service < spawn);
-    assert!(!lib.contains("sidecar_fetch_kinds") && !lib.contains("rust_github"), "PR 10: 사이드카에 fetch 소유 종류를 알리지 않는다");
+    let manage = lib.find("app.manage(router)").expect("라우터 등록");
+    assert!(cache < service && service < manage);
     // 실행기는 라우터가 받은 것의 복제를 fetch 서비스도 쓴다(진행 중 프로세스 표가 같다)
     assert!(lib.contains("router.set_github_cache(exec.clone());") && lib.contains("GitExecutor::Github(exec.clone())"));
     assert!(lib.contains(".with_github_cache("), "서비스에 캐시 기준 폴더를 준다");

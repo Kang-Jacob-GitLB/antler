@@ -30,7 +30,7 @@ fn service(vault: Arc<Vault>) -> JiraService {
 }
 
 fn router_with(vault: Arc<Vault>, opened: Arc<Mutex<Vec<String>>>) -> Router {
-    let router = Router::new(true, false, RepoMirror::default());
+    let router = Router::new(false, RepoMirror::default());
     let opener: antler_lib::api_host::Opener = Arc::new(move |url: &str| {
         opened.lock().unwrap().push(url.to_string());
         Ok(())
@@ -99,14 +99,14 @@ async fn jira_채널_시나리오가_ts_골든과_같다() {
             Some((ms, id)) => {
                 let canceller = async {
                     tokio::time::sleep(Duration::from_millis(*ms)).await;
-                    // 렌더러의 req:cancel 과 같은 길(라우터가 레지스트리와 서비스를 모두 취소하고 사이드카에도 넘긴다)
-                    assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Sidecar));
+                    // 렌더러의 req:cancel 과 같은 길(라우터가 레지스트리와 서비스를 모두 취소한다)
+                    assert!(matches!(router.route("req:cancel", &json!([id])).await, Routed::Done(_)));
                 };
                 tokio::join!(call, canceller).0
             }
             None => call.await,
         };
-        let Routed::Done(env) = routed else { panic!("{name}: jira 채널이 사이드카로 갔다") };
+        let Routed::Done(env) = routed else { panic!("{name}: jira 채널을 풀지 못했다") };
         let envelope = if env["ok"] == true {
             let mut o = json!({ "ok": true });
             if let Some(d) = env.get("data") {

@@ -1,5 +1,5 @@
 //! `src/main/git` 의 Rust 이식(파서·실행기·채널별 git 호출). 앱에서는 라우터(`crate::router`)가 등록된 채널만 부르고,
-//! 나머지는 Node 사이드카가 처리한다.
+//! 나머지 채널도 Rust 가 처리한다(Phase 6c PR 5 에서 Node 사이드카를 없앴다).
 pub mod activity;
 pub mod code_browse;
 pub mod commit;

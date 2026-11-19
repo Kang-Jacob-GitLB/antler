@@ -1,6 +1,6 @@
 //! GitHub 서비스(`src/main/github/service.ts` 이식, Phase 4 PR 7 — 앱에는 연결하지 않는다). 로그인 상태·세대(epoch)·Device Flow 세션·한도를 가지고,
-//! `gh:*` 채널(`gh:repo` 제외 — 사이드카에 남는다)마다 대응하는 메서드를 둔다. 요청은 [`GitHubClient`](PR 3), 응답 변환은 [`api_map`](PR 2),
-//! 입력 검증은 [`validate`](PR 1), 토큰 보관은 [`Vault`](PR 4), 사이드카에 묻는 것은 [`RepoQuery`], gh CLI 같은 밖의 출처는 [`ExternalTokenProvider`] 포트다.
+//! `gh:*` 채널(`gh:repo` 제외 — git 채널이라 라우터가 답한다)마다 대응하는 메서드를 둔다. 요청은 [`GitHubClient`](PR 3), 응답 변환은 [`api_map`](PR 2),
+//! 입력 검증은 [`validate`](PR 1), 토큰 보관은 [`Vault`](PR 4), 저장소 정보는 [`RepoQuery`], gh CLI 같은 밖의 출처는 [`ExternalTokenProvider`] 포트다.
 //!
 //! - 토큰은 `SecretString` 이다. 반환값에는 토큰이 없다([`GhAuthState`]·[`GhDeviceCode`]와 `Json` 결과뿐 — 테스트가 키 목록과 직렬화 문자열을 단언한다).
 //!   오류 문구는 마지막에 `redact_secrets` 를 거친다. 오류 코드는 `handlers.ts` 의 순서(ABORTED → `GH_*` → ERROR)다.
@@ -531,7 +531,7 @@ impl GitHubService {
                 }
             };
             self.finish_device(seq);
-            // 서버가 준 access_token 도 PAT 와 같은 모양 검사를 통과한 것만 쓴다(공백·제어 문자가 든 값이 보관소·사이드카 사본으로 가지 않게). 오류에는 토큰이 섞이지 않는 고정 문구뿐이다
+            // 서버가 준 access_token 도 PAT 와 같은 모양 검사를 통과한 것만 쓴다(공백·제어 문자가 든 값이 보관소로 가지 않게). 오류에는 토큰이 섞이지 않는 고정 문구뿐이다
             let token = validate::parse_pat_str(token.expose()).map_err(GhError::plain)?;
             let token_secrets = github_secrets(&token);
             let user = self.verify(&token, &cancel).await.map_err(|e| e.sealed(&token_secrets))?;
@@ -578,7 +578,7 @@ impl GitHubService {
 
     async fn slug(&self, repo_id: &str) -> Res<Slug> {
         let r: Option<GhRepoRef> = self.st.repos.gh_repo(repo_id).await.map_err(GhError::plain)?;
-        // 사이드카가 준 값은 믿지 않는다 — `..` 같은 값이 URL 경로로 새지 않게 형식을 다시 확인한다(TS 의 `parseGithubRemote` 와 같은 규칙)
+        // 저장소 정보가 준 값은 믿지 않는다 — `..` 같은 값이 URL 경로로 새지 않게 형식을 다시 확인한다(TS 의 `parseGithubRemote` 와 같은 규칙)
         r.and_then(|r| Slug::parse(&r.owner, &r.repo)).ok_or_else(|| GhError::plain(NOT_GITHUB))
     }
 
