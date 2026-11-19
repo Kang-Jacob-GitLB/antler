@@ -11,7 +11,8 @@
 - **GitHub CLI 로그인 가져오기**: 터미널에서 `gh auth login` 해 둔 계정을 그대로 쓴다.
 - **토큰 보관**: Electron `safeStorage` 로 암호화해 userData 의 `github-token.bin` 에 저장하며 renderer 로는 넘기지 않는다.
   키링이 없는 Linux(`basic_text`)에서는 디스크에 쓰지 않고 메모리에만 둔다.
-  Tauri 판(이관 중)은 Windows 자격 증명 관리자(`com.antler.app`)에 비밀과 메타를 한 덩어리로 두고, 그 밖의 OS 는 메모리에만 둔다. 토큰은 Rust 프로세스만 쥐고 renderer 로 보내지 않는다([docs/tauri.md](tauri.md) PR 4·Phase 6b PR 9·Phase 6c PR 5).
+  Tauri 판(이관 중)은 OS 키체인(Windows 자격 증명 관리자·macOS 로그인 키체인·Linux Secret Service — GNOME Keyring·KWallet)의 `com.antler.app` 에 비밀과 메타를 한 덩어리로 두고,
+  키링을 열 수 없거나(Linux 에 D-Bus·Secret Service 없음) 쓰지 못하면 Electron `basic_text` 처럼 디스크에 쓰지 않고 메모리에만 둔다(앱을 끄면 다시 로그인). 토큰은 Rust 프로세스만 쥐고 renderer 로 보내지 않는다([docs/tauri.md](tauri.md) PR 4·Phase 6b PR 9·Phase 6c PR 5).
 - GitHub Enterprise 는 지원하지 않는다.
 
 ## Jira 연결

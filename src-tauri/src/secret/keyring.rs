@@ -1,13 +1,15 @@
-//! Windows 자격 증명 관리자 저장소(keyring-core + windows-native-keyring-store). **키링 항목을 만드는 유일한 곳**이다(소스 검사가 강제한다).
+//! OS 키체인 저장소(keyring-core). **키링 항목을 만드는 유일한 곳**이다(소스 검사가 강제한다).
+//! - Windows: 자격 증명 관리자(windows-native-keyring-store)
+//! - macOS: 로그인 키체인(apple-native-keyring-store, `keychain`)
+//! - Linux: Secret Service — GNOME Keyring·KWallet(zbus-secret-service-keyring-store, 순수 Rust)
 //!
-//! 값은 `set_secret`/`get_secret` 으로 **바이트 그대로** 둔다(`set_password` 는 UTF-16 으로 바꿔 한도가 반으로 줄어든다).
-//! 항목 하나는 일반 자격 증명이고 대상 이름은 `<계정>.<서비스>` 다. 서비스 이름은 [`super::service_name`] 이 운영·디버그를 가른다.
+//! 값은 `set_secret`/`get_secret` 으로 **바이트 그대로** 둔다(Windows `set_password` 는 UTF-16 으로 바꿔 한도가 반으로 줄어든다).
+//! 서비스 이름은 [`super::service_name`] 이 운영·디버그를 가르고, 계정 이름은 세 OS 가 같다(`github-token`·`jira-token`).
 //! keyring 의 오류는 문구에 값(`BadEncoding` 의 바이트)이 들 수 있어 어디에도 싣지 않고 [`SecretError`] 로만 바꾼다.
-use std::collections::HashMap;
+//! 키링을 열지 못하거나(Linux 에 D-Bus·Secret Service 없음) 쓰지 못하면 호출부([`super::open_store`]·`Vault`)가 **디스크에 쓰지 않고 메모리에만** 둔다.
 use std::sync::Arc;
 
 use keyring_core::{CredentialStore, Error as KeyError};
-use windows_native_keyring_store::Store;
 use zeroize::Zeroizing;
 
 use super::{SecretError, SecretStore};
@@ -15,6 +17,22 @@ use super::{SecretError, SecretStore};
 pub struct KeyringStore {
     store: Arc<CredentialStore>,
     service: String,
+}
+
+/// 이 OS 의 키링 저장소를 연다. Linux 는 여기서 세션 D-Bus 에 연결하므로 키링이 없으면 `Err` 다
+#[cfg(windows)]
+fn new_store() -> keyring_core::Result<Arc<CredentialStore>> {
+    windows_native_keyring_store::Store::new().map(|s| s as Arc<CredentialStore>)
+}
+
+#[cfg(target_os = "macos")]
+fn new_store() -> keyring_core::Result<Arc<CredentialStore>> {
+    apple_native_keyring_store::keychain::Store::new().map(|s| s as Arc<CredentialStore>)
+}
+
+#[cfg(target_os = "linux")]
+fn new_store() -> keyring_core::Result<Arc<CredentialStore>> {
+    zbus_secret_service_keyring_store::Store::new().map(|s| s as Arc<CredentialStore>)
 }
 
 impl KeyringStore {
@@ -25,14 +43,19 @@ impl KeyringStore {
 
     /// 서비스 이름을 지정해 연다(수동 시험이 고유 이름을 쓴다)
     pub fn with_service(service: &str) -> Result<Self, SecretError> {
-        Ok(Self { store: Store::new().map_err(|_| SecretError::Backend)?, service: service.to_string() })
+        Ok(Self { store: new_store().map_err(|_| SecretError::Backend)?, service: service.to_string() })
     }
 
     fn entry(&self, account: &str) -> Result<keyring_core::Entry, SecretError> {
-        // 보존 방식은 Local(이 PC 의 이 사용자 로그온에만 남고 도메인 로밍을 타지 않는다). 기본값 Enterprise 는 로밍된다.
-        // 값을 쓸 때만 적용되며 이미 있는 항목을 읽는 데는 영향이 없다
-        let mods = HashMap::from([("persistence", "Local")]);
-        self.store.build(&self.service, account, Some(&mods)).map_err(|_| SecretError::Backend)
+        // Windows 의 보존 방식은 Local(이 PC 의 이 사용자 로그온에만 남고 도메인 로밍을 타지 않는다). 기본값 Enterprise 는 로밍된다.
+        // 값을 쓸 때만 적용되며 이미 있는 항목을 읽는 데는 영향이 없다. macOS·Linux 는 수정자가 없다
+        #[cfg(windows)]
+        let mods = std::collections::HashMap::from([("persistence", "Local")]);
+        #[cfg(windows)]
+        let mods = Some(&mods);
+        #[cfg(not(windows))]
+        let mods = None;
+        self.store.build(&self.service, account, mods).map_err(|_| SecretError::Backend)
     }
 }
 
@@ -66,6 +89,7 @@ impl SecretStore for KeyringStore {
 
 /// 실제 자격 증명 관리자에 쓰는 수동 시험 — `cargo test --lib -- --ignored secret::keyring`. 고유한 서비스 이름
 /// (`com.antler.test.<pid>-<시각>`)만 쓰고 끝나면(실패해도) 지운다. 사용자의 실제 항목(`com.antler.app*`)은 건드리지 않는다
+#[cfg(windows)]
 #[cfg(test)]
 mod manual {
     use super::*;
@@ -79,6 +103,7 @@ mod manual {
         }
     }
 
+    // blob 상한(2561 실패)·UTF-16 대조는 Windows 자격 증명 관리자 실측이다. macOS·Linux 의 수동 시험은 사람이 한다(docs/tauri.md)
     #[test]
     #[ignore = "실제 Windows 자격 증명 관리자를 쓴다"]
     fn 자격_증명_blob_상한과_인코딩을_잰다() {
