@@ -314,11 +314,18 @@ describe('Electron 정리 NSIS 훅 (정적 검사)', () => {
     const macro = code.slice(code.indexOf('!macro NSIS_HOOK_POSTINSTALL'))
     expect(macro.indexOf('AntlerRemoveElectron')).toBeGreaterThan(0)
     expect(macro.indexOf('AntlerForceRun')).toBeGreaterThan(macro.indexOf('AntlerRemoveElectron'))
-    const fn = code.slice(code.indexOf('Function AntlerForceRun'))
+    expect(macro).toContain('!insertmacro AntlerForceRun')
+    const fn = code.slice(code.indexOf('!macro AntlerForceRun'))
     expect(fn).toContain('"--force-run"')
     expect(fn).toContain('"/R"')
     expect(fn).toContain('nsis_tauri_utils::RunAsUser "$INSTDIR\\${MAINBINARYNAME}.exe"')
     expect(fn).not.toMatch(/^\s*Exec(Wait|Shell)?\s/m)
+  })
+
+  it('템플릿 전용 플러그인(nsis_tauri_utils)은 Function 본문이 아니라 매크로 안에서만 부른다 — hooks.nsh 는 플러그인 경로가 더해지기 전에 include 돼 Function 은 "Plugin not found" 로 빌드가 멈춘다(v2.0.0-rc.1)', () => {
+    const functions = [...code.matchAll(/^Function\b[\s\S]*?^FunctionEnd\b/gm)].map((m) => m[0])
+    expect(functions.length).toBeGreaterThan(0)
+    for (const f of functions) expect(f).not.toContain('nsis_tauri_utils::')
   })
 
   it('한국어 문구가 깨지지 않도록 UTF-8 BOM 이 있다(NSIS 는 BOM 없는 파일을 시스템 코드 페이지로 읽는다)', () => {

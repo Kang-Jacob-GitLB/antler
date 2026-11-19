@@ -197,7 +197,9 @@ Function AntlerRemoveElectron
 FunctionEnd
 
 ; Electron 업데이터가 `--force-run` 으로 설치기를 띄웠고 템플릿이 앱을 띄우지 않을 때(`/R` 없음)만 직접 띄운다(RunAsUser: 설치기가 관리자 토큰이어도 권한을 낮춰 실행)
-Function AntlerForceRun
+; Function 이 아니라 매크로다: hooks.nsh 는 템플릿이 nsis_tauri_utils 플러그인 경로를 더하기(!addplugindir) **전에** include 되고,
+; Function 본문은 그 자리에서 컴파일돼 "Plugin not found" 로 makensis 가 멈춘다(v2.0.0-rc.1 빌드). 매크로는 NSIS_HOOK_POSTINSTALL 이 설치 Section 안에서 펼칠 때 컴파일된다
+!macro AntlerForceRun
   Push $0
   ClearErrors
   ${GetOptions} $CMDLINE "--force-run" $0
@@ -210,9 +212,9 @@ Function AntlerForceRun
     ${EndIf}
   ${EndIf}
   Pop $0
-FunctionEnd
+!macroend
 
 !macro NSIS_HOOK_POSTINSTALL
   Call AntlerRemoveElectron
-  Call AntlerForceRun
+  !insertmacro AntlerForceRun
 !macroend
