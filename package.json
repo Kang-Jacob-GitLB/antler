@@ -23,6 +23,7 @@
     "notices": "node scripts/gen-notices.mjs",
     "tauri": "tauri",
     "tauri:web": "vite --config vite.tauri.config.mts",
+    "tauri:notices": "node scripts/gen-tauri-notices.mjs",
     "tauri:sidecar": "vite build --config vite.sidecar.config.mts",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build --no-bundle",

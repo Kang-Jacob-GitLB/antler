@@ -7,3 +7,4 @@ dist/
 out-tauri/
 src-tauri/target/
 src-tauri/gen/schemas/
+src-tauri/gen/licenses/

@@ -108,6 +108,7 @@ pnpm dist:dir             # 설치 파일 없이 풀린 폴더만(빠른 확인�
 | `node scripts/check-contrast.mjs` | 디자인 토큰 WCAG 대비 검사(미달 시 exit 1) |
 | `pnpm icons` (`scripts/gen-icons.mjs`) | `resources/` 아이콘 재생성 |
 | `pnpm notices` (`scripts/gen-notices.mjs`) | renderer 번들 라이브러리 라이선스 고지를 `resources/licenses/THIRD_PARTY_NOTICES.txt` 로 재생성(의존성 갱신 후) |
+| `pnpm tauri:notices` (`scripts/gen-tauri-notices.mjs [--target <triple>]`) | Tauri 판 고지 `src-tauri/gen/licenses/THIRD_PARTY_NOTICES.txt`(커밋 안 함) 생성: renderer npm 라이브러리 + `cargo metadata --locked --filter-platform` 정상 의존 트리의 Rust 크레이트(이름·버전·license·라이선스 파일 본문, 같은 본문은 한 번만). `bundle.resources` 가 폰트 라이선스와 함께 설치본의 `licenses/` 에 싣는다. `tauri build` 의 beforeBuildCommand 와 `tauri-package.yml` 빌드 앞 단계가 돌린다. 앱 안에서 고지를 여는 메뉴는 Electron·Tauri 판 모두 없다(설치 폴더의 `licenses/`). 파일 없이 `cargo check` 하면 `build.rs` 가 자리 표시 파일을 둔다 |
 
 `drive.mjs` 옵션(저장소는 로컬 경로 또는 `wsl:<배포판>:<경로>` / `ssh:<호스트>:<경로>`):
 

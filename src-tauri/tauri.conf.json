@@ -7,7 +7,7 @@
     "devUrl": "http://localhost:5174",
     "frontendDist": "../out-tauri/renderer",
     "beforeDevCommand": "pnpm tauri:sidecar && pnpm tauri:web",
-    "beforeBuildCommand": "pnpm tauri:sidecar && vite build --config vite.tauri.config.mts"
+    "beforeBuildCommand": "pnpm tauri:notices && pnpm tauri:sidecar && vite build --config vite.tauri.config.mts"
   },
   "app": {
     "withGlobalTauri": false,
@@ -22,6 +22,11 @@
     "publisher": "Antler",
     "category": "DeveloperTool",
     "shortDescription": "Windows / WSL / SSH 저장소를 한 화면에서 보는 가벼운 Git GUI",
+    "resources": {
+      "gen/licenses/THIRD_PARTY_NOTICES.txt": "licenses/THIRD_PARTY_NOTICES.txt",
+      "../resources/licenses/Pretendard-LICENSE.txt": "licenses/Pretendard-LICENSE.txt",
+      "../resources/licenses/NanumGothicCoding-LICENSE.txt": "licenses/NanumGothicCoding-LICENSE.txt"
+    },
     "icon": ["../resources/icon.ico", "../resources/icon.png", "../resources/icon.icns"],
     "windows": {
       "nsis": {
