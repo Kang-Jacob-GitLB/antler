@@ -2,7 +2,9 @@
 
 [← README](../README.md)
 
-Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배포되는 앱은 아직 Electron 판뿐이다.
+Electron 판을 Tauri 2 로 옮긴 작업의 계획·결정·진행 기록이다. **Phase 6c PR 7(`feat!:`)에서 Electron 판(`src/main`·`src/preload`·`electron-builder.yml` 등)을 지우고 Tauri 판으로 릴리스를 전환했다** —
+앱은 Tauri 판뿐이다(첫 릴리스 v2.0.0). 아래 기록의 "TS 원본"·`src/main/...` 언급은 전환 전 사정이고, 그 소스는 git 이력(태그 `v1.12.x`)에서만 볼 수 있다.
+사용자 대상 변경 사항은 [release-notes/v2.0.0.md](release-notes/v2.0.0.md).
 
 ## 결정 사항
 
@@ -25,9 +27,9 @@ Electron 판을 Tauri 2 로 옮기는 작업의 계획과 현재 상태다. 배�
 | 3 | fetch 가드 — `ALLOWED_KEYS` 허용 목록과 refspec 을 글자 그대로 이식, 기존 fetch 테스트로 패리티 확인, 보안 리뷰 | 완료(코드) — 판정 로직 이식·골든 일치(아래 "fetch 가드 판정 로직"), git 실행(`run.rs`)·통합 테스트(아래 "fetch 실행"), 상태 기계(아래 "fetch 상태 기계"), 라우팅·소유권(아래 "fetch 라우팅 — PR D"). 확인 창이 실제로 뜨고 버튼이 맞는지는 사람 확인이 남음 |
 | 4 | GitHub·Jira(reqwest), 토큰은 OS 키체인(`keyring`) | 완료(코드) — PR 1(순수 로직·골든)·2(응답 매퍼·골든)·3(HTTP 코어·클라이언트)·4(토큰 저장소)·5(Jira 서비스)·6(Jira 연결)·7(GitHub 서비스)·8(gh CLI)·9(GitHub 연결: `gh:*` 를 Rust 가 처리, `repoq`·`ghToken`, 한도 시각)까지 완료. 실제 GitHub·Jira 계정·키체인·gh 로 확인하는 것은 사람 확인이 남음(아래 "GitHub·Jira(Phase 4)" 의 각 PR "사람이 확인해야 할 것"). 계획·상태는 아래 "GitHub·Jira(Phase 4)" |
 | 5 | SSH — Electron 판과 같은 구조(자체 설정 파서 + 프로토콜 라이브러리)로 Rust 에 옮긴다. 라이브러리(`russh`) 도입은 결정됨 | 완료(코드) — PR 1(설정·known_hosts·원격 명령 인용의 순수 로직·골든, `russh` 없음)·PR 2a(`russh` 스파이크 go·연결·`run`·시험)·PR 2b(`GitExecutor::Ssh`·`stream` async·펌프·16MB 선읽기 상한)·PR 3(라우팅 — `sshHost` 미러·`SshPool`·`ANTLER_RUST_SSH`)·PR 4(ssh fetch — 소유 종류를 계산 값으로·SSH 전송 오류는 network·ssh 시나리오 골든) 완료. 남은 것은 실제 sshd 로 하는 사람 확인(아래 "남은 일")이다. 계획·결정은 아래 "SSH(Phase 5)" |
-| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget)·PR 3(external)·PR 4b(SFTP)·PR 5(앱 채널 4개)·PR 8(환경 채널)·PR 9(설정 소유 전환)·PR 10(사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만) 완료 — **Phase 6b 코드 완료**(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)"). 6c: PR 1(판정 로직)·PR 2(패키징 워크플로)·PR 3(단일 인스턴스)·PR 4(`update:*` 7채널 — 업데이트 공개 키 대기)·PR 4b(macOS dmg·Linux deb 수동 경로) 완료(아래 "업데이터·패키징·Electron 사용자 이관(Phase 6c)") |
+| 6 | 업데이트(서명 키 필수인 `tauri-plugin-updater` + dmg·deb 수동 경로), 패키징·CI, Electron 사용자 이관 릴리스 | 6a 진행 중 — PR 1(순수 로직·골든)·PR 2(코드 탐색기 4채널)·PR 3a(공유 상태)·PR 3b(`refs`·`refsDetails`)·PR 4(`search`·`activity`)·PR 5(`repoExtras`·`lfsPaths`)·PR 6(`wipStatus`·`wipDiff`)·PR 7a(감시 상태 기계)·PR 7b(실제 저장소 감시)·PR 8(`gh:repo`·repoq 의 git 조회) 완료(아래 "나머지 git 채널(Phase 6a)"). 6b(설정·저장소 관리·GitHub 원격 전용) PR 1(ConfigStore 코어·링크 순수 함수·바이트 골든)·PR 2(GitHub 캐시 실행 기반)·PR 4a(WSL 목록·경로 해석·저장 전 SSH 연결)·PR 6(GitHub 원격 전용 저장소의 git 조회)·PR 7(GitHub 원격 전용 저장소의 fetch·감시·기다리는 forget)·PR 3(external)·PR 4b(SFTP)·PR 5(앱 채널 4개)·PR 8(환경 채널)·PR 9(설정 소유 전환)·PR 10(사이드카 정리: 소유 실행의 사이드카는 `update:*` 7채널만) 완료 — **Phase 6b 코드 완료**(아래 "설정·저장소 관리·GitHub 원격 전용(Phase 6b)"). 6c: PR 1(판정 로직)·PR 2(패키징 워크플로)·PR 3(단일 인스턴스)·PR 4(`update:*` 7채널 — 업데이트 공개 키 대기)·PR 4b(macOS dmg·Linux deb 수동 경로)·PR 5(Node 사이드카 제거)·PR 7(`feat!:` Electron 제거 + 릴리스 전환 — **코드 완료, 공개 키·리허설·초안 공개는 사람 몫**) 완료(아래 "업데이터·패키징·Electron 사용자 이관(Phase 6c)") |
 
-이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피한다. Electron 을 걷어 내는 마지막 PR 만 `feat!:` 다.
+이관 PR 은 `refactor:`·`chore:` 제목으로 야간 릴리스를 피했다. Electron 을 걷어 낸 마지막 PR(6c PR 7)만 `feat!:` 다.
 
 ## 구조(Phase 0)
 
@@ -66,22 +68,24 @@ renderer(src/renderer/src, 그대로)
 ## 명령
 
 ```bash
+pnpm dev                # tauri dev — vite dev 서버(5174, `pnpm tauri:web`) + 디버그 빌드. 이 PR 에서 실행해 확인하지 않았다(메모리 사정)
+pnpm build              # 프런트(renderer) 빌드만: vite build → out-tauri/renderer (tauri.conf.json 의 beforeBuildCommand 와 같다)
 pnpm tauri:build        # renderer 빌드 후 src-tauri/target/release/antler.exe (설치본 없음)
 pnpm tauri:build:cdp    # 위 + ANTLER_CDP_PORT 로 원격 디버깅 포트를 열 수 있는 빌드(측정·자동화용, 배포 금지)
-pnpm tauri:dev          # vite dev 서버(5174) + 디버그 빌드 — 아직 실행해 확인하지 않았다
-
-UPDATE_GOLDEN=1 npx vitest run tests/golden.test.ts   # TS 파서 출력으로 골든(tests/golden/parsers) 다시 쓰기
-npx vitest run tests/golden.test.ts                   # TS 파서가 골든과 같은지
-cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 같은 골든과 같은지(건너뛴 수 출력)
-cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec --test channels --test log --test fetch_guard --test fetch --test fetch_service --test fetch_route --test api_route --test net   # CI 와 같은 전체(라우터·채널 패리티·로그 커서 포함)
-UPDATE_GOLDEN=1 npx vitest run tests/goldenChannels.test.ts   # 채널 골든(tests/golden/channels, exec/channels.json) 다시 쓰기
-UPDATE_GOLDEN=1 npx vitest run tests/goldenJiraChannels.test.ts   # jira:* 채널 골든(tests/golden/channels/jira.json) 다시 쓰기
+cargo test --manifest-path src-tauri/Cargo.toml --lib --test golden -- --nocapture   # Rust 파서가 동결한 골든과 같은지(건너뛴 수 출력)
+cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden --test exec …   # CI 와 같은 전체 — 목록은 .github/workflows/tauri.yml 이 기준이다
 ```
+
+**골든은 동결됐다**(Phase 6c PR 7): 아래 "골든 테스트(Phase 1)" 이후의 `UPDATE_GOLDEN=1 npx vitest run tests/golden*.test.ts` 는 TS 구현(`src/main`)과 함께 지워져 더 돌릴 수 없다. `tests/golden/**`·`tests/fixtures/**`(Rust 가 읽는 데이터)는 **동결된 사양**이고,
+앞으로 동작을 바꿀 때는 Rust 시험과 함께 골든 JSON 을 **손으로 고친다**(필요해지면 그때 Rust 쪽 재생성기를 만든다). TS 쪽 대응표 검사(vitest 가 `test-map.json` 의 누락을 강제하던 것)도 없다 — Rust 의 `golden.rs` 등이 가리키는 fn 이 있는지만 본다.
+생성기(`tests/golden*.test.ts`·`tests/fixtures/*Cases.ts`)와 TS 구현이 필요하면 `feat!: Electron 판을 없애고 Tauri 판으로 릴리스한다` 커밋의 부모에서 꺼내 쓴다(git 이력에만 남아 있다). 이 단락 아래 옛 명령(`UPDATE_GOLDEN=1 …`)은 **그 시점의 기록**이다.
 
 요구 사항: Rust(stable, MSVC), WebView2 런타임(실행에 Node 는 필요 없다 — 빌드에만 Node·pnpm). 환경 변수 `ANTLER_USER_DATA` 로 userData 를,
 `ANTLER_GPU=1` 로 하드웨어 가속을, `ANTLER_MEASURE=1` 로 첫 커밋 행 시각 기록(`window.__ANTLER_FIRST_ROW__`)을 켠다.
 
 ## 골든 테스트(Phase 1)
+
+> **동결됨(Phase 6c PR 7)**: 아래는 TS 구현이 살아 있던 때의 설계다. 지금은 `tests/golden/**` JSON 이 사양 그 자체이고 TS 생성기는 없다(위 "명령").
 
 TS 파서가 기준이다. `tests/fixtures`(git 원시 출력, `make-fixtures.mjs`)와 `tests/fixtures/edge`(손으로 짠 경계 입력, `make-edge-fixtures.mjs` —
 빈 입력·마지막 NUL 없음·잘못된 레코드·숫자 아닌 날짜·깨진 UTF-8·정렬 경계)에 TS 파서를 돌린 결과를 `tests/golden/parsers/<파서>__<fixture>.json`
@@ -2273,7 +2277,7 @@ GitHub 저장소의 경로는 정화가 이 앱의 캐시 경로로 다시 계�
 계획의 근거와 정정(C1~C9)은 6c 계획서에 있다. 여기에는 결정과 진행 상태만 적는다.
 
 **순서를 강제하는 실패 모드**: 야간 릴리스는 매일 main 의 `feat`·`fix` 로 버전을 올린다. 그래서 `release.yml` 을 먼저 Tauri 로 바꾸면 사이드카(PATH 의 node)에 기대는 Tauri 판이 1.x 로 나가고,
-Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가 막힌다. Tauri 패키징은 **발행 경로에 연결하지 않은 별도 워크플로**(PR 2)로 먼저 굳히고, 전환은 `feat!:` PR 하나(PR 6)에서 한다.
+Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가 막힌다. Tauri 패키징은 **발행 경로에 연결하지 않은 별도 워크플로**(PR 2)로 먼저 굳히고, 전환은 `feat!:` PR 하나(PR 7 — 계획서·이 표의 옛 이름은 "PR 6")에서 했다.
 
 | PR | 제목 접두 | 내용 | 앱 연결 | 묶음·선행 | 상태 |
 |---|---|---|---|---|---|
@@ -2283,8 +2287,8 @@ Electron 을 먼저 지우면 electron-builder 빌드가 깨져 1.x 릴리스가
 | 4 | `refactor:` | `update:*` 7채널을 Rust 로: 상태 기계·`net::http` 의 릴리스 자산 전용 리다이렉트 정책·스트리밍 다운로드·minisign 검증·설치·종료 정리 | 있음 | 직렬(6b PR 9, 이 표의 PR 1 뒤) | **완료(공개 키 대기)** — 아래 "PR 4". 운영 공개 키(`UPDATE_PUBKEY`)가 비어 있어 확인만 동작하고 내려받기·설치는 fail-closed |
 | 4b | `refactor:` | macOS dmg·Linux deb **수동 경로**(`manual-dmg`·`manual-file` 모드): 같은 매니페스트·서명 검증, 설치만 "검증한 파일을 저장해 연다"로. 플랫폼 판정·매니페스트 키·`sign` 잡이 dmg·deb 도 서명 | 있음 | 직렬(4 뒤) | **완료** — 아래 "PR 4b". 사용자 결정 U4 가 PR 4 에 적었으나 PR 4 가 NSIS 만 해서 분리됐다 |
 | 5 | `refactor:` | Node 사이드카와 되돌리기 스위치(`ANTLER_RUST_*`) 제거(6b PR 10 흡수) | 있음 | 직렬(4 뒤) | **완료(사람 확인 대기)** — 아래 "PR 5". **머지 전 §9-0 사람 확인 필요** |
-| R | (PR 아님) | 리허설: PR 6 브랜치 머리에 `v2.0.0-rc.N` 태그로 프리릴리스를 발행해 사람이 이관·자기 업데이트를 확인 | — | 5 뒤, 6 머지 전 | |
-| 6 | `feat!:` | Electron 제거 + 릴리스 전환(`release.yml` 을 Tauri 로, 골든 동결, 메이저 노트, 초안 발행 게이트·공개 전 릴리스 동결 가드) | 있음 | 직렬(R 뒤) | |
+| R | (PR 아님) | 리허설: PR 7 브랜치 머리에 `v2.0.0-rc.N` 태그로 프리릴리스를 발행해 사람이 이관·자기 업데이트를 확인 | — | 5 뒤, 7 머지 전 | **사람 몫** — 아래 "PR 7 → 리허설 R" |
+| 7 | `feat!:` | Electron 제거 + 릴리스 전환(`release.yml` 을 Tauri 로, 골든 동결, 메이저 노트, 초안 발행 게이트·공개 전 릴리스 동결 가드) | 있음 | 직렬(R 뒤) | **코드 완료** — 아래 "PR 7". 공개 키가 비어 있는 동안 발행 불가 |
 
 계획 요약:
 - **업데이트는 Tauri 에서 한 번도 돈 적이 없다**(사이드카의 `UpdateService` 는 꺼진 PoC). TS 원본(`src/main/update/`, `tests/update.test.ts`)이 사양이다.
@@ -2340,7 +2344,7 @@ Electron 동작은 그대로다(TS 는 한 줄도 바뀌지 않았다). 앱 연�
 
 **핵심 결정**
 - **계획과 다른 점(이유)**: ① `mainBinaryName: "Antler"` 를 넣지 않았다 — Cargo 바이너리는 `antler` 이고 CLI 가 이름을 바꿔 주는지(특히 대소문자를 구분하는 macOS·Linux)를 확인하지 못했다. Windows 는 대소문자를 구분하지 않아 `Antler.exe` 와 실질 차이가 없다(바로가기·방화벽 규칙·작업 관리자 이름). 다만 Electron 제거기가 이름으로 `Antler.exe` 를 종료시키므로 훅은 제거기를 앱 실행보다 먼저 돌린다. ② 기본 설정에 `plugins.updater` 를 넣지 않았다 — CLI 는 "공개 키가 있는데 개인 키가 없음"을 오류로 보고(바이너리 문자열 확인), 빈 `pubkey` 가 "있음"으로 읽히는지 알 수 없다. 공개 키는 사용자가 줄 때 `update::host::UPDATE_PUBKEY` 한 곳에 넣는다(PR 4 가 플러그인을 달면서 정했다 — 설정은 conf 가 아니라 `lib.rs` 가 만든다. 아래 "PR 4"). 서명은 빌드에 넣지 않고 사후 단계로 분리했다(보안 리뷰: 빌드 중 도는 코드가 키를 읽지 못하게). 그래서 `createUpdaterArtifacts` 와 덮어쓰기 설정 파일(`tauri.updater.conf.json`)도 없다 — `tauri signer sign` 은 공개 키 설정과 무관하게 `.sig` 를 만든다(`--app-version` 으로 서명에 버전을 묶는다). ③ PR 트리거 드라이런을 두지 않았다 — `environment: release` 잡은 PR 에서 시크릿을 못 받고, macOS·Linux 갈래가 실패할 가능성이 커 PR 을 빨갛게 만든다.
-- **macOS 는 x64·arm64 두 개**(universal 아님): Electron 과 같은 이름 규칙(`Antler-<v>-<arch>.dmg`)을 유지해 수동 업데이트 경로의 자산 선택이 그대로 맞는다. **이 이름 선택의 결과**: 지금 Electron 판 mac 사용자의 수동 경로는 같은 이름의 Tauri dmg 를 집을 수 있다(`latest-mac.yml` 은 만들지 않으므로 sha512 검증은 API 의 sha256 digest 로 떨어진다). 이 이관 동작은 계획이 분석하지 않았고 릴리스 전환 PR 에서 정해야 한다. deb(`antler_<v>_amd64.deb`)도 마찬가지다.
+- **macOS 는 x64·arm64 두 개**(universal 아님): Electron 과 같은 이름 규칙(`Antler-<v>-<arch>.dmg`)을 유지해 수동 업데이트 경로의 자산 선택이 그대로 맞는다. **이 이름 선택의 결과**: 지금 Electron 판 mac 사용자의 수동 경로는 같은 이름의 Tauri dmg 를 집을 수 있다(`latest-mac.yml` 은 만들지 않으므로 sha512 검증은 API 의 sha256 digest 로 떨어진다). deb(`antler_<v>_amd64.deb`)도 마찬가지다. **(PR 7 에서 마지막 Electron 소스 `manual.ts`·`logic.ts` 로 확인)**: portable 은 `Antler-Portable-<v>.exe` 가 없어 수동 확인만 오류("이 환경에 맞는 설치 파일이 릴리스에 없습니다"), AppImage 는 `latest-linux.yml` 404 로 조용히 멈춘다. dmg·deb 는 이름이 같아 집히고 API digest(sha256)로 검증된다 — **U4(세 OS 함께) 결정과 맞아 그대로 둔다**(실제 동작은 리허설에서 확인).
 - **업데이트 서명은 Windows 만**: dmg·deb 는 수동 경로라 서명이 필요 없다. `latest.json` 도 Windows 항목만 담는다.
 - **훅의 제거기 경로 검증**(계획 C6): `UninstallString` 의 따옴표 안 경로를 읽어 `InstallLocation` 바로 아래의 `.exe` 인지·실제 파일인지·드라이브 경로인지(UNC·`\\?\` 거부)·새 설치 폴더와 다른지 본다. 하나라도 어긋나면 아무것도 하지 않는다. 지우는 것은 검증한 제거기 파일과 비어 있는 `InstallLocation` 뿐이다(재귀 삭제·`%APPDATA%` 접근·레지스트리 쓰기 없음). 인자는 `/currentuser /S /KEEP_APP_DATA --updated --keep-shortcuts _?=<InstallLocation>`(electron-builder 가 옛 판을 지울 때와 같다 — `/currentuser` 는 사용자별 설치라 붙였다). 모든 사용자용(HKLM, 32·64비트 뷰)은 남기고 조용한 모드가 아니면 안내 창을 띄운다(한국어/영어). GUID 는 `UUID.v5("com.antler.app", electron-builder 네임스페이스)` 로 시험이 대조한다.
 - **재실행**: 템플릿은 `/R` 일 때만 앱을 띄우므로, `--force-run` 이 있고 `/R` 이 없을 때 템플릿과 같은 `nsis_tauri_utils::RunAsUser` 로 직접 띄운다(설치기가 관리자 토큰이어도 권한을 낮춰 실행). 스텁 템플릿에 플러그인 디렉터리를 등록한 makensis 컴파일로 플러그인 해석을 확인했고, 실제 템플릿에서의 순서는 리허설 R 에서 본다.
@@ -2550,7 +2554,7 @@ debian-binary`, dmg: 끝 512바이트의 `koly` — `Target::check_bytes`). 서�
 > **머지 전에 §9-0 사람 확인이 필요하다.** 이 PR 은 `ANTLER_RUST_GIT=0` 되돌리기를 없앤다 — "스위치를 끈 판과 같은지"를 비교하는 확인은 **이 PR 을 머지하기 전에만** 할 수 있다(머지 뒤에는 돌아갈 사이드카가 없다).
 > 이 PR 은 `pnpm tauri:build:cdp` + `drive.mjs --tauri` 시나리오를 **돌리지 않았다**(메모리 사정) — 아래 "사람 확인" 이 그 몫이다.
 
-새 크레이트·IPC 채널 없음. Electron 판(`src/main`·`src/preload`·`electron-builder.yml`)은 그대로 둔다 — 제거는 PR 6(`feat!:`). 이 PR 로 Tauri 판은 Node 런타임에 기대지 않으므로 PR 2 의 패키징 산출물이 **배포 후보**가 된다(아티팩트 이름의 `-dev-sidecar` 접미사도 뗐다).
+새 크레이트·IPC 채널 없음. Electron 판(`src/main`·`src/preload`·`electron-builder.yml`)은 그대로 둔다 — 제거는 PR 7(`feat!:`; 옛 이름 PR 6). 이 PR 로 Tauri 판은 Node 런타임에 기대지 않으므로 PR 2 의 패키징 산출물이 **배포 후보**가 된다(아티팩트 이름의 `-dev-sidecar` 접미사도 뗐다).
 
 **지운 것**
 
@@ -2592,6 +2596,78 @@ debian-binary`, dmg: 끝 512바이트의 `koly` — `Target::check_bytes`). 서�
 **남은 위험**
 - 스위치·사이드카 분기를 지우다 "꺼짐" 쪽 코드가 켜짐 경로로 남는 것 — 합집합 시험·소스 검사·라우팅 로그로 막았지만, 실제 앱에서의 비교는 위 §9-0 이 유일한 안전망이다.
 - 풀지 못한 호출의 오류 문구는 TS 와 종류별로 같지만 인자 모양 오류는 `잘못된 입력입니다` 하나다(PR 10 에서 정한 그대로).
+
+### PR 7 — `feat!:` Electron 제거 + 릴리스 전환(앱에 연결한다 · **발행은 사람 몫**)
+
+**리허설 R 결과(2026-11-19, 이 브랜치의 `v2.0.0-rc.1`~`rc.4` 태그)**:
+- rc.1: Windows NSIS 빌드 실패 — `hooks.nsh` 의 Function 본문이 플러그인 경로 등록 전에 컴파일돼 `nsis_tauri_utils::RunAsUser` 가 "Plugin not found". 재실행 부분을 매크로로 바꿨다(릴리스 없음).
+- rc.2: 서명 생략 → 자산 점검 실패 — 재사용 워크플로 안의 sign 잡은 Environment 를 선언해도 호출자가 `secrets: inherit` 하지 않으면 Environment 시크릿이 빈 값이다. 두 재사용 호출에 inherit(릴리스 없음).
+- rc.3: 세 OS 빌드·서명·`latest.json`·이관용 `latest.yml` 성공(자산 점검이 각 `.sig` 를 `UPDATE_PUBKEY` 로 검증 — 키 쌍 확인). Windows 실기: Electron 1.12.4 위 설치 → Tauri 판은 정상 실행했지만 **Electron 자동 제거 실패**(제거기를 설치 폴더 안에서 제자리로 돌려 자기 자신이 잠겨 `--updated` 의 폴더 옮기기 실패, 종료 코드 2). electron-builder 처럼 `$PLUGINSDIR` 로 복사해 돌리게 고쳤고, 같은 PC 에서 복사본으로 같은 인자를 돌려 종료 코드 0·설치 폴더·제거 항목 삭제·`%APPDATA%\Antler` 보존·새 바로가기 유지 확인.
+- rc.4(프리릴리스로 공개): 설치된 rc.3 이 앱 안에서 rc.4 를 알리고 내려받아 설치·재실행 → 2.0.0-rc.4 로 동작(Windows, 사람 확인). 자기 업데이트·서명 검증·`/R` 재실행이 실제로 확인됐다.
+- 확인하지 못한 것: 고친 이관 훅의 **설치본 안에서의** 실제 실행(rc.4 는 Electron 이 이미 제거된 PC 에 설치됐다 — 다른 PC 의 Electron 위 설치로 확인할 것), macOS dmg·Linux deb 실기, Electron 의 electron-updater 경로(`latest.yml`)로 받는 이관, 모든 사용자용 Electron 설치본.
+- Electron 제거기는 이름(`Antler.exe`)으로 실행 중인 프로세스를 끝낸다 — 수동으로 돌렸을 때 실행 중이던 Tauri 판도 꺼졌다. 설치 훅에서는 앱을 띄우기 전에 돌므로 영향이 없다.
+
+**머지하면**: 그날 00:00 KST 야간 릴리스가 `feat!:`(→ major)로 **v2.0.0 을 초안으로** 만든다. 초안은 `/releases/latest` 에 나오지 않아 Electron·Tauri 의 업데이트 확인이 보지 못한다 — 사람이 첨부와 노트를 확인하고 **공개**하는 순간 Electron NSIS 사용자의 이관이 시작된다.
+**공개 키(`UPDATE_PUBKEY`)를 넣기 전에는 발행할 수 없다** — 발행 워크플로가 `None` 이면 빌드 전에 실패한다(아래 가드). 키·시크릿·Environment 는 사람이 먼저 한다.
+
+**지운 것(Electron)**: `src/main/**`(약 90개)·`src/preload/`(`index.d.ts` 의 `window.antler` 타입은 `src/renderer/tauri/global.d.ts` 로 옮겼다)·`electron.vite.config.mts`(renderer 설정은 `vite.config.mts` 로 인라인 — 옛 `vite.tauri.config.mts`)·`electron-builder.yml`·
+`scripts/lib/electronHost.mjs`·`scripts/audit-ui.mjs`(Electron 전용 UI 감사 도구 — 대체 없음) · 의존 `electron`·`electron-builder`·`electron-vite`·`electron-updater`·`ssh2`·`@types/ssh2`(lockfile 313개 패키지 감소) · `package.json` 의 `main`·`dist*`·`preview`·`tauri:dev`
+· IPC 이벤트 `theme:system`(보내는 쪽도 구독도 없었다 — C8). `win:setTitleBarTheme` 채널은 bridge 가 CSS 로 처리하고 Rust 의 무동작 처리기가 남아 있다(채널 합집합 시험).
+스크립트 `dev` = `tauri dev`, `build` = `vite build`(renderer → `out-tauri/renderer`, `tauri.conf.json` 의 `beforeBuildCommand` 와 같은 명령 — 시험이 같음을 본다). `drive.mjs` 의 기본 호스트는 Tauri 뿐이다(`--tauri <exe>` 는 선택, 기본 `src-tauri/target/release/antler.exe`; `--update-fake` 는 `ANTLER_UPDATE_FAKE` 를 cdp 빌드에 전달).
+
+**시험 동결**: vitest 시험 파일 100개 → 23개. 지운 것은 `src/main`·`src/sidecar` 를 import 하던 파일과 골든 생성기(`tests/golden*.test.ts`·`tests/fixtures/*Cases.ts`·`itTitles.ts`·`rustPortSpecs.ts`·`goldenMaps.ts`·가짜 서버/하네스).
+`tests/golden/**` JSON·`tests/fixtures/**` 데이터·`test-map.json` 은 **남겼다**(Rust 시험이 읽는다 — 동결된 사양). 남은 vitest: renderer·shared 순수 로직 18개(그중 `lanes`·`launchpadMerge`·`repoOrder` 는 `src/main` 에 기대던 부분만 뗀 것), `nextVersion`, `updateManifests`, `releaseFeatureGuard`,
+그리고 새 `releaseWorkflow`(워크플로 정적 검사)·`releaseScripts`(가드 스크립트 판정). **잃은 renderer·shared 커버리지**(같은 파일에 `src/main` 시험이 섞여 있어 통째로 지웠다): `activity`(미니맵 `nodeStyle`), `defaultBranch`·`jiraAdf`·`compare`·`lfsGitflow`·`logScope` 의 renderer·shared 단언,
+`lanes` 의 실제 이력 두 시험(`parseLog` 필요 — 3,000 커밋 레인 연속성), `repoOrder`·`launchpadMerge` 의 설정 저장 검증(Rust `config` 골든이 대신한다). Rust 소스 시험 한 곳(`channel_scope.rs`)이 TS `RepoService.ts` 를 읽던 것은 Rust 소스를 읽게 바꿨다.
+**워크플로 YAML 해석기**: `tests/yamlLite.ts`(이 저장소 워크플로가 쓰는 YAML 부분집합만 — js-yaml 은 electron-builder 의 전이 의존이라 같이 사라졌고, 새 패키지는 들이지 않았다). 지우기 전에 js-yaml 과 **다섯 워크플로 전부 결과가 같음**을 확인했다(모르는 문법은 던진다).
+**electron-updater·app-builder-lib 대조의 동결**(`updateManifests.test.ts`): 지우기 전에 한 번 실행해 결과를 박았다 — `tests/fixtures/update/latest.yml` 표본 바이트(electron-updater 6.8.9 가 읽는 것을 확인), Electron 제거 키 GUID `a0282e38-7d2f-5de0-a2ab-1ae175fbe58f`(UUID v5(`com.antler.app`)와 일치 확인)·무작위 해시 200개 왕복.
+
+**릴리스 흐름**
+```
+태그 v* push(항상 초안) ─┐
+야간 00:00 KST(메이저면 초안) ─┤→ release.yml
+수동 실행(점검 빌드만, 발행 없음) ─┘
+  1) preflight  — 버전(semver)·업데이트 공개 키 점검(scripts/check-release-preflight.mjs). 발행하는 실행만 공개 키를 본다
+  2) package    — tauri-package.yml 재사용 호출(같은 커밋 sha): windows NSIS · macOS dmg×2 · Linux deb → sign 잡이 .sig·latest.json·latest.yml
+  3) release    — 자산 점검(scripts/check-release-assets.mjs) → (재사용 호출이면) annotated 태그 만들기·push → action-gh-release(draft·prerelease)
+```
+**가드**(전부 태그를 만들기 **전**에 돈다 — 태그만 남은 실패는 다음 야간 계산을 망친다)
+- 공개 키: `UPDATE_PUBKEY` 가 `None`·base64 아님·minisign 공개 키(`untrusted comment: minisign public key` + `RW…` 56자)가 아님·시험용 키면 실패. **키 없는 빌드는 발행하지 못한다.**
+- 자산 점검: 설치본 4(exe·dmg×2·deb) + `.sig` 4 + `latest.json`(+ `latest.yml`) **정확히 그 목록**(빠지면 실패·예상 밖 파일도 실패). `latest.json` 은 다섯 플랫폼 키가 전부 있고 각 `url` 이 그 자산을 가리키고 서명이 `.sig` 와 같아야 한다. `latest.yml` 은 sha512·size 가 설치본 실물과 같고 `url`·`path` 가 파일 이름만이어야 한다.
+  서명 키가 없거나 macOS·Linux 갈래가 실패한 산출물(`tauri-package` 는 점검용으로 통과시킨다)은 여기서 막힌다.
+- 중단 장치: 저장소 변수 `ELECTRON_MIGRATION` 이 `off`·`false`·`0`·`no` 면 `latest.yml` 을 **만들지 않고**(매니페스트 생성기), 자산 점검도 그때는 `latest.yml` 이 **없어야** 통과한다(켜져 있는데 없으면 실패, 꺼져 있는데 있으면 실패). 꺼진 동안에도 이후 릴리스는 막히지 않는다.
+  이미 공개된 릴리스는 사람이 `latest.yml` 자산도 지워야 한다.
+- 공개 대기 동결(야간): plan 잡이 직전 정식 태그의 릴리스를 `gh release view <태그> --json isDraft` 로 조회해 **초안·없음·조회 오류면 새 릴리스를 만들지 않는다**(fail-closed — `scripts/release-freeze.mjs`). 읽기 전용 토큰이 초안을 볼 수 있는지는 확인하지 못했다. 어느 쪽이어도 막는다.
+  초안을 공개(또는 삭제)하면 다음 실행부터 다시 발행한다. 요약에 이유가 남는다.
+- 시크릿: 서명 키는 `tauri-package.yml` 의 `sign` 잡이 Environment `release` 로 받는다(`release.yml` 에는 `secrets` 참조가 없고 `secrets: inherit` 도 없다 — 시험이 모든 워크플로에서 확인). 쓰기 권한은 `release` 잡 하나뿐이다.
+- 초안 범위: 태그 push 는 **항상 초안**(rc 도 사람이 공개해야 프리릴리스로 보인다), 야간은 **메이저 올림일 때만 초안**이다. 한 곳에서 정한다(`release.yml` 의 preflight "버전·발행 방식 결정" → `draft`).
+- 필수 체크 이름 유지: `build.yml` 의 잡 `Typecheck · Test · Build`(내용: renderer·shared·scripts 타입 검사·vitest·`vite build`·대비 검사)와 `tauri.yml` 의 `Rust · 골든 · clippy`(이름 그대로 — 브랜치 룰셋이 이름으로 건다)를 시험이 못 박는다.
+
+**리허설 R(사람이 한다 — PR 7 머지 전)**: 이 PR 은 워크플로를 실행해 보지 못했다(머지 전 `workflow_dispatch` 불가 · 외부 쓰기 금지). 준비물: ① 서명 키 쌍을 만들어 공개 키를 `UPDATE_PUBKEY` 에 커밋하고 개인 키·암호를 Environment `release` 시크릿에 넣는다(순서는 [updates.md](updates.md#업데이트-공개-키-사용자가-서명-키를-만든-뒤)).
+② Environment `release` 의 배포 브랜치·태그에 **`main` 과 `v*` 태그**를 허용한다(태그 push 로 도는 리허설의 sign 잡이 시크릿을 받으려면 필요) — 태그 생성은 tag ruleset 으로 제한한다.
+③ 이 PR 의 브랜치 머리에서:
+```
+git tag -a v2.0.0-rc.1 -m "rc.1" <브랜치 머리 sha>      # 하이픈 → 프리릴리스. 정식 판 Electron·Tauri 는 프리릴리스를 보지 않는다
+git push origin v2.0.0-rc.1                              # release.yml 이 돈다 → 초안 프리릴리스(자산 확인 후 Publish)
+# rc.1 을 공개 → 새 Windows 사용자 계정에서 R1~R5(깨끗한 설치·Electron 위 이관 `Antler-Setup-2.0.0-rc.1-x64.exe --updated /S --force-run`·다른 폴더·모든 사용자 설치)
+git tag -a v2.0.0-rc.2 -m "rc.2" <머리 sha> && git push origin v2.0.0-rc.2   # → 공개 → R7: rc.1 이 시작 10초 뒤 알리고 [업데이트]→[다시 시작하여 설치]→rc.2 로 뜬다
+```
+R7(rc.1 → rc.2 자기 업데이트)을 **빼면 안 된다** — 커밋한 공개 키가 시크릿의 개인 키와 한 쌍인지 확인하는 유일한 길이다(어긋나면 모든 업데이트가 서명 오류로 거부되고, 이미 설치된 앱은 앱 안에서 고칠 수 없다). 나머지 항목(R3 electron-updater 끝에서 끝까지·R6 작업 표시줄·R8 두 번 실행·R9 WebView2 없는 VM·R10 프록시)은 6c 계획서 §9.
+실패한 rc 릴리스·태그는 사람이 지운다(외부 쓰기). 야간 계산은 정식 태그(하이픈 없음)만 기준으로 삼아 rc 에 영향을 받지 않는다.
+
+**남은 위험·미확인(이 PR 은 실행하지 않았다)**
+- 워크플로 전부 — 문법·구조 시험만 했다(`${{ }}` 식·재사용 호출의 권한·Environment 시크릿 전달은 실제 실행에서만 확인된다). `tauri build`(세 OS)도 하지 않았다.
+- **세 OS 중 한 갈래라도 실패하면 rc 를 포함해 릴리스가 하나도 만들어지지 않는다**(자산 점검이 정확한 목록을 요구한다). 그래서 Windows 이관 리허설이 macOS·Linux 의 **첫 컴파일**에 묶인다. 권고 0단계(사람): 머지 전 점검 빌드 — `gh workflow run tauri-package.yml --ref <이 브랜치> -f version=2.0.0-rc.0`(빌드만, 발행 없음).
+  다만 `workflow_dispatch` 는 워크플로 파일이 기본 브랜치에 있어야 한다고 알고 있어(확인하지 못했다) 브랜치에서 돌지 않을 수 있고, sign 잡은 Environment 의 브랜치 규칙에 막힐 수 있다.
+- **서명 시크릿 전달(미검증)**: 계획 C3 에 따라 재사용 호출에 `secrets: inherit` 를 두지 않았다(`sign` 잡이 `environment: release` 로 직접 받는다고 알고 있다 — 중첩 재사용 호출에서 맞는지 확인하지 못했다). 리허설에서 틀리면 징후는 "서명 키 확인" 경고 뒤 자산 점검이 `.sig`·`latest.json` 누락으로 실패하는 것이다.
+  고치려면 `nightly-release.yml`→`release.yml`→`package` 두 호출 단계에 `secrets: inherit` 를 더하고 `tests/releaseWorkflow.test.ts` 의 금지 단언을 푼다.
+- **리허설 R 은 야간 경로(태그 생성·노트 앞붙이기·공개 대기 가드·메이저 초안)를 지나지 않는다**(태그 push 경로만). 머지 뒤 `gh workflow run nightly-release.yml -f dry_run=true` 로 plan 잡과 공개 대기 가드까지만 볼 수 있고, 태그 단계는 첫 실제 야간 실행이 처음이다.
+- **고아 태그**: 야간 경로에서 태그를 push 한 뒤 릴리스 생성 단계가 실패하면 태그만 남고, 공개 대기 가드(릴리스 없음 = 막음)가 이후 야간 릴리스를 모두 막는다 — 사람이 그 태그를 지우거나 릴리스를 만들어야 풀린다.
+- **조용한 설치에서는 이관 훅의 HKLM 안내 창이 뜨지 않는다**(`/SD IDOK`): 모든 사용자용 Electron 판은 자동 이관 뒤에도 남고 사용자는 노트로만 알 수 있다.
+- **Environment `release` 에 Required reviewers 를 두면 야간 릴리스가 매번 승인 대기**에 걸린다(sign 잡). 야간 자동화와 승인자 요구는 양립하지 않는다 — 사용자 결정 필요(승인자를 없애고 배포 브랜치·태그 제한에 기대거나, 매번 승인한다).
+- macOS·Linux 는 컴파일·번들링 한 번도 확인한 적이 없다(첫 실행에서 빌드가 실패할 수 있고, 자산 점검이 그 릴리스를 막는다 — Windows 만 내려면 `tauri-package.yml` 과 점검 목록을 고쳐야 한다). 코드 서명이 없다. bridge 의 `platform: 'win32'` 고정(단축키 표기·창 버튼·환경 배지가 Windows 식)과 토큰 보관(Windows 자격 증명 관리자 전용)은 그대로다 — macOS·Linux 판의 알려진 한계는 [release-notes/v2.0.0.md](release-notes/v2.0.0.md) 에 적었다(확인 대상 표시).
+- Tauri 번들에 서드파티 라이선스 고지(`resources/licenses/`)가 실리지 않는다 — Electron 판은 `extraResources` 로 동봉했다(`tauri.conf.json` 에 `bundle.resources` 없음). 번들링을 확인하지 못해 이 PR 에서 넣지 않았다.
+- `audit-ui.mjs`(Electron 전용 UI 감사)는 대체 없이 지웠다. Rust 소스의 주석 다수가 `src/main/...`·`UPDATE_GOLDEN=1 npx vitest …` 를 가리킨다(전환 전 사정 — 이력 설명으로 남겼다).
 
 ## Phase 0 에서 확인한 것
 
@@ -2647,10 +2723,12 @@ B 469–477 / 185–195(small), 446–448 / 167–168(big).
 
 ## 남은 일·알려진 제약
 
+- **발행 전 사람 몫**(6c PR 7 — 위 "PR 7"): 서명 키 생성·공개 키 커밋·Environment `release` 설정, 리허설 R(rc.1 → rc.2 자기 업데이트 포함), 초안 릴리스의 첨부 확인 후 공개, 공개 뒤 실사용 Electron 1.12.x 로 이관 확인.
 - 직접 확인 필요: 스냅 레이아웃 플라이아웃 위치·지연, 툴바 드래그·더블클릭 최대화(입력 합성을 하지 않아 자동 확인 못 함).
 - Electron 대비 성능은 위 "Phase 0 측정" — 콜드 스타트는 부하 없는 환경에서 다시 재야 한다.
 - 새 창으로 여는 링크는 github.com 만 기본 브라우저로 보낸다(Electron 판 `setWindowOpenHandler` 와 같은 규칙).
-- 미지원: `theme:system` 이벤트(renderer 가 `matchMedia` 로 시스템 테마를 직접 따라 필요 없다), `openPath`·`showItemInFolder`, 확인 창의 체크박스, Windows 밖에서의 기본 버튼 지정(위 참고).
+- 미지원: `openPath`·`showItemInFolder`, 확인 창의 체크박스, Windows 밖에서의 기본 버튼 지정(위 참고). (`theme:system` 이벤트는 renderer 가 `matchMedia` 로 직접 따라 필요 없어 IPC 에서 지웠다 — PR 7.)
+- macOS·Linux(v2.0.0 에 포함): 한 번도 컴파일·실행해 확인하지 않았다. bridge 의 `platform: 'win32'` 고정(단축키 `Ctrl` 표기·창 버튼·환경 배지), 토큰 보관(Windows 자격 증명 관리자 전용 — Windows 가 아니면 `open_store` 가 메모리 저장소를 골라 **앱을 끄면 GitHub·Jira 로그인이 풀린다**), notify 의 macOS 백엔드 꺼짐이 알려진 한계다.
 - 직접 확인 필요(SSH PR 3): 실제 sshd 에 있는 저장소를 열어 그래프·로그(더 보기)·커밋 상세·파일 diff·파일 이력·blame 이 TS 판과 같이 나오는지, 큰 저장소의 `file_diff` 가 상한 오류 없이 열리는지,
   `ANTLER_RUST_SSH=0` 으로 실행하면 같은 저장소가 사이드카(ssh2)로 열리는지(`ANTLER_ROUTE_LOG=1` 로 `[route] git:log -> rust|sidecar` 확인), ssh 저장소를 삭제한 뒤 연결이 닫히는지(원격 `who`·`ss`), ssh 저장소의 fetch 가 한 번만 일어나는지(PR 4 부터 Rust 만 — 위 "사람 확인 필요(SSH PR 4)").
 - 직접 확인 필요: 확인 창(fetch·SSH)과 폴더·에디터 선택 대화상자가 실제로 뜨고 버튼 응답이 맞는지, 창 위치·크기·최대화가 재시작 뒤 복원되는지(자동 확인은 대화상자를 띄우지 않고 요청·응답 형식만 봤다).

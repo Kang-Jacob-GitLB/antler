@@ -5,8 +5,11 @@ name: nightly-release
 #   판단은 scripts/next-version.mjs(테스트: tests/nextVersion.test.ts). main 은 squash 머지만 쓰므로 커밋 제목 = PR 제목이다.
 # 버전은 태그로만 정한다(package.json 은 0.0.0 고정). 버전 커밋을 만들지 않는다.
 # 한 번의 실행으로 끝낸다: plan 잡이 버전을 정하고, release 잡이 release.yml 을 재사용 워크플로로 불러
-# 세 OS 빌드 → (모두 성공하면) annotated 태그 → Release 발행까지 한다. 빌드가 실패하면 태그도 남지 않으며,
+# 세 OS 빌드 → 자산 점검 → (모두 성공하면) annotated 태그 → Release 발행까지 한다. 빌드가 실패하면 태그도 남지 않으며,
 # 실패한 잡만 "Re-run failed jobs" 로 다시 돌리면 된다.
+# **메이저 올림(feat!:)은 초안으로 발행한다** — 사람이 첨부(설치본·.sig·latest.json·latest.yml)와 노트를 확인한 뒤 공개한다(공개 = Electron 판 이관 시작).
+# 초안인 동안은 **다음 릴리스를 만들지 않는다**(공개 대기 가드 — scripts/release-freeze.mjs): 태그는 초안 단계에서 이미 push 돼 있어, 그 사이 fix: 하나가 머지되면
+# 다음 야간이 v2.0.1 을 정식으로 발행해 사람의 확인 없이 이관이 시작되기 때문이다. 초안·릴리스 없음·조회 오류는 모두 "발행하지 않음"이다(fail-closed).
 # 주의: GitHub 의 예약 실행은 부하에 따라 수 분~수십 분 늦게 시작될 수 있다.
 on:
   schedule:
@@ -36,10 +39,13 @@ jobs:
     name: 새 커밋 확인·다음 버전 계산
     runs-on: ubuntu-latest
     outputs:
-      release: ${{ steps.next.outputs.release }}
+      # 새 커밋이 있고 공개 대기 중인 초안이 없을 때만 true
+      release: ${{ steps.next.outputs.release == 'true' && steps.freeze.outputs.frozen == 'false' }}
       version: ${{ steps.next.outputs.version }}
       sha: ${{ steps.next.outputs.sha }}
       notes: ${{ steps.next.outputs.notes }}
+      # 메이저 올림이면 초안으로 발행한다
+      draft: ${{ steps.next.outputs.bump == 'major' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -56,15 +62,17 @@ jobs:
       # 계산한 그 커밋(sha)을 그대로 빌드·태그하므로, 계산 뒤 main 에 새 커밋이 들어와도 섞이지 않는다.
       - name: 다음 버전 계산
         id: next
+        env:
+          BUMP: ${{ inputs.bump || 'auto' }}
         run: |
-          node scripts/next-version.mjs --bump "${{ inputs.bump || 'auto' }}" --json > next.json
+          node scripts/next-version.mjs --bump "$BUMP" --json > next.json
           cat next.json
           node -e '
             const r = require("./next.json")
             const fs = require("fs")
             const { execFileSync } = require("child_process")
             const out = process.env.GITHUB_OUTPUT
-            fs.appendFileSync(out, `release=${r.release}\nlast=${r.last}\n`)
+            fs.appendFileSync(out, `release=${r.release}\nlast=${r.last}\nbump=${r.bump ?? ""}\n`)
             if (r.release) {
               const sha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim()
               fs.appendFileSync(out, `version=${r.next}\nsha=${sha}\n`)
@@ -74,18 +82,40 @@ jobs:
             }
           '
 
+      # 공개 대기 가드: 마지막 정식 태그의 릴리스가 초안이면 발행하지 않는다(위 주석). 판정은 scripts/release-freeze.mjs(tests/releaseFreeze.test.ts).
+      # 조회 실패·릴리스 없음·초안 모두 frozen=true 다. 읽기 전용 토큰(contents: read)이면 충분하다
+      - name: 공개 대기 확인 (직전 정식 릴리스가 초안인가)
+        id: freeze
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST: ${{ steps.next.outputs.last }}
+        run: |
+          set +e
+          OUT=$(gh release view "$LAST" --json isDraft 2>&1)
+          RC=$?
+          set -e
+          node scripts/release-freeze.mjs --last "$LAST" --rc "$RC" --out "$OUT" | tee freeze.txt
+          grep -E '^(frozen|reason)=' freeze.txt >> "$GITHUB_OUTPUT"
+
       - name: 요약
         env:
           RELEASE: ${{ steps.next.outputs.release }}
+          FROZEN: ${{ steps.freeze.outputs.frozen }}
+          REASON: ${{ steps.freeze.outputs.reason }}
           LAST: ${{ steps.next.outputs.last }}
           VERSION: ${{ steps.next.outputs.version }}
+          BUMP: ${{ steps.next.outputs.bump }}
           NOTES: ${{ steps.next.outputs.notes }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           {
             echo "### 야간 릴리스"
-            if [ "$RELEASE" = "true" ]; then
-              echo "$LAST → **v$VERSION**$([ "$DRY_RUN" = "true" ] && echo ' (dry run — 발행하지 않음)')"
+            if [ "$RELEASE" = "true" ] && [ "$FROZEN" != "false" ]; then
+              echo "$LAST → v$VERSION 은 **공개 대기로 발행하지 않습니다** — $REASON"
+              echo
+              echo "초안을 공개(또는 삭제)하면 다음 실행부터 다시 발행합니다."
+            elif [ "$RELEASE" = "true" ]; then
+              echo "$LAST → **v$VERSION**$([ "$DRY_RUN" = "true" ] && echo ' (dry run — 발행하지 않음)')$([ "$BUMP" = "major" ] && echo ' — 메이저 올림: 초안으로 발행합니다(사람이 공개)')"
               echo
               printf '%s\n' "$NOTES"
             else
@@ -100,7 +130,10 @@ jobs:
     permissions:
       contents: write # 발행 잡이 태그를 push 하고 Release 를 만든다
     uses: ./.github/workflows/release.yml
+    # release.yml → tauri-package.yml 의 sign 잡까지 시크릿이 닿게 한다(재사용 호출은 단계마다 넘겨야 한다)
+    secrets: inherit
     with:
       version: ${{ needs.plan.outputs.version }}
       sha: ${{ needs.plan.outputs.sha }}
       notes: ${{ needs.plan.outputs.notes }}
+      draft: ${{ needs.plan.outputs.draft == 'true' }}

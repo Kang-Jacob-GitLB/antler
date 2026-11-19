@@ -5,26 +5,26 @@
 ## 구조
 
 ```
+src-tauri/        Rust 백엔드(Tauri 2) — 앱의 모든 IPC 채널을 처리한다. Node 런타임은 없다
+  src/
+    lib.rs, main.rs, commands.rs(antler_invoke 진입점), router.rs(채널 → 처리 갈래 라우터 — 목록에 없는 채널은 오류 봉투)
+    *_host.rs      라우터가 채널 묶음을 넘기는 호스트: api_host(jira·gh), app_host(대화상자·클립보드·링크), config_host, env_host, fetch_host, watch_host
+    git/           exec/(GitExecutor: Local·Wsl·Ssh(russh)·Github, 큐·프로세스), parsers/(log·refs·stash·worktree·commit·changes·diff·blame·…),
+                   fetch/(허용 목록 가드·실행·상태 기계), log_service(LogCursor), wip, activity, lfs, search, code_browse, refs_service, file_channels,
+                   watcher·fs_watch(외부 변경 감시), github_cache·github_link(GitHub 원격 전용 저장소), link_guard
+    github/        api·client(ETag 캐시)·device_flow·gh_cli(CLI 로그인 가져오기)·service·checks·launchpad …   jira/  api·client·service·adf …
+    net/           http(reqwest 한 곳 — 클라이언트는 여기서만 만든다)·url_rules·redact …
+    config/        설정 저장소(유일한 작성자)·Electron 판 설정 가져오기(import)     repos/  저장소 추가·삭제·스캔·환경 검사
+    external/      파일 관리자·에디터·터미널로 열기     secret/  토큰 보관(Windows 자격 증명 관리자·그 밖은 메모리)
+    update/        logic(semver·URL 허용 목록·매니페스트·정책)·service(상태 기계)·host(minisign 검증·설치 — UPDATE_PUBKEY)·store
+    snap.rs(Win+Z 스냅 플라이아웃), single_instance.rs, dialogs.rs(네이티브 확인 창), fsguard.rs, mirror.rs·routed_repos.rs
+  tests/           Rust 통합 시험(골든 패리티·실행기·채널·보안 소스 검사) — 동결한 골든(tests/golden)을 읽는다
+  nsis/hooks.nsh   Electron 판 자동 정리 훅(이관)
+  tauri.conf.json  창·CSP·번들(NSIS·dmg·deb)·식별자 com.antler.app
 src/
-  shared/      types(데이터 타입), ipc(IPC 계약 — 채널·인자·결과 타입, 허용 목록 IPC_CHANNELS),
-               gitflow·lfs·launchpad·avatar·checkTtl·logScope·prNumber(main·renderer 공용 순수 로직)
-  main/
-    index.ts, titleBar.ts, windowState.ts
-    executors/ GitExecutor 인터페이스, LocalExecutor, WslExecutor, SshExecutor, wslPaths,
-               ssh/(config·connection·knownHosts·quote), processRunner, ProcessQueue(동시성 제한+dedupe)
-    git/       commands(refs·search·logArgs), logCursor, parsers/(log, refs, worktree, stash, commit, changes, diff, nulRecords),
-               fetch(설정 허용 목록 검사), wip(작업 트리 상태), activity(미니맵), fileInsight(파일 히스토리·blame·LFS),
-               repoExtras(LFS·Gitflow·서브모듈), defaultBranch, githubCache(GitHub 원격 전용 저장소),
-               codeBrowse(코드 탐색기: ls-tree·cat-file blob·rev 해석·push 여부)
-    github/    api, client(ETag 캐시), deviceFlow, tokenStore, ghCli(CLI 로그인 가져오기), remoteUrl, service, validate,
-               accessibleRepos, avatars, checks, launchpad, devFake(개발용 가짜 응답)
-    jira/      api, client, service, validate, adf(Atlassian 문서 형식 변환)
-    external/  opener, plan — 파일 관리자·에디터·터미널로 열기
-    update/    logic(semver·자산 선택·해시 검증·정책), manual(GitHub Releases 검증 다운로드), UpdateService(상태 기계),
-               autoBackend(electron-updater), releaseNotes
-    services/  ConfigStore(JSON 설정), RepoService(저장소 단위 진입점), RepoWatcher(외부 변경 감시), FetchService, repoScan, lru
-    ipc/       handlers(IpcEnvelope 로 감싸 등록), github, jira, external, confirmText
-  preload/     window.antler — 허용 목록 채널만 노출
+  shared/      types(데이터 타입), ipc(IPC 계약 — 채널·인자·결과 타입, 허용 목록 IPC_CHANNELS·IPC_EVENTS),
+               gitflow·lfs·launchpad·avatar·checkTtl·logScope·prNumber(renderer 공용 순수 로직)
+  renderer/tauri/  bridge.ts(window.antler — 허용 목록 검사·envelope 해제·창 버튼), titlebar.css, global.d.ts(window.antler 타입)
   renderer/src/
     components/   Toolbar, Sidebar, CommitList, GraphCanvas, DetailPanel(+두 커밋 비교), DiffView, FileView(히스토리·Blame),
                   CodeView·MarkdownDoc(코드 탐색기·GitHub 식 마크다운), CommandPalette, ShortcutsDialog, CommitMinimap, WipGraph·WipPanel, RepoSwitcher, SearchBar, AddRepoDialog,
@@ -43,9 +43,9 @@ src/
     styles/       tokens.css(디자인 토큰 3층), base.css, fonts.css
     i18n/         ko, en
 resources/       앱 아이콘(icon.svg·icon-small.svg 원본, 생성된 png/ico/icns, icons/*.png), licenses/
-electron-builder.yml  패키징 설정
-scripts/         개발 도구 스크립트(build.md 참고)
-tests/           vitest + fixtures/
+vite.config.mts  renderer(Tauri 프런트) 빌드·개발 서버 설정
+scripts/         개발 도구 스크립트·릴리스 가드(build.md 참고)
+tests/           vitest(renderer·shared·스크립트·워크플로 정적 검사) + fixtures/ + golden/(Rust 시험이 읽는 동결한 골든)
 docs/            이 문서들과 README 스크린샷(images/)
 ```
 
@@ -63,21 +63,20 @@ docs/            이 문서들과 README 스크린샷(images/)
 - **환경별 실행(M4)**: git 은 항상 저장소가 있는 환경 안에서 돈다.
   - WSL: `wsl.exe -d <배포판> --cd ~ --exec env <GIT_ENV> git -C <경로> …` — `--exec` 라 리눅스 셸이 인자를 해석하지 않는다.
     `\\wsl.localhost\<배포판>\…` 경로를 고르면 WSL 저장소로 바꿔 등록한다(9P 공유를 거치지 않아 빠르고 정확하다).
-  - SSH: `ssh2` 로 호스트당 연결 하나를 유지하고 exec 채널을 연다(Windows OpenSSH 는 ControlMaster 미지원).
+  - SSH: `russh` 로 호스트당 연결 하나를 유지하고 exec 채널을 연다(Windows OpenSSH 는 ControlMaster 미지원).
     `~/.ssh/config`(Host·HostName·User·Port·IdentityFile·ProxyJump·Include)를 따르고, 인증은 ssh-agent·키 파일만 —
     비밀번호는 저장하지도 묻지도 않는다. 호스트 키는 `known_hosts` 로 검증하며 모르는 키는 자동 등록하지 않는다.
   - 경로 `~/x` 는 셸 없이 실행되므로 두 실행기 모두 홈 디렉터리에서 실행해 상대 경로로 처리한다.
 - **GitHub 연동(M5)**: remote URL(origin 우선)에서 owner/repo 를 추론하고, API 는 환경(로컬·WSL·SSH)과 무관하게
-  main 이 직접 호출한다. 모든 GET 은 ETag 조건부 요청이라 다시 볼 때 304(호출 한도 차감 없음)로 끝난다.
-  로그인은 PAT 또는 Device Flow(설정에 OAuth App client ID 필요). 토큰은 Electron `safeStorage` 로 암호화해
-  저장하고 renderer 로는 절대 넘기지 않는다. PR·이슈 본문은 GitHub 가 렌더링한 HTML 을 앱에서 한 번 더 허용 목록으로
+  Rust 가 직접 호출한다. 모든 GET 은 ETag 조건부 요청이라 다시 볼 때 304(호출 한도 차감 없음)로 끝난다.
+  로그인은 PAT 또는 Device Flow(설정에 OAuth App client ID 필요). 토큰은 Windows 자격 증명 관리자에 저장하고(그 밖의 OS 는 메모리) renderer 로는 절대 넘기지 않는다. PR·이슈 본문은 GitHub 가 렌더링한 HTML 을 앱에서 한 번 더 허용 목록으로
   정화하고, 링크는 github.com 만 기본 브라우저로 연다(이미지는 CSP 로 *.githubusercontent.com 만).
 - **외부 변경 자동 반영**: 활성 저장소만 감시한다(`RepoWatcher`). 로컬은 `.git`(워크트리면 공통 디렉터리까지) 재귀 감시 → 디바운스,
   WSL 4초·SSH 30초 폴링(창이 뒤에 있으면 4배 느리게, 앞으로 오면 즉시 확인). HEAD 와 모든 ref 의 해시 요약이
   바뀐 경우에만 사이드바·그래프를 다시 읽고, 보던 커밋 선택은 유지한다.
 - **커밋 상세·diff**: 커밋을 고르면(↑↓ 연타 대비 60ms 디바운스) 메타데이터와 첫 부모 대비 변경 파일(+/− 통계)을
   불러온다. 파일을 누르면 중앙이 diff 로 바뀐다(Esc 닫기, Alt+↑/↓ 이전/다음 파일). diff 는 3,000줄까지만 담아
-  보내고 나머지는 "전체 불러오기"로 받는다. 상세·diff 는 커밋 해시 기준 불변 LRU 캐시(main)와 상세 캐시(renderer)에 담는다.
+  보내고 나머지는 "전체 불러오기"로 받는다. 상세·diff 는 커밋 해시 기준 불변 LRU 캐시(Rust `git/lru.rs`)와 상세 캐시(renderer)에 담는다.
 - **사이드바 동작(GitKraken 식)**: 브랜치·태그 클릭 = 그래프에서 그 커밋으로 이동(필요하면 더 불러옴),
   더블클릭/깔때기 버튼 = 그 ref 만 보기(툴바 필터 칩으로 해제). 워크트리·스태시 클릭 = 그 HEAD 기준 보기.
 - **디자인 토큰**: palette(원시) → semantic(테마가 교체하는 층) → component(semantic 만 참조) 3층.
@@ -93,7 +92,7 @@ docs/            이 문서들과 README 스크린샷(images/)
 
 ## 성능
 
-이 Windows 11 머신에서 `scripts/drive.mjs` 로 측정(콜드 스타트는 앱 프로세스 시작 기준).
+이 Windows 11 머신에서 `scripts/drive.mjs` 로 측정(콜드 스타트는 앱 프로세스 시작 기준). **아래 표는 Electron 판(v1.x)의 측정이다** — Tauri 판의 비교 측정(콜드 스타트·메모리·스크롤)은 [tauri.md](tauri.md) "Phase 0 측정"에 있다.
 
 | 항목 | 측정 | 목표 |
 |---|---|---|
@@ -106,20 +105,18 @@ docs/            이 문서들과 README 스크린샷(images/)
 
 ## 의존성과 추가 이유
 
-런타임 의존성(`dependencies`)은 **ssh2, electron-updater 둘**이다. renderer 라이브러리는 번들에 들어가므로 devDependencies 에 둔다.
+npm 의 런타임 의존성(`dependencies`)은 없다 — 백엔드는 Rust(`src-tauri/Cargo.toml`: tauri·tokio·reqwest·russh·notify·keyring-core·tauri-plugin-updater 등)이고, npm 패키지는 모두 renderer 번들·빌드·시험·도구용(devDependencies)이다.
 
 | 패키지 | 이유 |
 |---|---|
-| electron-updater (runtime) | 앱 안 업데이트(Windows NSIS·Linux AppImage). main 프로세스에서 쓰이므로 번들되지 않는 runtime 의존성 |
-| ssh2 (runtime) | SSH 연결 유지·exec 채널 — Windows OpenSSH 는 ControlMaster 미지원 |
 | react, react-dom (dev) | renderer UI — 번들에 포함 |
 | zustand (dev) | 보일러플레이트 없는 경량 상태관리(≈1KB) |
 | @tanstack/react-virtual (dev) | 10만 행 가상 스크롤 |
 | highlight.js (dev) | diff syntax highlight — core 와 필요한 언어만 diff 를 열 때 지연 로드(언어별 청크) |
-| electron, electron-vite, vite, @vitejs/plugin-react | 앱 런타임과 main/preload/renderer 통합 빌드 |
-| electron-builder | 설치 파일 패키징(`pnpm dist*`) |
+| @tauri-apps/api, @tauri-apps/cli | renderer 의 Tauri 호출(bridge)과 `tauri dev`·`tauri build`(설치본 패키징) |
+| vite, @vitejs/plugin-react | renderer(Tauri 프런트) 빌드·개발 서버(`vite.config.mts`) |
 | typescript, @types/* | strict 타입 검사 |
-| vitest | 파서·executor 단위 테스트 |
+| vitest | renderer·shared 순수 로직·릴리스 가드 스크립트·워크플로 정적 검사 단위 테스트(Rust 는 `cargo test`) |
 | happy-dom | renderer 의 HTML 정화(sanitize) 테스트에 쓰는 가벼운 DOM 구현 — 테스트 전용 |
 | playwright-core | 빌드된 앱을 실제로 띄워 측정·스크린샷(`scripts/drive.mjs`) — 브라우저 다운로드 없는 core 판 |
 | @resvg/resvg-js, png2icons | 아이콘 생성(`pnpm icons`): SVG → PNG, PNG → ico/icns |
@@ -137,3 +134,4 @@ docs/            이 문서들과 README 스크린샷(images/)
 - [x] **M6** 아이콘/브랜딩, 성능 튜닝, 패키징
 - [x] 이후(v1.x): 명령 팔레트, 파일 히스토리·Blame, 두 커밋 비교, WIP 행, 커밋 미니맵, LFS·Gitflow 표시, Actions,
       Launchpad, Jira 작업 공간·워크로그, GitHub 원격 전용 저장소, 외부 도구로 열기, 앱 안 업데이트
+- [x] **v2.0.0** Electron → Tauri 2 전환(백엔드를 Rust 로) — 과정과 결정은 [tauri.md](tauri.md)

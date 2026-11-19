@@ -1,4 +1,4 @@
-// IPC 계약. 채널 이름과 인자·결과 타입을 한곳에서 정의해 main/preload/renderer 가 공유한다.
+// IPC 계약. 채널 이름과 인자·결과 타입을 한곳에서 정의해 Rust(src-tauri)와 renderer(bridge)가 공유한다.
 import type {
   AddGithubReposInput,
   AddGithubReposResult,
@@ -242,16 +242,15 @@ export type IpcChannel = keyof IpcContract
 export type IpcArgs<C extends IpcChannel> = IpcContract[C]['args']
 export type IpcResult<C extends IpcChannel> = IpcContract[C]['result']
 
-/** main 이 renderer 로 밀어주는 이벤트 */
+/** Rust 가 renderer 로 밀어주는 이벤트(antler:evt) */
 export interface IpcEvents {
   'repo:changed': { repoId: string }
   'fetch:status': FetchStatus
-  'theme:system': { dark: boolean }
   'update:state': UpdateState
 }
 export type IpcEvent = keyof IpcEvents
 
-/** preload 에서 허용 목록으로 쓰는 런타임 채널 목록 */
+/** bridge 에서 허용 목록으로 쓰는 런타임 채널 목록(Rust 라우터의 처리 목록 합집합과 같아야 한다 — src-tauri/tests/channel_scope.rs) */
 export const IPC_CHANNELS = [
   'config:get',
   'config:setUi',
@@ -338,7 +337,7 @@ export const IPC_CHANNELS = [
   'win:setTitleBarTheme'
 ] as const satisfies readonly IpcChannel[]
 
-export const IPC_EVENTS = ['repo:changed', 'fetch:status', 'theme:system', 'update:state'] as const satisfies readonly IpcEvent[]
+export const IPC_EVENTS = ['repo:changed', 'fetch:status', 'update:state'] as const satisfies readonly IpcEvent[]
 
 /**
  * 인자 배열의 빈 자리(undefined) 표식. JSON 은 배열 속 undefined 를 null 로 바꾸므로 Tauri bridge 가 이 키 하나짜리 객체로 보내고
@@ -346,7 +345,7 @@ export const IPC_EVENTS = ['repo:changed', 'fetch:status', 'theme:system', 'upda
  */
 export const UNDEFINED_ARG = '__antlerUndefinedArg'
 
-/** invoke 결과 래퍼. Electron 기본 에러 문자열("Error invoking remote method…")을 피하려고 쓴다. */
+/** invoke 결과 래퍼. 오류 문구를 가공 없이 renderer 에 전하려고 쓴다(봉투 모양은 tests/golden 의 골든이 고정한다). */
 export type IpcEnvelope<T> = { ok: true; data: T } | { ok: false; error: string; code?: string }
 
 /** window.antler 로 노출되는 API 형태 */

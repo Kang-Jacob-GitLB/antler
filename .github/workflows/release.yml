@@ -1,11 +1,17 @@
 name: release
 
-# 세 OS 설치본을 빌드해 GitHub Release 에 첨부한다. 세 가지로 실행된다:
-#   1) 사람이 semver 태그(v0.1.0, 프리릴리스 v0.2.0-rc.1)를 push — 태그가 이미 있고, 노트는 그 태그 메시지
-#   2) nightly-release.yml 이 재사용 워크플로로 호출(workflow_call) — 버전·대상 커밋·노트를 입력으로 받고,
-#      세 OS 빌드가 모두 성공한 뒤 발행 잡에서 annotated 태그를 만든다(빌드가 실패하면 태그도 남지 않는다)
+# Tauri 판 설치본(Windows NSIS · macOS dmg · Linux deb)과 업데이트 서명(.sig)·매니페스트(latest.json, Electron 판 이관용 latest.yml)를 GitHub Release 에 첨부한다.
+# 세 가지로 실행된다:
+#   1) 사람이 semver 태그(v2.0.0-rc.1 등)를 push — 태그가 이미 있고, 노트는 그 태그 메시지. **항상 초안**으로 발행한다(사람이 첨부를 확인하고 공개한다)
+#   2) nightly-release.yml 이 재사용 워크플로로 호출(workflow_call) — 버전·대상 커밋·노트·초안 여부를 입력으로 받고,
+#      빌드·점검이 모두 끝난 **뒤에** 발행 잡에서 annotated 태그를 만든다(빌드·점검이 실패하면 태그도 남지 않는다 — 태그만 남은 실패는 다음 야간 계산을 망친다)
 #   3) 수동 실행(workflow_dispatch) — 태그 없이 설치본만 빌드해 아티팩트로 올린다(점검용, 발행하지 않음)
 # 버전의 기준은 태그 하나다: 저장소의 package.json 은 0.0.0 으로 고정하고, 빌드 직전에 버전을 넣는다(커밋하지 않음).
+#
+# 흐름: preflight(버전·업데이트 공개 키 점검) → package(tauri-package.yml 재사용 호출: 세 OS 빌드·서명·매니페스트) → release(자산 점검 → 태그 → 초안 릴리스)
+#   - **공개 키 넣기 전에는 발행할 수 없다**: src-tauri/src/update/host.rs 의 UPDATE_PUBKEY 가 None 이면 preflight 가 실패한다(docs/updates.md)
+#   - 자산이 하나라도 빠지면(서명 키 없음·macOS/Linux 갈래 실패·latest.json 의 플랫폼 키 누락) release 잡의 점검이 태그를 만들기 전에 실패한다
+#   - 서명 시크릿은 tauri-package.yml 의 sign 잡(Environment `release`)만 받는다. 이 파일에는 secrets 참조가 없다
 # 주의: tags 필터는 정규식이 아니라 glob 이다.
 on:
   push:
@@ -16,7 +22,7 @@ on:
   workflow_call:
     inputs:
       version:
-        description: "릴리스할 버전(접두사 v 없이, 예: 1.1.0)"
+        description: "릴리스할 버전(접두사 v 없이, 예: 2.0.0)"
         type: string
         required: true
       sha:
@@ -27,155 +33,154 @@ on:
         description: "릴리스 노트(마크다운, 첫 줄은 태그 제목)"
         type: string
         required: true
+      draft:
+        description: "초안으로 발행(사람이 공개할 때까지 /releases/latest 에 나오지 않는다)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read # 쓰기 권한은 Release 를 만드는 release 잡에만 준다
 
 jobs:
-  # ── OS별 설치본 빌드 ─────────────────────────────────────────────────
-  # 각 러너에서 electron-builder 로 그 OS 설치본을 만들어 워크플로 아티팩트로 올린다.
-  # 실제 Release 발행은 아래 release 잡이 셋을 모아 한 번에 한다(같은 태그에 동시 발행하는 레이스 방지).
-  # 설치본 외에 앱 안 업데이트용 메타데이터(dist/latest*.yml: 버전·sha512)와 blockmap(차등 다운로드)도 함께 올린다.
-  #   electron-builder.yml 의 publish 설정 덕분에 --publish never 여도 생성된다.
-  # 타깃은 electron-builder.yml 을 따른다:
-  #   Windows — NSIS 설치 프로그램 + portable (x64)
-  #   macOS   — dmg (arm64, x64 — arm64 러너에서 둘 다 빌드), ad-hoc 서명
-  #   Linux   — AppImage + deb (x64, Ubuntu)
-  build:
-    name: 빌드 (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # 한 OS 가 실패해도 나머지는 끝까지 돌려 원인 파악을 쉽게 한다(release 는 needs 라 발행되지 않는다)
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            asset: win
-            eb_platform: "--win"
-            meta_file: dist/latest.yml
-            installer_glob: |
-              dist/*.exe
-              dist/latest.yml
-              dist/*.blockmap
-          - os: macos-latest
-            asset: mac
-            eb_platform: "--mac"
-            meta_file: dist/latest-mac.yml
-            installer_glob: |
-              dist/*.dmg
-              dist/latest-mac.yml
-              dist/*.blockmap
-          - os: ubuntu-latest
-            asset: linux
-            eb_platform: "--linux"
-            meta_file: dist/latest-linux.yml
-            installer_glob: |
-              dist/*.AppImage
-              dist/*.deb
-              dist/latest-linux.yml
-              dist/*.blockmap
-
-    # Windows 도 Git Bash 로 고정해 셸 차이를 없앤다
-    defaults:
-      run:
-        shell: bash
-
+  # ── 발행 전 점검: 빌드보다 앞 ─────────────────────────────────────────
+  # 이 잡이 실패하면 빌드도 태그도 없다. 버전은 여기서 한 번만 정해 뒤 잡이 같은 값을 쓴다.
+  preflight:
+    name: 발행 전 점검
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      sha: ${{ steps.v.outputs.sha }}
+      publish: ${{ steps.v.outputs.publish }}
+      # 호출자가 준 draft 이거나 초안 강제 정책(메이저 변경·메이저 노트 존재)에 걸리면 true
+      draft: ${{ steps.v.outputs.draft == 'true' || steps.policy.outputs.force == 'true' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # 재사용 호출이면 계산한 그 커밋을, 아니면 이 실행의 ref(태그 등)를 빌드한다
+          # 재사용 호출이면 계산한 그 커밋을, 아니면 이 실행의 ref(태그 등)를 본다
           ref: ${{ inputs.sha || github.ref }}
+          # 직전 정식 태그를 찾으려면 태그 전체가 필요하다
+          fetch-depth: 0
           persist-credentials: false
-
-      # 버전을 package.json 에 넣는다(이 러너 안에서만, 커밋하지 않음).
-      # electron-builder(설치본 이름·latest*.yml)와 앱의 __APP_VERSION__(electron.vite.config.mts)이 모두 이 값을 읽는다.
-      # 재사용 호출은 입력 버전, 태그 push 는 태그 버전, 수동 실행은 0.0.0-ci.<실행 번호>.
-      - name: 버전 결정 → package.json
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          if [ -n "$INPUT_VERSION" ]; then
-            VERSION="$INPUT_VERSION"
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION="0.0.0-ci.${{ github.run_number }}"
-          fi
-          # semver(MAJOR.MINOR.PATCH[-pre]) 가 아니면 실패한다 — 설치본 이름·업데이트 비교가 이 값에 기대므로
-          if ! echo "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$'; then
-            echo "::error::semver 가 아닌 버전입니다: $VERSION ($GITHUB_REF_NAME)"
-            exit 1
-          fi
-          npm pkg set version="$VERSION"
-          echo "버전=$VERSION"
-
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Node 설정
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-          cache: pnpm
 
-      - name: 의존성 설치
-        run: pnpm install --frozen-lockfile
-
-      - name: 빌드 (electron-vite)
-        run: pnpm build
-
-      # --publish never: 태그 트리거 + 토큰이 있는 상태에서 electron-builder 가 스스로 Release 를 만들어
-      #   아래 release 잡과 충돌하는 것을 막는다.
-      # 코드 서명: Windows 는 인증서가 없어 미서명, macOS 는 electron-builder.yml 의 ad-hoc('-') 서명.
-      #   CSC_IDENTITY_AUTO_DISCOVERY=false 로 러너 키체인의 인증서를 집어 쓰지 않게 한다.
-      - name: 패키징 (electron-builder)
+      # 재사용 호출은 입력 버전, 태그 push 는 태그 버전(표현식으로는 접두사 v 를 뗄 수 없어 셸에서 한다), 수동 실행은 0.0.0-ci.<실행 번호>.
+      # publish: 태그 push 이거나 재사용 호출일 때만 true(수동 실행은 빌드 점검만). draft: 태그 push 는 항상 true, 재사용 호출은 입력(야간은 메이저 올림일 때)을 따른다
+      - name: 버전·발행 방식 결정
+        id: v
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: pnpm exec electron-builder ${{ matrix.eb_platform }} --publish never
-
-      # 앱 안 업데이트가 읽는 메타데이터(버전·sha512)가 없으면 이 잡에서 바로 실패한다(수동 dry run 도 잡아낸다)
-      - name: 업데이트 메타데이터 확인
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_DRAFT: ${{ inputs.draft }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          ls -la dist
-          test -f "${{ matrix.meta_file }}" || { echo "::error::${{ matrix.meta_file }} 가 없습니다"; exit 1; }
+          publish=false
+          draft=false
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+            SHA="$INPUT_SHA"
+            publish=true
+            draft="$INPUT_DRAFT"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            VERSION="${REF_NAME#v}"
+            SHA="$HEAD_SHA"
+            publish=true
+            draft=true
+          else
+            VERSION="0.0.0-ci.${RUN_NUMBER}"
+            SHA="$HEAD_SHA"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          echo "버전=$VERSION 발행=$publish 초안=$draft 커밋=$SHA"
 
-      - name: 설치본 아티팩트 업로드
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: installers-${{ matrix.asset }}
-          path: ${{ matrix.installer_glob }}
-          if-no-files-found: error
+      # 초안 강제 이중화(scripts/release-draft-policy.mjs): 메이저가 직전 정식 태그와 다르거나 docs/release-notes/v<버전>.md 가 있으면 호출자의 draft 와 무관하게 초안이다.
+      # 야간 수동 실행의 `--bump major` 로도 메이저 첫 릴리스가 공개로 나가지 않게 한다
+      - name: 초안 강제 확인
+        id: policy
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          TAGS=$(git tag --list 'v*' | paste -sd, -)
+          NOTES=false
+          if [ -f "docs/release-notes/v${VERSION}.md" ]; then NOTES=true; fi
+          node scripts/release-draft-policy.mjs --version "$VERSION" --tags "$TAGS" --notes "$NOTES" | tee policy.txt
+          grep -E '^force=' policy.txt >> "$GITHUB_OUTPUT"
 
-  # ── 릴리스 발행: 세 OS 설치본을 모아 한 번에 Release 생성·첨부 ──────────
+      # 발행하는 실행만 공개 키까지 본다(수동 점검 빌드는 키 없이도 돈다). 버전이 semver 가 아니어도 여기서 실패한다
+      - name: 버전·업데이트 공개 키 점검
+        if: steps.v.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: node scripts/check-release-preflight.mjs --version "$VERSION"
+
+  # ── 세 OS 설치본 빌드·서명·매니페스트(tauri-package.yml) ────────────────
+  # 시크릿(TAURI_SIGNING_PRIVATE_KEY·_PASSWORD)은 그 안의 sign 잡이 Environment `release` 로 받는다.
+  # 재사용 워크플로 안의 잡은 호출자가 secrets 를 넘겨야(inherit) Environment 시크릿도 보인다(v2.0.0-rc.2 에서 넘기지 않아 빈 값이었다).
+  # inherit 는 시크릿을 "쓸 수 있게"만 한다 — 실제로 secrets.* 를 참조하는 곳은 sign 잡 두 단계뿐이다(시험이 강제)
+  package:
+    name: 패키징
+    needs: preflight
+    uses: ./.github/workflows/tauri-package.yml
+    secrets: inherit
+    with:
+      version: ${{ needs.preflight.outputs.version }}
+      sha: ${{ needs.preflight.outputs.sha }}
+
+  # ── 릴리스 발행: 자산 점검 → 태그 → (초안) 릴리스 ────────────────────────
   release:
     name: 릴리스 발행
-    needs: build # 세 OS 빌드가 모두 성공해야 발행(반쪽짜리 릴리스 방지)
-    # 태그 push 이거나 재사용 호출일 때만 발행한다(수동 실행은 빌드 점검만)
-    if: github.ref_type == 'tag' || inputs.version
+    needs: [preflight, package] # 빌드·서명·매니페스트가 모두 성공해야 발행(반쪽짜리 릴리스 방지)
+    if: needs.preflight.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
+      VERSION: ${{ needs.preflight.outputs.version }}
       # 발행할 태그 이름: 재사용 호출이면 v<입력 버전>, 태그 push 면 그 태그
       TAG: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.sha || github.ref }}
+          ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           # 재사용 호출만 태그를 push 해야 해서 자격 증명이 필요하다
           persist-credentials: ${{ inputs.version && 'true' || 'false' }}
 
+      - name: Node 설정
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # 아티팩트 한 벌(tauri-installers)만 받는다. 점검이 예상 밖 파일을 거부하므로 merge 로 섞이는 일이 없다
       - name: 설치본 아티팩트 다운로드
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: installers-*
+          name: tauri-installers
           path: installers
-          merge-multiple: true
 
       - name: 첨부할 설치본 목록
         run: ls -la installers
 
-      # 재사용 호출: 빌드가 모두 성공한 지금에서야 annotated 태그를 만든다(노트 = 태그 메시지).
+      # **태그를 만들기 전에** 점검한다: 필수 자산(설치본·.sig·latest.json 의 다섯 플랫폼 키)이 하나라도 없으면 여기서 실패한다.
+      # latest.yml(Electron 판 이관용)은 저장소 변수 ELECTRON_MIGRATION 이 off 일 때만 빠진다(중단 장치 — docs/build.md)
+      - name: 자산 점검 (누락 시 실패)
+        env:
+          ELECTRON_MIGRATION: ${{ vars.ELECTRON_MIGRATION }}
+        run: node scripts/check-release-assets.mjs --version "$VERSION" --dir installers --pubkey-from src-tauri/src/update/host.rs --electron-migration "$ELECTRON_MIGRATION"
+
+      # 재사용 호출: 빌드·점검이 모두 성공한 지금에서야 annotated 태그를 만든다(노트 = 태그 메시지).
+      # 메이저 노트(docs/release-notes/v<버전>.md)가 있으면 야간 노트 앞에 붙인다 — 야간 노트는 커밋 제목뿐이라 이관·재로그인 안내를 실을 자리가 없다.
       # 노트는 커밋 제목에서 만든 문자열이라 셸에 직접 끼워 넣지 않고 환경 변수로 넘긴다.
       - name: 태그 만들기·push (재사용 호출)
         if: inputs.version
@@ -187,7 +192,12 @@ jobs:
             echo "::error::$TAG 태그가 이미 있습니다"
             exit 1
           fi
-          printf '%s\n' "$NOTES" > tag_message.md
+          : > tag_message.md
+          if [ -f "docs/release-notes/$TAG.md" ]; then
+            cat "docs/release-notes/$TAG.md" >> tag_message.md
+            printf '\n---\n\n' >> tag_message.md
+          fi
+          printf '%s\n' "$NOTES" >> tag_message.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # 기본 cleanup(strip)은 '#' 으로 시작하는 줄을 주석으로 지워 노트의 '## 새 기능' 같은 제목이 사라진다
@@ -209,14 +219,16 @@ jobs:
             echo "fallback=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 릴리스 생성 + 설치본 첨부 (Windows / macOS / Ubuntu)
+      # draft: 초안은 /releases/latest·atom 피드에 나오지 않아 Electron·Tauri 의 업데이트 확인이 모두 보지 못한다. 사람이 첨부를 확인하고 공개한다
+      - name: 릴리스 생성 + 설치본 첨부 (Windows / macOS / Linux)
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ env.TAG }}
           name: ${{ env.TAG }}
           body_path: release_notes.md
           generate_release_notes: ${{ steps.notes.outputs.fallback == 'true' }}
-          # 하이픈이 든 태그(v0.2.0-rc.1)는 프리릴리스로 표시
+          draft: ${{ needs.preflight.outputs.draft == 'true' }}
+          # 하이픈이 든 태그(v2.0.0-rc.1)는 프리릴리스로 표시
           prerelease: ${{ contains(env.TAG, '-') }}
           fail_on_unmatched_files: true
           files: |

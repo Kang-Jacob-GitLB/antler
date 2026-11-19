@@ -4,9 +4,9 @@
 
 읽기 전용 앱이지만 공격자가 내용을 정할 수 있는 저장소를 연다는 전제로 설계했다.
 
-- 창: contextIsolation · sandbox · nodeIntegration off, preload 는 허용 목록 채널만 노출, 권한 요청은 모두 거부,
-  프로덕션 빌드에 CSP 메타 태그 주입, 외부 링크는 기본 브라우저로. 외부 HTML 은 sanitize 로 정화한다.
-- IPC: main 이 모든 입력(경로·해시·ref 등)을 검증한다.
+- 창: Tauri(WebView2·WKWebView·WebKitGTK)의 webview 안에서 renderer 만 돈다(Node 없음). bridge(`src/renderer/tauri/bridge.ts`)는 허용 목록 채널만 호출하고, 라우터가 최종 관문이다(`__TAURI__` 로 bridge 를 건너뛸 수 있다).
+  앱 밖 주소로의 이동·새 창·권한 요청은 모두 거부, CSP 는 `tauri.conf.json` 의 `app.security.csp`, capability 는 실제로 쓰는 창·이벤트 권한만, 외부 링크는 기본 브라우저로. 외부 HTML 은 sanitize 로 정화한다.
+- IPC: Rust(라우터·`*_host`)가 모든 입력(경로·해시·ref 등)을 검증한다.
 - 악성 저장소 방어: 모든 git 호출에 `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `-c core.fsmonitor=false`, `-c core.protectNTFS=true`, `-c diff.submodule=short`, `-c submodule.recurse=false` 를 줘
   저장소 설정이 네트워크 접근이나 외부 명령 실행을 일으키지 못하게 한다.
 - fetch: 사용자 저장소에 하는 유일한 쓰기이자 유일한 git 네트워크 접근이다 — GitHub 원격 전용 저장소는 아래 별도 절을 본다(remote 마다 `git fetch --prune --no-prune-tags --no-recurse-submodules --no-write-fetch-head --refmap= -- <이름> +refs/heads/*:refs/remotes/<이름>/*`).
@@ -23,7 +23,7 @@
   없으면 `GIT_SSH_COMMAND`/`GIT_SSH` 환경변수, 그것도 없으면 `BatchMode=yes`·`ConnectTimeout=15` 로 실행한다. 60초 제한, 저장소당 하나만, 환경당 전용 슬롯 하나.
   **악성 설정 차단(허용 목록)**: fetch 전에(그리고 실행 직전에 한 번 더) `git config --list --show-scope --includes -z` 로 local/worktree 설정(include 한 파일 포함)을 검사한다.
   git 과 Git Credential Manager 같은 도구가 명령을 실행하거나 연결을 열거나 파일을 쓰는 설정을 계속 추가해 차단 목록은 번번이 새 키를 놓쳤으므로,
-  **읽기만 하는 데이터인 키만 통과시키는 허용 목록**을 쓴다(`src/main/git/fetch.ts`의 `ALLOWED_KEYS`: 저장소 형식·플래그 `core.*`, `remote.<n>.url|fetch|…`,
+  **읽기만 하는 데이터인 키만 통과시키는 허용 목록**을 쓴다(`src-tauri/src/git/fetch/guard.rs`의 `ALLOWED_KEYS`: 저장소 형식·플래그 `core.*`, `remote.<n>.url|fetch|…`,
   `branch.<n>.remote|merge|…`, `user.*`, `pull/push/fetch.prune` 류, `extensions.*`, `submodule.<n>.url|active`, `include.path`, git-lfs 기본값 그대로인 `filter.lfs.*`).
   그 밖의 키(`http.*`·`credential.*`·`protocol.*`·`url.*`·`trace2.*`·`fetch.bundleURI`·`core.sshCommand` 등 전부)는 "알 수 없는 설정"으로 자동 fetch 를 막고
   "fetch 차단됨"으로 표시한다. 새로고침을 누르면 해당 키·값을 이스케이프해서(제어·서식·방향·결합·닮은꼴 따옴표·공백처럼 보이는 문자를 \uXXXX 로 노출, 긴 값은 앞…뒤+길이) 보여 주는
@@ -43,7 +43,7 @@
   공격자가 설정을 정할 수 있는 저장소를 여는 일반적인 한계다(Antler 는 네트워크 공유 저장소 경로 자체는 거부한다).
   (2) 사용자가 "알 수 없는 설정" 확인 창에서 허용하면, 저장소의 `http.<url>.*` 같은 키가 우리가 `-c` 로 준 기본값을 덮을 수 있다 — 허용은 사용자의 결정이다.
   (3) renderer 가 주장하는 `manual` 값은 main 이 검증할 수 없다. 침해된 renderer 가 수동 fetch 를 요청해도 알 수 없는 설정은 main 의 확인 창에서 사용자가 눌러야 한다.
-  **Tauri 판**: local·WSL 저장소의 fetch 가드(허용 목록·URL 판정·상태 기계)는 Rust(`src-tauri/src/git/fetch/`)에 있다(Node 사이드카는 Phase 6c PR 5 에서 없앴다 — fetch 를 맡는 쪽이 Rust 하나라 이중 fetch 가 없다).
+  fetch 가드(허용 목록·URL 판정·상태 기계)는 Rust(`src-tauri/src/git/fetch/`)에 있다(Electron 판의 TS 구현은 v2.0.0 에서 지워졌다 — 판정은 동결된 골든 `tests/golden/fetch` 가 고정한다).
   확인 창은 webview 가 아니라 Rust 네이티브 대화상자(`dialogs::message_box`)이며 renderer 에는 그것을 띄우거나 누를 경로가 없다. 승인은 설정 파일의 유일한 작성자인 Rust 가 직접 남기고(Phase 6b PR 9), renderer 의 값은 그 경로로 가지 않는다 — 자세한 것은 docs/tauri.md "fetch 라우팅".
 - 코드 탐색기: 저장소 문서(README 등)의 외부 링크는 사용자가 누를 때만 `code:openLink` 로 연다 — https 만, 사용자 정보가 든 URL 은 거부, 마우스를 올리면 실제 주소를 보여 준다.
 - 경로·diff: `GIT_LITERAL_PATHSPECS=1` 이라 renderer 가 보낸 경로가 pathspec 매직으로 해석되지 않고,
@@ -53,11 +53,11 @@
   `.git` 을 문자열로 비교하는 검사만으로는 Windows NTFS 8.3 짧은 이름(`GIT~1/config`)으로 `.git/config` 를 읽을 수 있어서다. 접두사 허용은 두지 않는다.
   `--no-index` 가 종료 코드 1 이면서 출력이 없으면 "차이 있음"이 아니라 파일을 못 연 오류로 올린다.
 - 작업 트리 diff 의 정션·symlink 우회: Git for Windows 의 `status -uall` 은 `mklink /J j .git` 정션을 따라 들어가 `j/config` 를 untracked 로 보고하고 `--no-index` 가 `.git/config` 를 출력한다
-  (저장소 밖을 가리키는 정션도 같다). 그래서 **로컬 실행기**(`exec.kind === 'local'`)는 untracked·unstaged diff 를 열기 직전에(`src/main/git/linkGuard.ts`)
+  (저장소 밖을 가리키는 정션도 같다). 그래서 **로컬 실행기**(`exec.kind === 'local'`)는 untracked·unstaged diff 를 열기 직전에(`src-tauri/src/git/link_guard.rs`)
   저장소 루트부터 구성 요소마다 `lstat` 해 symlink·정션(Node 는 정션도 `isSymbolicLink` 로 보고 — 시험으로 확인)이면 거부하고(untracked 는 파일 자체가 링크여도 거부, unstaged 는 추적 중인 링크 파일만 허용),
   `realpath.native`(8.3 이름이 펴진다)가 저장소 루트 실제 경로 안이며 `.git` 구성 요소가 없는지 확인한다. 허용 목록을 만들 때(wipStatus)는 파일마다 lstat 하지 않는다(파일 수천 개 비용) — diff 시점 검사가 방어선이다.
   unstaged 는 추가로 `~숫자` 로 끝나는 구성 요소(8.3 모양)를 거부한다(조작된 index 의 `GIT~1/config`; 정상 파일 `foo~1` 도 막히는 오탐을 허용). NTFS 는 끝의 `.`·공백을 떼므로 `GIT~1.`·`GIT~1 ` 도 같이 거부한다(`hasShortNameSegment`).
-- 작업 트리 status·diff 의 filter 드라이버 무력화(`src/main/git/wip.ts` `filterOverrides`): 모든 드라이버를 이번 실행에서만 `-c filter.<이름>.clean=`(smudge·process 도, `required=false`)로 비운다. **git-lfs 도 예외가 아니다**(값 비교로 기본 명령을 통과시키던 예외를 없앴다).
+- 작업 트리 status·diff 의 filter 드라이버 무력화(`src-tauri/src/git/wip.rs` 의 filter 덮어쓰기): 모든 드라이버를 이번 실행에서만 `-c filter.<이름>.clean=`(smudge·process 도, `required=false`)로 비운다. **git-lfs 도 예외가 아니다**(값 비교로 기본 명령을 통과시키던 예외를 없앴다).
   git-lfs 의 clean 은 기본 명령 그대로여도 저장소 설정의 `lfs.extension.<이름>.clean` 명령을 실행하고 `.git/lfs/objects` 에 객체를 **쓴다**(`lfs.storage` 로 쓰기 위치도 바꿀 수 있다) —
   저장소를 열기만 해도(repoExtras) 임의 명령 실행과 쓰기가 가능해 읽기 전용 경계를 깬다(재현: git-lfs 3.6.1, `.gitattributes filter=lfs` + `lfs.extension.x.clean` 표지 명령). 그래서 git-lfs 프로세스는 아예 뜨지 않는다.
   **화면 영향**: clean 이 돌지 않으므로 stat 이 바뀐(내용은 같은) LFS 추적 파일은 포인터가 아닌 원본과 비교돼 "수정됨"으로 보일 수 있고, 그 diff 는 포인터가 아니라 실제 내용(바이너리면 바이너리)으로 나온다.
@@ -80,7 +80,7 @@
   untracked(`diff --no-index`)는 index 를 읽지 않아 porcelain 그대로다. Rust 의 wip diff argv(`git/wip.rs`)도 같은 plumbing 인자·같은 staged 기준 결정을 쓴다(`docs/tauri.md` PR 6).
   전역 인자에도 `-c diff.submodule=short`·`-c submodule.recurse=false` 를 더했다(`GIT_GLOBAL_ARGS`, Rust `exec/common.rs`) — 어떤 호출이 porcelain diff 를 부르더라도 서브모듈 재귀가 켜지지 않는 방어 심층이다.
   작업 트리를 읽지 않는 호출(`blame`·`cat-file blob`·`ls-files`·`stash list`·`check-attr`·`ls-tree`)은 필터를 돌리지 않아 가드 대상이 아니다.
-- **원격 UNC 를 가리키는 링크는 따라가기 전에 거부한다**(`src/main/git/linkGuard.ts` `isRemoteLinkTarget`·`linksStayLocal`): 작업 트리 안의 심볼릭 링크·정션이 `\\host\share\…`·`//host/…`·`\\?\UNC\…`·`\??\UNC\…`·
+- **원격 UNC 를 가리키는 링크는 따라가기 전에 거부한다**(`src-tauri/src/fsguard.rs`·`git/link_guard.rs`): 작업 트리 안의 심볼릭 링크·정션이 `\\host\share\…`·`//host/…`·`\\?\UNC\…`·`\??\UNC\…`·
   WebDAV `\\host@SSL\DavWWWRoot\…`·장치 경로(`\\.\…`)·볼륨 GUID(`\\?\Volume{…}`)·`\??\GLOBALROOT\Device\Mup\…`·`\??\Device\…` 를 가리키면, `realpath`·`stat` 처럼 링크를 따라가는 호출이 나가는 순간 Windows 가 SMB/WebDAV 인증을 시도해
   NTLM 해시가 공격자 서버로 샌다 — 이후 "저장소 밖"이라 거부해도 이미 늦다. 그래서 **따라가기 전에** `linksStayLocal(path)` 가 경로를 루트부터 구성 요소 단위로 `lstat` 하며 링크마다 `readlink` 대상 문자열만 판정한다
   (대상에는 접속하지 않는다). 원격이면 거부, 로컬 대상은 그 경로도 같은 방식으로 이어서 확인하고, 링크 수가 합쳐 16 을 넘으면 거부한다. 판정은 **허용 목록**이다(차단 목록은 `GLOBALROOT` 같은 NT 장치 경로로 우회돼 폐기): 로컬은 드라이브 경로(`C:\`·`C:/`·`\\?\C:\`·`\??\C:\`)·상대 경로·단일 `/` 시작 경로·WSL 공유(`\\wsl.localhost\…`·`\\wsl$\…`)뿐이고,
@@ -101,7 +101,7 @@ Jira 토큰은 Rust 프로세스 밖(renderer 포함)으로 나가지 않는다 
 GitHub 토큰도 renderer 로 가지 않는다(원격 전용 저장소의 fetch·조회 인증은 Rust 의 캐시 실행기가 환경 변수로만 쓴다). 되돌리기 스위치(`ANTLER_RUST_*`)는 사이드카와 함께 없앴다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
 리다이렉트를 따라가지 않으며, `jira:openExternal` 은 연결한 사이트의 https 주소만, `gh:openExternal` 은 `https://github.com` 의 주소만 연다. 자세한 것은 docs/tauri.md "PR 6"·"PR 9".
 
-**Tauri 판의 SSH**(`src-tauri/src/git/exec/ssh/`, `russh`): Electron 판(`ssh2` + 자체 설정 파서)과 같은 규칙을 Rust 로 옮겼다. 호스트 키는 known_hosts 로만 검증한다(TOFU 없음 — 모르는 호스트·키가 바뀐 호스트·폐기된 키는 거부하고
+**SSH**(`src-tauri/src/git/exec/ssh/`, `russh`): Electron 판(`ssh2` + 자체 설정 파서)의 규칙을 Rust 로 옮겼다. 호스트 키는 known_hosts 로만 검증한다(TOFU 없음 — 모르는 호스트·키가 바뀐 호스트·폐기된 키는 거부하고
 ssh CLI 로 직접 수락하라고 안내한다. ProxyJump 는 홉마다 검증). `ProxyCommand`·`ProxyCommand` 가 걸리는 `Match` 는 설정을 읽는 단계에서 거부한다. 연결 뒤 원격 셸이 POSIX 인지 확인하는 명령(`echo 'an''tler'`)이 통과해야 사용자 값이 든 명령을 보낸다(Windows `cmd` 서버는 거부).
 인증은 ssh-agent 와 암호 없는 키 파일뿐이다(password·keyboard-interactive·known_hosts 쓰기·포트 포워딩 API 는 소스 검사가 허용된 파일 밖의 사용을 막는다). **서버가 먼저 여는 채널은 종류를 가리지 않고 모두 거부한다**(agent·X11·forwarded-tcpip·direct 등 7종).
 원격으로 가는 명령은 `build_remote_command`(모든 인자를 작은따옴표로 인용, 환경은 `GIT_ENV` 와 닫힌 `FetchEnv` 뿐) 하나로만 만든다 — 임의 명령을 보낼 길이 없다.
@@ -111,14 +111,14 @@ ssh CLI 로 직접 수락하라고 안내한다. ProxyJump 는 홉마다 검증)
 SSH 전송 오류(연결·호스트 키·인증·셸 확인 실패)는 문구가 아니라 오류 종류로 network(백오프)로 분류한다 — 호스트 키 불일치가 "인증 일시 정지"로 오분류되지 않는다. 원격 git 이 낸 인증 오류는 문구로 auth 다.
 호스트가 미러에서 빠지면 연결과 fetch 서비스의 실행기를 함께 닫는다. 연결 확인 창은 저장소를 **추가하는 흐름에서만** 뜨고(`env:test`·`env:listDir`·`repos:scan` 은 Rust `env_host.rs` 가, `repos:add` 는 설정 소유자(`config_host.rs`)가 같은 `EnvHost` 로 묻는다 — 승인은 프로세스 메모리이고 취소가 기본 버튼이다. 모르는 호스트·바뀐 키는 이 흐름에서도 거부하고 지문과 `ssh <별칭>` 안내를 보이며 `known_hosts` 에 쓰지 않는다), fetch 중에는 원격 설정의 위험 항목에 대한 확인 창(local·WSL 과 같은 것)만 뜬다. 자세한 것은 docs/tauri.md "SSH(Phase 5)".
 
-**저장소 감시**(Electron `RepoWatcher.ts`, Tauri `src-tauri/src/git/{watcher,fs_watch}.rs` — notify): 활성 저장소 하나의 `.git`(워크트리면 공통 디렉터리까지)만 재귀로 감시하고 변화는 **ref 시그니처가 바뀌었을 때만** 알린다(이벤트가 git 을 부르는 폭주가 되지 않게 400ms 디바운스·확인 사이 최소 2초·확인 제한 20초, 이벤트는 쌓지 않고 합친다).
+**저장소 감시**(`src-tauri/src/git/{watcher,fs_watch}.rs` — notify): 활성 저장소 하나의 `.git`(워크트리면 공통 디렉터리까지)만 재귀로 감시하고 변화는 **ref 시그니처가 바뀌었을 때만** 알린다(이벤트가 git 을 부르는 폭주가 되지 않게 400ms 디바운스·확인 사이 최소 2초·확인 제한 20초, 이벤트는 쌓지 않고 합친다).
 `.git` 파일의 `gitdir`/`commondir` 은 저장소(공격자)가 정하므로 **UNC(네트워크)·NT 네임스페이스(`\??\UNC\…`) 경로이거나, 디렉터리·`HEAD` 가 링크이거나, `HEAD` 가 없는 디렉터리는 감시하지 않는다**(링크를 따라가지 않고 `lstat` 로 본다 — stat 만으로도 SMB 접속이 일어난다. notify 도 `follow_symlinks(false)`) — 홈 전체·네트워크 경로를 가리켜 재귀 감시를 이벤트 폭주(DoS)로 만들지 못하게 한다. `objects/` 이벤트는 무시한다.
 WSL 은 4초, SSH 는 30초 폴링만 한다(`.git` 을 직접 보지 않는다). WSL 폴링은 **등록된 배포판이 있을 때만** 한다(레지스트리 확인 — WSL 을 지운 PC 의 `wsl.exe` 스텁이 설치 창을 띄우지 않게). Tauri 판에서 감시 소유는 fetch 와 같은 한 술어(소스 종류 대조 — Rust 가 맡는 종류는 Rust 만, 나머지는 감시하지 않는다)라 이중 감시도 무감시 구간도 없다.
 
 ## GitHub 원격 전용 저장소의 예외
 
 저장소 추가 대화상자의 GitHub 탭으로 추가한 저장소는 작업 폴더 없이 앱 캐시
-(`<userData>/remote-repos/<owner>/<repo>.git`, bare + `blob:none` partial)에 이력만 받는다(`src/main/git/githubCache.ts`).
+(`<userData>/remote-repos/<owner>/<repo>.git`, bare + `blob:none` partial)에 이력만 받는다(`src-tauri/src/git/github_cache.rs`).
 위 규칙과 의도적으로 다른 점은 셋이며, 모두 이 캐시 저장소에만 적용된다.
 
 1. **토큰이 GitHub 서비스 밖으로 나가는 유일한 경로** — 이 저장소의 git 에만 `GIT_CONFIG_COUNT` 환경 변수로
@@ -187,3 +187,5 @@ fetch 자체는 닫힌 진입점(`--filter=blob:none`·`http.followRedirects=fal
 - 사용 가능 판정은 번들러가 심은 `bundle_type()`(NSIS)뿐이다(환경 변수를 믿지 않는다). 개발 장치(`ANTLER_UPDATE_FAKE`)는 개발·cdp 빌드 코드에만 있다.
 - **설치 직전 정리**: `Update::install` 이 `exit(0)` 으로 끝나 `RunEvent::Exit` 을 건너뛰므로 `on_before_exit` 가 같은 `exit_cleanup`(git 프로세스 트리 종료 등)을 부른다.
 - **지키지 못하는 것**: 첫 설치(Electron 이관 포함)의 무결성은 Electron 이 읽는 `latest.yml` 의 sha512 다(Electron 쪽 코드). 설치본에 Authenticode 가 없다(코드 서명 인증서 없음). 플러그인이 임시 폴더에 쓴 설치본과 실행 사이의 TOCTOU 는 같은 사용자 권한 범위다.
+- **릴리스 가드(CI, Phase 6c PR 7)**: 발행은 되돌릴 수 없어 **태그를 만들기 전**에 점검한다 — 업데이트 공개 키가 없는(`None`) 빌드는 발행하지 않고, 자산(설치본·`.sig`·`latest.json` 의 다섯 플랫폼 키·`latest.yml`)이 하나라도 빠지거나 예상 밖 파일이 있으면 실패한다.
+  서명 시크릿은 서명 잡(Environment `release`) 하나만 받고 빌드 잡은 받지 않는다. 메이저 올림은 초안으로 발행하고, 직전 정식 릴리스가 초안이면 야간 릴리스를 만들지 않는다. 자세한 것은 [tauri.md](tauri.md) "PR 7", [build.md](build.md).

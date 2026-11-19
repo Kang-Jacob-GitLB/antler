@@ -7,7 +7,7 @@ export function newRequestId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${(seq++).toString(36)}`
 }
 
-/** preload 가 붙인 "[CODE] message" 형식에서 취소 여부를 판별한다 */
+/** bridge 가 붙인 "[CODE] message" 형식에서 취소 여부를 판별한다 */
 export function isAbort(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('[ABORTED]')
 }

@@ -1,9 +1,10 @@
 // 배포 빌드 feature 가드(scripts/check-release-features.mjs)와 패키징 워크플로(.github/workflows/tauri-package.yml)의 정적 검사.
-// 워크플로는 이 PR 머지 전에는 실행할 수 없다(workflow_dispatch 는 기본 브랜치의 파일만 돈다) — 여기서는 "발행하지 않는다"는 불변식과 가드 연결만 본다.
+// 워크플로는 머지 전에는 실행할 수 없다(workflow_dispatch 는 기본 브랜치의 파일만 돈다) — 여기서는 "이 워크플로는 발행하지 않는다"는 불변식과 가드 연결만 본다.
+// 발행 경로(release.yml·nightly-release.yml)의 정적 검사는 tests/releaseWorkflow.test.ts.
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parseYaml } from './yamlLite'
 // @ts-expect-error — 순수 JS 스크립트(타입 선언 없음)
 import { FORBIDDEN, findForbidden } from '../scripts/check-release-features.mjs'
 
@@ -60,19 +61,31 @@ describe('tauri-package.yml', () => {
     expect(code).not.toMatch(/contents:\s*write|action-gh-release|gh release|git tag|git push|actions\/create-release/)
   })
 
-  it('수동 실행(workflow_dispatch)만 쓰고 release.yml 과 이어지지 않는다', () => {
+  it('수동 실행(workflow_dispatch)과 재사용 호출(workflow_call)만 쓰고, 부르는 곳은 release.yml 하나다', () => {
     expect(code).toMatch(/^on:\n {2}workflow_dispatch:/m)
-    expect(code).not.toMatch(/^ {2}(push|pull_request|workflow_call|schedule):/m)
+    expect(code).toMatch(/^ {2}workflow_call:/m)
+    expect(code).not.toMatch(/^ {2}(push|pull_request|schedule):/m)
     for (const f of readdirSync(join(root, '.github', 'workflows'))) {
       if (f === 'tauri-package.yml') continue
-      expect(read('.github', 'workflows', f), f).not.toContain('tauri-package')
+      // 부르는 곳(`uses:`)만 센다 — tauri.yml 의 변경 감지 목록처럼 이름을 적기만 하는 것은 호출이 아니다
+      const calls = /^\s*uses:\s*\.\/\.github\/workflows\/tauri-package\.yml\s*$/m.test(read('.github', 'workflows', f))
+      expect(calls, f).toBe(f === 'release.yml')
     }
+  })
+
+  it('재사용 호출은 계산한 커밋(inputs.sha)을 빌드한다 — 세 잡의 모든 checkout 이 ref 를 준다', () => {
+    const checkouts = Object.values(jobs).flatMap((j) => j.steps.filter((s) => s.uses?.startsWith('actions/checkout@')))
+    expect(checkouts).toHaveLength(3)
+    for (const s of checkouts) expect(s.with?.['ref']).toBe('${{ inputs.sha || github.sha }}')
+    const on = (parseYaml(wf) as { on: { workflow_call: { inputs: Record<string, { required?: boolean }> } } }).on
+    expect(Object.keys(on.workflow_call.inputs).sort()).toEqual(['sha', 'version'])
+    expect(on.workflow_call.inputs['sha']?.required).toBe(true)
+    expect(on.workflow_call.inputs['version']?.required).toBe(true)
   })
 
   type Step = { name?: string; uses?: string; run?: string; if?: string; env?: Record<string, string>; with?: Record<string, unknown> }
   type Job = { environment?: string; env?: Record<string, string>; needs?: string | string[]; steps: Step[] }
-  const yaml = createRequire(createRequire(import.meta.url).resolve('electron-builder'))('js-yaml') as { load(s: string): unknown }
-  const jobs = (yaml.load(wf) as { jobs: Record<string, Job> }).jobs
+  const jobs = (parseYaml(wf) as { jobs: Record<string, Job> }).jobs
   const job = (id: string): Job => {
     const j = jobs[id]
     if (!j) throw new Error(`잡이 없다: ${id}`)
@@ -116,8 +129,10 @@ describe('tauri-package.yml', () => {
     const install = stepAt('Tauri CLI 설치')
     // 키가 주어지는 단계보다 앞에서 설치하고, 설치 스크립트는 돌리지 않는다. 이 잡에는 빌드가 없다
     expect(install.run).toBe('pnpm install --frozen-lockfile --ignore-scripts --store-dir "$RUNNER_TEMP/pnpm-store"')
-    // 빌드 잡이 저장한 pnpm 캐시를 키가 있는 잡이 복원하지 않는다
-    expect(JSON.stringify(sign)).not.toContain('cache')
+    // 서명 잡은 빌드 잡이 저장한 캐시를 복원하지 않는다(오염된 Tauri CLI 바이너리가 서명 키를 읽는 길) — setup-node 에 cache 가 없다
+    const node = sign.steps.find((s) => s.uses?.startsWith('actions/setup-node@'))
+    expect(node?.with).toEqual({ 'node-version': '22' })
+    expect(JSON.stringify(sign)).not.toMatch(/actions\/cache|cache:|cache-dependency/)
     expect(idx('Tauri CLI 설치')).toBeLessThan(idx('서명 키 확인'))
     expect(idx('서명 키 확인')).toBeLessThan(idx('업데이트 서명'))
     expect(sign.steps.some((s) => /tauri build|cargo|rustup/.test(s.run ?? ''))).toBe(false)
@@ -224,8 +239,7 @@ describe('tauri.yml', () => {
   const code = wf.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n')
   type Step = { name?: string; uses?: string; run?: string }
   type Job = { name?: string; 'runs-on'?: string; steps: Step[]; strategy?: { matrix: { os: string[] } } }
-  const yaml = createRequire(createRequire(import.meta.url).resolve('electron-builder'))('js-yaml') as { load(s: string): unknown }
-  const jobs = (yaml.load(wf) as { jobs: Record<string, Job> }).jobs
+  const jobs = (parseYaml(wf) as { jobs: Record<string, Job> }).jobs
 
   it('필수 체크 잡(rust)의 이름과 러너는 그대로다 — 브랜치 룰셋이 이름으로 건다', () => {
     expect(jobs['rust']?.name).toBe('Rust · 골든 · clippy')

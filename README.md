@@ -16,17 +16,18 @@
 
 | OS | 파일 |
 |---|---|
-| Windows | `Antler-Setup-<버전>-x64.exe`(설치) 또는 portable exe |
+| Windows | `Antler-Setup-<버전>-x64.exe`(설치 — 사용자별, portable 은 없다) |
 | macOS | dmg (Intel · Apple Silicon) |
-| Linux | AppImage · deb |
+| Linux | deb (x64) |
 
 설치한 뒤에는 앱이 새 버전을 알려 주고, 누르면 업데이트한다([업데이트 방식](docs/updates.md)).
 코드 서명이 없어 처음 실행할 때 Windows SmartScreen 이나 macOS Gatekeeper 경고가 뜰 수 있다.
+**v1.x(Electron 판)를 쓰고 있다면** [v2.0.0 노트](docs/release-notes/v2.0.0.md)를 먼저 본다 — Tauri 판으로 바뀌며 GitHub·Jira 에 다시 로그인해야 한다.
 
 ## 한눈에 보기
 
 - **어디에 있든 같은 화면** — 로컬 폴더, WSL 배포판, SSH 원격 서버의 저장소를 한 목록에서 고른다. git 은 각 환경 안에서 돈다.
-- **커밋 10만 개도 부드럽게** — Canvas 레인 그래프와 가상 스크롤. 콜드 스타트 약 1.2초, 스크롤 p95 13ms.
+- **커밋 10만 개도 부드럽게** — Canvas 레인 그래프와 가상 스크롤. 스크롤 p95 13ms(Tauri 판 측정은 [docs/tauri.md](docs/tauri.md) "Phase 0 측정").
 - **GitHub · Jira 를 같은 창에서** — PR·이슈·Actions, 여러 저장소를 모은 Launchpad, Jira 칸반·워크로그.
 - **저장소를 건드리지 않는다** — commit·push 같은 쓰기 기능이 없다. 자동 fetch 도 원격 추적 ref 만 갱신하고, 악성 저장소 설정을 막는다.
 - 다크 · 라이트 · 시스템 테마, 한국어 · English.
@@ -166,13 +167,15 @@ macOS 에서는 `Ctrl` 이 `⌘`, `Alt` 가 `⌥` 다.
 
 | 문서 | 내용 |
 |---|---|
-| [docs/build.md](docs/build.md) | 소스에서 실행·빌드·패키징, 릴리스 CI, 개발 도구 스크립트 |
+| [docs/build.md](docs/build.md) | 소스에서 실행·빌드·패키징, 릴리스 CI·가드, 개발 도구 스크립트 |
 | [docs/architecture.md](docs/architecture.md) | 프로젝트 구조, 핵심 설계, 성능 측정, 의존성 |
 | [docs/security.md](docs/security.md) | 보안 설계 — 악성 저장소 방어, fetch 가드, 토큰 보관 |
 | [docs/connections.md](docs/connections.md) | GitHub · Jira 로그인, WSL · SSH 설정 |
-| [docs/updates.md](docs/updates.md) | 앱 업데이트 방식과 다운로드 검증 |
+| [docs/updates.md](docs/updates.md) | 앱 업데이트 방식·다운로드 검증, Electron 판(v1.x)에서 올라오기 |
+| [docs/tauri.md](docs/tauri.md) | Electron → Tauri 2 전환의 계획·결정·진행 기록, 릴리스 전환(PR 7)과 리허설 |
+| [docs/release-notes/v2.0.0.md](docs/release-notes/v2.0.0.md) | v2.0.0 변경 사항(이관·재로그인·되돌리기) |
 
-소스에서 바로 실행하려면(Node 22+, pnpm 10+, 각 환경 안에 git 2.36+):
+소스에서 바로 실행하려면(Node 22+, pnpm 10+, Rust stable, 각 환경 안에 git 2.36+):
 
 ```bash
 pnpm install
@@ -185,7 +188,7 @@ pnpm dev
 - GitHub Enterprise · GitLab · Bitbucket 은 지원하지 않는다.
 - SSH 원격의 로그인 셸이 cmd/PowerShell 이면 지원하지 않는다.
 - 코드 서명이 없다(Windows SmartScreen, macOS Gatekeeper 경고).
-- macOS · Linux 패키지는 개발 환경에서 직접 검증하지 못했다.
+- macOS · Linux 판은 개발 환경에서 직접 검증하지 못했다. 알려진 한계: 단축키·환경 표기와 창 단추가 Windows 식이고, Windows 밖에서는 GitHub·Jira 토큰을 저장하지 못해 **앱을 끄면 로그인이 풀린다**.
 
 ## 라이선스
 
@@ -194,4 +197,4 @@ pnpm dev
 - Pretendard — OFL 1.1
 - Nanum Gothic Coding — OFL 1.1
 
-라이선스 고지는 `resources/licenses/`(Pretendard·나눔고딕코딩 폰트, 번들 라이브러리 `THIRD_PARTY_NOTICES.txt`)에 있고, 패키지에는 `resources/licenses/` 로 동봉된다. ssh2 와 그 의존 패키지는 `app.asar` 의 node_modules 에 각자의 LICENSE 와 함께 실린다.
+라이선스 고지는 `resources/licenses/`(Pretendard·나눔고딕코딩 폰트, 번들 라이브러리 `THIRD_PARTY_NOTICES.txt`)에 있다. Electron 판은 이것을 패키지에 동봉했지만 **Tauri 판의 번들 설정에는 아직 동봉이 없다**([docs/tauri.md](docs/tauri.md) "PR 7" 의 남은 위험) — Rust 의존 crate 의 고지도 아직 없다.

@@ -1,9 +1,9 @@
 // 서드파티 라이선스 고지 생성(scripts/lib/notices.mjs)과 Tauri 번들·워크플로 연결의 시험.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { parseYaml } from './yamlLite'
 // @ts-expect-error — 순수 JS 스크립트(타입 선언 없음)
 import { BUNDLED, npmSection, readLicenseFiles, rustNotices, selectNormalCrates } from '../scripts/lib/notices.mjs'
 
@@ -124,9 +124,9 @@ describe('Tauri 번들·워크플로 연결', () => {
   })
 
   it('tauri-package.yml 의 모든 빌드 잡이 빌드 앞에서 고지를 만들고, 그 단계에는 시크릿이 없다', () => {
-    const yaml = createRequire(createRequire(import.meta.url).resolve('electron-builder'))('js-yaml') as { load(s: string): unknown }
+    // yamlLite: js-yaml 은 Electron 의존(electron-builder)과 함께 사라졌다
     type Step = { name?: string; run?: string }
-    const jobs = (yaml.load(read('.github', 'workflows', 'tauri-package.yml')) as { jobs: Record<string, { steps: Step[] }> }).jobs
+    const jobs = (parseYaml(read('.github', 'workflows', 'tauri-package.yml')) as { jobs: Record<string, { steps: Step[] }> }).jobs
     for (const id of ['windows', 'unix']) {
       const steps = jobs[id]?.steps ?? []
       const gen = steps.findIndex((s) => s.run?.includes('pnpm tauri:notices'))

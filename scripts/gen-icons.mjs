@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // resources/icon.svg(48px 이상) · icon-small.svg(16~32px)로 플랫폼별 아이콘을 만든다.
-//   resources/icon.png        512×512 (Linux·electron-builder 기본)
+//   resources/icon.png        512×512 (Linux·Tauri 번들 아이콘)
 //   resources/icons/<n>.png   16·24·32·48·64·128·256·512·1024
 //   resources/icon.ico        Windows(16~256 묶음 — 작은 크기는 단순판)
 //   resources/icon.icns       macOS

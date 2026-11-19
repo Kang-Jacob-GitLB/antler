@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Antler 는 Windows · WSL · SSH 의 git 저장소를 한 창에서 보는 **읽기 전용** Git GUI(Electron + React + TypeScript)다.
+Antler 는 Windows · WSL · SSH 의 git 저장소를 한 창에서 보는 **읽기 전용** Git GUI(Tauri 2 · Rust 백엔드 + React + TypeScript renderer)다.
 사용자 소개는 [README.md](README.md), 세부 문서는 [docs/](docs/) 에 있다.
 
 | 문서 | 내용 |
@@ -10,37 +10,41 @@ Antler 는 Windows · WSL · SSH 의 git 저장소를 한 창에서 보는 **읽
 | [docs/build.md](docs/build.md) | 설치·실행·패키징·릴리스(CI), 개발 도구 스크립트 |
 | [docs/connections.md](docs/connections.md) | GitHub·Jira 로그인, WSL·SSH |
 | [docs/updates.md](docs/updates.md) | 앱 안 업데이트 동작과 검증 |
-| [docs/tauri.md](docs/tauri.md) | Tauri 2 전환 계획·결정·진행 상태(src-tauri, src/renderer/tauri — Node 사이드카는 6c PR 5 에서 제거) |
+| [docs/tauri.md](docs/tauri.md) | Electron → Tauri 2 전환의 계획·결정·진행 기록(src-tauri, src/renderer/tauri), 릴리스 전환(PR 7)·리허설 |
+| [docs/release-notes/](docs/release-notes/) | 메이저 릴리스 노트(야간 릴리스가 태그 메시지 앞에 붙인다) |
 
 ## 명령
 
 ```bash
 pnpm install
-pnpm dev                        # 개발 모드(HMR)
-pnpm typecheck                  # main/preload + renderer 타입 검사
-pnpm test                       # vitest
-pnpm build                      # out/
+pnpm dev                        # tauri dev(vite 개발 서버 + Rust 디버그 빌드)
+pnpm typecheck                  # renderer·shared·scripts·tests 타입 검사
+pnpm test                       # vitest(renderer·shared·릴리스 가드·워크플로 정적 검사)
+pnpm build                      # 프런트 빌드(vite build → out-tauri/renderer)
 node scripts/check-contrast.mjs # 디자인 토큰 WCAG 대비(미달 시 exit 1)
+cargo test --manifest-path src-tauri/Cargo.toml --features test-hooks --lib --test golden …   # Rust 시험 — 전체 목록은 .github/workflows/tauri.yml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings                # 기본·--features test-hooks 둘 다
 ```
 
-PR 필수 체크(`build.yml`)는 위 typecheck · test · build · check-contrast 다. 커밋 전에 넷 다 돌린다.
-화면 확인은 `pnpm build` 후 `node scripts/drive.mjs <저장소>` (임시 userData 를 써서 실사용 설정을 건드리지 않는다).
+PR 필수 체크는 `build.yml`('Typecheck · Test · Build': typecheck · test · build · check-contrast)과 `tauri.yml`('Rust · 골든 · clippy': cargo test · clippy 둘)다. 커밋 전에 다 돌린다.
+**잡 이름은 브랜치 룰셋이 이름으로 건다 — 바꾸면 PR 머지가 막힌다.** 골든(`tests/golden/**`)은 동결된 사양이다(TS 생성기는 지워졌다) — 동작을 바꾸면 Rust 시험과 함께 골든을 손으로 고친다.
+화면 확인은 `pnpm tauri:build:cdp` 후 `node scripts/drive.mjs <저장소>` (임시 userData 를 써서 실사용 설정을 건드리지 않는다).
 
 ## 지켜야 할 경계
 
 - **저장소에는 쓰지 않는다.** commit·push·merge 같은 쓰기 기능은 넣지 않는다. 예외는 원격 추적 ref 를 갱신하는 `git fetch` 와
   GitHub 원격 전용 저장소의 앱 캐시뿐이다. Jira 는 조회와 이슈 상태 전환만 한다(워크로그 쓰기는 사용자 결정 없이 넣지 않는다).
 - **fetch 보안 모델을 약화하지 않는다.** 원격마다 목적지를 `refs/remotes/<이름>/` 로 고정한 refspec + `--refmap=`,
-  저장소 로컬 설정은 **허용 목록**(`src/main/git/fetch.ts` 의 `ALLOWED_KEYS`)만 통과시킨다. 차단 목록 방식으로 되돌리지 않는다
+  저장소 로컬 설정은 **허용 목록**(`src-tauri/src/git/fetch/guard.rs` 의 `ALLOWED_KEYS`)만 통과시킨다. 차단 목록 방식으로 되돌리지 않는다
   (리뷰마다 우회돼 폐기한 방식이다). 자세한 이유는 docs/security.md.
 - 저장소 내용(코드·커밋)을 외부 서비스로 보내는 기능은 넣지 않는다(예: AI 커밋 설명).
-- 토큰은 main 프로세스에만 두고 renderer 로 넘기지 않는다.
-- 저장소 내용을 읽는 git 호출은 textconv·필터가 돌지 않는 형태만 쓴다(파일 내용은 `cat-file blob`, `git show` 금지 — `src/main/git/codeBrowse.ts`).
+- 토큰은 Rust(main) 프로세스에만 두고 renderer 로 넘기지 않는다.
+- 저장소 내용을 읽는 git 호출은 textconv·필터가 돌지 않는 형태만 쓴다(파일 내용은 `cat-file blob`, `git show` 금지 — `src-tauri/src/git/code_browse.rs`).
 
 ## 코드 규약
 
-- **새 IPC 채널**은 `src/shared/ipc.ts` 의 `IpcMap` 과 `IPC_CHANNELS` 허용 목록 **둘 다**에 넣는다. 빠뜨리면 preload 가 막는다.
-- main 은 renderer 가 보낸 모든 입력(경로·해시·ref 등)을 검증한다. git 호출은 `GitExecutor` 를 거친다.
+- **새 IPC 채널**은 `src/shared/ipc.ts` 의 `IpcMap` 과 `IPC_CHANNELS` 허용 목록 **둘 다**에 넣고, Rust 라우터의 처리 목록(`src-tauri/src/router.rs`) **정확히 하나**에 넣는다. 빠뜨리면 bridge 가 막거나 `src-tauri/tests/channel_scope.rs` 가 깨진다.
+- Rust(main)는 renderer 가 보낸 모든 입력(경로·해시·ref 등)을 검증한다. git 호출은 `git::exec`(`GitExecutor`)를 거친다.
 - 명령·단축키는 `src/renderer/src/lib/commands.ts` 한 곳에서 정의한다(팔레트·단축키 목록·전역 단축키가 모두 여기서 나온다).
 - 문구는 `src/renderer/src/i18n/` 의 ko · en 둘 다 추가한다.
 - 클립보드 복사는 `lib/clipboard.ts` 의 `copyText` 를 쓴다. 앱이 권한 요청을 모두 거부해 `navigator.clipboard` 는 조용히 실패한다.
