@@ -12,15 +12,16 @@
   -webkit-app-region: drag;
   user-select: none;
 }
+/* data-native-titlebar(Tauri 판의 mac·linux): OS 제목 표시줄을 쓰므로 아래 두 자리를 비운다 */
 /* win·linux: OS 창 컨트롤 오버레이 자리. WCO 값이 있으면 그 폭에 맞추고 없으면 138px */
-:root:not([data-platform='darwin']) .toolbar {
+:root:not([data-platform='darwin']):not([data-native-titlebar]) .toolbar {
   padding-right: max(
     var(--space-3),
     calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)))
   );
 }
 /* mac: 신호등 버튼 자리 */
-:root[data-platform='darwin'] .toolbar {
+:root[data-platform='darwin']:not([data-native-titlebar]) .toolbar {
   padding-left: 78px;
 }
 .crumb,

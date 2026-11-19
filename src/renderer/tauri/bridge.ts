@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { IPC_CHANNELS, IPC_EVENTS, type AntlerApi, type IpcEnvelope } from '@shared/ipc'
 import { UNDEFINED_ARG } from '../../sidecar/protocol'
+import { resolvePlatform } from './platform'
 import './titlebar.css'
 
 const channels = new Set<string>(IPC_CHANNELS)
@@ -31,8 +32,13 @@ function encodeArgs(args: unknown[]): unknown[] {
 const root = document.documentElement
 root.dataset['shell'] = 'tauri'
 
+const platform = resolvePlatform((window as unknown as Record<string, unknown>)['__ANTLER_PLATFORM__'], navigator.userAgent)
+// Windows 만 앱이 창 단추를 그린다. 그 밖에는 OS 제목 표시줄을 쓰므로 단추 자리·신호등 자리를 비운다(Toolbar.css)
+const customTitlebar = platform === 'win32'
+if (!customTitlebar) root.dataset['nativeTitlebar'] = ''
+
 const api: AntlerApi = {
-  platform: 'win32',
+  platform,
   async invoke(channel, ...args) {
     if (!channels.has(channel)) throw new Error(`blocked channel: ${channel}`)
     // 창 컨트롤은 bridge 가 직접 그리므로 제목 표시줄 색은 CSS 로 처리한다(Rust 로 보내지 않는다)
@@ -151,7 +157,7 @@ function watchFirstRow(): void {
 }
 
 const start = (): void => {
-  mountWindowControls()
+  if (customTitlebar) mountWindowControls()
   installToolbarDrag()
   if ((window as unknown as Record<string, unknown>)['__ANTLER_MEASURE__']) watchFirstRow()
 }

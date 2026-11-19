@@ -2511,6 +2511,7 @@ debian-binary`, dmg: 끝 512바이트의 `koly` — `Target::check_bytes`). 서�
 - `src/renderer/tauri/bridge.ts` 의 `platform: 'win32'` 고정(계획 §6c)이 macOS·Linux 화면(창 버튼·스냅 등)에 주는 영향은 이 PR 이 건드리지 않았다 — 업데이트 스낵바는 `platform` 을 보지 않는다.
 
 **사람 확인(리허설 R — macOS·Linux)**
+- 실제 OS 전달(`fix-tauri-platform`): Rust(`src-tauri/src/platform.rs`)가 `std::env::consts::OS` 를 `process.platform` 값으로 바꿔 창 초기화 스크립트(`window.__ANTLER_PLATFORM__`)로 심고 `bridge.ts` 가 읽는다. Windows 가 아니면 `decorations(true)`(OS 제목 표시줄)로 만들고 bridge 는 창 단추·Win+Z 스냅 호출을 붙이지 않으며 `data-native-titlebar` 로 툴바의 단추·신호등 자리를 비운다. macOS·Linux 에서 확인 못 한 것: (1) 컴파일 — 특히 `lib.rs` 의 `data_directory`·`additional_browser_args` 는 Tauri 에서 플랫폼 한정 API 일 수 있어 비-Windows 빌드가 막힐 수 있다, (2) 제목 표시줄 아래 툴바 드래그·더블클릭 최대화, (3) macOS 에서 제목 표시줄을 숨기고 신호등을 툴바에 얹는 Overlay 스타일(Electron 판과 같은 모양)은 적용하지 않았다.
 - macOS(arm64·x64 각각): 앱 번들(`/Applications/Antler.app`)로 실행 → `bundle_type()` 이 `App` 이고 `--no-bundle` 빌드는 확인하지 않는지, 시작 10초 뒤 스낵바 → [업데이트] 진행률 → dmg 가 마운트되는지(Finder 에 창이 뜨는지)·`~/Library/Application Support/<앱>/updates/` 에 `Antler-<v>-<arch>.dmg` 가 생기는지·[다시 열기]가 되는지, Gatekeeper 가 미서명 앱을 처음 열 때 안내(build.md)대로 열리는지, 같은 버전을 다시 받아도 오류가 없는지(같은 내용 재사용), 파일을 바꾼 뒤 [다시 열기]가 거부되는지.
 - Linux(deb): `dpkg -i`/소프트웨어 센터로 설치한 앱에서 `bundle_type()` 이 `Deb` 인지·`xdg-open` 이 `.deb` 를 소프트웨어 센터로 여는지(데스크톱 환경별로 다를 수 있다 — GNOME 소프트웨어·Discover·Ubuntu 소프트웨어 센터)·열리지 않으면 "다운로드 폴더에서 직접 여세요" 오류가 보이는지.
 - 공통: 공개 키가 들어간 뒤 `tauri-package.yml` 로 만든 `latest.json` 에 세 수동 키가 있고 `.sig` 가 앱의 공개 키와 한 쌍인지, 서명이 없는 갈래는 알림만 없고 오류가 없는지.
