@@ -125,11 +125,14 @@ jobs:
         run: node scripts/check-release-preflight.mjs --version "$VERSION"
 
   # ── 세 OS 설치본 빌드·서명·매니페스트(tauri-package.yml) ────────────────
-  # 시크릿(TAURI_SIGNING_PRIVATE_KEY·_PASSWORD)은 그 안의 sign 잡이 Environment `release` 로 직접 받는다 — 이 호출에 secrets 를 넘기지 않는다
+  # 시크릿(TAURI_SIGNING_PRIVATE_KEY·_PASSWORD)은 그 안의 sign 잡이 Environment `release` 로 받는다.
+  # 재사용 워크플로 안의 잡은 호출자가 secrets 를 넘겨야(inherit) Environment 시크릿도 보인다(v2.0.0-rc.2 에서 넘기지 않아 빈 값이었다).
+  # inherit 는 시크릿을 "쓸 수 있게"만 한다 — 실제로 secrets.* 를 참조하는 곳은 sign 잡 두 단계뿐이다(시험이 강제)
   package:
     name: 패키징
     needs: preflight
     uses: ./.github/workflows/tauri-package.yml
+    secrets: inherit
     with:
       version: ${{ needs.preflight.outputs.version }}
       sha: ${{ needs.preflight.outputs.sha }}

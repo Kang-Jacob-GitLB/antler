@@ -130,6 +130,8 @@ jobs:
     permissions:
       contents: write # 발행 잡이 태그를 push 하고 Release 를 만든다
     uses: ./.github/workflows/release.yml
+    # release.yml → tauri-package.yml 의 sign 잡까지 시크릿이 닿게 한다(재사용 호출은 단계마다 넘겨야 한다)
+    secrets: inherit
     with:
       version: ${{ needs.plan.outputs.version }}
       sha: ${{ needs.plan.outputs.sha }}

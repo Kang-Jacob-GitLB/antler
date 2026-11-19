@@ -51,10 +51,13 @@ describe('release.yml — 태그에서 Tauri 설치본을 초안으로 발행한
     for (const k of ['version', 'sha', 'notes']) expect(on.workflow_call.inputs[k]?.required, k).toBe(true)
   })
 
-  it('시크릿은 이 파일에 없다 — secrets 를 넘기지도(inherit 포함) 참조하지도 않는다. 서명 키는 tauri-package 의 sign 잡이 Environment 로 받는다', () => {
+  it('시크릿은 이 파일에서 참조하지 않는다. 재사용 호출(package)에만 inherit 로 넘기고, 서명 키는 tauri-package 의 sign 잡이 Environment 로 받는다', () => {
     expect(code(f)).not.toMatch(/secrets\./)
-    expect(job(f, 'package').secrets).toBeUndefined()
-    for (const file of readdirSync(WORKFLOWS)) expect(code(file), file).not.toMatch(/secrets:\s*inherit/)
+    // 재사용 워크플로 안의 잡은 호출자가 넘겨야 Environment 시크릿도 보인다(v2.0.0-rc.2 에서 빈 값이었다)
+    expect(job(f, 'package').secrets).toBe('inherit')
+    // inherit 는 재사용 호출 두 곳(nightly → release, release → tauri-package)에만 있다
+    const inherits = readdirSync(WORKFLOWS).flatMap((file) => [...code(file).matchAll(/^\s*secrets:\s*inherit\s*$/gm)].map(() => file))
+    expect(inherits.sort()).toEqual(['nightly-release.yml', 'release.yml'])
     // 시크릿을 참조하는 곳은 tauri-package.yml 의 서명 잡 두 단계뿐이다(릴리스 발행 잡의 GITHUB_TOKEN 은 secrets 가 아니라 자동 토큰이다)
     const referencing = readdirSync(WORKFLOWS).filter((file) => /secrets\./.test(code(file)))
     expect(referencing).toEqual(['tauri-package.yml'])
@@ -174,7 +177,7 @@ describe('nightly-release.yml — 메이저는 초안으로, 초안이 공개 �
     expect(rel.with?.['draft']).toBe("${{ needs.plan.outputs.draft == 'true' }}")
     expect(rel.if).toBe("needs.plan.outputs.release == 'true' && inputs.dry_run != true")
     expect(rel.permissions).toEqual({ contents: 'write' })
-    expect(rel.secrets).toBeUndefined()
+    expect(rel.secrets).toBe('inherit') // release.yml 의 재사용 호출까지 Environment 시크릿이 닿게
   })
 })
 
