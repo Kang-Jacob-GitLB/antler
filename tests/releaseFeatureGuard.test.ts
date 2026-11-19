@@ -239,8 +239,7 @@ describe('tauri.yml', () => {
   const code = wf.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n')
   type Step = { name?: string; uses?: string; run?: string }
   type Job = { name?: string; 'runs-on'?: string; steps: Step[]; strategy?: { matrix: { os: string[] } } }
-  const yaml = createRequire(createRequire(import.meta.url).resolve('electron-builder'))('js-yaml') as { load(s: string): unknown }
-  const jobs = (yaml.load(wf) as { jobs: Record<string, Job> }).jobs
+  const jobs = (parseYaml(wf) as { jobs: Record<string, Job> }).jobs
 
   it('필수 체크 잡(rust)의 이름과 러너는 그대로다 — 브랜치 룰셋이 이름으로 건다', () => {
     expect(jobs['rust']?.name).toBe('Rust · 골든 · clippy')

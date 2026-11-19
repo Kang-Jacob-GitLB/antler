@@ -219,7 +219,8 @@ describe('Electron 제거(Phase 6c PR 7)', () => {
   it('tauri.conf.json 의 프런트 빌드와 package.json 의 빌드 스크립트가 같은 설정을 쓴다', () => {
     const conf = JSON.parse(read('src-tauri', 'tauri.conf.json')) as { build: { beforeBuildCommand: string; beforeDevCommand: string } }
     const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
-    expect(conf.build.beforeBuildCommand).toBe(pkg.scripts['build'])
+    // 설치본 빌드는 라이선스 고지를 먼저 생성한다(번들 resources — scripts/gen-tauri-notices.mjs)
+    expect(conf.build.beforeBuildCommand).toBe(`pnpm tauri:notices && ${pkg.scripts['build']}`)
     expect(conf.build.beforeDevCommand).toBe('pnpm tauri:web')
     expect(existsSync(join(root, 'vite.config.mts'))).toBe(true)
     expect(read('vite.config.mts')).not.toMatch(/electron/i)
