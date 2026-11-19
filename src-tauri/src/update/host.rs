@@ -34,7 +34,7 @@ use crate::net::json::Json;
 
 /// 업데이트 서명의 **공개 키**(`tauri signer generate` 가 만든 `.pub` 파일 내용 — minisign 공개 키 텍스트를 base64 로 한 번 더 감싼 한 줄)다.
 /// 사용자가 서명 키를 만들어 공개 키를 주면 **여기 한 줄만** `Some("…")` 로 바꾼다(방법·확인은 docs/updates.md). `None` 인 동안 이 빌드는 업데이트를 내려받지도 설치하지도 않는다(fail-closed)
-pub const UPDATE_PUBKEY: Option<&str> = None;
+pub const UPDATE_PUBKEY: Option<&str> = Some("dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU4Q0M0QkI0MTJEMzQ0RjEKUldUeFJOTVN0RXZNNkh5YnlKa295OFVLUWxJc3c4TlZhSzd2d1Zib21WY1dFNjdna0ZBZVMranIK");
 
 /// 키가 없을 때의 오류 문구(내려받기·설치 단계)
 pub const NO_KEY_MESSAGE: &str = "업데이트 서명 키가 설정되지 않았습니다. 이 빌드는 업데이트를 설치할 수 없습니다";
