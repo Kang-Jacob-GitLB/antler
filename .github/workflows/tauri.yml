@@ -155,7 +155,7 @@ jobs:
           $RELEVANT = @(
             '^src-tauri/', '^tests/golden/', '^tests/fixtures/', '^src/main/git/', '^src/main/executors/',
             '^src/main/services/RepoService\.ts$', '^src/main/services/ConfigStore\.ts$', '^src/main/windowState\.ts$','^src/main/ipc/handlers\.ts$',
-            '^scripts/make-repo-fixtures\.mjs$', '^scripts/make-edge-fixtures\.mjs$', '^scripts/lib/edgeFixtures6a\.mjs$', '^src/shared/', '^src/sidecar/',
+            '^scripts/make-repo-fixtures\.mjs$', '^scripts/make-edge-fixtures\.mjs$', '^scripts/lib/edgeFixtures6a\.mjs$', '^src/shared/',
             '^src/renderer/tauri/', '^tests/golden.*\.test\.ts$', '^\.github/workflows/tauri\.yml$',
             '^src/main/ipc/confirmText\.ts$', '^src/main/ipc/jira\.ts$', '^src/main/ipc/github\.ts$', '^scripts/gen-fetch-special\.mjs$', '^src/main/github/', '^src/main/jira/',
             '^src/main/update/', '^tests/update\.test\.ts$',
