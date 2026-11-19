@@ -565,6 +565,7 @@ fn tree_of(root: u32, snap: &[(u32, u32)]) -> Vec<u32> {
     tree
 }
 
+#[cfg(windows)]
 fn big_repo() -> String {
     match std::env::var("ANTLER_BIG_REPO") {
         Ok(p) if !p.is_empty() => p,
@@ -718,6 +719,7 @@ async fn 트리_kill_폴백_taskkill_도_트리를_죽이고_종료가_기다린
 // ---------------------------------------------------------------------------------------------------------------------
 
 /// 시간 제한이 있는 날 프로세스 실행(wsl.exe 가 멈춰도 테스트가 매달리지 않게)
+#[cfg(windows)]
 fn output_with_timeout(mut cmd: std::process::Command, limit: Duration) -> Option<std::process::Output> {
     use std::process::Stdio;
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().ok()?;
@@ -735,6 +737,7 @@ fn output_with_timeout(mut cmd: std::process::Command, limit: Duration) -> Optio
 }
 
 /// 배포판 안에서 셸 스크립트를 실행한다(준비·검사용). 인자는 --exec 라 그대로 전달된다
+#[cfg(windows)]
 fn wsl_sh(distro: &str, script: &str) -> (bool, String) {
     let mut c = raw("wsl.exe");
     // 배포판 안의 사용자 git 설정(전역 hooks·commit.gpgsign 등)이 테스트 준비 커밋에 끼지 않게 격리한다
@@ -748,6 +751,7 @@ fn wsl_sh(distro: &str, script: &str) -> (bool, String) {
 
 /// 등록된 WSL 배포판 이름(레지스트리 `HKCU\…\Lxss\{GUID}\DistributionName`). wsl.exe 를 띄우지 않는다 —
 /// WSL 을 지운 PC 에도 system32 의 wsl.exe 스텁이 남아, 부르기만 하면 사용자 화면에 "WSL 설치" 창(키를 누르면 설치 시작)이 뜬다
+#[cfg(windows)]
 fn registered_distros() -> Vec<String> {
     let mut c = raw("reg.exe");
     c.args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss", "/s", "/v", "DistributionName"]);
@@ -764,6 +768,7 @@ fn registered_distros() -> Vec<String> {
 
 /// 첫 사용자 배포판 이름. 레지스트리에 배포판이 없으면 wsl.exe 를 부르지 않고 None(위 설명).
 /// `wsl.exe -l -q` 출력은 UTF-16LE 일 수 있어 NUL·BOM·CR 을 걸러 읽는다(docker-desktop 은 제외)
+#[cfg(windows)]
 fn first_distro() -> Option<String> {
     if !registered_distros().iter().any(|n| !n.starts_with("docker-desktop")) {
         return None;

@@ -1873,6 +1873,7 @@ env 는 `[키, 값]` 순서 목록이고(토큰은 가짜 값), 판정 함수는
 `cargo tree -e normal -p notify` 로 확정한 새 크레이트:
 - **Windows 그래프: `notify`·`notify-types` 둘뿐**이다(`walkdir`·`same-file`·`winapi-util`·`windows-sys`·`libc`·`log`·`bitflags` 는 이미 있었다). Windows 백엔드는 ReadDirectoryChangesW 재귀다.
 - `Cargo.lock` 에는 다른 OS 몫이 넷 더 들어온다: `inotify`·`inotify-sys`(Linux), `kqueue`·`kqueue-sys`(BSD·macOS 의존 선언 — notify 의 `Cargo.toml` 이 BSD·macOS 타깃에 건다). 6c 에서 `macos_fsevent` 를 켜면 macOS 용 크레이트(`objc2-core-*`)가 더해진다. 넷 모두 Windows 빌드에는 컴파일되지 않는다.
+- **macOS 빌드 때 켠 것(CI 크로스 컴파일 확인이 찾았다)**: `[target.'cfg(target_os = "macos")'.dependencies]` 에 `notify = { version = "8.2.2", default-features = false, features = ["macos_fsevent"] }` 를 더했다(대상별 기능은 합쳐진다 — Windows·Linux 빌드는 그대로). `Cargo.lock` 에는 새 크레이트 **`objc2-core-services` 0.3.2 하나**가 늘었고(승인된 notify 기본 기능 의존), notify 의 의존 목록에 `objc2-core-foundation`(이미 lock 에 있던 판)·`objc2-core-services` 두 줄이 더해졌다.
 - 이 외의 크레이트는 더하지 않았다(`mio` 는 이미 락에 있다).
 
 **구성**

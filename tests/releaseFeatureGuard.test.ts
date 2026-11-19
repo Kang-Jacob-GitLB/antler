@@ -218,3 +218,36 @@ describe('tauri-package.yml', () => {
     for (const f of keys) expect(f).toMatch(/^TEST-ONLY-.*\.(pub|sig)$/)
   })
 })
+
+describe('tauri.yml', () => {
+  const wf = read('.github', 'workflows', 'tauri.yml')
+  const code = wf.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n')
+  type Step = { name?: string; uses?: string; run?: string }
+  type Job = { name?: string; 'runs-on'?: string; steps: Step[]; strategy?: { matrix: { os: string[] } } }
+  const yaml = createRequire(createRequire(import.meta.url).resolve('electron-builder'))('js-yaml') as { load(s: string): unknown }
+  const jobs = (yaml.load(wf) as { jobs: Record<string, Job> }).jobs
+
+  it('필수 체크 잡(rust)의 이름과 러너는 그대로다 — 브랜치 룰셋이 이름으로 건다', () => {
+    expect(jobs['rust']?.name).toBe('Rust · 골든 · clippy')
+    expect(jobs['rust']?.['runs-on']).toBe('windows-latest')
+  })
+
+  it('권한은 contents: read 뿐이고 시크릿·쓰기 권한이 없다', () => {
+    expect(code).toMatch(/^permissions:\n {2}contents: read$/m)
+    expect(code).not.toMatch(/contents:\s*write|secrets\.|id-token|environment:/)
+  })
+
+  it('cross 잡: ubuntu-22.04·macos-latest 에서 check·clippy 를 돌리고, 모든 액션은 40자 SHA 로 고정한다', () => {
+    const cross = jobs['cross']
+    expect(cross?.name).not.toBe('Rust · 골든 · clippy')
+    expect(cross?.strategy?.matrix.os).toEqual(['ubuntu-22.04', 'macos-latest'])
+    const run = cross?.steps.map((s) => s.run ?? '').join('\n') ?? ''
+    expect(run).toContain('cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml')
+    expect(run).toContain('--features test-hooks')
+    expect(run).toContain('-- -D warnings')
+    expect(run).toContain('libwebkit2gtk-4.1-dev')
+    for (const [id, job] of Object.entries(jobs)) {
+      for (const s of job.steps) if (s.uses) expect(s.uses, `${id} 잡의 액션이 SHA 고정이 아니다`).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/)
+    }
+  })
+})

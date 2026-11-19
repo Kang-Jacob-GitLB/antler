@@ -49,8 +49,8 @@ zeroize = "1"
 # 연결·인증 API 는 connection.rs 한 곳에서만 부른다(clippy.toml 의 disallowed-methods)
 russh = { version = "0.65.2", default-features = false, features = ["ring", "rsa"] }
 # 저장소 감시의 이벤트원(src/git/fs_watch.rs, Phase 6a PR 7b). Windows: ReadDirectoryChangesW 재귀, Linux: inotify. 8.2 안정판(9.0 은 프리릴리스라 쓰지 않는다).
-# default-features 를 끄면 macOS 백엔드(`macos_fsevent`)가 빠진다. macOS 는 `macos_fsevent`(기본)나 `macos_kqueue` 중 하나가 있어야 RecommendedWatcher 가 정해진다(notify lib.rs 의 cfg) —
-# 지금은 macOS 빌드를 하지 않으며(Phase 6c) 그때 `macos_fsevent` 를 켠다
+# default-features 를 끄면 macOS 백엔드(`macos_fsevent`)가 빠진다(RecommendedWatcher 는 `macos_fsevent`·`macos_kqueue` 중 하나가 있어야 정해진다). 그래서 macOS 에서만
+# `macos_fsevent` 를 켠다(아래 `[target.'cfg(target_os = "macos")'.dependencies]`). Windows·Linux 는 기능이 필요 없다
 notify = { version = "8.2.2", default-features = false }
 # SFTP 폴더 목록(src/git/exec/ssh/sftp.rs, Phase 6b PR 4b, 결정 D4). 클라이언트는 AsyncRead+AsyncWrite 스트림만 받는다(russh 에 의존하지 않는다 — russh 0.65.2 채널과 맞물리는지는 tests/ssh.rs 의 시험이 확인한다)
 russh-sftp = "3.0.1"
@@ -84,6 +84,10 @@ rfd = { version = "0.17", default-features = false, features = ["common-controls
 # 토큰 보관(src/secret) — Windows 자격 증명 관리자. 키링 생성은 secret 모듈 한 곳에서만 한다(tests/net.rs 의 소스 검사)
 keyring-core = "1"
 windows-native-keyring-store = "1.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# notify 의 macOS 백엔드(FSEvents). Cargo.lock 에 `objc2-core-services` 0.3.2 하나가 늘고 notify 의 의존 목록에 그것과 `objc2-core-foundation`(이미 lock 에 있다)이 더해진다(notify 의 기본 기능 의존이라 승인된 범위, macOS 에서만 빌드된다)
+notify = { version = "8.2.2", default-features = false, features = ["macos_fsevent"] }
 
 [features]
 cdp = []
