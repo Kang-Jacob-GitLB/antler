@@ -53,6 +53,16 @@ input {
   cursor: text;
 }
 
+/* 오류 문구는 드래그해 복사할 수 있게 한다(앱 전체는 user-select: none — 오류를 보고하려면 문구가 필요하다).
+   오류 안의 버튼은 그대로 누르는 커서다 */
+.is-error {
+  user-select: text;
+  cursor: text;
+}
+.is-error button {
+  cursor: pointer;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
