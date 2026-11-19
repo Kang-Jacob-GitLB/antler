@@ -30,7 +30,8 @@
 
 ### 업데이트 공개 키 (사용자가 서명 키를 만든 뒤)
 
-서명 키가 없는 지금은 **공개 키 상수가 비어 있다**(`src-tauri/src/update/host.rs` 의 `UPDATE_PUBKEY = None`). 이 동안 앱은 새 버전을 *확인*은 하지만 [업데이트]를 누르면 **"업데이트 서명 키가 설정되지 않았습니다. 이 빌드는 업데이트를 설치할 수 없습니다"** 오류가 되고, 설치본을 내려받지도 설치를 시작하지도 않는다(fail-closed).
+공개 키는 `src-tauri/src/update/host.rs` 의 `UPDATE_PUBKEY` 에 들어 있다(2026-11-19, 키 ID `E8CC4BB412D344F1`). 개인 키·비밀번호는 Environment `release` 의 시크릿에만 있고, 원본은 키를 만든 PC 의 `~/.tauri/` 에 있으니 **오프라인으로 백업**한다(잃으면 설치된 앱에 더 이상 업데이트를 보낼 수 없다).
+상수가 비어 있으면(`None`) 앱은 새 버전을 *확인*은 하지만 [업데이트]를 누르면 **"업데이트 서명 키가 설정되지 않았습니다. 이 빌드는 업데이트를 설치할 수 없습니다"** 오류가 되고, 설치본을 내려받지도 설치를 시작하지도 않는다(fail-closed).
 
 키를 넣는 방법:
 1. `pnpm tauri signer generate -w <오프라인 경로>`(비밀번호 있는 키 권장 — 계획 U1)로 키를 만든다. 개인 키와 비밀번호는 GitHub Environment `release` 의 `TAURI_SIGNING_PRIVATE_KEY`·`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 로만 넣는다([build.md](build.md#tauri-판-패키징발행-없음--phase-6c-pr-2)).
