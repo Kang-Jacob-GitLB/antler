@@ -2599,6 +2599,14 @@ debian-binary`, dmg: 끝 512바이트의 `koly` — `Target::check_bytes`). 서�
 
 ### PR 7 — `feat!:` Electron 제거 + 릴리스 전환(앱에 연결한다 · **발행은 사람 몫**)
 
+**리허설 R 결과(2026-11-19, 이 브랜치의 `v2.0.0-rc.1`~`rc.4` 태그)**:
+- rc.1: Windows NSIS 빌드 실패 — `hooks.nsh` 의 Function 본문이 플러그인 경로 등록 전에 컴파일돼 `nsis_tauri_utils::RunAsUser` 가 "Plugin not found". 재실행 부분을 매크로로 바꿨다(릴리스 없음).
+- rc.2: 서명 생략 → 자산 점검 실패 — 재사용 워크플로 안의 sign 잡은 Environment 를 선언해도 호출자가 `secrets: inherit` 하지 않으면 Environment 시크릿이 빈 값이다. 두 재사용 호출에 inherit(릴리스 없음).
+- rc.3: 세 OS 빌드·서명·`latest.json`·이관용 `latest.yml` 성공(자산 점검이 각 `.sig` 를 `UPDATE_PUBKEY` 로 검증 — 키 쌍 확인). Windows 실기: Electron 1.12.4 위 설치 → Tauri 판은 정상 실행했지만 **Electron 자동 제거 실패**(제거기를 설치 폴더 안에서 제자리로 돌려 자기 자신이 잠겨 `--updated` 의 폴더 옮기기 실패, 종료 코드 2). electron-builder 처럼 `$PLUGINSDIR` 로 복사해 돌리게 고쳤고, 같은 PC 에서 복사본으로 같은 인자를 돌려 종료 코드 0·설치 폴더·제거 항목 삭제·`%APPDATA%\Antler` 보존·새 바로가기 유지 확인.
+- rc.4(프리릴리스로 공개): 설치된 rc.3 이 앱 안에서 rc.4 를 알리고 내려받아 설치·재실행 → 2.0.0-rc.4 로 동작(Windows, 사람 확인). 자기 업데이트·서명 검증·`/R` 재실행이 실제로 확인됐다.
+- 확인하지 못한 것: 고친 이관 훅의 **설치본 안에서의** 실제 실행(rc.4 는 Electron 이 이미 제거된 PC 에 설치됐다 — 다른 PC 의 Electron 위 설치로 확인할 것), macOS dmg·Linux deb 실기, Electron 의 electron-updater 경로(`latest.yml`)로 받는 이관, 모든 사용자용 Electron 설치본.
+- Electron 제거기는 이름(`Antler.exe`)으로 실행 중인 프로세스를 끝낸다 — 수동으로 돌렸을 때 실행 중이던 Tauri 판도 꺼졌다. 설치 훅에서는 앱을 띄우기 전에 돌므로 영향이 없다.
+
 **머지하면**: 그날 00:00 KST 야간 릴리스가 `feat!:`(→ major)로 **v2.0.0 을 초안으로** 만든다. 초안은 `/releases/latest` 에 나오지 않아 Electron·Tauri 의 업데이트 확인이 보지 못한다 — 사람이 첨부와 노트를 확인하고 **공개**하는 순간 Electron NSIS 사용자의 이관이 시작된다.
 **공개 키(`UPDATE_PUBKEY`)를 넣기 전에는 발행할 수 없다** — 발행 워크플로가 `None` 이면 빌드 전에 실패한다(아래 가드). 키·시크릿·Environment 는 사람이 먼저 한다.
 
