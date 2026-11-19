@@ -95,6 +95,11 @@ jobs:
           rustup default stable
           rustc --version
 
+      # 서드파티 라이선스 고지(npm + Rust 크레이트)를 만든다 — bundle.resources 가 설치본에 싣는다. 빌드의 beforeBuildCommand 도 같은 스크립트를 돌리지만
+      # 여기서 먼저 돌려 실패(라이선스 파일 해석 등)를 빌드 앞에서 드러낸다. 시크릿이 필요 없다
+      - name: 라이선스 고지 생성
+        run: pnpm tauri:notices
+
       # 서명 없이 빌드한다(createUpdaterArtifacts 를 켜지 않는다 — 빌드가 서명하는 구조가 아니다). --features 는 쓰지 않는다(cdp·test-hooks 금지)
       - name: 빌드 (NSIS)
         run: pnpm tauri build --bundles nsis
@@ -354,6 +359,15 @@ jobs:
           rustup default stable
           if [ -n "${{ matrix.target }}" ]; then rustup target add "${{ matrix.target }}"; fi
           rustc --version
+
+      # 서드파티 라이선스 고지(npm + Rust 크레이트): 빌드 대상 플랫폼의 의존만 모은다(Windows 잡과 같은 이유로 빌드 앞에서 먼저 돌린다)
+      - name: 라이선스 고지 생성
+        run: |
+          if [ -n "${{ matrix.target }}" ]; then
+            pnpm tauri:notices --target ${{ matrix.target }}
+          else
+            pnpm tauri:notices
+          fi
 
       # --features 는 쓰지 않는다(cdp·test-hooks 금지). macOS 는 --target 으로 아키텍처를 고른다(결과는 target/<triple>/release)
       - name: 빌드
