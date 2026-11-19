@@ -2733,3 +2733,14 @@ B 469–477 / 185–195(small), 446–448 / 167–168(big).
   `ANTLER_RUST_SSH=0` 으로 실행하면 같은 저장소가 사이드카(ssh2)로 열리는지(`ANTLER_ROUTE_LOG=1` 로 `[route] git:log -> rust|sidecar` 확인), ssh 저장소를 삭제한 뒤 연결이 닫히는지(원격 `who`·`ss`), ssh 저장소의 fetch 가 한 번만 일어나는지(PR 4 부터 Rust 만 — 위 "사람 확인 필요(SSH PR 4)").
 - 직접 확인 필요: 확인 창(fetch·SSH)과 폴더·에디터 선택 대화상자가 실제로 뜨고 버튼 응답이 맞는지, 창 위치·크기·최대화가 재시작 뒤 복원되는지(자동 확인은 대화상자를 띄우지 않고 요청·응답 형식만 봤다).
 - 배포 전 필수: `cdp` 기능은 배포 빌드에서 켜지지 않게 CI 에서 막는다(사이드카 경로 문제는 Phase 6c PR 5 에서 사이드카와 함께 사라졌다).
+
+## 시작 화면: 빈 창 대신 로딩 창(startup.rs)
+
+- **회귀**: v2.0.0 은 메인 창을 만들자마자 보여 바탕색만 있는 빈 창이 잠깐 떴다가 화면이 그려졌다. Electron 판은 `show:false` + `ready-to-show` 였고 바탕색도 `ui.theme` 를 따랐다.
+- **고친 방식**: 설정을 먼저 열어 `ui.theme`(dark·light·system — system 은 Windows 의 `AppsUseLightTheme`, 알 수 없으면 다크)로 바탕색을 고르고(`startup::background_rgb`, 값은 tokens.css 와 같다 — 시험이 비교한다),
+  작은 로딩 창(`splash.html`, 320×360·테두리 없음·가운데·권한 없음)을 **먼저** 띄운다. 메인 창은 `visible(false)` 로 만들고, React 첫 커밋 뒤 두 프레임이 지나면 renderer 가 `antler_window_ready` command 로 알리고
+  Rust 가 메인 창을 `show`·`set_focus` 한 뒤 로딩 창을 닫는다. 안전망: 페이지 로드 완료 3초 뒤, 로드 완료조차 없으면 창을 만든 지 10초 뒤 같은 `reveal` 을 부른다(한 번만 — `StartupGate`).
+  창 보이기 권한은 capability 에 주지 않는다(`tests/startup.rs` 가 검사). window-state 의 복원은 `SIZE|POSITION|MAXIMIZED` 만 쓰고 `VISIBLE` 을 쓰지 않아 숨은 채 적용된다(로딩 창은 denylist).
+  두 번째 실행은 메인 창이 아직 숨어 있으면 건드리지 않는다(준비되면 `reveal` 이 포커스를 준다).
+- **사람 확인 필요**: 실행하면 로딩 창이 화면 가운데에 바로 뜨고 빈 창이 보이지 않는지, 메인 창이 그려진 채로 나타나며 로딩 창이 닫히는지, 최대화 상태로 종료 후 재시작했을 때 복원(깜박임 없음),
+  라이트·다크·시스템 테마(로딩 창 바탕·글자색 포함), 다중 모니터·DPI 배율에서 로딩 창 위치·크기, 앱이 떠 있을 때 두 번째 실행(로딩 중·로딩 후 모두), 작업 표시줄에 로딩 창이 따로 보이지 않는지.

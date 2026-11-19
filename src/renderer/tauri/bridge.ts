@@ -161,3 +161,7 @@ const start = (): void => {
 }
 if (document.body) start()
 else document.addEventListener('DOMContentLoaded', start, { once: true })
+
+// 첫 화면이 그려졌다는 신호(main.tsx 의 FirstPaint)를 Rust 에 전한다. 메인 창은 숨긴 채 만들어지고 Rust 가 보인다(startup.rs).
+// 창 권한은 renderer 에 없다 — 이 command 는 "보여 달라"는 알림일 뿐이고, 한 번만 받아들여진다
+window.addEventListener('antler:first-paint', () => void invoke('antler_window_ready'), { once: true })

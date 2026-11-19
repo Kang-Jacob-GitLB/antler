@@ -1,0 +1,97 @@
+<!doctype html>
+<!-- 시작 로딩 창(스플래시). 메인 창이 첫 화면을 그리는 동안 화면 가운데에 뜬다(src-tauri/src/startup.rs).
+     외부 리소스·스크립트 없이 인라인 CSS 와 SVG 만 쓴다. 라이트 테마는 Rust 가 data-theme 을 넣어 알린다.
+     색은 tokens.css 의 값과 같다(--bg-base #14110F/#F6F1E7, --text-primary, --accent). -->
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Antler</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        cursor: default;
+        user-select: none;
+        background: #14110f;
+        color: #ede6d8;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+      }
+      :root[data-theme='light'] body {
+        background: #f6f1e7;
+        color: #2a211b;
+      }
+      main {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+      }
+      svg {
+        width: 112px;
+        height: 112px;
+      }
+      :root[data-theme='light'] .horn {
+        stroke: #2a211b;
+      }
+      h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+      }
+      .spinner {
+        width: 22px;
+        height: 22px;
+        box-sizing: border-box;
+        border: 2px solid rgba(217, 164, 65, 0.25);
+        border-top-color: #d9a441;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation-duration: 3s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <g transform="translate(2.4 4.55) scale(0.8)">
+          <g class="horn" fill="none" stroke="#ede6d8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 17V14" />
+            <path d="M12 14C12 10 8 8.5 6.5 3" />
+            <path d="M12 14C12 10 16 8.5 17.5 3" />
+          </g>
+          <g class="horn" fill="none" stroke="#ede6d8" stroke-width="1.2" stroke-linecap="round">
+            <path d="M10.81 10.44L7.21 9.44" />
+            <path d="M13.19 10.44L16.79 9.44" />
+            <path d="M8.35 7.05L4.75 6.05" />
+            <path d="M15.65 7.05L19.25 6.05" />
+          </g>
+          <g fill="#d9a441">
+            <circle cx="6.29" cy="2.23" r="1.9" />
+            <circle cx="17.71" cy="2.23" r="1.9" />
+            <circle cx="6.45" cy="9.23" r="1.45" />
+            <circle cx="17.55" cy="9.23" r="1.45" />
+            <circle cx="3.98" cy="5.84" r="1.45" />
+            <circle cx="20.02" cy="5.84" r="1.45" />
+          </g>
+        </g>
+      </svg>
+      <h1>Antler</h1>
+      <div class="spinner" role="progressbar"></div>
+    </main>
+  </body>
+</html>
