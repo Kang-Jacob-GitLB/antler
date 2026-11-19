@@ -1220,7 +1220,7 @@ vitest: `golden`(151)·`golden6a`(1)와 `codeBrowse`·`wip`·`wipFilter`·`lfsGi
 | 채널 | 인자 | git(상수 + 검증된 값) | 캐시 | 취소 |
 |---|---|---|---|---|
 | `git:resolveRev` | `repoId, ref` | `rev-parse --verify --end-of-options <ref>^{commit}` | 없음(ref 는 움직인다) | 없음 |
-| `git:tree` | `repoId, {rev, dir}, requestId?` | (dir 이 있으면 `cat-file -t <rev>:<dir>` 로 트리인지) → `ls-tree -z --end-of-options <rev>[:<dir>]` — **`-l` 은 쓰지 않는다**(크기 조회가 lazy fetch 를 부른다) | 키 `repoId\0rev 소문자\0정규화 dir`, 200개·8MB(항목 비용 200×(항목+1)), **missing 은 캐시하지 않는다** | 프로세스에 바로 닿는다(`queue.run(None, Some(token))`) |
+| `git:tree` | `repoId, {rev, dir}, requestId?` | (dir 이 있으면 `cat-file -t <rev>:<dir>` 로 트리인지) → `ls-tree -z <rev>[:<dir>]`(인자는 검증한 해시로 시작해 옵션이 될 수 없다 — `--end-of-options` 는 git 2.24 미만이 거부해 빼었다) — **`-l` 은 쓰지 않는다**(크기 조회가 lazy fetch 를 부른다) | 키 `repoId\0rev 소문자\0정규화 dir`, 200개·8MB(항목 비용 200×(항목+1)), **missing 은 캐시하지 않는다** | 프로세스에 바로 닿는다(`queue.run(None, Some(token))`) |
 | `git:blob` | `repoId, {rev, path}, requestId?` | `cat-file -t <rev>:<path>` → `cat-file -s` → (상한 이하일 때만) `cat-file blob` | 키 `repoId\0rev 소문자\0정규화 경로`, 64개·32MB(비용 text×2 + dataUrl + 1024, 길이는 UTF-16 단위), missing 제외 | 프로세스에 바로 닿는다 |
 | `git:onRemote` | `repoId, rev` | `for-each-ref --count=1 --contains <rev 소문자> --format=%(refname) refs/remotes/` | **true 만** 기억(`repoId:rev 소문자`, 2000개가 되면 비운다) | 없음 |
 

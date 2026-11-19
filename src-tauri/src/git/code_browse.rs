@@ -282,9 +282,12 @@ pub fn cat_file_args(kind: &str, spec: &str) -> Vec<String> {
     vec!["cat-file".to_string(), kind.to_string(), spec.to_string()]
 }
 
-/// `ls-tree -z --end-of-options <spec>`(`-l` 은 쓰지 않는다)
+/// `ls-tree -z <spec>`(`-l` 은 쓰지 않는다). spec 은 검증한 16진수 커밋 해시로 시작하는 **한 인자**(`<hash>` 또는 `<hash>:<경로>`)라
+/// 옵션으로 해석될 수 없다(`cat_file_args` 와 같은 근거). `--end-of-options` 는 쓰지 않는다 — git 2.24 미만(예: Ubuntu 18.04 의 2.17)의
+/// `ls-tree` 가 `unknown option` 으로 거부해 SSH 저장소의 코드 보기가 실패했다
 pub fn ls_tree_args(spec: &str) -> Vec<String> {
-    vec!["ls-tree".to_string(), "-z".to_string(), "--end-of-options".to_string(), spec.to_string()]
+    debug_assert!(spec.as_bytes().first().is_some_and(u8::is_ascii_hexdigit), "ls-tree spec 은 커밋 해시로 시작해야 한다");
+    vec!["ls-tree".to_string(), "-z".to_string(), spec.to_string()]
 }
 
 /// `for-each-ref --count=1 --contains <rev 소문자> --format=%(refname) refs/remotes/`
@@ -628,7 +631,9 @@ mod tests {
         assert_eq!(cat_file_args("-t", "abc:src"), ["cat-file", "-t", "abc:src"]);
         assert_eq!(cat_file_args("-s", "abc:-x"), ["cat-file", "-s", "abc:-x"]);
         assert_eq!(cat_file_args("blob", "abc:a b"), ["cat-file", "blob", "abc:a b"]);
-        assert_eq!(ls_tree_args("abc:src"), ["ls-tree", "-z", "--end-of-options", "abc:src"]);
+        assert_eq!(ls_tree_args("abc:src"), ["ls-tree", "-z", "abc:src"]);
+        // git 2.24 미만이 모르는 옵션을 쓰지 않는다(Ubuntu 18.04 의 2.17 이 `unknown option` 으로 거부했다)
+        assert!(!ls_tree_args("abc:src").iter().any(|a| a == "--end-of-options"));
         let rev = CommitId::parse(&"AB".repeat(20)).unwrap();
         assert_eq!(on_remote_args(&rev), ["for-each-ref", "--count=1", "--contains", &"ab".repeat(20), "--format=%(refname)", "refs/remotes/"]);
     }

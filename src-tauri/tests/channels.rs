@@ -1277,7 +1277,7 @@ fn 코드_탐색기_argv_는_상수_뒤_검증된_값뿐이다() {
     let rev = "ABCDEFabcdef0123456789ABCDEFabcdef012345";
     assert_eq!(resolve_rev_args("refs/heads/main"), ["rev-parse", "--verify", "--end-of-options", "refs/heads/main^{commit}"]);
     assert_eq!(cat_file_args("blob", &format!("{rev}:-x")), ["cat-file", "blob", &format!("{rev}:-x")]);
-    assert_eq!(ls_tree_args(rev), ["ls-tree", "-z", "--end-of-options", rev]);
+    assert_eq!(ls_tree_args(rev), ["ls-tree", "-z", rev]);
     // onRemote 의 해시는 소문자, 범위는 refs/remotes/
     assert_eq!(on_remote_args(&CommitId::parse(rev).unwrap()), ["for-each-ref", "--count=1", "--contains", &rev.to_lowercase(), "--format=%(refname)", "refs/remotes/"]);
     // 파일 내용은 `cat-file blob` 뿐이다 — `git show`·diff 계열·`ls-tree -l` 인자는 어디에도 없다
