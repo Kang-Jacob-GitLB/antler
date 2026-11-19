@@ -1,4 +1,5 @@
-//! 메모리 저장소. Windows 가 아니거나 `ANTLER_USER_DATA`(측정·자동화 실행)가 있을 때 쓰며, 앱을 끄면 사라진다.
+//! 메모리 저장소. 키링을 열 수 없거나(Linux 에 Secret Service 없음 등) `ANTLER_USER_DATA`(측정·자동화 실행)가 있을 때 쓰며, 앱을 끄면 사라진다.
+//! 디스크에는 아무것도 쓰지 않는다(Electron 판 safeStorage 의 `basic_text` 처리와 같은 의미).
 use std::collections::HashMap;
 use std::sync::Mutex;
 

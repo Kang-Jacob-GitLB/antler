@@ -96,7 +96,7 @@
   TS 사례표 `tests/fixtures/repos/link-target.cases.json` 은 `fsguard` 단위 시험이 TS 와 함께 읽고, GLOBALROOT·Mup 같은 Rust 쪽 추가 사례는 `fsguard.rs` 시험에 따로 있다(TS 수정 PR 과 맞춘 뒤 사례표로 옮긴다).
 - 서브모듈 상태 조회: 인덱스의 gitlink 경로가 절대 경로·드라이브 문자로 시작하거나 `..`·`.`·빈 구성 요소를 가지면 `git -C` 를 돌리지 않고 `unknown` 으로 둔다(저장소 밖 HEAD 를 읽지 않게). 로컬 실행기는 추가로 `realpath.native(저장소/경로)` 가 저장소 루트 안(`.git` 아님)인지 확인해 정션·symlink 로 밖을 가리키면 `unknown` 이다(없는 경로는 git 이 미초기화로 판정).
 
-**Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 Windows 자격 증명 관리자에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행은 메모리).
+**Tauri 판의 Jira·GitHub**: `jira:*`·`gh:*`(`gh:repo` 제외)는 Rust(`src-tauri/src/api_host.rs` → `jira/service.rs`·`github/service.rs`)가 처리하고 토큰은 OS 키체인(Windows 자격 증명 관리자·macOS 키체인·Linux Secret Service)에만 둔다. 키링을 열 수 없거나 쓰기가 실패하면 평문 파일로 내려가지 않고 메모리에만 둔다(`ANTLER_USER_DATA` 로 도는 자동화 실행도 메모리).
 Jira 토큰은 Rust 프로세스 밖(renderer 포함)으로 나가지 않는다 — Phase 6c PR 5 에서 Node 사이드카를 없애 토큰 인자를 받을 다른 프로세스가 없다. 모든 채널은 Rust 가 처리하고, 목록에 없는 채널·서비스를 만들지 못했거나 포트가 없는 채널은 Rust 가 명시적 오류 봉투로 답한다(`Router::invoke`, 시험 `tests/channel_scope.rs` — IPC 채널 전부가 처리 목록 중 하나에만 있다).
 GitHub 토큰도 renderer 로 가지 않는다(원격 전용 저장소의 fetch·조회 인증은 Rust 의 캐시 실행기가 환경 변수로만 쓴다). 되돌리기 스위치(`ANTLER_RUST_*`)는 사이드카와 함께 없앴다. HTTP 는 `https` 만(루프백 http 는 테스트 빌드에서만), 프록시 환경 변수를 따르지 않고
 리다이렉트를 따라가지 않으며, `jira:openExternal` 은 연결한 사이트의 https 주소만, `gh:openExternal` 은 `https://github.com` 의 주소만 연다. 자세한 것은 docs/tauri.md "PR 6"·"PR 9".

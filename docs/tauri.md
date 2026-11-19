@@ -61,7 +61,7 @@ renderer(src/renderer/src, 그대로)
 - 창 수준 가드: 앱 밖 주소로 이동·새 창·권한 요청을 모두 거부한다(`src-tauri/src/lib.rs`). capability 는 실제로 쓰는 창·이벤트 권한만 준다
   (`core:default` 는 tray·menu·path·devtools 까지 열어 preload 허용 목록보다 넓다).
 - userData 는 Tauri 의 `app_data_dir`(`%APPDATA%\com.antler.app`)이다. Electron 판(`%APPDATA%\Antler`)과 공유하지 않는다.
-  토큰은 메모리에만 둔다(Electron `safeStorage` 로 암호화된 파일은 풀 수 없다).
+  토큰은 OS 키체인에 둔다(아래 PR 4, macOS·Linux 는 "OS 키체인 확대"). Electron `safeStorage` 로 암호화된 파일은 풀 수 없어 옮기지 않는다.
 
 ## 명령
 
@@ -581,8 +581,8 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
 | 파일 | 내용 |
 |---|---|
 | `secret/mod.rs` | `SecretStore` 트레이트(`get`·`set`·`delete` 는 바이트, `get_secret_string`·`set_secret_string` 은 `SecretString`), `Vault`(GitHub·Jira 저장·복원), 저장소 선택 `open_store`·`open_default_store`, `service_name` |
-| `secret/keyring.rs` | `KeyringStore`(Windows 자격 증명 관리자, `cfg(windows)`). **키링 항목을 만드는 유일한 곳**. keyring 오류는 값이 들 수 있어(`BadEncoding` 의 바이트) 싣지 않고 `SecretError` 로만 바꾼다 |
-| `secret/memory.rs` | `MemoryStore`. Windows 가 아니거나 `ANTLER_USER_DATA` 가 있으면 이것이며 `storage_unavailable` 이다 |
+| `secret/keyring.rs` | `KeyringStore`(Windows 자격 증명 관리자·macOS 키체인·Linux Secret Service, `cfg(any(windows, macos, linux))`). **키링 항목을 만드는 유일한 곳**. keyring 오류는 값이 들 수 있어(`BadEncoding` 의 바이트) 싣지 않고 `SecretError` 로만 바꾼다 |
+| `secret/memory.rs` | `MemoryStore`. 키링을 열 수 없거나 `ANTLER_USER_DATA` 가 있으면 이것이며 `storage_unavailable` 이다 |
 
 - **저장 형식**: 비밀과 메타데이터를 **한 덩어리 UTF-8 JSON** 으로 둔다(메타 파일 없음). GitHub `{method, token}`(계정 `github-token`), Jira `{kind, siteUrl, email, token, displayName}`(계정 `jira-token`).
   서비스 이름은 운영 `com.antler.app`, 디버그 빌드 `com.antler.app.dev` 다. 값은 `set_secret` 으로 **바이트 그대로** 두므로 UTF-16 으로 바꾸지 않는다.
@@ -596,10 +596,29 @@ https 로 평문 리스너에 붙으면 핸드셰이크 실패·Authorization �
   수정자는 값을 쓸 때만 적용되고 읽기에는 영향이 없다. 실제 자격 증명 관리자에서의 동작(이미 Enterprise 인 항목을 덮어쓸 때 바뀌는지 포함)은 수동 시험으로 확인하지 않았다.
 - **비밀 다루기**: `SecretString` 은 `Debug` `***`·`Display`/`Serialize` 없음을 유지하고 버릴 때 0 으로 덮는다(`Drop`). 저장 JSON 버퍼와 읽은 바이트는 `Zeroizing`, 해석한 `Value` 의 문자열은 `scrub` 이 덮는다
   (serde 가 이스케이프를 풀어 만든 중간 복사까지는 보장하지 못한다 — "가능하면").
-- **소스 검사**(`tests/net.rs` 의 `mod secret_store`): `keyring_core`·`windows_native_keyring_store` 는 `secret/` 밖에서 쓰지 않고(Cargo.toml 에서도 windows 대상 의존성뿐), `secret/` 에는 `println`·`eprintln`·`dbg`·`log` 가 없다
+- **소스 검사**(`tests/net.rs` 의 `mod secret_store`): `keyring_core`·`*_native_keyring_store`·`zbus_secret_service_keyring_store` 는 `secret/` 밖에서 쓰지 않고(Cargo.toml 에서도 대상별 의존성뿐), `secret/` 에는 `println`·`eprintln`·`dbg`·`log` 가 없다
   (파일 끝의 `#[cfg(test)]` 모듈은 제외 — 수동 시험이 `eprintln!` 으로 실측값을 낸다). 테스트는 메모리 구현만 쓴다. 대응표 `N/A: PR 4` 5개 중 4개를 Rust 테스트에 연결했고, 하나(Linux `basic_text`)는 해당 분기가 없어 N/A 사유로 바꿨다.
 - 의존성: `keyring-core 1`·`windows-native-keyring-store 1.1`(windows 대상), `zeroize 1`(전이 의존이던 판). `windows-sys 0.61.2` 를 기존 트리와 공유해 중복 판이 없다(`cargo tree -d`).
 - **연결**: Jira 는 PR 6(`ANTLER_RUST_API`·키체인 읽기), GitHub 는 PR 9 이다. Electron 판 토큰은 옮기지 않는다(다시 로그인).
+
+#### OS 키체인 확대 — macOS·Linux(`fix: Tauri 판이 macOS·Linux 에서도 토큰을 OS 키체인에 저장한다`)
+
+Electron 판(`safeStorage`: macOS 키체인·Linux libsecret/KWallet, 키링이 없으면 `basic_text` → 메모리)과 맞춘다. 세 OS 가 같은 `Vault`·서비스 이름(`com.antler.app`[`.dev`])·계정(`github-token`·`jira-token`)·상한(`MAX_BLOB` 2560B)·`Zeroizing` 을 쓴다.
+
+- **크레이트**(대상별 `[target.'cfg(...)'.dependencies]` 에만 — Windows 의존 트리는 불변이다, `cargo tree --target x86_64-pc-windows-msvc` 로 확인):
+  macOS `apple-native-keyring-store 1.0.2`(`keychain` 기능만 — `protected` 는 서명·entitlement 가 필요), Linux `zbus-secret-service-keyring-store 1.0.1`(`default-features = false`, `rt-async-io-crypto-rust`), 둘 다 `keyring-core 1` 의 짝이다.
+- **Linux 저장소 선택 근거**: keyring-core 생태계에는 `dbus-secret-service-keyring-store`(libdbus-sys 의존 → 빌드에 `libdbus-1-dev`, 정적 링크하려면 vendored C 빌드, 암호는 openssl 또는 RustCrypto)와 `zbus-secret-service-keyring-store`(순수 Rust)가 있다.
+  후자를 골랐다: zbus 5 는 tauri 가 이미 끌어오고(Cargo.lock 의 `zbus 5.19.0`), 암호는 RustCrypto(`crypto-rust`)라 openssl 이 없으며, 시스템 라이브러리가 늘지 않아 `tauri.yml` cross 잡·`tauri-package.yml` unix 잡의 apt 목록을 바꾸지 않는다.
+  런타임은 zbus 기본(async-io)이다 — 저장소 API 가 동기라 tokio 런타임에 얹지 않는다.
+- **Cargo.lock 의 새 항목 8개**: `apple-native-keyring-store 1.0.2`(macOS), `zbus-secret-service-keyring-store 1.0.1`·`secret-service 5.2.0`(Linux), `num 0.4.3`·`num-bigint 0.4.8`·`num-complex 0.4.6`·`num-iter 0.1.46`·`num-rational 0.4.2`(secret-service 의 전이 의존).
+  나머지(`security-framework`·`zbus`·`aes`·`cbc`·`hkdf` 등)는 lock 에 이미 있었다. `num-bigint 0.5.1`(기존)과 두 판이 공존해 lock 의 참조가 `num-bigint 0.5.1` 로 구분 표기됐을 뿐 Windows 에서 빌드되는 것은 없다.
+- **폴백(평문 디스크 저장 없음)**: `open_store` 의 결정부 `choose_store` 는 키링을 열 수 없으면(Linux 에 세션 D-Bus·Secret Service 없음 — `Store::new` 가 연결에서 실패) `MemoryStore`(`persistent()` = false)를 쓰고 `Vault` 가 `storage_unavailable` 로 알린다.
+  열렸어도 쓰기가 실패하면(컬렉션 잠김 해제 거부·서비스 응답 없음 등) 그 계정만 메모리로 내려가 `storage_unavailable` 이 된다 — 기존 Windows 와 같은 경로다. macOS 도 같다. 소스 검사가 `secret/` 의 운영 코드에 파일 쓰기(`std::fs`·`File::`·`OpenOptions`)가 없음을 강제한다.
+- **시험**: 순수 로직(`choose_store` 의 폴백 결정·환경 변수 우선·키체인 쓰기 실패 시 메모리 강등·상한)은 `secret::tests`, 소스 검사(키링 크레이트는 `secret/` 안에서만, 대상별 절에 자기 OS 크레이트만, Linux 에 dbus·openssl 의존 없음, 평문 쓰기 없음)는 `tests/net.rs` 의 `secret_store`.
+  macOS·Linux 의 실제 키체인은 이 PC 에서 돌리지 못했다 — PR CI 의 `cross` 잡(ubuntu-22.04·macos-latest `cargo check`+clippy)이 컴파일만 확인한다.
+- **사람이 확인해야 할 것**: ① macOS: 처음 저장할 때 키체인 접근 허용 창이 뜨고 "항상 허용" 뒤 재시작해도 로그인이 복원되는지, 키체인 접근 앱에 `jira-token`·`github-token`(서비스 `com.antler.app`)이 생기고 로그아웃 시 지워지는지.
+  ② Linux GNOME(Keyring)·KDE(KWallet — Secret Service 를 켠 상태): 로그인 후 재시작해도 복원되는지, `seahorse`/KWalletManager 에 항목이 생기는지, 잠긴 키링의 잠금 해제 창이 뜨는지.
+  ③ Linux 키링이 없는 환경(헤드리스·D-Bus 세션 없음·`gnome-keyring` 미설치): 앱이 죽지 않고 로그인되며 "메모리에만 보관" 안내가 보이고 재시작하면 다시 로그인하는지, 디스크에 토큰 파일이 없는지.
 
 ### PR 5 — Jira 서비스(`src-tauri/src/jira/service.rs`; 앱에 연결한 것은 PR 6)
 

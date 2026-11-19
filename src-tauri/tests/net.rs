@@ -7612,7 +7612,8 @@ mod secret_store {
         let mut out = Vec::new();
         for (n, t) in code_lines(text) {
             let w = words(t);
-            let uses_keyring = w.iter().any(|x| *x == "keyring_core" || *x == "windows_native_keyring_store") || t.contains("keyring-core") || t.contains("windows-native-keyring-store");
+            let uses_keyring = w.iter().any(|x| matches!(*x, "keyring_core" | "windows_native_keyring_store" | "apple_native_keyring_store" | "zbus_secret_service_keyring_store"))
+                || ["keyring-core", "windows-native-keyring-store", "apple-native-keyring-store", "zbus-secret-service-keyring-store"].iter().any(|c| t.contains(c));
             let prints = in_secret
                 && (["println", "eprintln", "print", "eprint", "dbg"].iter().any(|m| w.contains(m) && t.contains(&format!("{m}!")))
                     || w.iter().any(|x| matches!(*x, "log" | "tracing" | "slog" | "env_logger")));
@@ -7627,6 +7628,8 @@ mod secret_store {
     fn 소스_검사기가_위반을_알아본다() {
         assert_eq!(violations("net/x.rs", "use keyring_core::Entry;").len(), 1);
         assert_eq!(violations("net/x.rs", "let s = windows_native_keyring_store::Store::new();").len(), 1);
+        assert_eq!(violations("net/x.rs", "let s = apple_native_keyring_store::keychain::Store::new();").len(), 1);
+        assert_eq!(violations("net/x.rs", "let s = zbus_secret_service_keyring_store::Store::new();").len(), 1);
         assert!(violations("secret/keyring.rs", "use keyring_core::Entry;").is_empty());
         assert!(violations("net/x.rs", "// keyring_core 는 secret 에서만").is_empty());
         assert_eq!(violations("secret/mod.rs", "println!(\"{}\", x);").len(), 1);
@@ -7655,12 +7658,33 @@ mod secret_store {
         }
         assert!(secret_files >= 3, "secret 모듈 파일을 {secret_files}개만 찾았다");
         assert!(bad.is_empty(), "위반:\n{}", bad.join("\n"));
-        // Cargo.toml: 두 크레이트는 windows 대상 의존성으로만 있다
+        // Cargo.toml: 키링 크레이트는 대상별 의존성으로만 있다(공통 [dependencies] 에 없다) — 저장소 크레이트는 자기 OS 절에만
         let toml = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
-        let (before, after) = toml.split_once("[target.'cfg(windows)'.dependencies]").expect("windows 의존성 절");
-        let windows_part = after.split("\n[").next().unwrap();
-        assert!(windows_part.contains("keyring-core") && windows_part.contains("windows-native-keyring-store"));
-        assert!(!before.contains("keyring-core") && !before.contains("windows-native-keyring-store"));
+        let section = |header: &str| -> String {
+            let (_, after) = toml.split_once(&format!("\n{header}")).unwrap_or_else(|| panic!("{header} 절"));
+            after.split("\n[").next().unwrap().to_string()
+        };
+        let (windows, macos, linux) = (section("[target.'cfg(windows)'.dependencies]"), section("[target.'cfg(target_os = \"macos\")'.dependencies]"), section("[target.'cfg(target_os = \"linux\")'.dependencies]"));
+        let first_target = toml.find("\n[target.").unwrap();
+        let common = &toml[..first_target];
+        let stores = ["windows-native-keyring-store", "apple-native-keyring-store", "zbus-secret-service-keyring-store"];
+        for c in stores.iter().chain(&["keyring-core"]) {
+            assert!(!common.contains(c), "{c} 는 대상별 의존성이어야 한다");
+        }
+        for (name, part, own) in [("windows", &windows, 0), ("macos", &macos, 1), ("linux", &linux, 2)] {
+            assert!(part.contains("keyring-core"), "{name} 절에 keyring-core");
+            for (i, s) in stores.iter().enumerate() {
+                assert_eq!(part.contains(s), i == own, "{name} 절의 {s}");
+            }
+        }
+        // Linux 는 libdbus·openssl 시스템 라이브러리가 필요 없는 순수 Rust 판(zbus + RustCrypto)만 쓴다
+        assert!(linux.contains("rt-async-io-crypto-rust") && !linux.contains("dbus-secret-service") && !linux.contains("openssl"));
+        // 평문 파일 저장 같은 대체 경로가 없다: secret/ 의 운영 코드는 파일을 쓰지 않는다
+        for f in ["mod.rs", "keyring.rs", "memory.rs"] {
+            let t = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/secret").join(f)).unwrap();
+            let body: String = code_lines(&t).iter().map(|(_, l)| *l).collect::<Vec<_>>().join("\n");
+            assert!(!body.contains("std::fs") && !body.contains("File::") && !body.contains("OpenOptions") && !body.contains("fs::write"), "secret/{f} 가 파일에 쓴다");
+        }
     }
 
     #[test]

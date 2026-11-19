@@ -1,11 +1,11 @@
 //! 토큰 보관(Phase 4 PR 4) — 앱에는 아직 연결하지 않는다. 원본은 `src/main/github/tokenStore.ts`(저장 방식)와 `src/main/jira/service.ts`(저장값 복원)다.
 //!
-//! - [`SecretStore`]: 이름 붙은 바이트 덩어리를 두고 꺼내는 저장소. [`keyring::KeyringStore`](Windows 자격 증명 관리자)와 [`memory::MemoryStore`] 가 있다.
-//!   keyring-core·windows-native-keyring-store 는 이 모듈에서만 쓴다(소스 검사가 강제한다).
+//! - [`SecretStore`]: 이름 붙은 바이트 덩어리를 두고 꺼내는 저장소. [`keyring::KeyringStore`](Windows 자격 증명 관리자·macOS 키체인·Linux Secret Service)와
+//!   [`memory::MemoryStore`] 가 있다. keyring-core·windows-native-keyring-store·apple-native-keyring-store·zbus-secret-service-keyring-store 는 이 모듈에서만 쓴다(소스 검사가 강제한다).
 //! - [`Vault`]: 저장소 위에서 GitHub·Jira 자격 증명을 **비밀과 메타데이터를 한 덩어리 UTF-8 JSON** 으로 저장·복원한다(메타 파일은 없다).
 //!   - GitHub `{method, token}`, Jira `{kind, siteUrl, email, token, displayName}`.
 //!   - 읽은 값이 깨졌으면(JSON 실패·검증 실패) 그 항목을 지우고 `None`. Jira 는 `jira::validate::parse_connect_input` 으로 다시 검증한다.
-//!   - 쓰기에 실패하거나 저장소가 남지 않는 종류(Windows 아님·`ANTLER_USER_DATA`)면 메모리에만 두고 `storage_unavailable` 이다(tokenStore.ts 와 같다).
+//!   - 쓰기에 실패하거나 저장소가 남지 않는 종류(키링을 열 수 없음 — Linux 에 Secret Service 없음 등·`ANTLER_USER_DATA`)면 메모리에만 두고 `storage_unavailable` 이다(tokenStore.ts 와 같다).
 //!   - 한 덩어리는 [`MAX_BLOB`] 바이트(Windows 자격 증명 blob 상한, 실측은 keyring.rs 의 수동 시험)를 넘지 못한다. Jira 표시 이름은 먼저 200자로 자른다.
 //!   - 직렬화는 용량 [`MAX_BLOB`] 로 미리 잡은 버퍼에 재할당 없이 쓴다(넘으면 `TooLarge`). 재할당되면 토큰이 든 옛 버퍼가 0 으로 덮이지 않은 채 해제되기 때문이다.
 //!   - GitHub 토큰은 `usable_token` 을 통과해야 저장한다(`InvalidToken`). 메모리로 떨어진 상태(`storage_unavailable`)는 GitHub·Jira 가 따로다.
@@ -25,11 +25,12 @@ use crate::jira::validate::{parse_connect_input, ConnectInput, SiteOptions};
 use crate::jira::JiraKind;
 use crate::net::redact::{usable_token, SecretString};
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 pub mod keyring;
 pub mod memory;
 
-/// 자격 증명 하나의 blob 상한(바이트) — Windows `CRED_MAX_CREDENTIAL_BLOB_SIZE`(5 × 512). 값은 UTF-8 JSON 바이트 그대로 저장한다
+/// 자격 증명 하나의 blob 상한(바이트) — Windows `CRED_MAX_CREDENTIAL_BLOB_SIZE`(5 × 512). 값은 UTF-8 JSON 바이트 그대로 저장한다.
+/// macOS·Linux 도 같은 상한을 쓴다(Electron 판과 같고, 세 OS 의 저장 규칙을 하나로 둔다)
 pub const MAX_BLOB: usize = 2560;
 /// Jira 표시 이름은 이 글자 수로 먼저 자른다(예산 확보)
 pub const MAX_DISPLAY_NAME_CHARS: usize = 200;
@@ -89,12 +90,23 @@ pub fn service_name() -> &'static str {
     }
 }
 
-/// 쓸 저장소를 고른다: `ANTLER_USER_DATA`(측정·자동화 실행)가 있거나 Windows 가 아니거나 키링을 열 수 없으면 메모리, 아니면 자격 증명 관리자
+/// 쓸 저장소를 고른다: `ANTLER_USER_DATA`(측정·자동화 실행)가 있거나 키링이 없는 OS(Windows·macOS·Linux 외)거나 키링을 열 수 없으면 메모리(`persistent()` 가 false —
+/// 평문 파일 같은 대체 저장은 없다), 아니면 OS 키체인(Windows 자격 증명 관리자·macOS 키체인·Linux Secret Service)
 pub fn open_store(user_data: Option<&OsStr>) -> Arc<dyn SecretStore> {
-    if user_data.is_none() {
-        #[cfg(windows)]
+    choose_store(user_data, || {
+        #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
         if let Ok(k) = keyring::KeyringStore::open() {
-            return Arc::new(k);
+            return Some(Arc::new(k) as Arc<dyn SecretStore>);
+        }
+        None
+    })
+}
+
+/// [`open_store`] 의 결정부(OS 와 무관한 순수 로직). `open_keyring` 은 환경 변수가 없을 때만 불리고, `None` 이면 메모리 전용으로 내려간다
+fn choose_store(user_data: Option<&OsStr>, open_keyring: impl FnOnce() -> Option<Arc<dyn SecretStore>>) -> Arc<dyn SecretStore> {
+    if user_data.is_none() {
+        if let Some(k) = open_keyring() {
+            return k;
         }
     }
     Arc::new(memory::MemoryStore::new())
@@ -403,5 +415,59 @@ mod tests {
         // to_json 도 같은 결과다
         assert_eq!(to_json(&GithubWire { method: "pat", token: &fit }).unwrap().len(), MAX_BLOB);
         assert_eq!(to_json(&GithubWire { method: "pat", token: &over }).err(), Some(SecretError::TooLarge));
+    }
+
+    fn keychain_stand_in() -> Arc<dyn SecretStore> {
+        Arc::new(memory::MemoryStore::standing_in_for_keychain())
+    }
+
+    #[test]
+    fn 키링을_열면_그_저장소를_쓰고_열지_못하면_메모리로_내려간다() {
+        // 열렸다: 남는 저장소(키체인)
+        assert!(choose_store(None, || Some(keychain_stand_in())).persistent());
+        // 열지 못했다(Linux 에 D-Bus·Secret Service 없음 등): 메모리 — 남지 않는 저장소라 호출부가 `storage_unavailable` 로 알린다
+        let s = choose_store(None, || None);
+        assert!(!s.persistent());
+        let v = Vault::new(s);
+        assert_eq!(v.save_github(&SecretString::new("ghp_abc"), GithubMethod::Pat), Ok(false));
+        assert!(v.github_storage_unavailable());
+        assert!(v.load_github().is_some(), "메모리에는 남아 있다");
+    }
+
+    #[test]
+    fn 측정_자동화_실행은_키링을_열어_보지도_않는다() {
+        let mut called = false;
+        let s = choose_store(Some(OsStr::new("C:\\tmp\\ud")), || {
+            called = true;
+            Some(keychain_stand_in())
+        });
+        assert!(!called && !s.persistent());
+    }
+
+    #[test]
+    fn 키체인_쓰기가_실패하면_메모리로_내려가고_상한은_모든_저장소에_같다() {
+        struct Failing;
+        impl SecretStore for Failing {
+            fn get(&self, _: &str) -> Result<Option<Zeroizing<Vec<u8>>>, SecretError> {
+                Err(SecretError::Backend)
+            }
+            fn set(&self, _: &str, _: &[u8]) -> Result<(), SecretError> {
+                Err(SecretError::Backend)
+            }
+            fn delete(&self, _: &str) -> Result<(), SecretError> {
+                Ok(())
+            }
+            fn persistent(&self) -> bool {
+                true
+            }
+        }
+        let v = Vault::new(Arc::new(Failing));
+        assert!(!v.github_storage_unavailable());
+        assert_eq!(v.save_github(&SecretString::new("ghp_abc"), GithubMethod::Pat), Ok(false));
+        assert!(v.github_storage_unavailable() && !v.jira_storage_unavailable(), "실패는 그 계정만 메모리 상태로 만든다");
+        assert!(v.load_github().is_some());
+        // 크기 상한(2560B)은 저장소 종류와 무관하게 Vault 가 먼저 막는다
+        assert_eq!(v.write(GITHUB_ACCOUNT, &vec![b'a'; MAX_BLOB + 1]), Err(SecretError::TooLarge));
+        assert_eq!(v.write(GITHUB_ACCOUNT, &vec![b'a'; MAX_BLOB]), Ok(false));
     }
 }
