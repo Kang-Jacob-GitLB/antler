@@ -310,6 +310,34 @@ async fn powershell_로그인_셸은_두_번_확인한_뒤_powershell_규칙으�
 }
 
 #[tokio::test]
+async fn powershell_연결은_출력_전의_일시적_exec_거부를_다시_보낸다() {
+    // run 경로
+    let e = Env::with(|o| {
+        o.shell = Shell::Pwsh;
+        o.exec = ExecMode::RejectFirst;
+    })
+    .await;
+    let ex = e.ex();
+    let r = run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap();
+    assert_eq!((r.code, e.server.rejected()), (1, 1), "한 번 거부된 뒤 다시 보내 끝까지 돌았다");
+    assert_eq!(e.server.exec_log().len(), 3, "확인 둘 + 다시 보낸 명령 하나(거부된 요청은 기록되지 않는다)");
+    ex.dispose();
+    // stream 경로
+    let e = Env::with(|o| {
+        o.shell = Shell::Pwsh;
+        o.exec = ExecMode::RejectFirst;
+    })
+    .await;
+    let ex = e.ex();
+    let mut s = ex.stream(&e.repo, &["log"], &RunOpts::default()).await.unwrap();
+    let mut buf = Vec::new();
+    let _ = s.read_to_end(&mut buf).await;
+    assert_eq!(e.server.rejected(), 1);
+    assert_eq!(e.server.exec_log().len(), 3, "stream 도 다시 보냈다");
+    ex.dispose();
+}
+
+#[tokio::test]
 async fn 첫_확인만_powershell_처럼_보이면_거부한다() {
     let e = Env::with(|o| o.shell = Shell::FakePwsh).await;
     let ex = e.ex();

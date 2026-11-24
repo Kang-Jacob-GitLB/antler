@@ -53,6 +53,10 @@ const DISPOSED: &str = "SSH 연결이 이미 종료되었습니다";
 const OPEN_TIMEOUT: Duration = Duration::from_secs(15);
 /// 취소·종료 때 KILL·close 요청을 보내는 데 주는 시간
 const KILL_TIMEOUT: Duration = Duration::from_secs(2);
+/// PowerShell(Windows OpenSSH) 연결에서 exec 요청이 거부됐을 때 다시 보내기 전 대기. Windows sshd 는 막 닫힌 세션을 잠시 계속 세어
+/// 채널을 빠르게 열고 닫으면 세션 한도(`MaxSessions`)에 순간적으로 걸린다(실기기에서 한 연결에 6개씩 몰아 실행하면 간헐적으로 거부).
+/// 거부는 명령이 시작되기 전이고 출력도 없으므로 같은 명령을 다시 보내도 안전하다
+const PS_EXEC_RETRY: [Duration; 3] = [Duration::from_millis(200), Duration::from_millis(500), Duration::from_millis(1000)];
 /// KILL 뒤 서버가 채널을 닫기를 기다리는 시간(그 뒤에야 슬롯을 돌려준다)
 const CLOSE_WAIT: Duration = Duration::from_secs(3);
 /// SFTP 다리(채널 ↔ 클라이언트 스트림)의 한 번 복사 크기와 스트림 완충 크기
@@ -911,10 +915,27 @@ struct Job {
 impl Job {
     /// 채널을 열어 명령을 실행하고 끝까지 읽는다. **슬롯은 이 함수가 끝난 뒤(닫힘 확인 뒤)** 호출자가 돌려준다
     async fn run(self, token: CancellationToken) -> Result<RunResult, ExecError> {
-        let mut ch = open_exec(&self.live, &self.command, &token, &None).await?;
-        let mut stdout: Vec<u8> = Vec::new();
-        let mut stderr: Vec<u8> = Vec::new();
-        let outcome = self.read_all(&mut ch, &token, &mut stdout, &mut stderr).await;
+        let mut retries = PS_EXEC_RETRY.iter();
+        let (mut ch, stdout, stderr, outcome) = loop {
+            let mut ch = open_exec(&self.live, &self.command, &token, &None).await?;
+            let mut stdout: Vec<u8> = Vec::new();
+            let mut stderr: Vec<u8> = Vec::new();
+            let outcome = self.read_all(&mut ch, &token, &mut stdout, &mut stderr).await;
+            // PowerShell(Windows OpenSSH)의 일시적 거부는 출력이 오기 전이면 잠시 뒤 다시 보낸다(`PS_EXEC_RETRY`)
+            if matches!(outcome, Outcome::Rejected) && self.live.shell == RemoteShell::PowerShell && stdout.is_empty() && stderr.is_empty() {
+                if let Some(wait) = retries.next() {
+                    let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
+                    drain_until_closed(&mut ch).await;
+                    tokio::select! {
+                        biased;
+                        _ = token.cancelled() => return Err(ExecError::Aborted),
+                        () = tokio::time::sleep(*wait) => {}
+                    }
+                    continue;
+                }
+            }
+            break (ch, stdout, stderr, outcome);
+        };
         match outcome {
             Outcome::Done(code) => {
                 let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
@@ -1033,64 +1054,96 @@ fn admit(queued: &AtomicUsize, cap: usize, len: usize) -> Admit {
 /// 소비자는 이 태스크가 채운 큐에서 가져간다. 큐가 상한을 넘으면 원격을 죽이고 소비자에게 `Overflow` 를 알린다
 async fn pump(p: Pump) {
     let Pump { live, command, slot, tx, queued, cap, stop, user, started } = p;
-    let mut ch = match open_exec(&live, &command, &stop, &user).await {
-        Ok(ch) => ch,
-        Err(e) => {
-            let _ = started.send(Err(e));
-            drop(slot);
-            return;
-        }
-    };
-    let _ = started.send(Ok(()));
-    let mut stderr: Vec<u8> = Vec::new();
-    let mut code: Option<i32> = None;
-    let mut eof = false;
-    let exit = loop {
-        let msg = tokio::select! {
-            biased;
-            () = stop.cancelled() => break PumpExit::Kill,
-            () = cancelled(&user) => break PumpExit::Kill,
-            m = ch.wait() => m,
-        };
-        let Some(msg) = msg else {
-            let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
-            break PumpExit::Ended;
-        };
-        match msg {
-            ChannelMsg::Data { data } => match admit(&queued, cap, data.len()) {
-                Admit::Skip => {}
-                Admit::Overflow => {
-                    let _ = tx.send(Event::Overflow);
-                    break PumpExit::Kill;
-                }
-                Admit::Queue => {
-                    if tx.send(Event::Data(data.to_vec())).is_err() {
-                        break PumpExit::Kill;
+    let mut started = Some(started);
+    let mut retries = PS_EXEC_RETRY.iter();
+    let (mut ch, exit) = 'attempt: loop {
+        let mut ch = match open_exec(&live, &command, &stop, &user).await {
+            Ok(ch) => ch,
+            Err(e) => {
+                match started.take() {
+                    Some(s) => {
+                        let _ = s.send(Err(e));
+                    }
+                    // 다시 보내다 실패했다 — 소비자는 이미 시작 알림을 받았으므로 거부로 끝낸다
+                    None => {
+                        let _ = tx.send(Event::End(End { code: None, stderr: Vec::new(), rejected: true }));
                     }
                 }
-            },
-            ChannelMsg::ExtendedData { data, ext: 1 } => {
-                let room = MAX_STDERR.saturating_sub(stderr.len());
-                stderr.extend_from_slice(&data[..data.len().min(room)]);
+                drop(slot);
+                return;
             }
-            ChannelMsg::ExitStatus { exit_status } => code = Some(i32::try_from(exit_status).unwrap_or(-1)),
-            // 시그널로 죽었으면 -1(TS 와 같다)
-            ChannelMsg::ExitSignal { .. } => code = Some(-1),
-            ChannelMsg::Eof => eof = true,
-            ChannelMsg::Failure => {
-                let _ = tx.send(Event::End(End { code: None, stderr: Vec::new(), rejected: true }));
-                break PumpExit::Rejected;
+        };
+        if let Some(s) = started.take() {
+            let _ = s.send(Ok(()));
+        }
+        let mut stderr: Vec<u8> = Vec::new();
+        let mut code: Option<i32> = None;
+        let mut eof = false;
+        // 소비자에게 데이터를 보냈는가(보냈으면 다시 보내지 않는다)
+        let mut sent = false;
+        let exit = loop {
+            let msg = tokio::select! {
+                biased;
+                () = stop.cancelled() => break PumpExit::Kill,
+                () = cancelled(&user) => break PumpExit::Kill,
+                m = ch.wait() => m,
+            };
+            let Some(msg) = msg else {
+                let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
+                break PumpExit::Ended;
+            };
+            match msg {
+                ChannelMsg::Data { data } => match admit(&queued, cap, data.len()) {
+                    Admit::Skip => {}
+                    Admit::Overflow => {
+                        let _ = tx.send(Event::Overflow);
+                        break PumpExit::Kill;
+                    }
+                    Admit::Queue => {
+                        sent = true;
+                        if tx.send(Event::Data(data.to_vec())).is_err() {
+                            break PumpExit::Kill;
+                        }
+                    }
+                },
+                ChannelMsg::ExtendedData { data, ext: 1 } => {
+                    let room = MAX_STDERR.saturating_sub(stderr.len());
+                    stderr.extend_from_slice(&data[..data.len().min(room)]);
+                }
+                ChannelMsg::ExitStatus { exit_status } => code = Some(i32::try_from(exit_status).unwrap_or(-1)),
+                // 시그널로 죽었으면 -1(TS 와 같다)
+                ChannelMsg::ExitSignal { .. } => code = Some(-1),
+                ChannelMsg::Eof => eof = true,
+                ChannelMsg::Failure => {
+                    // PowerShell(Windows OpenSSH)의 일시적 거부는 출력이 오기 전이면 잠시 뒤 다시 보낸다(`PS_EXEC_RETRY`)
+                    if live.shell == RemoteShell::PowerShell && !sent && stderr.is_empty() {
+                        if let Some(wait) = retries.next() {
+                            let _ = tokio::time::timeout(KILL_TIMEOUT, ch.close()).await;
+                            drain_until_closed(&mut ch).await;
+                            tokio::select! {
+                                biased;
+                                () = stop.cancelled() => break 'attempt (ch, PumpExit::Kill),
+                                () = cancelled(&user) => break 'attempt (ch, PumpExit::Kill),
+                                () = tokio::time::sleep(*wait) => {}
+                            }
+                            continue 'attempt;
+                        }
+                    }
+                    let _ = tx.send(Event::End(End { code: None, stderr: Vec::new(), rejected: true }));
+                    break PumpExit::Rejected;
+                }
+                ChannelMsg::Close => {
+                    let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
+                    break PumpExit::Ended;
+                }
+                _ => {}
             }
-            ChannelMsg::Close => {
+            if eof && code.is_some() {
                 let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
                 break PumpExit::Ended;
             }
-            _ => {}
-        }
-        if eof && code.is_some() {
-            let _ = tx.send(Event::End(End { code, stderr, rejected: false }));
-            break PumpExit::Ended;
-        }
+        };
+        break (ch, exit);
     };
     match exit {
         PumpExit::Ended => {

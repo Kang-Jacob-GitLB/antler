@@ -106,6 +106,8 @@ pub enum ExecMode {
     Normal,
     /// 요청을 거부한다(channel_failure). 채널은 클라이언트가 닫을 때까지 서버에 남는다
     Reject,
+    /// 확인 명령이 아닌 첫 exec 하나만 거부하고 그 뒤로는 받는다(Windows sshd 의 일시적 세션 한도 흉내 — 거부한 요청도 `rejected` 로 센다)
+    RejectFirst,
 }
 
 pub struct Opts {
@@ -144,6 +146,8 @@ struct Shared {
     handles: Mutex<Vec<server::Handle>>,
     /// 받은 exec 명령(셸 확인 포함, 받은 순서)
     exec_log: Mutex<Vec<String>>,
+    /// `ExecMode::RejectFirst` 로 거부한 exec 수
+    rejected: AtomicUsize,
     /// 받은 direct-tcpip 요청(`host:port`)
     tunnels: Mutex<Vec<String>>,
     /// 공개키 인증을 시도한 연결 수(연결당 한 번만 센다)
@@ -235,6 +239,10 @@ impl TestServer {
     }
 
     /// 서버가 받은 exec 명령들(셸 확인 포함)
+    pub fn rejected(&self) -> usize {
+        self.shared.rejected.load(Ordering::SeqCst)
+    }
+
     pub fn exec_log(&self) -> Vec<String> {
         self.shared.exec_log.lock().unwrap().clone()
     }
@@ -439,7 +447,9 @@ impl server::Handler for Conn {
     }
 
     async fn exec_request(&mut self, id: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
-        if self.exec == ExecMode::Reject && data != SHELL_PROBE.as_bytes() {
+        let probe = data == SHELL_PROBE.as_bytes() || data == PS_PROBE.as_bytes();
+        let reject_first = self.exec == ExecMode::RejectFirst && !probe && self.shared.rejected.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok();
+        if (self.exec == ExecMode::Reject && data != SHELL_PROBE.as_bytes()) || reject_first {
             session.channel_failure(id)?;
             // 거부한 채널은 클라이언트가 닫을 때(channel_close)까지 남는다 — 그 수를 센다
             if self.opened.insert(id) {
