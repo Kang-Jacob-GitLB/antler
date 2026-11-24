@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use antler_lib::git::exec::ssh::SHELL_PROBE;
+use antler_lib::git::exec::ssh::{PS_PROBE, SHELL_PROBE};
 use antler_lib::git::exec::{ExecError, LocalExecutor, RunOpts};
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
 use russh::server::{self, Auth, Msg, Server as _, Session, VerifiedPublicKey};
@@ -94,6 +94,10 @@ pub enum Shell {
     Posix,
     /// Windows cmd 처럼 작은따옴표를 문자 그대로 돌려준다(클라이언트의 셸 확인이 거부해야 한다)
     Cmd,
+    /// PowerShell 처럼 첫 확인에 `an'tler`, 두 번째 확인(`PS_PROBE`)에 주 버전을 낸다. 그 밖의 명령은 기록만 하고 실패(1)로 답한다(PowerShell 문법을 풀지 않는다)
+    PowerShell,
+    /// 첫 확인만 PowerShell 처럼 답하고 두 번째 확인은 POSIX 셸처럼(`$PSVersionTable` 을 빈 값으로) 답한다 — 클라이언트가 거부해야 한다
+    FakePowerShell,
 }
 
 /// 프로브가 아닌 exec 요청에 서버가 어떻게 답하는가
@@ -635,9 +639,24 @@ async fn finish(channel: &Channel<Msg>, code: Option<u32>) {
 
 async fn serve_exec(shared: Arc<Shared>, shell: Shell, channel: Channel<Msg>, command: String, token: CancellationToken) {
     if command == SHELL_PROBE {
-        let out: &[u8] = if shell == Shell::Cmd { b"'an''tler'\r\n" } else { b"antler\n" };
+        let out: &[u8] = match shell {
+            Shell::Cmd => b"'an''tler'\r\n",
+            Shell::PowerShell | Shell::FakePowerShell => b"an'tler\r\n",
+            Shell::Posix => b"antler\n",
+        };
         let _ = channel.data(out).await;
         finish(&channel, Some(0)).await;
+        return;
+    }
+    if command == PS_PROBE && matches!(shell, Shell::PowerShell | Shell::FakePowerShell) {
+        let out: &[u8] = if shell == Shell::PowerShell { b"5\r\n" } else { b".PSVersion.Major\n" };
+        let _ = channel.data(out).await;
+        finish(&channel, Some(0)).await;
+        return;
+    }
+    if shell == Shell::PowerShell {
+        let _ = channel.extended_data(1, &b"powershell fake\n"[..]).await;
+        finish(&channel, Some(1)).await;
         return;
     }
     let Ok(argv) = unquote(&command) else {

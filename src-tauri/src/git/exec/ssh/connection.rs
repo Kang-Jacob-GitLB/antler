@@ -5,6 +5,8 @@
 //! - **홉마다 `unsupported` 거부**: 대상과 모든 ProxyJump 홉을 `resolve_host` 로 해석해 하나라도 `unsupported`(ProxyCommand·Match·비 ASCII·포트 범위·RevokedHostKeys)면 연결 전에 거부한다.
 //! - **홉마다 known_hosts 판정**(`verify_host_key_text`, TOFU·쓰기 없음). 알려진 키 종류로 서버 호스트 키 알고리즘을 제한한다. `HostKeyAlias` 가 있으면 별칭·포트 22 로 조회한다.
 //! - **원격 셸 확인**([`SHELL_PROBE`]): 접속 직후 로그인 셸이 POSIX 인용을 해석하는지 본다. 확인 전에는 사용자 값이 든 명령을 보내지 않는다.
+//!   PowerShell(Windows OpenSSH 의 기본 셸을 PowerShell 로 둔 서버)은 `an'tler` 를 내고, 두 번째 고정 확인([`PS_PROBE`])이 버전 숫자를 내야 PowerShell 로 본다.
+//!   원격 명령 문자열은 **그 연결의 셸**로 만든다([`GitCommand::build`] → `quote::build_remote_command_for`) — 재연결해 셸이 바뀌어도 다른 셸의 인용이 가지 않는다.
 //! - 인증은 agent·키 파일뿐이다(`auth.rs`). 비밀번호·keyboard-interactive·agent 전달·X11·포트 포워딩은 쓰지 않는다(clippy.toml).
 //!
 //! **채널은 태스크가 소유한다.** Rust 에서는 future 를 버리는 것이 취소이고 `Drop` 은 동기라 원격에 KILL/close 를 보낼 수 없다. 그래서 exec 채널을 연 순간부터는
@@ -26,9 +28,10 @@ use tokio_util::sync::CancellationToken;
 use super::auth::{self, AgentSetting};
 use super::config::{load_ssh_config, resolve_host, Ctx, RealFs, ResolvedHost};
 use super::known_hosts::{known_host_key_algorithms, read_known_hosts, verify_host_key_text};
+use super::quote::{build_remote_command_for, RemoteShell};
 use super::sftp::{self, SftpError};
 use super::stream::{End, Event, SshStream, EVENT_COST, STREAM_AHEAD_LIMIT};
-use crate::git::exec::common::{to_strings, RunOpts, RunResult, DEFAULT_MAX_BUFFER, MAX_STDERR};
+use crate::git::exec::common::{to_strings, FetchEnv, RunOpts, RunResult, DEFAULT_MAX_BUFFER, MAX_STDERR};
 use crate::git::exec::error::ExecError;
 use crate::git::parsers::js_trim;
 use crate::repos::scan::RemoteDirListing;
@@ -38,6 +41,12 @@ use crate::repos::scan::RemoteDirListing;
 /// sh/bash/zsh/fish 는 인접한 두 따옴표 문자열을 이어 `antler` 를 출력하고, cmd 는 따옴표를 그대로, PowerShell 은 `an'tler` 를 출력한다.
 pub const SHELL_PROBE: &str = "echo 'an''tler'";
 const SHELL_PROBE_EXPECT: &str = "antler";
+/// PowerShell 이 [`SHELL_PROBE`] 에 내는 값
+const SHELL_PROBE_POWERSHELL: &str = "an'tler";
+/// PowerShell 확인(두 번째, 고정 명령). PowerShell 만 주 버전 숫자를 낸다(POSIX 셸은 `$PSVersionTable` 을 빈 값으로 풀어 `.PSVersion.Major` 를 낸다)
+pub const PS_PROBE: &str = "$PSVersionTable.PSVersion.Major";
+const NOT_SUPPORTED_SHELL: &str =
+    "원격 로그인 셸이 POSIX 셸이 아닙니다(sh·bash·zsh·fish·PowerShell 만 지원합니다). Windows OpenSSH 서버라면 기본 셸을 PowerShell 이나 bash 로 바꿔야 합니다.";
 const CONNECTION_LOST: &str = "SSH 연결이 끊겨 원격 git 이 끝나기 전에 종료되었습니다";
 const DISPOSED: &str = "SSH 연결이 이미 종료되었습니다";
 /// 채널을 열고 exec 요청을 보내는 데 주는 시간(응답이 없는 서버에서 영원히 기다리지 않는다)
@@ -236,6 +245,21 @@ type ClientHandle = Handle<HostKeyHandler>;
 /// 연결된 체인(점프 호스트들 + 대상). 점프 호스트의 세션을 버리면 그 위의 터널이 끊기므로 체인 전체를 쥔다
 struct Live {
     chain: Vec<ClientHandle>,
+    /// 접속 직후 확인한 원격 로그인 셸 — 원격 명령 문자열을 이 규칙으로 만든다
+    shell: RemoteShell,
+}
+
+/// 원격 git 명령의 재료. 문자열은 연결의 셸 확인 뒤 그 셸 규칙으로 만든다(`quote::build_remote_command_for` 하나로만)
+pub(super) struct GitCommand {
+    pub repo_path: String,
+    pub args: Vec<String>,
+    pub fetch: Option<FetchEnv>,
+}
+
+impl GitCommand {
+    fn build(&self, shell: RemoteShell) -> Result<String, ExecError> {
+        build_remote_command_for(shell, &self.repo_path, &self.args, self.fetch.as_ref()).map_err(|e| ExecError::Other { message: e.to_string() })
+    }
 }
 
 impl Live {
@@ -409,17 +433,17 @@ impl Inner {
         let mut chain: Vec<ClientHandle> = Vec::new();
         let result = self.connect_chain(&nodes, hop_count, &mut chain).await;
         match result {
-            Ok(()) => Ok(Live { chain }),
+            Ok(shell) => Ok(Live { chain, shell }),
             Err(e) => {
                 if !chain.is_empty() {
-                    disconnect_in_background(Arc::new(Live { chain }));
+                    disconnect_in_background(Arc::new(Live { chain, shell: RemoteShell::Posix }));
                 }
                 Err(e)
             }
         }
     }
 
-    async fn connect_chain(&self, nodes: &[ResolvedHost], hop_count: usize, chain: &mut Vec<ClientHandle>) -> Result<(), ExecError> {
+    async fn connect_chain(&self, nodes: &[ResolvedHost], hop_count: usize, chain: &mut Vec<ClientHandle>) -> Result<RemoteShell, ExecError> {
         for (i, node) in nodes.iter().enumerate() {
             let prefix = if i < hop_count { format!("[점프 호스트 {}] ", node.alias) } else { String::new() };
             let handle = match i {
@@ -433,7 +457,7 @@ impl Inner {
             chain.push(handle);
         }
         let last = chain.last().expect("대상이 있다");
-        check_posix_shell(last, self.opts.timeouts.probe).await
+        detect_shell(last, self.opts.timeouts.probe).await
     }
 
     /// 호스트 하나를 연다(TCP 또는 앞 홉의 direct-tcpip 위에서 키 교환·호스트 키 검증·인증). 전체가 `ready` 시간 안이어야 한다
@@ -586,8 +610,28 @@ fn disconnect_in_background(live: Arc<Live>) {
     });
 }
 
-/// 원격 로그인 셸이 POSIX 계열인지 확인한다(`SHELL_PROBE` 참고). 아니면 사용자 값이 든 명령을 보내지 않는다
-async fn check_posix_shell(handle: &ClientHandle, limit: Duration) -> Result<(), ExecError> {
+/// 원격 로그인 셸을 확인한다(`SHELL_PROBE`·`PS_PROBE` 참고). POSIX·PowerShell 이 아니면 사용자 값이 든 명령을 보내지 않는다
+async fn detect_shell(handle: &ClientHandle, limit: Duration) -> Result<RemoteShell, ExecError> {
+    let first = run_probe(handle, SHELL_PROBE, limit).await?;
+    match js_trim(&String::from_utf8_lossy(&first)) {
+        SHELL_PROBE_EXPECT => Ok(RemoteShell::Posix),
+        // `an'tler` 하나만으로는 열지 않는다 — PowerShell 만 내는 두 번째 고정 확인이 맞아야 한다
+        SHELL_PROBE_POWERSHELL => {
+            let second = run_probe(handle, PS_PROBE, limit).await?;
+            let v = String::from_utf8_lossy(&second);
+            let v = js_trim(&v);
+            if !v.is_empty() && v.len() <= 3 && v.bytes().all(|b| b.is_ascii_digit()) {
+                Ok(RemoteShell::PowerShell)
+            } else {
+                Err(other(NOT_SUPPORTED_SHELL))
+            }
+        }
+        _ => Err(other(NOT_SUPPORTED_SHELL)),
+    }
+}
+
+/// 고정 확인 명령 하나를 보내고 stdout 앞 256바이트를 받는다(전체가 `limit` 안)
+async fn run_probe(handle: &ClientHandle, command: &'static str, limit: Duration) -> Result<Vec<u8>, ExecError> {
     let probe = async {
         let mut ch = tokio::time::timeout(OPEN_TIMEOUT, handle.channel_open_session())
             .await
@@ -595,7 +639,7 @@ async fn check_posix_shell(handle: &ClientHandle, limit: Duration) -> Result<(),
             .map_err(|e| other(format!("원격 셸을 확인하지 못했습니다: {e}")))?;
         // 원격 명령 실행은 이 파일(프로브·Job::run)에서만 요청한다(clippy.toml)
         #[allow(clippy::disallowed_methods)]
-        let sent = ch.exec(true, SHELL_PROBE).await;
+        let sent = ch.exec(true, command).await;
         sent.map_err(|e| other(format!("원격 셸을 확인하지 못했습니다: {e}")))?;
         let mut out: Vec<u8> = Vec::new();
         let (mut eof, mut exited) = (false, false);
@@ -619,14 +663,9 @@ async fn check_posix_shell(handle: &ClientHandle, limit: Duration) -> Result<(),
         let _ = ch.close().await;
         Ok(out)
     };
-    let out = match tokio::time::timeout(limit, probe).await {
-        Ok(r) => r?,
-        Err(_) => return Err(other("원격 셸 확인이 시간 안에 끝나지 않았습니다")),
-    };
-    if js_trim(&String::from_utf8_lossy(&out)) == SHELL_PROBE_EXPECT {
-        Ok(())
-    } else {
-        Err(other("원격 로그인 셸이 POSIX 셸이 아닙니다(sh·bash·zsh·fish 만 지원합니다). Windows OpenSSH 서버라면 기본 셸을 바꿔야 합니다."))
+    match tokio::time::timeout(limit, probe).await {
+        Ok(r) => r,
+        Err(_) => Err(other("원격 셸 확인이 시간 안에 끝나지 않았습니다")),
     }
 }
 
@@ -1107,7 +1146,7 @@ impl Connection {
 
     /// 원격 명령 하나를 실행해 출력을 모은다. 연결은 지연해서 맺고, 동시 채널은 세마포어로 제한한다.
     /// 호출자가 취소(`opts.cancel`)하거나 future 를 버리면 원격 프로세스에 KILL 을 보내고 슬롯은 채널이 닫힌 뒤에 돌려준다.
-    pub(super) async fn run(&self, command: String, git_args: &[String], opts: &RunOpts) -> Result<RunResult, ExecError> {
+    pub(super) async fn run(&self, command: GitCommand, git_args: &[String], opts: &RunOpts) -> Result<RunResult, ExecError> {
         if opts.cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
             return Err(ExecError::Aborted);
         }
@@ -1126,6 +1165,8 @@ impl Connection {
             _ = cancelled(&opts.cancel) => return Err(ExecError::Aborted),
             l = inner.live() => l?,
         };
+        // 이 연결의 셸 규칙으로 만든다(PowerShell 에 못 보내는 인자는 여기서 거부 — 아무것도 보내지 않는다)
+        let command = command.build(live.shell)?;
         let job = Job { live, command, max_stdout: opts.max_buffer.unwrap_or(DEFAULT_MAX_BUFFER), git_args: to_strings(git_args) };
         let token = CancellationToken::new();
         // 이 future 가 어떤 경로로든 끝나거나 버려지면 태스크에 취소를 알린다(이미 끝났다면 무해하다)
@@ -1145,7 +1186,7 @@ impl Connection {
 
     /// 원격 명령 하나를 실행해 stdout 을 스트림으로 준다(`run` 과 같은 슬롯·연결 규칙). 채널·슬롯은 펌프 태스크가 쥐고 소비자와 무관하게 비운다 —
     /// 스트림을 버리거나 취소하면 원격에 KILL 을 보내고 슬롯은 채널이 닫힌 뒤에 돌려준다. 시작(exec 요청)까지만 기다리고 돌아온다
-    pub(super) async fn stream(&self, command: String, git_args: &[String], opts: &RunOpts) -> Result<SshStream, ExecError> {
+    pub(super) async fn stream(&self, command: GitCommand, git_args: &[String], opts: &RunOpts) -> Result<SshStream, ExecError> {
         if opts.cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
             return Err(ExecError::Aborted);
         }
@@ -1163,6 +1204,7 @@ impl Connection {
             _ = cancelled(&opts.cancel) => return Err(ExecError::Aborted),
             l = inner.live() => l?,
         };
+        let command = command.build(live.shell)?;
         let stop = CancellationToken::new();
         // 시작 전에 돌아가는 모든 경로에서 버려져 펌프를 멈춘다(성공하면 스트림이 넘겨받는다)
         let guard = stop.clone().drop_guard();

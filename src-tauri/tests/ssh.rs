@@ -13,10 +13,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use antler_lib::git::exec::ssh::config::{list_hosts, load_ssh_config, Ctx, RealFs};
-use antler_lib::git::exec::ssh::quote::build_remote_command;
+use antler_lib::git::exec::ssh::quote::{build_remote_command, build_remote_command_for, RemoteShell};
 #[cfg(feature = "test-hooks")]
 use antler_lib::git::exec::ssh::is_read_ahead_exceeded;
-use antler_lib::git::exec::ssh::{SftpError, SshExecutor, SshOptions, SshPool, SshStream, SHELL_PROBE};
+use antler_lib::git::exec::ssh::{SftpError, SshExecutor, SshOptions, SshPool, SshStream, PS_PROBE, SHELL_PROBE};
 use antler_lib::repos::env::test_ssh_env;
 use antler_lib::git::exec::{ExecError, GitExecutor, RunOpts, RunResult, GIT_ENV};
 #[cfg(feature = "test-hooks")]
@@ -288,6 +288,63 @@ async fn 원격_로그인_셸이_posix_가_아니면_사용자_값이_든_명령
     assert_eq!(e.server.exec_log(), [SHELL_PROBE], "셸 확인 말고는 아무 명령도 보내지 않았다");
     wait_for("거부한 접속의 서버 쪽 연결 종료", || e.server.open_connections() == 0).await;
     ex.dispose();
+}
+
+#[tokio::test]
+async fn powershell_로그인_셸은_두_번_확인한_뒤_powershell_규칙으로_명령을_만든다() {
+    let e = Env::with(|o| o.shell = Shell::PowerShell).await;
+    let ex = e.ex();
+    // 시험 서버는 PowerShell 문법을 풀지 않고 실패(1)로 답한다 — 보낸 문자열만 본다
+    let r = run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap();
+    assert_eq!(r.code, 1);
+    let log = e.server.exec_log();
+    assert_eq!(log.len(), 3, "{log:?}");
+    assert_eq!((log[0].as_str(), log[1].as_str()), (SHELL_PROBE, PS_PROBE), "사용자 값이 든 명령보다 두 확인이 먼저다");
+    assert_eq!(log[2], build_remote_command_for(RemoteShell::PowerShell, &e.repo, &["rev-parse", "HEAD"], None).unwrap());
+    assert!(log[2].contains("& git.exe '-C' "), "{}", log[2]);
+    // 같은 연결에서 PowerShell 로 못 넘기는 인자는 보내지 않고 거부한다(git 옵션 주입 방지)
+    let m = message(run(&ex, &e.repo, &["log", "--grep=a\"b"]).await);
+    assert!(m.contains("PowerShell 원격에는"), "{m}");
+    assert_eq!(e.server.exec_log().len(), 3, "거부한 명령은 보내지 않았다");
+    ex.dispose();
+}
+
+#[tokio::test]
+async fn 첫_확인만_powershell_처럼_보이면_거부한다() {
+    let e = Env::with(|o| o.shell = Shell::FakePowerShell).await;
+    let ex = e.ex();
+    let m = message(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await);
+    assert!(m.contains("POSIX 셸이 아닙니다"), "{m}");
+    assert_eq!(e.server.exec_log(), [SHELL_PROBE, PS_PROBE], "두 확인 말고는 아무 명령도 보내지 않았다");
+    ex.dispose();
+}
+
+/// 실제 Windows PowerShell 5.1 에 만든 명령을 그대로 넘겨, git 이 받은 인자가 보낸 인자와 같은지 본다(`rev-parse --sq-quote` 가 받은 그대로 되돌려 준다).
+/// OpenSSH 는 기본 셸이 PowerShell 이면 `powershell.exe -c <명령>` 으로 실행한다 — 같은 모양으로 돌린다
+#[cfg(windows)]
+#[test]
+fn 실제_powershell_로_git_이_받는_인자가_보낸_인자와_같다() {
+    let dir = std::env::temp_dir().join(format!("antler-ps-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    #[allow(clippy::disallowed_methods)]
+    let init = std::process::Command::new("git").args(["init", "-q"]).arg(&dir).status().unwrap();
+    assert!(init.success());
+    let tricky = ["a b", "a\tb", "%PATH%", "& | ^ ; <>", "*", "한글 경로", "it\u{2019}s", "x'y", "$HOME", "`n$(whoami)", "C:\\a\\b\\", "-c core.x=1", "--format=%H%x00%s", "@(1,2)", "{x}"];
+    let mut args = vec!["rev-parse", "--sq-quote"];
+    args.extend(tricky);
+    let repo = dir.to_string_lossy().replace('\\', "/");
+    let cmd = build_remote_command_for(RemoteShell::PowerShell, &format!("/{repo}"), &args, None).unwrap();
+    #[allow(clippy::disallowed_methods)]
+    let out = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-c", &cmd]).output().unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let want: String = tricky.iter().map(|a| format!(" '{}'", a.replace('\'', "'\\''"))).collect();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end(), want, "PowerShell 을 거친 인자가 바뀌었다");
+    // git 이 실패하면 그 종료 코드가 그대로 온다
+    let bad = build_remote_command_for(RemoteShell::PowerShell, "C:/antler-no-such-dir", &["rev-parse", "HEAD"], None).unwrap();
+    #[allow(clippy::disallowed_methods)]
+    let out = std::process::Command::new("powershell.exe").args(["-NoProfile", "-NonInteractive", "-c", &bad]).output().unwrap();
+    assert_eq!(out.status.code(), Some(128));
 }
 
 // ── 거부 경로 ──────────────────────────────────────────────────────────────────

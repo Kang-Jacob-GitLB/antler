@@ -2,7 +2,7 @@
 //! 연결은 실행기마다 하나를 재사용하고(끊기면 다음 호출에서 재연결), 채널은 동시 6개로 제한한다. 인증은 agent 와 암호 없는 키 파일뿐이다.
 //! 원격 명령은 `build_remote_command`(PR 1)의 결과만 보낸다 — 이 모듈 밖에서 임의 명령을 보낼 길이 없다.
 
-use super::connection::{Connection, SshOptions};
+use super::connection::{Connection, GitCommand, SshOptions};
 use super::sftp::SftpError;
 use super::stream::SshStream;
 use super::quote::build_remote_command;
@@ -31,8 +31,10 @@ impl SshExecutor {
         if opts.cancel.as_ref().is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
             return Err(ExecError::Aborted);
         }
-        let command = build_remote_command(repo_path, args, opts.fetch_env.as_ref()).map_err(|e| ExecError::Other { message: e.to_string() })?;
+        // 어떤 셸로도 보낼 수 없는 값(NUL 등)은 연결 전에 거부한다. 실제 문자열은 연결의 셸 확인 뒤 그 셸 규칙으로 만든다(`GitCommand`)
+        build_remote_command(repo_path, args, opts.fetch_env.as_ref()).map_err(|e| ExecError::Other { message: e.to_string() })?;
         let git_args: Vec<String> = args.iter().map(|a| a.as_ref().to_string()).collect();
+        let command = GitCommand { repo_path: repo_path.to_string(), args: git_args.clone(), fetch: opts.fetch_env.clone() };
         self.conn.run(command, &git_args, opts).await
     }
 
@@ -43,8 +45,9 @@ impl SshExecutor {
         if opts.cancel.as_ref().is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
             return Err(ExecError::Aborted);
         }
-        let command = build_remote_command(repo_path, args, None).map_err(|e| ExecError::Other { message: e.to_string() })?;
+        build_remote_command(repo_path, args, None).map_err(|e| ExecError::Other { message: e.to_string() })?;
         let git_args: Vec<String> = args.iter().map(|a| a.as_ref().to_string()).collect();
+        let command = GitCommand { repo_path: repo_path.to_string(), args: git_args.clone(), fetch: None };
         self.conn.stream(command, &git_args, opts).await
     }
 

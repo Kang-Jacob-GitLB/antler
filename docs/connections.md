@@ -34,7 +34,9 @@
 - `~/.ssh/config` 의 `Host`·`HostName`·`User`·`Port`·`IdentityFile`·`ProxyJump`·`Include`·`UserKnownHostsFile`·`HostKeyAlias` 를 따른다.
 - 인증은 키 파일 또는 ssh-agent 만. 비밀번호는 저장하지도 묻지도 않는다.
 - 호스트 키가 이미 `known_hosts` 에 있어야 한다 — 처음이면 ssh CLI 로 한 번 접속해 둔다.
-- 원격 로그인 셸은 POSIX 계열(sh/bash/zsh/fish)이어야 한다.
+- 원격 로그인 셸은 POSIX 계열(sh/bash/zsh/fish) 또는 PowerShell 이어야 한다(Windows OpenSSH 의 기본 셸을 PowerShell 로 둔 PC — cmd 는 안 된다).
+  PowerShell 원격은 `git.exe` 가 PATH 에 있어야 하고, 폴더 선택기가 주는 `/C:/…` 경로는 `C:/…` 로 바꿔 쓴다.
+  Windows PowerShell 5.1 이 실행 파일 인자를 잘못 넘기는 값(큰따옴표·빈 값·제어 문자·공백이 있으면서 `\` 로 끝나는 값)은 보내지 않고 오류로 알린다.
 - `ProxyCommand` 와 호스트에 걸리는 `Match` 블록은 무시하지 않고 **거부**한다(잘못된 곳에 접속하는 것을 막기 위해).
   예외는 `ProxyCommand ssh <별칭> socat - UNIX-CONNECT:<절대경로>` 한 모양뿐이다 — 명령을 실행하지 않고, `<별칭>` 을 점프 홉으로 접속한 뒤
   그 서버의 유닉스 소켓으로 direct-streamlocal 채널을 연다(역방향 터널 소켓 경유용. 점프 서버 sshd 의 `AllowStreamLocalForwarding` 이 켜져 있어야 한다).
