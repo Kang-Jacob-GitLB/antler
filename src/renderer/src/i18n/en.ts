@@ -26,6 +26,7 @@ export const en: Messages = {
   'add.distro': 'WSL distribution',
   'add.noDistros': 'No WSL distributions installed',
   'add.host': 'SSH host',
+  'add.hostList': 'Hosts in ~/.ssh/config',
   'add.hostPlaceholder': 'Host from ~/.ssh/config or user@host:port',
   'add.sshHint': 'Authenticates with keys or ssh-agent. Passwords are never stored or asked. For a new server, connect once with ssh in a terminal to accept its host key.',
   'add.path': 'Repository path',

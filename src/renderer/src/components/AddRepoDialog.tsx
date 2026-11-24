@@ -8,6 +8,7 @@ import { IconCheck, IconFolder, IconGithub, IconMonitor, IconServer, IconTermina
 import { GithubRepoPicker } from './GithubRepoPicker'
 import { useGhAccessibleRepos } from './useGhAccessibleRepos'
 import { RemoteFolderPicker } from './RemoteFolderPicker'
+import { SshHostPicker } from './SshHostPicker'
 import { GroupPicker } from './GroupChip'
 import './AddRepoDialog.css'
 
@@ -306,21 +307,7 @@ export function AddRepoDialog(): React.JSX.Element | null {
         {kind === 'ssh' && (
           <label className="field">
             <span className="field__label">{t('add.host')}</span>
-            <input
-              className="field__input mono"
-              list="ssh-hosts"
-              value={host}
-              placeholder={t('add.hostPlaceholder')}
-              onChange={(e) => setHost(e.target.value)}
-              autoFocus
-            />
-            <datalist id="ssh-hosts">
-              {hosts.map((h) => (
-                <option key={h.alias} value={h.alias}>
-                  {`${h.user ? `${h.user}@` : ''}${h.hostName}${h.port !== 22 ? `:${h.port}` : ''}${h.proxyJump ? ` via ${h.proxyJump}` : ''}`}
-                </option>
-              ))}
-            </datalist>
+            <SshHostPicker hosts={hosts} value={host} onChange={setHost} placeholder={t('add.hostPlaceholder')} autoFocus />
             <span className="field__hint">{t('add.sshHint')}</span>
           </label>
         )}
