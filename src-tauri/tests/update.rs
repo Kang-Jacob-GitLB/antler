@@ -559,8 +559,11 @@ fn 번들_표식과_실행_위치로_업데이트_대상을_고른다() {
     let kind = |os, arch, mark, in_app| detect_target(os, arch, mark, in_app).map(|t| (t.kind, t.mode()));
     assert_eq!(kind("windows", "x86_64", M::Nsis, false), Some((K::Nsis, "auto")));
     assert_eq!(kind("linux", "x86_64", M::Deb, false), Some((K::Deb, "manual-file")));
-    assert_eq!(kind("macos", "aarch64", M::App, true), Some((K::Dmg, "manual-dmg")));
-    assert_eq!(kind("macos", "x86_64", M::App, true), Some((K::Dmg, "manual-dmg")));
+    // macOS 는 앱 번들을 앱 안에서 바꾸고 다시 시작한다(dmg 수동 경로는 이전 판만 쓴다)
+    assert_eq!(kind("macos", "aarch64", M::App, true), Some((K::MacApp, "auto")));
+    assert_eq!(kind("macos", "x86_64", M::App, true), Some((K::MacApp, "auto")));
+    assert_eq!(logic::Target::dmg("aarch64").map(|t| (t.kind, t.mode())), Some((K::Dmg, "manual-dmg")));
+    assert_eq!(logic::Target::dmg("riscv64"), None);
     // 꺼지는 경우: 표식 없음(--no-bundle)·다른 형태(AppImage·rpm·msi)·다른 OS 의 표식·지원하지 않는 아키텍처
     assert_eq!(kind("windows", "x86_64", M::Unknown, false), None, "표식 없는 Windows 빌드");
     assert_eq!(kind("windows", "x86_64", M::Other, false), None, "msi");
@@ -578,7 +581,11 @@ fn 번들_표식과_실행_위치로_업데이트_대상을_고른다() {
 fn 대상_파일_형식_표식을_본다() {
     use logic::{detect_target, BundleMark as M, Target};
     let deb = detect_target("linux", "x86_64", M::Deb, false).expect("deb");
-    let dmg = detect_target("macos", "aarch64", M::App, true).expect("dmg");
+    let dmg = Target::dmg("aarch64").expect("dmg");
+    let app = detect_target("macos", "aarch64", M::App, true).expect("app");
+    // 앱 번들 묶음: gzip 표식
+    assert!(app.check_bytes(&[0x1f, 0x8b, 8, 0]));
+    assert!(!app.check_bytes(b"") && !app.check_bytes(b"PK\x03\x04"));
     // deb: ar 아카이브 + 첫 멤버 debian-binary
     let good_deb = [b"!<arch>\ndebian-binary   ".as_slice(), &[0u8; 100]].concat();
     assert!(deb.check_bytes(&good_deb));
@@ -614,10 +621,14 @@ fn 앱_번들_안의_실행_파일만_앱_번들로_본다() {
 
 #[test]
 fn 수동_경로의_매니페스트_키와_기대_파일_이름() {
-    use logic::{check_manifest_for, detect_target, BundleMark as M};
-    let dmg_arm = detect_target("macos", "aarch64", M::App, true).expect("arm64");
-    let dmg_x64 = detect_target("macos", "x86_64", M::App, true).expect("x64");
+    use logic::{check_manifest_for, detect_target, BundleMark as M, Target};
+    let dmg_arm = Target::dmg("aarch64").expect("arm64");
+    let dmg_x64 = Target::dmg("x86_64").expect("x64");
     let deb = detect_target("linux", "x86_64", M::Deb, false).expect("deb");
+    let app_arm = detect_target("macos", "aarch64", M::App, true).expect("app arm64");
+    let app_x64 = detect_target("macos", "x86_64", M::App, true).expect("app x64");
+    assert_eq!(app_arm.asset_name("2.0.0").as_deref(), Some("Antler-2.0.0-arm64.app.tar.gz"));
+    assert_eq!(app_x64.asset_name("v2.0.0").as_deref(), Some("Antler-2.0.0-x64.app.tar.gz"));
     assert_eq!(dmg_arm.asset_name("2.0.0").as_deref(), Some("Antler-2.0.0-arm64.dmg"));
     assert_eq!(dmg_x64.asset_name("v2.0.0").as_deref(), Some("Antler-2.0.0-x64.dmg"));
     assert_eq!(deb.asset_name("2.0.0").as_deref(), Some("antler_2.0.0_amd64.deb"));
@@ -626,11 +637,19 @@ fn 수동_경로의_매니페스트_키와_기대_파일_이름() {
     let all = json!({
         "darwin-aarch64-dmg": { "url": format!("{BASE}/v1.1.0/Antler-1.1.0-arm64.dmg"), "signature": SIG },
         "darwin-x86_64-dmg": { "url": format!("{BASE}/v1.1.0/Antler-1.1.0-x64.dmg"), "signature": SIG },
+        "darwin-aarch64-app": { "url": format!("{BASE}/v1.1.0/Antler-1.1.0-arm64.app.tar.gz"), "signature": SIG },
+        "darwin-x86_64-app": { "url": format!("{BASE}/v1.1.0/Antler-1.1.0-x64.app.tar.gz"), "signature": SIG },
         "linux-x86_64-deb": { "url": format!("{BASE}/v1.1.0/antler_1.1.0_amd64.deb"), "signature": SIG },
         "windows-x86_64-nsis": { "url": format!("{BASE}/v1.1.0/Antler-Setup-1.1.0-x64.exe"), "signature": SIG },
     });
     let text = manifest("1.1.0", &all);
-    for (target, key, file) in [(dmg_arm, "darwin-aarch64-dmg", "Antler-1.1.0-arm64.dmg"), (dmg_x64, "darwin-x86_64-dmg", "Antler-1.1.0-x64.dmg"), (deb, "linux-x86_64-deb", "antler_1.1.0_amd64.deb")] {
+    for (target, key, file) in [
+        (dmg_arm, "darwin-aarch64-dmg", "Antler-1.1.0-arm64.dmg"),
+        (dmg_x64, "darwin-x86_64-dmg", "Antler-1.1.0-x64.dmg"),
+        (app_arm, "darwin-aarch64-app", "Antler-1.1.0-arm64.app.tar.gz"),
+        (app_x64, "darwin-x86_64-app", "Antler-1.1.0-x64.app.tar.gz"),
+        (deb, "linux-x86_64-deb", "antler_1.1.0_amd64.deb"),
+    ] {
         let o = check_manifest_for(&text, "1.0.0", &target).expect("검사").expect("새 버전");
         assert_eq!((o.platform, o.file_name()), (key, file));
     }
@@ -640,14 +659,14 @@ fn 수동_경로의_매니페스트_키와_기대_파일_이름() {
     assert_eq!(check_manifest_for(&text, "2.0.0", &deb), Ok(None));
     // 키가 없으면 일반 키(`darwin-aarch64`·`linux-x86_64`)로 내려가지 않는다
     let generic = json!({ "darwin-aarch64": all["darwin-aarch64-dmg"].clone(), "linux-x86_64": all["linux-x86_64-deb"].clone(), "windows-x86_64": all["windows-x86_64-nsis"].clone() });
-    for t in [dmg_arm, deb] {
+    for t in [dmg_arm, app_arm, deb] {
         assert_eq!(check_manifest_for(&manifest("1.1.0", &generic), "1.0.0", &t), Err("이 환경에 맞는 업데이트가 없습니다".to_string()));
     }
     // 키는 맞는데 파일 이름이 기대와 다르다(다른 플랫폼 자산·다른 버전·다른 확장자·안전하지 않은 이름) → 거부
-    for (key, t, good) in [("darwin-aarch64-dmg", dmg_arm, "Antler-1.1.0-arm64.dmg"), ("linux-x86_64-deb", deb, "antler_1.1.0_amd64.deb")] {
+    for (key, t, good) in [("darwin-aarch64-dmg", dmg_arm, "Antler-1.1.0-arm64.dmg"), ("darwin-aarch64-app", app_arm, "Antler-1.1.0-arm64.app.tar.gz"), ("linux-x86_64-deb", deb, "antler_1.1.0_amd64.deb")] {
         let url_ok = |file: &str| check_manifest_for(&manifest("1.1.0", &json!({ key: { "url": format!("{BASE}/v1.1.0/{file}"), "signature": SIG } })), "1.0.0", &t).is_ok();
         assert!(url_ok(good), "{key}: 기대 이름은 통과한다");
-        for bad in ["Antler-1.1.0-x64.dmg", "antler_1.1.0_amd64.deb", "Antler-Setup-1.1.0-x64.exe", "Antler-1.0.0-arm64.dmg", "Antler-1.1.0-arm64.dmg.exe", "latest.json", "..%2fx.dmg", "a/Antler-1.1.0-arm64.dmg"] {
+        for bad in ["Antler-1.1.0-x64.dmg", "Antler-1.1.0-x64.app.tar.gz", "Antler-1.1.0-arm64.dmg.app.tar.gz", "antler_1.1.0_amd64.deb", "Antler-Setup-1.1.0-x64.exe", "Antler-1.0.0-arm64.dmg", "Antler-1.1.0-arm64.dmg.exe", "latest.json", "..%2fx.dmg", "a/Antler-1.1.0-arm64.dmg"] {
             if bad != good {
                 assert!(!url_ok(bad), "{key} {bad}");
             }
@@ -683,12 +702,14 @@ fn ci_가_만드는_latest_json_표본을_검사가_받는다() {
 /// 수동 경로 항목까지 담은 CI 표본(`latest-all.json`)을 대상마다 `check_manifest_for` 가 받는다 — 스크립트의 키·파일 이름과 앱의 기대가 어긋나면 여기서 깨진다
 #[test]
 fn ci_표본의_수동_경로_항목을_대상마다_검사가_받는다() {
-    use logic::{check_manifest_for, detect_target, BundleMark as M};
+    use logic::{check_manifest_for, detect_target, BundleMark as M, Target};
     let path = root().join("tests").join("fixtures").join("update").join("latest-all.json");
     let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     for (target, key, file) in [
-        (detect_target("macos", "aarch64", M::App, true), "darwin-aarch64-dmg", "Antler-2.0.0-arm64.dmg"),
-        (detect_target("macos", "x86_64", M::App, true), "darwin-x86_64-dmg", "Antler-2.0.0-x64.dmg"),
+        (Target::dmg("aarch64"), "darwin-aarch64-dmg", "Antler-2.0.0-arm64.dmg"),
+        (Target::dmg("x86_64"), "darwin-x86_64-dmg", "Antler-2.0.0-x64.dmg"),
+        (detect_target("macos", "aarch64", M::App, true), "darwin-aarch64-app", "Antler-2.0.0-arm64.app.tar.gz"),
+        (detect_target("macos", "x86_64", M::App, true), "darwin-x86_64-app", "Antler-2.0.0-x64.app.tar.gz"),
         (detect_target("linux", "x86_64", M::Deb, false), "linux-x86_64-deb", "antler_2.0.0_amd64.deb"),
         (detect_target("windows", "x86_64", M::Nsis, false), "windows-x86_64-nsis", "Antler-Setup-2.0.0-x64.exe"),
     ] {

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Tauri 판 설치본의 업데이트 매니페스트 두 개를 만든다(.github/workflows/tauri-package.yml 의 서명 잡이 쓴다).
 //   latest.json — Tauri 업데이터용(src-tauri/src/update/logic.rs 의 check_manifest_for 가 읽는 형식). 서명(.sig)이 있는 설치본만 넣는다:
-//                 Windows NSIS(`windows-x86_64-nsis`·`windows-x86_64`)와, --dir 에 `.sig` 와 함께 있는 macOS dmg(`darwin-aarch64-dmg`·`darwin-x86_64-dmg`)·Linux deb(`linux-x86_64-deb`) 수동 경로 자산(MANUAL_ASSETS)
+//                 Windows NSIS(`windows-x86_64-nsis`·`windows-x86_64`)와, --dir 에 `.sig` 와 함께 있는 macOS dmg(`darwin-aarch64-dmg`·`darwin-x86_64-dmg`)·Linux deb(`linux-x86_64-deb`) 수동 경로 자산(MANUAL_ASSETS),
+//                 macOS 앱 번들(`darwin-aarch64-app`·`darwin-x86_64-app`, 앱 안 설치 — APP_ASSETS)
 //   latest.yml  — Electron 판(electron-updater)이 Tauri 설치본을 받아 가게 하는 이관용. electron-builder 가 만드는 모양을 따른다
 // 발행하지 않는다: 파일을 --dir 에 쓸 뿐이다. 실제 첨부는 나중의 릴리스 전환 PR(feat!:)이 한다.
 //
@@ -58,6 +59,18 @@ export const MANUAL_ASSETS = [
   { key: 'darwin-x86_64-dmg', name: (v) => `Antler-${v}-x64.dmg` },
   { key: 'linux-x86_64-deb', name: (v) => `antler_${v}_amd64.deb` }
 ]
+
+/**
+ * macOS 앱 안 설치 자산(앱 번들 `.app.tar.gz` — 플러그인이 실행 중인 `.app` 을 바꾸고 앱이 다시 시작한다). 키는 앱(logic.rs 의 PLATFORM_KEY_APP_*)이 정확히 그 키 하나만 본다.
+ * dmg 항목(MANUAL_ASSETS)은 이 방식을 모르는 이전 판(≤ 2.1.0)을 위해 계속 함께 올린다. tauri-package.yml 의 "설치본 이름 정리"가 이 이름으로 묶는다
+ */
+export const APP_ASSETS = [
+  { key: 'darwin-aarch64-app', name: (v) => `Antler-${v}-arm64.app.tar.gz` },
+  { key: 'darwin-x86_64-app', name: (v) => `Antler-${v}-x64.app.tar.gz` }
+]
+
+/** Windows 설치본 말고 서명해 latest.json 에 넣는 자산 전부(수동 경로 + 앱 번들) */
+export const SIGNED_ASSETS = [...MANUAL_ASSETS, ...APP_ASSETS]
 
 /** Tauri 업데이터 매니페스트 본문. `entries`: [{ key, fileName, signature }] — 같은 파일이면 여러 키를 줄 수 있다 */
 export function buildManifest({ version, pubDate, entries }) {
@@ -132,7 +145,7 @@ export function makeManifests({ dir, version, installer, signatureText: rawSigna
   if (!signed) warnings.push('서명 단계가 돌았다는 표식(--signed true)이 없어 latest.json 의 서명 항목을 만들지 않았습니다')
   // 수동 경로(dmg·deb): 설치본과 `<이름>.sig` 가 둘 다 있는 것만 넣는다. 없는 것은 경고하고 건너뛴다(그 플랫폼 사용자는 업데이트를 받지 못한다)
   const extras = []
-  for (const { key, name } of signed ? MANUAL_ASSETS : []) {
+  for (const { key, name } of signed ? SIGNED_ASSETS : []) {
     const asset = name(version)
     const assetFile = join(dir, asset)
     const sigFile = join(dir, `${asset}.sig`)
@@ -164,7 +177,7 @@ export function makeManifests({ dir, version, installer, signatureText: rawSigna
   // 가드: url 의 파일 이름이 올릴 자산과 같고, 해시·크기가 실물과 같다
   if (files['latest.json']) {
     const doc = JSON.parse(files['latest.json'])
-    const manualByKey = Object.fromEntries(MANUAL_ASSETS.map((m) => [m.key, m.name(version)]))
+    const manualByKey = Object.fromEntries(SIGNED_ASSETS.map((m) => [m.key, m.name(version)]))
     for (const [key, p] of Object.entries(doc.platforms)) {
       // 키마다 올릴 자산 이름이 정해져 있다: Windows 키는 설치본, 수동 키는 MANUAL_ASSETS 의 이름
       const want = manualByKey[key] ?? fileName

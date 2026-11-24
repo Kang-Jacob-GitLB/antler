@@ -729,8 +729,8 @@ async fn 릴리스_노트는_토큰_없이_api_에서_받는다() {
 
 /// 시험 대상: (이름, 대상, 매니페스트 키, 자산 이름 — 버전 2.0.0)
 fn manual_cases() -> Vec<(&'static str, Target, &'static str, &'static str)> {
-    let dmg_arm = detect_target("macos", "aarch64", BundleMark::App, true).expect("dmg arm64");
-    let dmg_x64 = detect_target("macos", "x86_64", BundleMark::App, true).expect("dmg x64");
+    let dmg_arm = Target::dmg("aarch64").expect("dmg arm64");
+    let dmg_x64 = Target::dmg("x86_64").expect("dmg x64");
     let deb = detect_target("linux", "x86_64", BundleMark::Deb, false).expect("deb");
     vec![
         ("dmg arm64", dmg_arm, "darwin-aarch64-dmg", "Antler-2.0.0-arm64.dmg"),

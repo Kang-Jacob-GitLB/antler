@@ -105,7 +105,7 @@ semver 태그(`v2.0.0`, 프리릴리스는 `v2.0.0-rc.1`)를 annotated 태그로
 | 갈래 | 러너 | 산출물(최종 아티팩트 `tauri-installers` 에 모인다) |
 |---|---|---|
 | windows | `windows-latest` | `Antler-Setup-<버전>-x64.exe`(NSIS, 사용자별 설치) · `.exe.sig` · `latest.json` · `latest.yml` (서명·매니페스트는 `sign` 잡) |
-| mac-arm64 · mac-x64 | `macos-latest`(arm64 러너에서 둘 다 빌드) | `Antler-<버전>-arm64.dmg` · `Antler-<버전>-x64.dmg` (ad-hoc 서명 `-`) · 각 `.sig` |
+| mac-arm64 · mac-x64 | `macos-latest`(arm64 러너에서 둘 다 빌드) | `Antler-<버전>-arm64.dmg` · `Antler-<버전>-x64.dmg` (ad-hoc 서명 `-`) · 같은 빌드의 앱 번들 `Antler-<버전>-<arch>.app.tar.gz`(앱 안 업데이트용) · 각 `.sig` |
 | linux | `ubuntu-22.04` | `antler_<버전>_amd64.deb` · `.sig` |
 
 이름은 앱 안 수동 업데이트가 자산을 고르는 규칙이다(앱의 `Target::asset_name`·`scripts/make-update-manifests.mjs` 의 `MANUAL_ASSETS`).
@@ -119,7 +119,7 @@ semver 태그(`v2.0.0`, 프리릴리스는 `v2.0.0-rc.1`)를 annotated 태그로
 키는 2026-11-19 에 만들어 Environment `release`(배포 대상 `main` 브랜치·`v*` 태그) 의 시크릿으로 넣었다. 공개 키(키 ID `E8CC4BB412D344F1`)는 `src-tauri/src/update/host.rs` 의 `UPDATE_PUBKEY` 한 곳에 넣는다(Phase 6c PR 4 가 업데이터를 앱에 연결했고 `tauri.conf.json` 에는 `plugins` 를 두지 않는다 — [updates.md](updates.md#tauri-판-phase-6c-pr-4)). 상수가 `None` 인 동안 앱은 업데이트를 확인만 하고 내려받기·설치는 거부한다. 공개 키가 `None`·형식 오류·시험용 키면 릴리스 preflight 가 발행을 막는다(`scripts/check-release-preflight.mjs`).
 
 **매니페스트** — `scripts/make-update-manifests.mjs` 가 만든다(순수 함수 + `tests/updateManifests.test.ts`).
-- `latest.json`: Tauri 업데이터 형식. `url` 은 `https://github.com/Kang-Jacob-GitLB/antler/releases/download/v<버전>/<파일>`, 플랫폼 키는 Windows 가 `windows-x86_64-nsis` 와 `windows-x86_64`(같은 항목), 수동 경로가 `darwin-aarch64-dmg`·`darwin-x86_64-dmg`·`linux-x86_64-deb`(각각 `Antler-<버전>-arm64.dmg`·`Antler-<버전>-x64.dmg`·`antler_<버전>_amd64.deb` — 앱이 **그 키 하나만, 그 이름과 정확히 같을 때만** 받는다)다. 앱의 `check_manifest_for`(`update/logic.rs`)가 읽는 형식이고, 실제 검사가 표본 `tests/fixtures/update/latest.json`·`latest-all.json` 을 받는지 `src-tauri/tests/update.rs` 가 확인한다. 서명(`.sig`)이 있는 설치본만 들어간다.
+- `latest.json`: Tauri 업데이터 형식. `url` 은 `https://github.com/Kang-Jacob-GitLB/antler/releases/download/v<버전>/<파일>`, 플랫폼 키는 Windows 가 `windows-x86_64-nsis` 와 `windows-x86_64`(같은 항목), 수동 경로가 `darwin-aarch64-dmg`·`darwin-x86_64-dmg`·`linux-x86_64-deb`(각각 `Antler-<버전>-arm64.dmg`·`Antler-<버전>-x64.dmg`·`antler_<버전>_amd64.deb`), macOS 앱 안 설치가 `darwin-aarch64-app`·`darwin-x86_64-app`(`Antler-<버전>-<arm64|x64>.app.tar.gz`)다 — 앱이 **그 키 하나만, 그 이름과 정확히 같을 때만** 받는다. 앱의 `check_manifest_for`(`update/logic.rs`)가 읽는 형식이고, 실제 검사가 표본 `tests/fixtures/update/latest.json`·`latest-all.json` 을 받는지 `src-tauri/tests/update.rs` 가 확인한다. 서명(`.sig`)이 있는 설치본만 들어간다.
 - `latest.yml`: Electron 판(electron-updater)이 Tauri 설치본을 받아 가게 하는 이관용. `url`·`path` 는 **파일 이름만**이다(절대 URL 이면 electron-updater 가 경로를 깨뜨린다). 서명과 무관하게 만든다.
 - **비상 정지**: 저장소 변수 `ELECTRON_MIGRATION` 이 `off`·`false`·`0`·`no`(대소문자 무시)면 `latest.yml` 을 만들지 않는다(기본 on). 이미 발행된 릴리스에서는 사람이 `latest.yml` 자산도 지워야 한다.
 - 스크립트가 파일을 쓰기 전에 버전·파일 이름·해시·크기를 실물과 대조하고, 어긋나면 워크플로가 실패한다.

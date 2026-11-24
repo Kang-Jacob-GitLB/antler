@@ -5,6 +5,8 @@
 //! 2. 설치본도 같은 클라이언트로 받는다(리다이렉트 허용 목록·300MB 상한·읽기 정지 제한). **검증 전에는 디스크에 쓰지 않는다** — 메모리에만 둔다.
 //! 3. 검증은 플러그인의 `Updater::restore_update`(검사를 통과한 [`ManifestOffer`] 로 우리가 다시 만든 매니페스트 — 고른 플랫폼 키 하나·`target` 고정·**서명된 버전 일치 강제**) → `Update::verify`(minisign).
 //! 4. 설치는 `Update::install` 이 **다시 검증한 뒤** 임시 파일을 만들어 설치 프로그램을 띄우고 프로세스를 끝낸다. 바이트 경로는 [`HostBackend`] 안의 하나뿐이다.
+//!    macOS(앱 번들 `.app.tar.gz`)는 플러그인이 검증 뒤 실행 중인 `.app` 을 그 자리에서 바꾸고 **돌아온다** — 그러면 `request_restart` 로 다시 시작한다
+//!    (`RunEvent::Exit` 의 종료 정리가 돈 뒤 Tauri 가 LaunchServices 로 새 번들을 띄운다. 앱이 받은 바이트로 쓴 파일이라 quarantine 표식이 붙지 않는다).
 //!
 //! **공개 키는 [`UPDATE_PUBKEY`] 한 곳이다**(믿는 키의 유일한 원천). 비어 있으면(`None`) **fail-closed**: 확인은 동작하지만 내려받기·설치는 시작하지 않고 설치 포트(`Engine::install`)는 절대 불리지 않는다.
 //! 플러그인 설정은 `tauri.conf.json` 이 아니라 [`updater_plugin_config`] 가 만들어 `lib.rs` 가 넣는다(conf 에는 `plugins` 가 없다 — 시험이 강제). `configure_client`·플러그인의 다운로드·`check()` 는 쓰지 않는다
@@ -252,6 +254,9 @@ fn install_error_text(e: &tauri_plugin_updater::Error) -> &'static str {
     match e {
         E::Minisign(_) | E::Base64(_) | E::SignatureUtf8(_) | E::SignedVersionMismatch { .. } | E::MissingSignedVersion => verify_error_text(e),
         E::InvalidUpdaterFormat => "설치 파일 형식이 올바르지 않습니다",
+        // macOS 앱 번들 교체
+        E::TempDirNotOnSameMountPoint => "앱이 있는 디스크에 임시 폴더를 만들 수 없어 설치하지 못했습니다",
+        E::PreviousAppNotRestored(_) => "업데이트를 설치하지 못했고 이전 앱을 제자리로 되돌리지 못했습니다. 다운로드한 dmg 로 다시 설치하세요",
         E::Io(_) => "설치 프로그램을 시작하지 못했습니다",
         _ => "설치를 시작하지 못했습니다",
     }
@@ -269,7 +274,12 @@ impl<R: Runtime> Engine for PluginEngine<R> {
 
     fn install(&self, offer: &ManifestOffer, bytes: &[u8]) -> Result<(), String> {
         let update = self.restore(offer)?;
-        update.install(bytes).map_err(|e| install_error_text(&e).to_string())
+        update.install(bytes).map_err(|e| install_error_text(&e).to_string())?;
+        // Windows 는 위 호출이 설치 프로그램을 띄우고 `exit(0)` 으로 끝나 여기에 오지 않는다. macOS 는 앱 번들을 바꾸고 돌아오므로 새 판으로 다시 시작한다 —
+        // 종료 요청 → `RunEvent::Exit`(종료 정리 `exit_cleanup`) → 같은 경로의 새 번들 실행. 되돌릴 수 없는 단계라 정리가 돈 것으로 표시한다
+        self.cleaned.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.app.request_restart();
+        Ok(())
     }
 
     fn cleanup_ran(&self) -> bool {

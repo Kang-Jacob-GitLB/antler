@@ -13,7 +13,8 @@ name: tauri-package
 #   windows — NSIS 설치 프로그램(x64)을 **시크릿 없이** 빌드한다. 이어지는 sign 잡이 빌드 산출물만 받아 시크릿 TAURI_SIGNING_PRIVATE_KEY 로
 #             업데이트 서명(.sig)을 만들고 latest.json 도 만든다. 키가 없으면 경고하고 서명 없이 계속한다(latest.yml 은 서명과 무관하게 만든다).
 #             sign 이 Environment `release` 를 선언해 시크릿을 받는다 — 그 Environment 의 브랜치 제한·승인자 설정이 필수다(docs/build.md)
-#   macos   — dmg x64·arm64(arm64 러너에서 둘 다 빌드). ad-hoc 서명(`-`), 공증 없음 — 처음 열 때 Gatekeeper 경고가 뜬다(docs/build.md)
+#   macos   — dmg x64·arm64(arm64 러너에서 둘 다 빌드). ad-hoc 서명(`-`), 공증 없음 — 처음 열 때 Gatekeeper 경고가 뜬다(docs/build.md).
+#             같은 빌드의 앱 번들을 `.app.tar.gz` 로도 묶는다(앱 안 업데이트 — 플러그인이 실행 중인 .app 을 바꾼다. dmg 는 처음 설치·이전 판의 수동 업데이트용)
 #   linux   — deb(x64). 의존: libwebkit2gtk-4.1-0 · libgtk-3-0
 #   (macOS·Linux 설치본도 같은 sign 잡이 업데이트 서명(.sig)을 하고 latest.json 의 수동 경로 항목(darwin-*-dmg·linux-x86_64-deb)을 만든다 — 빌드 잡에는 키가 없다)
 # macOS·Linux 는 Tauri 판을 한 번도 컴파일한 적이 없어 첫 실행에서 빌드가 실패할 수 있다(fail-fast 를 꺼 갈래마다 따로 본다).
@@ -232,6 +233,8 @@ jobs:
           copy_one in/mac-arm64 "Antler-${VERSION}-arm64.dmg" no
           copy_one in/mac-x64 "Antler-${VERSION}-x64.dmg" no
           copy_one in/linux "antler_${VERSION}_amd64.deb" no
+          copy_one in/mac-arm64 "Antler-${VERSION}-arm64.app.tar.gz" no
+          copy_one in/mac-x64 "Antler-${VERSION}-x64.app.tar.gz" no
           ls -la out
 
       # 시크릿은 if: 에서 못 쓰므로 env 로 받아 비어 있는지만 본다. 값을 출력하지 않는다. 키가 없는 잡이 아니라 이 확인 단계만 키를 받는다
@@ -263,8 +266,8 @@ jobs:
             fi
           }
           sign "Antler-Setup-${VERSION}-x64.exe"
-          # 수동 경로 자산(앱이 기대하는 이름 — scripts/make-update-manifests.mjs 의 MANUAL_ASSETS). 없는 갈래는 경고하고 건너뛴다
-          for name in "Antler-${VERSION}-arm64.dmg" "Antler-${VERSION}-x64.dmg" "antler_${VERSION}_amd64.deb"; do
+          # 수동 경로 자산·macOS 앱 번들(앱이 기대하는 이름 — scripts/make-update-manifests.mjs 의 SIGNED_ASSETS). 없는 갈래는 경고하고 건너뛴다
+          for name in "Antler-${VERSION}-arm64.dmg" "Antler-${VERSION}-x64.dmg" "antler_${VERSION}_amd64.deb" "Antler-${VERSION}-arm64.app.tar.gz" "Antler-${VERSION}-x64.app.tar.gz"; do
             if [ -f "out/$name" ]; then
               sign "$name"
             else
@@ -303,6 +306,10 @@ jobs:
             out/Antler-${{ env.VERSION }}-x64.dmg.sig
             out/antler_${{ env.VERSION }}_amd64.deb
             out/antler_${{ env.VERSION }}_amd64.deb.sig
+            out/Antler-${{ env.VERSION }}-arm64.app.tar.gz
+            out/Antler-${{ env.VERSION }}-arm64.app.tar.gz.sig
+            out/Antler-${{ env.VERSION }}-x64.app.tar.gz
+            out/Antler-${{ env.VERSION }}-x64.app.tar.gz.sig
             out/latest.json
             out/latest.yml
           if-no-files-found: error
@@ -404,6 +411,8 @@ jobs:
 
       # 산출물 이름을 Electron 규칙으로 맞춘다(앱 안 수동 업데이트 경로의 자산 선택이 이 이름을 본다):
       #   dmg → Antler-<v>-<arch>.dmg,  deb → antler_<v>_amd64.deb
+      #   macOS 는 같은 빌드의 앱 번들도 Antler-<v>-<arch>.app.tar.gz 로 묶는다(최상위가 Antler.app — 플러그인이 첫 경로 요소를 떼고 푼다).
+      #   COPYFILE_DISABLE 로 확장 속성용 `._*` 파일이 묶음에 섞이지 않게 한다
       - name: 설치본 이름 정리
         run: |
           if [ -n "${{ matrix.target }}" ]; then base="src-tauri/target/${{ matrix.target }}/release/bundle"; else base="src-tauri/target/release/bundle"; fi
@@ -417,6 +426,14 @@ jobs:
           mkdir -p out
           if [ "${{ matrix.bundle }}" = "dmg" ]; then
             cp "${found[0]}" "out/Antler-${VERSION}-${{ matrix.arch }}.dmg"
+            apps=("$base/macos"/*.app)
+            if [ "${#apps[@]}" -ne 1 ]; then
+              echo "::error::앱 번들이 하나가 아닙니다(${#apps[@]}개)"
+              ls -la "$base/macos" || true
+              exit 1
+            fi
+            COPYFILE_DISABLE=1 tar -czf "out/Antler-${VERSION}-${{ matrix.arch }}.app.tar.gz" -C "$base/macos" "$(basename "${apps[0]}")"
+            tar -tzf "out/Antler-${VERSION}-${{ matrix.arch }}.app.tar.gz" | head -3
           else
             cp "${found[0]}" "out/antler_${VERSION}_${{ matrix.arch }}.deb"
           fi

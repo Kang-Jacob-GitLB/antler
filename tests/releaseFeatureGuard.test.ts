@@ -142,7 +142,8 @@ describe('tauri-package.yml', () => {
     // 서명에 버전을 묶는다(requireSignedVersion). 매니페스트 생성은 서명 뒤, 키 없는 단계에서
     expect(step.run).toContain('tauri signer sign --app-version "$VERSION"')
     // macOS dmg·Linux deb(수동 경로 자산)도 같은 단계에서 서명한다. unix 갈래가 실패해도 Windows 서명은 막지 않는다
-    for (const name of ['Antler-${VERSION}-arm64.dmg', 'Antler-${VERSION}-x64.dmg', 'antler_${VERSION}_amd64.deb']) expect(step.run, name).toContain(name)
+    for (const name of ['Antler-${VERSION}-arm64.dmg', 'Antler-${VERSION}-x64.dmg', 'antler_${VERSION}_amd64.deb', 'Antler-${VERSION}-arm64.app.tar.gz', 'Antler-${VERSION}-x64.app.tar.gz'])
+      expect(step.run, name).toContain(name)
     expect((sign as { if?: string }).if).toBe("${{ !cancelled() && needs.windows.result == 'success' }}")
     const manifest = stepAt('업데이트 매니페스트 생성·검증')
     expect(idx('업데이트 매니페스트 생성·검증')).toBeGreaterThan(idx('업데이트 서명'))
@@ -169,18 +170,21 @@ describe('tauri-package.yml', () => {
       'in/win Antler-Setup-${VERSION}-x64.exe yes',
       'in/mac-arm64 Antler-${VERSION}-arm64.dmg no',
       'in/mac-x64 Antler-${VERSION}-x64.dmg no',
-      'in/linux antler_${VERSION}_amd64.deb no'
+      'in/linux antler_${VERSION}_amd64.deb no',
+      'in/mac-arm64 Antler-${VERSION}-arm64.app.tar.gz no',
+      'in/mac-x64 Antler-${VERSION}-x64.app.tar.gz no'
     ])
     // out/ 를 만들거나 복사로 채우는 곳은 복사 단계뿐이다(서명·매니페스트 단계는 고정 이름·스크립트만)
     for (const s of sign.steps) {
       if (s === copy) continue
-      expect(s.run ?? '', s.name).not.toMatch(/\bmkdir\b|\bcp\b|\bmv\b|\bln\b|\bunzip\b|\btar\b/)
+      // 명령어만 본다(파일 이름 `….app.tar.gz` 의 `tar` 는 명령이 아니다 — 앞이 `.` 인 단어는 뺀다)
+      expect(s.run ?? '', s.name).not.toMatch(/(?<![.\w-])(mkdir|cp|mv|ln|unzip|tar)\b/)
       if (s.uses?.startsWith('actions/download-artifact')) expect(String(s.with?.['path']), '다운로드가 out/ 에 쓴다').not.toMatch(/^out(\/|$)/)
     }
     expect(step.run ?? '').not.toContain('*')
     const upload = sign.steps.find((s) => s.uses?.startsWith('actions/upload-artifact'))
     expect(String(upload?.with?.['path'])).not.toContain('out/*')
-    for (const line of String(upload?.with?.['path']).split('\n').filter(Boolean)) expect(line).toMatch(/^out\/(Antler-Setup-\$\{\{ env\.VERSION \}\}-x64\.exe|Antler-\$\{\{ env\.VERSION \}\}-(arm64|x64)\.dmg|antler_\$\{\{ env\.VERSION \}\}_amd64\.deb)(\.sig)?$|^out\/latest\.(json|yml)$/)
+    for (const line of String(upload?.with?.['path']).split('\n').filter(Boolean)) expect(line).toMatch(/^out\/(Antler-Setup-\$\{\{ env\.VERSION \}\}-x64\.exe|Antler-\$\{\{ env\.VERSION \}\}-(arm64|x64)\.(dmg|app\.tar\.gz)|antler_\$\{\{ env\.VERSION \}\}_amd64\.deb)(\.sig)?$|^out\/latest\.(json|yml)$/)
   })
 
   it('cdp·test-hooks 를 켜지 않는다', () => {

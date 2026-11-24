@@ -83,7 +83,7 @@ describe('check-release-preflight — 공개 키 없는 빌드의 발행을 막�
 
 describe('check-release-assets — 자산이 하나라도 빠지면 태그를 만들기 전에 실패한다', () => {
   const VERSION = '2.0.0'
-  const INSTALLERS = [M.installerName(VERSION), ...M.MANUAL_ASSETS.map((a: { name: (v: string) => string }) => a.name(VERSION))]
+  const INSTALLERS = [M.installerName(VERSION), ...M.SIGNED_ASSETS.map((a: { name: (v: string) => string }) => a.name(VERSION))]
 
   /** 설치본·.sig·latest.json·latest.yml 을 tauri-package.yml 산출물과 같은 모양으로 만든다 */
   function fullDir(migration?: string): string {
@@ -175,6 +175,7 @@ describe('check-release-assets — 자산이 하나라도 빠지면 태그를 �
       return run(dir)
     }
     expect(tamper((d) => delete d.platforms['darwin-aarch64-dmg']).stderr).toContain('darwin-aarch64-dmg 항목이 없습니다')
+    expect(tamper((d) => delete d.platforms['darwin-x86_64-app']).stderr).toContain('darwin-x86_64-app 항목이 없습니다')
     expect(tamper((d) => (d.platforms['linux-x86_64-deb']!.url = d.platforms['linux-x86_64-deb']!.url.replace('.deb', '.x'))).stderr).toContain('linux-x86_64-deb')
     expect(tamper((d) => (d.platforms['windows-x86_64']!.signature = 'AAAA')).stderr).toContain('서명이')
     expect(tamper((d) => (d.version = '2.0.1')).stderr).toContain('버전')
@@ -210,10 +211,18 @@ describe('check-release-assets — 자산이 하나라도 빠지면 태그를 �
     expect(run(on, 'off').stderr).toContain('예상하지 않은 파일입니다: latest.yml')
   })
 
-  it('필수 자산 목록은 설치본 4 + .sig 4 + latest.json (+ latest.yml)이다', () => {
-    expect(A.expectedAssets(VERSION, undefined)).toHaveLength(10)
-    expect(A.expectedAssets(VERSION, 'off')).toHaveLength(9)
-    expect(A.REQUIRED_PLATFORM_KEYS).toEqual(['windows-x86_64-nsis', 'windows-x86_64', 'darwin-aarch64-dmg', 'darwin-x86_64-dmg', 'linux-x86_64-deb'])
+  it('필수 자산 목록은 설치본 6(exe·dmg 2·deb·app.tar.gz 2) + .sig 6 + latest.json (+ latest.yml)이다', () => {
+    expect(A.expectedAssets(VERSION, undefined)).toHaveLength(14)
+    expect(A.expectedAssets(VERSION, 'off')).toHaveLength(13)
+    expect(A.REQUIRED_PLATFORM_KEYS).toEqual([
+      'windows-x86_64-nsis',
+      'windows-x86_64',
+      'darwin-aarch64-dmg',
+      'darwin-x86_64-dmg',
+      'linux-x86_64-deb',
+      'darwin-aarch64-app',
+      'darwin-x86_64-app'
+    ])
   })
 })
 
