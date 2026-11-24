@@ -51,6 +51,10 @@ pub const GIT_ENV: [(&str, &str); 9] = [
     ("LC_ALL", "C.UTF-8"),
 ];
 
+/// 빈 `GIT_ASKPASS`(askpass 를 쓰지 않음)와 같은 효과의 git 설정. 빈 환경 값을 표현할 수 없는 PowerShell 원격(`ssh/quote.rs`)이 `-C <경로>` 바로 뒤에 넣는다 —
+/// 빈 `core.askPass` 는 `SSH_ASKPASS` 로도 내려가지 않는다(git `prompt.c`). 고정 값이라 저장소가 정하는 값이 들어갈 자리가 없다
+pub const NO_ASKPASS_ARGS: [&str; 2] = ["-c", "core.askPass="];
+
 /// `run` 이 담는 stdout 상한(기본 64MB)
 pub const DEFAULT_MAX_BUFFER: usize = 64 * 1024 * 1024;
 

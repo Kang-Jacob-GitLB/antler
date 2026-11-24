@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use antler_lib::git::exec::ssh::SHELL_PROBE;
+use antler_lib::git::exec::ssh::{PS_PROBE, SHELL_PROBE};
 use antler_lib::git::exec::{ExecError, LocalExecutor, RunOpts};
 use russh::keys::{Algorithm, PrivateKey, PublicKey};
 use russh::server::{self, Auth, Msg, Server as _, Session, VerifiedPublicKey};
@@ -94,6 +94,10 @@ pub enum Shell {
     Posix,
     /// Windows cmd 처럼 작은따옴표를 문자 그대로 돌려준다(클라이언트의 셸 확인이 거부해야 한다)
     Cmd,
+    /// PowerShell 처럼 첫 확인에 `an'tler`, 두 번째 확인(`PS_PROBE`)에 주 버전을 낸다. 그 밖의 명령은 기록만 하고 실패(1)로 답한다(PowerShell 문법을 풀지 않는다)
+    Pwsh,
+    /// 첫 확인만 PowerShell 처럼 답하고 두 번째 확인은 POSIX 셸처럼(`$PSVersionTable` 을 빈 값으로) 답한다 — 클라이언트가 거부해야 한다
+    FakePwsh,
 }
 
 /// 프로브가 아닌 exec 요청에 서버가 어떻게 답하는가
@@ -102,6 +106,8 @@ pub enum ExecMode {
     Normal,
     /// 요청을 거부한다(channel_failure). 채널은 클라이언트가 닫을 때까지 서버에 남는다
     Reject,
+    /// 확인 명령이 아닌 첫 exec 하나만 거부하고 그 뒤로는 받는다(Windows sshd 의 일시적 세션 한도 흉내 — 거부한 요청도 `rejected` 로 센다)
+    RejectFirst,
 }
 
 pub struct Opts {
@@ -140,6 +146,8 @@ struct Shared {
     handles: Mutex<Vec<server::Handle>>,
     /// 받은 exec 명령(셸 확인 포함, 받은 순서)
     exec_log: Mutex<Vec<String>>,
+    /// `ExecMode::RejectFirst` 로 거부한 exec 수
+    rejected: AtomicUsize,
     /// 받은 direct-tcpip 요청(`host:port`)
     tunnels: Mutex<Vec<String>>,
     /// 공개키 인증을 시도한 연결 수(연결당 한 번만 센다)
@@ -231,6 +239,10 @@ impl TestServer {
     }
 
     /// 서버가 받은 exec 명령들(셸 확인 포함)
+    pub fn rejected(&self) -> usize {
+        self.shared.rejected.load(Ordering::SeqCst)
+    }
+
     pub fn exec_log(&self) -> Vec<String> {
         self.shared.exec_log.lock().unwrap().clone()
     }
@@ -435,7 +447,9 @@ impl server::Handler for Conn {
     }
 
     async fn exec_request(&mut self, id: ChannelId, data: &[u8], session: &mut Session) -> Result<(), Self::Error> {
-        if self.exec == ExecMode::Reject && data != SHELL_PROBE.as_bytes() {
+        let probe = data == SHELL_PROBE.as_bytes() || data == PS_PROBE.as_bytes();
+        let reject_first = self.exec == ExecMode::RejectFirst && !probe && self.shared.rejected.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok();
+        if (self.exec == ExecMode::Reject && data != SHELL_PROBE.as_bytes()) || reject_first {
             session.channel_failure(id)?;
             // 거부한 채널은 클라이언트가 닫을 때(channel_close)까지 남는다 — 그 수를 센다
             if self.opened.insert(id) {
@@ -635,9 +649,24 @@ async fn finish(channel: &Channel<Msg>, code: Option<u32>) {
 
 async fn serve_exec(shared: Arc<Shared>, shell: Shell, channel: Channel<Msg>, command: String, token: CancellationToken) {
     if command == SHELL_PROBE {
-        let out: &[u8] = if shell == Shell::Cmd { b"'an''tler'\r\n" } else { b"antler\n" };
+        let out: &[u8] = match shell {
+            Shell::Cmd => b"'an''tler'\r\n",
+            Shell::Pwsh | Shell::FakePwsh => b"an'tler\r\n",
+            Shell::Posix => b"antler\n",
+        };
         let _ = channel.data(out).await;
         finish(&channel, Some(0)).await;
+        return;
+    }
+    if command == PS_PROBE && matches!(shell, Shell::Pwsh | Shell::FakePwsh) {
+        let out: &[u8] = if shell == Shell::Pwsh { b"5\r\n" } else { b".PSVersion.Major\n" };
+        let _ = channel.data(out).await;
+        finish(&channel, Some(0)).await;
+        return;
+    }
+    if shell == Shell::Pwsh {
+        let _ = channel.extended_data(1, &b"powershell fake\n"[..]).await;
+        finish(&channel, Some(1)).await;
         return;
     }
     let Ok(argv) = unquote(&command) else {
