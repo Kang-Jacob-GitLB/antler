@@ -24,6 +24,7 @@ export const ko = {
   'add.distro': 'WSL 배포판',
   'add.noDistros': '설치된 WSL 배포판이 없습니다',
   'add.host': 'SSH 호스트',
+  'add.hostList': '~/.ssh/config 호스트',
   'add.hostPlaceholder': '~/.ssh/config 의 Host 이름 또는 user@host:port',
   'add.sshHint': '키 또는 ssh-agent 로 인증합니다. 비밀번호는 저장하지도 묻지도 않습니다. 처음 접속하는 서버는 터미널에서 ssh 로 한 번 접속해 호스트 키를 등록하세요.',
   'add.path': '저장소 경로',

@@ -25,6 +25,7 @@ mod connection;
 mod executor;
 mod pool;
 pub mod known_hosts;
+pub mod posix_path;
 pub mod quote;
 mod sftp;
 mod stream;

@@ -1,0 +1,49 @@
+.ssh-host-picker {
+  position: relative;
+}
+
+.ssh-host-picker__list {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
+}
+
+.ssh-host-picker__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-height: var(--row-h-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.ssh-host-picker__item.is-active {
+  background: var(--row-hover);
+}
+
+.ssh-host-picker__alias {
+  flex-shrink: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+
+.ssh-host-picker__detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}

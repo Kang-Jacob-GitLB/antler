@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 use std::fs;
 
+use super::posix_path as posix;
 use super::win32_path as win32;
 use super::glob_match;
 use crate::git::fetch::{is_line_terminator, js_to_lowercase, js_trim};
@@ -221,27 +222,82 @@ fn has_glob_char(s: &str) -> bool {
     s.contains(['*', '?', '['])
 }
 
-fn expand_include_glob(pattern: &str, fs: &dyn ConfigFs) -> Vec<String> {
+/// 설정 값의 경로 규칙. 홈이 `/` 로 시작하면 POSIX(macOS·Linux), 아니면 Node `path.win32`(골든 사양) 규칙이다.
+/// win32 규칙을 macOS 에서 쓰면 `/Users/me/.ssh/id_rsa` 가 `\Users\me\.ssh\id_rsa` 가 돼 키·Include 파일을 읽지 못한다
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathStyle {
+    Win32,
+    Posix,
+}
+
+impl PathStyle {
+    fn for_home(home_dir: &str) -> Self {
+        if home_dir.starts_with('/') {
+            PathStyle::Posix
+        } else {
+            PathStyle::Win32
+        }
+    }
+
+    fn normalize(self, p: &str) -> String {
+        match self {
+            PathStyle::Win32 => win32::normalize(p),
+            PathStyle::Posix => posix::normalize(p),
+        }
+    }
+
+    fn join(self, parts: &[&str]) -> String {
+        match self {
+            PathStyle::Win32 => win32::join(parts),
+            PathStyle::Posix => posix::join(parts),
+        }
+    }
+
+    fn is_absolute(self, p: &str) -> bool {
+        match self {
+            PathStyle::Win32 => win32::is_absolute(p),
+            PathStyle::Posix => posix::is_absolute(p),
+        }
+    }
+
+    fn dirname(self, p: &str) -> String {
+        match self {
+            PathStyle::Win32 => win32::dirname(p),
+            PathStyle::Posix => posix::dirname(p),
+        }
+    }
+
+    fn basename(self, p: &str) -> String {
+        match self {
+            PathStyle::Win32 => win32::basename(p),
+            PathStyle::Posix => posix::basename(p),
+        }
+    }
+}
+
+fn expand_include_glob(pattern: &str, style: PathStyle, fs: &dyn ConfigFs) -> Vec<String> {
     if !has_glob_char(pattern) {
         return vec![pattern.to_string()];
     }
-    let dir = win32::dirname(pattern);
+    let dir = style.dirname(pattern);
     if has_glob_char(&dir) {
         return Vec::new(); // 디렉터리 부분의 글롭은 지원하지 않는다
     }
-    let base = win32::basename(pattern);
+    let base = style.basename(pattern);
     let mut names: Vec<String> = fs.read_dir(&dir).unwrap_or_default().into_iter().filter(|n| glob_match(&base, n)).collect();
     // JS 기본 sort 는 UTF-16 코드 단위 순서다
     names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
-    names.iter().map(|n| win32::join(&[&dir, n])).collect()
+    names.iter().map(|n| style.join(&[&dir, n])).collect()
 }
 
 fn expand_tilde(p: &str, home_dir: &str) -> String {
     if p == "~" {
         return home_dir.to_string();
     }
-    if p.starts_with("~/") || p.starts_with("~\\") {
-        return win32::join(&[home_dir, &p[2..]]);
+    let style = PathStyle::for_home(home_dir);
+    // `~\` 는 Windows 에서만 홈이다(POSIX 에서 `\` 는 파일 이름의 일부)
+    if p.starts_with("~/") || (style == PathStyle::Win32 && p.starts_with("~\\")) {
+        return style.join(&[home_dir, &p[2..]]);
     }
     p.to_string()
 }
@@ -276,9 +332,10 @@ fn parse_into(text: &str, cfg: &mut SshConfig, mut cur: usize, depth: usize, fs:
                     continue;
                 }
                 for arg in &args {
+                    let style = PathStyle::for_home(&cfg.home_dir);
                     let p = expand_tilde(arg, &cfg.home_dir);
-                    let abs = if win32::is_absolute(&p) { p } else { win32::join(&[&cfg.home_dir, ".ssh", &p]) };
-                    for file in expand_include_glob(&abs, fs) {
+                    let abs = if style.is_absolute(&p) { p } else { style.join(&[&cfg.home_dir, ".ssh", &p]) };
+                    for file in expand_include_glob(&abs, style, fs) {
                         let Some(content) = fs.read_file(&file) else {
                             continue;
                         };
@@ -553,7 +610,8 @@ pub fn resolve_host(config: &SshConfig, spec: &str, ctx: &Ctx) -> ResolvedHost {
 
     let port_s = port.to_string();
     let tokens: [(char, &str); 6] = [('d', &config.home_dir), ('u', ctx.local_user), ('h', &host_name), ('r', &user), ('p', &port_s), ('n', &alias)];
-    let normalized = |f: &str| win32::normalize(&expand_tilde(&expand_tokens(f, &tokens), &config.home_dir));
+    let style = PathStyle::for_home(&config.home_dir);
+    let normalized = |f: &str| style.normalize(&expand_tilde(&expand_tokens(f, &tokens), &config.home_dir));
     let files: Vec<String> = identity_files.iter().filter(|f| js_to_lowercase(f) != "none").map(|f| normalized(f)).collect();
 
     // 조용히 무시하면 위험한 설정: ProxyCommand 를 무시하면 bastion 을 건너뛰고 내부 이름으로 직접 접속하고,
@@ -777,6 +835,28 @@ mod tests {
         assert_eq!(resolve_host(&cfg, "inc-c", &ctx(&no_env)).port, 22);
         assert_eq!(resolve_host(&cfg, "inc-a", &ctx(&no_env)).user, "tail");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn posix_홈은_identity_file_과_include_를_posix_경로로_푼다() {
+        const POSIX_HOME: &str = "/Users/me";
+        let fs = MemFs::new([("/Users/me/.ssh/conf.d/10-a.conf".to_string(), "Host inc-a\n  Port 1111\n".to_string())]);
+        let cfg = parse_ssh_config(
+            "Include conf.d/*.conf\nHost box\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile %d/.ssh/k_%r\n  IdentityFile /etc/ssh/../keys/x\n  User jo\n",
+            POSIX_HOME,
+            &fs,
+        );
+        let r = resolve_host(&cfg, "box", &ctx(&no_env));
+        assert_eq!(r.identity_files, vec!["/Users/me/.ssh/id_rsa", "/Users/me/.ssh/k_jo", "/etc/keys/x"]);
+        assert_eq!(resolve_host(&cfg, "inc-a", &ctx(&no_env)).port, 1111);
+        assert_eq!(expand_tilde("~\\x", POSIX_HOME), "~\\x");
+        assert_eq!(expand_tilde("~", POSIX_HOME), POSIX_HOME);
+    }
+
+    #[test]
+    fn windows_홈은_여전히_win32_경로다() {
+        let r = resolve("Host box\n  IdentityFile ~/.ssh/id_rsa\n  IdentityFile ~\\.ssh\\k\n", "box");
+        assert_eq!(r.identity_files, vec!["C:\\h\\.ssh\\id_rsa", "C:\\h\\.ssh\\k"]);
     }
 
     #[test]
