@@ -4,7 +4,9 @@
 //! 보안(인자 주입 경계): ref 이름은 renderer 가 보낸 값이다. 실행기가 인자를 전역 옵션 바로 뒤에 붙이므로 옵션으로 읽히는 값이
 //! 들어가면 `-c alias.x=!cmd`·`--output=<경로>` 가 된다. 그래서
 //! - 항목은 `refs/(heads|tags|remotes)/…` 형식·40/64자 소문자 해시·`refs/remotes/<이름>/*` 만 통과한다(그 밖의 문자열은 argv 를 만들 방법이 없다).
-//! - 통과한 값도 옵션 자리에 오지 않는다: solo 의 rev 는 `--end-of-options` 뒤, glob·exclude 는 `--glob=`·`--exclude=` 접두가 붙은 한 인자로만 들어간다.
+//! - 통과한 값도 옵션 자리에 오지 않는다: solo 의 rev 는 `refs/` 나 16진수로 시작해 `-` 로 시작할 수 없고, glob·exclude 는 `--glob=`·`--exclude=`
+//!   접두가 붙은 한 인자로만 들어간다. `--end-of-options` 는 쓰지 않는다 — git 2.24 미만(예: Ubuntu 18.04 의 2.17)의 `log` 가
+//!   `unrecognized argument` 로 거부해 SSH 저장소의 solo 보기가 실패했다.
 //!
 //! 검증은 TS 정규식과 같은 결과여야 한다. 정규식 크레이트를 쓰지 않고 손으로 검사한다 — JS `\s`(U+FEFF 포함, U+0085 제외)는
 //! Rust `char::is_whitespace`(U+0085 포함, U+FEFF 제외)와 달라서 [`is_js_space`] 로 나열하고, 길이는 UTF-16 코드 단위로 센다.
@@ -122,7 +124,7 @@ fn rev_args() -> Vec<String> {
 
 /// 범위를 `git log` 의 시작점 인자로 바꾼다(`scopeArgs`). 형식은 [`parse_scope`] 가 이미 검증했다.
 /// - 범위가 없거나 비었으면 기본 보기(모든 브랜치·리모트·태그 + HEAD)
-/// - solo: 리모트 전체는 `--glob=`, 나머지는 `--end-of-options` 뒤의 rev. 시작점이 하나도 없으면 빈 목록
+/// - solo: 리모트 전체는 `--glob=`, 나머지는 rev 그대로(검증상 `-` 로 시작하지 않는다). 시작점이 하나도 없으면 빈 목록
 /// - hide: 종류별 `--exclude=` 가 바로 다음 `--branches`·`--remotes`·`--tags` 한 번에만 적용된다. 해시는 숨길 수 없다
 pub fn scope_args(scope: Option<&Scope>) -> Result<Vec<String>, String> {
     let Some(scope) = scope else { return Ok(rev_args()) };
@@ -130,10 +132,8 @@ pub fn scope_args(scope: Option<&Scope>) -> Result<Vec<String>, String> {
         let (globs, revs): (Vec<&String>, Vec<&String>) = scope.solo.iter().partition(|s| s.ends_with("/*"));
         let mut v = vec!["--ignore-missing".to_string()];
         v.extend(globs.iter().map(|g| format!("--glob={g}")));
-        if !revs.is_empty() {
-            v.push("--end-of-options".to_string());
-            v.extend(revs.iter().map(|r| (*r).clone()));
-        }
+        debug_assert!(revs.iter().all(|r| !r.starts_with('-')), "solo rev 는 옵션 모양일 수 없다");
+        v.extend(revs.iter().map(|r| (*r).clone()));
         return Ok(v);
     }
     if scope.hide.is_empty() {
@@ -346,15 +346,14 @@ mod tests {
         assert_eq!(args(json!({ "solo": ["refs/heads/a", "refs/remotes/origin/*", "refs/tags/v"] })), [
             "--ignore-missing",
             "--glob=refs/remotes/origin/*",
-            "--end-of-options",
             "refs/heads/a",
             "refs/tags/v"
         ]);
-        // 옵션처럼 보이는 이름도 --end-of-options 뒤에 놓인다
+        // 옵션처럼 보이는 이름도 refs/ 로 시작하는 한 인자라 옵션이 아니다
         let a = args(json!({ "solo": ["refs/heads/--output=x"] }));
-        assert_eq!(a, ["--ignore-missing", "--end-of-options", "refs/heads/--output=x"]);
+        assert_eq!(a, ["--ignore-missing", "refs/heads/--output=x"]);
         // solo 가 있으면 hide 는 무시한다(해시여도 거부하지 않는다)
-        assert_eq!(args(json!({ "solo": ["refs/heads/a"], "hide": ["a".repeat(40)] })), ["--ignore-missing", "--end-of-options", "refs/heads/a"]);
+        assert_eq!(args(json!({ "solo": ["refs/heads/a"], "hide": ["a".repeat(40)] })), ["--ignore-missing", "refs/heads/a"]);
     }
 
     #[test]

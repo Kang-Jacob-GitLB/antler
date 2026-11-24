@@ -58,7 +58,6 @@
         "--date-order",
         "--skip=10",
         "--ignore-missing",
-        "--end-of-options",
         "refs/heads/b",
         "refs/heads/a",
         "--"
@@ -73,7 +72,6 @@
         "--decorate=full",
         "--date-order",
         "--ignore-missing",
-        "--end-of-options",
         "refs/tags/v1",
         "refs/remotes/origin/main",
         "--"
@@ -90,7 +88,6 @@
         "--ignore-missing",
         "--glob=refs/remotes/origin/*",
         "--glob=refs/remotes/team/x/*",
-        "--end-of-options",
         "refs/heads/a",
         "--"
       ],
@@ -104,7 +101,6 @@
         "--decorate=full",
         "--date-order",
         "--ignore-missing",
-        "--end-of-options",
         "0123456789abcdef0123456789abcdef01234567",
         "--"
       ],
@@ -118,7 +114,6 @@
         "--decorate=full",
         "--date-order",
         "--ignore-missing",
-        "--end-of-options",
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         "--"
       ],
@@ -132,7 +127,6 @@
         "--decorate=full",
         "--date-order",
         "--ignore-missing",
-        "--end-of-options",
         "refs/heads/--output=x",
         "--"
       ],
@@ -146,7 +140,6 @@
         "--decorate=full",
         "--date-order",
         "--ignore-missing",
-        "--end-of-options",
         "refs/heads/a",
         "refs/heads/b",
         "--"
@@ -161,7 +154,6 @@
         "--decorate=full",
         "--date-order",
         "--ignore-missing",
-        "--end-of-options",
         "refs/heads/a",
         "--"
       ],
@@ -278,7 +270,6 @@
         "--decorate=full",
         "--date-order",
         "--ignore-missing",
-        "--end-of-options",
         "refs/heads/ab",
         "--"
       ],

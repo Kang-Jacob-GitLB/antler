@@ -1275,7 +1275,7 @@ async fn 악성_저장소의_textconv_와_filter_는_코드_탐색기가_실행�
 fn 코드_탐색기_argv_는_상수_뒤_검증된_값뿐이다() {
     use antler_lib::git::code_browse::{cat_file_args, ls_tree_args, on_remote_args, resolve_rev_args, CommitId};
     let rev = "ABCDEFabcdef0123456789ABCDEFabcdef012345";
-    assert_eq!(resolve_rev_args("refs/heads/main"), ["rev-parse", "--verify", "--end-of-options", "refs/heads/main^{commit}"]);
+    assert_eq!(resolve_rev_args("refs/heads/main"), ["rev-parse", "--verify", "refs/heads/main^{commit}"]);
     assert_eq!(cat_file_args("blob", &format!("{rev}:-x")), ["cat-file", "blob", &format!("{rev}:-x")]);
     assert_eq!(ls_tree_args(rev), ["ls-tree", "-z", rev]);
     // onRemote 의 해시는 소문자, 범위는 refs/remotes/
