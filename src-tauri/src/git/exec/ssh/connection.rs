@@ -488,11 +488,21 @@ impl Inner {
                 r.map_err(|e| fail(e, &plan.notes))?
             }
             Some((via_handle, from)) => {
-                #[allow(clippy::disallowed_methods)]
-                let tunnel = via_handle.channel_open_direct_tcpip(node.host_name.clone(), node.port, "127.0.0.1", 0).await;
-                let channel = tunnel.map_err(|e| {
-                    other(format!("점프 호스트 {} 에서 {}:{} 로 연결하지 못했습니다: {e}", from.alias, node.host_name, node.port))
-                })?;
+                let channel = match &node.proxy_socket {
+                    // ProxyCommand `ssh <점프> socat - UNIX-CONNECT:<경로>` 와 같은 연결: 점프 홉 위에서 그 서버의 유닉스 소켓으로 채널을 연다(명령은 실행하지 않는다)
+                    Some(path) => {
+                        #[allow(clippy::disallowed_methods)]
+                        let tunnel = via_handle.channel_open_direct_streamlocal(path.clone()).await;
+                        tunnel.map_err(|e| other(format!("점프 호스트 {} 에서 유닉스 소켓 {path} 로 연결하지 못했습니다: {e}", from.alias)))?
+                    }
+                    None => {
+                        #[allow(clippy::disallowed_methods)]
+                        let tunnel = via_handle.channel_open_direct_tcpip(node.host_name.clone(), node.port, "127.0.0.1", 0).await;
+                        tunnel.map_err(|e| {
+                            other(format!("점프 호스트 {} 에서 {}:{} 로 연결하지 못했습니다: {e}", from.alias, node.host_name, node.port))
+                        })?
+                    }
+                };
                 #[allow(clippy::disallowed_methods)]
                 let r = client::connect_stream(config, channel.into_stream(), handler).await;
                 r.map_err(|e| fail(e, &plan.notes))?

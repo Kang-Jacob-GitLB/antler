@@ -4,7 +4,8 @@
 //!       ProxyJump(쉼표 체인·user@host:port·none), IdentitiesOnly, IdentityAgent(none/SSH_AUTH_SOCK/경로), UserKnownHostsFile, HostKeyAlias,
 //!       Include(`~/.ssh` 기준 상대 경로, 마지막 경로 요소의 `*` `?` 글롭만 best-effort, 깊이 16).
 //! 의미론: OpenSSH 와 같이 "먼저 얻은 값이 이긴다"(IdentityFile 만 모든 일치 블록에서 누적).
-//! 미지원: Match — `Match all` 만 전역으로 취급하고 그 외 조건의 Match 블록은 통째로 적용하지 않는다. ProxyCommand 도 다루지 않는다.
+//! 미지원: Match — `Match all` 만 전역으로 취급하고 그 외 조건의 Match 블록은 통째로 적용하지 않는다. ProxyCommand 는 실행하지 않는다 —
+//!       예외로 `ssh <별칭> socat - UNIX-CONNECT:<절대경로>` 한 모양만 "그 별칭을 점프 홉으로, 그 안의 유닉스 소켓을 대상으로"로 읽는다([`parse_streamlocal_proxy`]).
 //!
 //! **조용히 무시하면 위험한 설정은 [`ResolvedHost::unsupported`] 로 알린다**: ProxyCommand 를 무시하면 bastion 을 건너뛰고 내부 이름으로 직접 접속하고,
 //! 이 호스트에 걸릴 수 있는 Match 블록을 무시하면 의도와 다른 신원으로 접속한다. 연결 쪽은 `unsupported` 가 있으면 거부해야 한다(이 약화는 금지).
@@ -402,6 +403,26 @@ pub struct ResolvedHost {
     pub known_hosts_files: Vec<String>,
     /// `HostKeyAlias` — known_hosts 조회에 HostName 대신 쓸 이름
     pub host_key_alias: Option<String>,
+    /// `ProxyCommand ssh <별칭> socat - UNIX-CONNECT:<경로>` 로 읽은 원격 유닉스 소켓 경로. 있으면 `proxy_jump` 는 그 별칭 한 홉이고,
+    /// 연결 쪽은 그 홉 위에서 direct-tcpip 대신 이 경로로 direct-streamlocal 채널을 연다
+    pub proxy_socket: Option<String>,
+}
+
+/// `ProxyCommand` 인자가 정확히 `ssh <별칭> socat - UNIX-CONNECT:<절대경로>` 이면 (별칭, 경로). 그 밖의 모양은 모두 `None`(= 거부).
+/// 명령은 실행하지 않는다 — 같은 뜻의 연결(별칭으로 SSH 접속 → 그 서버의 유닉스 소켓)을 직접 연다. 그래서 셸이 다르게 풀 여지가 있는 글자는 받지 않는다:
+/// 별칭은 `[A-Za-z0-9._-]`(첫 글자 `-` 금지, 옵션·`user@`·`%` 토큰 없음), 경로는 `/` 로 시작하는 `[A-Za-z0-9._/-]`(`..` 조각 금지)
+pub fn parse_streamlocal_proxy(args: &[String]) -> Option<(String, String)> {
+    const PREFIX: &str = "UNIX-CONNECT:";
+    let [ssh, jump, socat, dash, target] = args else {
+        return None;
+    };
+    if ssh != "ssh" || socat != "socat" || dash != "-" {
+        return None;
+    }
+    let path = target.get(..PREFIX.len()).filter(|p| p.eq_ignore_ascii_case(PREFIX)).map(|_| &target[PREFIX.len()..])?;
+    let jump_ok = !jump.starts_with('-') && !jump.is_empty() && jump.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
+    let path_ok = path.starts_with('/') && path.bytes().all(|b| b.is_ascii_alphanumeric() || b"._/-".contains(&b)) && !path.split('/').any(|seg| seg == "..");
+    (jump_ok && path_ok).then(|| (jump.clone(), path.to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -617,8 +638,13 @@ pub fn resolve_host(config: &SshConfig, spec: &str, ctx: &Ctx) -> ResolvedHost {
     // 조용히 무시하면 위험한 설정: ProxyCommand 를 무시하면 bastion 을 건너뛰고 내부 이름으로 직접 접속하고,
     // 이 호스트에 걸릴 수 있는 Match 블록(IdentitiesOnly·User 등)을 무시하면 의도와 다른 신원으로 접속한다
     let mut problems: Vec<String> = Vec::new();
-    if first_arg(&first, "proxycommand").is_some_and(|pc| !pc.is_empty() && js_to_lowercase(pc) != "none") {
-        problems.push("ProxyCommand".to_string());
+    // ProxyCommand 는 socat 유닉스 소켓 경유 한 모양만 받는다. ProxyJump 와 같이 있으면 OpenSSH 는 먼저 나온 쪽을 쓰므로 모호해 거부한다
+    let mut socket_proxy: Option<(String, String)> = None;
+    if let Some(pc) = first.get("proxycommand").copied().filter(|pc| pc.first().is_some_and(|c| !c.is_empty() && js_to_lowercase(c) != "none")) {
+        socket_proxy = parse_streamlocal_proxy(pc).filter(|_| !first.contains_key("proxyjump"));
+        if socket_proxy.is_none() {
+            problems.push("ProxyCommand".to_string());
+        }
     }
     for block in &config.blocks {
         let margs = block.match_args.as_deref().unwrap_or(&[]);
@@ -637,7 +663,10 @@ pub fn resolve_host(config: &SshConfig, spec: &str, ctx: &Ctx) -> ResolvedHost {
         problems.push(NON_ASCII_HOST.to_string());
     }
     // 포트는 최종 값과 모든 ProxyJump 홉이 1..=65535 여야 한다(digits_to_port 는 u32 로 포화시킨다)
-    let proxy_jump: Vec<JumpHop> = first.get("proxyjump").map(|pj| parse_proxy_jump(&pj.join(" "))).unwrap_or_default();
+    let proxy_jump: Vec<JumpHop> = match &socket_proxy {
+        Some((jump, _)) => parse_proxy_jump(jump),
+        None => first.get("proxyjump").map(|pj| parse_proxy_jump(&pj.join(" "))).unwrap_or_default(),
+    };
     if !PORT_RANGE.contains(&port) || proxy_jump.iter().any(|h| h.port.is_some_and(|p| !PORT_RANGE.contains(&p))) {
         problems.push(BAD_PORT.to_string());
     }
@@ -665,6 +694,7 @@ pub fn resolve_host(config: &SshConfig, spec: &str, ctx: &Ctx) -> ResolvedHost {
         unsupported: (!problems.is_empty()).then(|| problems.join(", ")),
         known_hosts_files,
         host_key_alias,
+        proxy_socket: socket_proxy.map(|(_, path)| path),
     }
 }
 
@@ -766,6 +796,41 @@ mod tests {
     fn proxy_command_와_match_는_unsupported() {
         assert_eq!(resolve("Host inner\n  ProxyCommand ssh -W %h:%p bastion\n", "inner").unsupported.as_deref(), Some("ProxyCommand"));
         assert_eq!(resolve("Host inner\n  ProxyCommand none\n", "inner").unsupported, None);
+    }
+
+    #[test]
+    fn proxy_command_는_socat_유닉스_소켓_경유_한_모양만_점프로_읽는다() {
+        let r = resolve("Host pc\n  HostName 10.0.0.2\n  ProxyCommand ssh Z840C socat - UNIX-CONNECT:/home3/jo/.board-bridge/ssh.sock\n", "pc");
+        assert_eq!(r.unsupported, None);
+        assert_eq!(r.proxy_socket.as_deref(), Some("/home3/jo/.board-bridge/ssh.sock"));
+        assert_eq!(r.proxy_jump.iter().map(|h| h.spec.as_str()).collect::<Vec<_>>(), ["Z840C"]);
+        assert_eq!(r.proxy_jump[0].host, "Z840C");
+        // 소문자 주소 종류도 socat 은 받는다
+        assert!(resolve("Host pc\n  ProxyCommand ssh j socat - unix-connect:/s\n", "pc").proxy_socket.is_some());
+        // 그 밖의 모양은 전부 거부(명령을 실행하지 않으므로 뜻이 다를 수 있는 것은 받지 않는다)
+        for pc in [
+            "ssh -W %h:%p j",
+            "ssh j socat - UNIX-CONNECT:rel/s",
+            "ssh j socat - UNIX-CONNECT:/a/../s",
+            "ssh j socat - UNIX-CONNECT:$HOME/s",
+            "ssh j socat - UNIX-CONNECT:~/s",
+            "ssh j socat - UNIX-CONNECT:/s;id",
+            "ssh j socat - UNIX-CONNECT:/%h",
+            "ssh -oX=y socat - UNIX-CONNECT:/s",
+            "ssh u@j socat - UNIX-CONNECT:/s",
+            "ssh j socat - UNIX-CONNECT:/s extra",
+            "ssh j socat STDIO UNIX-CONNECT:/s",
+            "ssh j socat - TCP:127.0.0.1:22",
+            "/usr/bin/ssh j socat - UNIX-CONNECT:/s",
+        ] {
+            let r = resolve(&format!("Host pc\n  ProxyCommand {pc}\n"), "pc");
+            assert_eq!(r.unsupported.as_deref(), Some("ProxyCommand"), "{pc}");
+            assert_eq!(r.proxy_socket, None, "{pc}");
+        }
+        // ProxyJump 와 같이 있으면(어느 쪽이 이길지 모호) 거부
+        let both = resolve("Host pc\n  ProxyJump b\n  ProxyCommand ssh j socat - UNIX-CONNECT:/s\n", "pc");
+        assert_eq!(both.unsupported.as_deref(), Some("ProxyCommand"));
+        assert_eq!(both.proxy_socket, None);
         let cfg = "Match host *.corp exec \"true\"\n  IdentitiesOnly yes\nMatch user root\n  User admin\n";
         assert_eq!(resolve(cfg, "box.home").unsupported.as_deref(), Some("Match user root"));
         assert_eq!(resolve(cfg, "db.corp").unsupported.as_deref(), Some("Match host *.corp exec true, Match user root"));
