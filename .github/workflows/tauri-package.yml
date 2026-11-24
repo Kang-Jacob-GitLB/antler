@@ -392,11 +392,12 @@ jobs:
             pnpm tauri:notices
           fi
 
-      # --features 는 쓰지 않는다(cdp·test-hooks 금지). macOS 는 --target 으로 아키텍처를 고른다(결과는 target/<triple>/release)
+      # --features 는 쓰지 않는다(cdp·test-hooks 금지). macOS 는 --target 으로 아키텍처를 고른다(결과는 target/<triple>/release).
+      # macOS 는 app 도 함께 요청한다 — dmg 만 요청하면 번들러가 dmg 를 만든 뒤 bundle/macos/Antler.app 을 지워 앱 번들 묶음(.app.tar.gz)을 만들 수 없다
       - name: 빌드
         run: |
           if [ -n "${{ matrix.target }}" ]; then
-            pnpm tauri build --bundles ${{ matrix.bundle }} --target ${{ matrix.target }}
+            pnpm tauri build --bundles app,${{ matrix.bundle }} --target ${{ matrix.target }}
           else
             pnpm tauri build --bundles ${{ matrix.bundle }}
           fi

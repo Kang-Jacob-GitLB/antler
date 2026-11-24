@@ -65,6 +65,8 @@ describe('latest.json (Tauri 업데이터)', () => {
     expect(wf).toContain('out/Antler-${VERSION}-${{ matrix.arch }}.dmg')
     expect(wf).toContain('out/antler_${VERSION}_${{ matrix.arch }}.deb')
     expect(wf).toContain('out/Antler-${VERSION}-${{ matrix.arch }}.app.tar.gz')
+    // dmg 만 요청하면 번들러가 .app 을 지운다 — macOS 빌드는 app 도 요청해야 묶을 수 있다
+    expect(wf).toContain('pnpm tauri build --bundles app,${{ matrix.bundle }} --target ${{ matrix.target }}')
     // 이 이름들은 TS 수동 경로(pickAsset)의 이름 규칙이기도 하다
     for (const a of M.MANUAL_ASSETS as { name: (v: string) => string }[]) expect(tsIsSafeFileName(a.name('2.0.0'))).toBe(true)
   })
