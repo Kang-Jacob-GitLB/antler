@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 릴리스에 첨부할 자산 폴더를 발행 직전에 점검한다(.github/workflows/release.yml — 태그를 만들기 **전에** 돈다). 하나라도 어긋나면 exit 1.
 // tauri-package.yml 은 점검용 수동 실행에서도 쓰이므로 서명 키가 없거나 macOS·Linux 갈래가 실패해도 경고만 하고 끝난다 — 그 느슨함이 발행으로 새지 않게 여기서 막는다:
-//   필수 자산(설치본 + .sig) 전부 · latest.json(다섯 플랫폼 키가 전부, 키마다 url 이 그 자산을 가리킨다) · latest.yml(저장소 변수 ELECTRON_MIGRATION 이 꺼지지 않았다면)
+//   필수 자산(설치본 + .sig) 전부 · latest.json(일곱 플랫폼 키가 전부, 키마다 url 이 그 자산을 가리킨다) · latest.yml(저장소 변수 ELECTRON_MIGRATION 이 꺼지지 않았다면)
 //   · 자산 목록 밖의 파일이 없다(예상 밖 파일이 릴리스에 딸려 가지 않게).
 //   각 `.sig` 는 host.rs 의 UPDATE_PUBKEY 로 실제 검증한다(키 ID·Ed25519·trusted comment 전역 서명·서명된 버전) — 다른 키로 서명했거나 변조된 산출물은 발행하지 못한다.
 // 사용: node scripts/check-release-assets.mjs --version <버전> --dir <자산 폴더> --pubkey-from src-tauri/src/update/host.rs [--electron-migration <값>]
@@ -9,14 +9,14 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { verifyMinisign } from './lib/minisign.mjs'
 import { readPubkey } from './check-release-preflight.mjs'
-import { DOWNLOAD_PREFIX, installerName, isSafeFileName, MANUAL_ASSETS, migrationEnabled, sha512Base64 } from './make-update-manifests.mjs'
+import { DOWNLOAD_PREFIX, installerName, isSafeFileName, migrationEnabled, sha512Base64, SIGNED_ASSETS } from './make-update-manifests.mjs'
 
-/** latest.json 이 담아야 하는 플랫폼 키(Windows 는 같은 항목 둘 + 수동 경로 셋) */
-export const REQUIRED_PLATFORM_KEYS = ['windows-x86_64-nsis', 'windows-x86_64', ...MANUAL_ASSETS.map((a) => a.key)]
+/** latest.json 이 담아야 하는 플랫폼 키(Windows 는 같은 항목 둘 + 수동 경로 셋 + macOS 앱 번들 둘) */
+export const REQUIRED_PLATFORM_KEYS = ['windows-x86_64-nsis', 'windows-x86_64', ...SIGNED_ASSETS.map((a) => a.key)]
 
 /** 이 릴리스에 올라가야 하는 파일 이름 전부. `latest.yml` 은 이관이 꺼져(ELECTRON_MIGRATION=off 등) 있으면 빠진다 */
 export function expectedAssets(version, migration) {
-  const installers = [installerName(version), ...MANUAL_ASSETS.map((a) => a.name(version))]
+  const installers = [installerName(version), ...SIGNED_ASSETS.map((a) => a.name(version))]
   const names = [...installers, ...installers.map((n) => `${n}.sig`), 'latest.json']
   if (migrationEnabled(migration)) names.push('latest.yml')
   return names
@@ -64,7 +64,7 @@ export function checkAssets({ version, migration, names, readText, sizeOf, sha51
           problems.push(`latest.json 에 ${key} 항목이 없습니다`)
           continue
         }
-        const file = key.startsWith('windows') ? installerName(version) : MANUAL_ASSETS.find((a) => a.key === key).name(version)
+        const file = key.startsWith('windows') ? installerName(version) : SIGNED_ASSETS.find((a) => a.key === key).name(version)
         if (p.url !== `${DOWNLOAD_PREFIX}v${version}/${file}`) problems.push(`latest.json ${key} 의 url 이 ${file} 을 가리키지 않습니다`)
         if (names.includes(`${file}.sig`) && p.signature !== readText(`${file}.sig`).trim()) problems.push(`latest.json ${key} 의 서명이 ${file}.sig 와 다릅니다`)
       }

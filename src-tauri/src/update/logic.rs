@@ -44,6 +44,11 @@ pub const PLATFORM_KEY_GENERIC: &str = "windows-x86_64";
 pub const PLATFORM_KEY_DMG_ARM64: &str = "darwin-aarch64-dmg";
 pub const PLATFORM_KEY_DMG_X64: &str = "darwin-x86_64-dmg";
 pub const PLATFORM_KEY_DEB_X64: &str = "linux-x86_64-deb";
+/// macOS 앱 안 설치(앱 번들 `.app.tar.gz` 를 플러그인이 그 자리에서 바꾸고 다시 시작한다)의 매니페스트 키. 역시 **이 키 하나만** 본다 —
+/// 일반 키 `darwin-<arch>` 를 쓰지 않는 것은 dmg 키와 같은 이유다. `scripts/make-update-manifests.mjs` 의 `APP_ASSETS` 와 같아야 한다(`tests/updateManifests.test.ts` 가 대조한다).
+/// dmg 키(`PLATFORM_KEY_DMG_*`)는 이 방식을 모르는 이전 판(≤ 2.1.0)이 계속 받도록 매니페스트에 남는다
+pub const PLATFORM_KEY_APP_ARM64: &str = "darwin-aarch64-app";
+pub const PLATFORM_KEY_APP_X64: &str = "darwin-x86_64-app";
 
 const GENERIC_ERROR: &str = "업데이트 정보가 올바르지 않습니다";
 
@@ -227,12 +232,14 @@ pub fn is_safe_file_name(n: &str) -> bool {
     !b.is_empty() && b.len() <= 201 && b[0].is_ascii_alphanumeric() && b.iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) && !n.contains("..")
 }
 
-// ── 설치 대상(Windows NSIS·macOS dmg·Linux deb) ───────────────────────
+// ── 설치 대상(Windows NSIS·macOS 앱 번들·Linux deb) ───────────────────
 
-/// 이 빌드가 업데이트를 받는 방식. NSIS 는 앱 안에서 설치하고(`auto`), dmg·deb 는 검증한 파일을 받아 열어 줄 뿐이다(수동 — TS `manual.ts`)
+/// 이 빌드가 업데이트를 받는 방식. NSIS 와 macOS 앱 번들(`.app.tar.gz`)은 앱 안에서 설치하고(`auto`), dmg·deb 는 검증한 파일을 받아 열어 줄 뿐이다(수동 — TS `manual.ts`).
+/// `Dmg` 는 지금 판이 고르지 않는다(macOS 는 `MacApp`) — 이전 판의 동작과 시험을 위해 남겨 둔다
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstallKind {
     Nsis,
+    MacApp,
     Dmg,
     Deb,
 }
@@ -263,17 +270,26 @@ impl Target {
         Target { kind: InstallKind::Nsis, platform: PLATFORM_KEY_NSIS, asset_arch: "x64" }
     }
 
+    /// macOS dmg 수동 경로 대상(`aarch64`·`x86_64`). 지금 판은 [`detect_target`] 가 고르지 않는다(macOS 는 앱 번들 `auto`) — 이전 판이 받는 dmg 항목의 시험용이다
+    pub fn dmg(arch: &str) -> Option<Self> {
+        match arch {
+            "aarch64" => Some(Target { kind: InstallKind::Dmg, platform: PLATFORM_KEY_DMG_ARM64, asset_arch: "arm64" }),
+            "x86_64" => Some(Target { kind: InstallKind::Dmg, platform: PLATFORM_KEY_DMG_X64, asset_arch: "x64" }),
+            _ => None,
+        }
+    }
+
     /// `UpdateState.mode`: `auto`(앱 안 설치)·`manual-dmg`(dmg 를 열어 준다)·`manual-file`(deb 를 열어 준다)
     pub const fn mode(&self) -> &'static str {
         match self.kind {
-            InstallKind::Nsis => "auto",
+            InstallKind::Nsis | InstallKind::MacApp => "auto",
             InstallKind::Dmg => "manual-dmg",
             InstallKind::Deb => "manual-file",
         }
     }
 
     pub const fn is_manual(&self) -> bool {
-        !matches!(self.kind, InstallKind::Nsis)
+        matches!(self.kind, InstallKind::Dmg | InstallKind::Deb)
     }
 
     /// 매니페스트에서 찾을 키(앞이 우선). 수동 경로는 하나뿐이다
@@ -289,6 +305,8 @@ impl Target {
     pub fn check_bytes(&self, bytes: &[u8]) -> bool {
         match self.kind {
             InstallKind::Nsis => true,
+            // gzip 표식. 앱 번들 설치는 플러그인이 tar.gz 를 풀며 형식을 확인한다(이 함수는 수동 경로만 부른다)
+            InstallKind::MacApp => bytes.starts_with(&[0x1f, 0x8b]),
             InstallKind::Deb => bytes.starts_with(b"!<arch>\ndebian-binary"),
             InstallKind::Dmg => bytes.len() >= 512 && &bytes[bytes.len() - 512..bytes.len() - 508] == b"koly",
         }
@@ -299,6 +317,7 @@ impl Target {
         let v = strip_v(version);
         match self.kind {
             InstallKind::Nsis => None,
+            InstallKind::MacApp => Some(format!("Antler-{v}-{}.app.tar.gz", self.asset_arch)),
             InstallKind::Dmg => Some(format!("Antler-{v}-{}.dmg", self.asset_arch)),
             InstallKind::Deb => Some(format!("antler_{v}_{}.deb", self.asset_arch)),
         }
@@ -312,14 +331,15 @@ pub fn in_app_bundle(exe: &std::path::Path) -> bool {
 }
 
 /// 이 빌드가 앱 안 업데이트를 받는 방식. `None` 이면 확인하지 않는다(`--no-bundle` 개발·측정 빌드, 지원하지 않는 형태·아키텍처).
-/// 번들 표식이 아니면 켜지 않는다(환경 변수는 믿지 않는다): Windows 는 NSIS, Linux 는 deb(AppImage·rpm 은 이 PR 의 CI 가 만들지 않는다), macOS 는 앱 번들 안에서 실행 중일 때만
+/// 번들 표식이 아니면 켜지 않는다(환경 변수는 믿지 않는다): Windows 는 NSIS, Linux 는 deb(AppImage·rpm 은 이 PR 의 CI 가 만들지 않는다), macOS 는 앱 번들 안에서 실행 중일 때만.
+/// macOS 는 앱 번들(`.app.tar.gz`)을 받아 앱 안에서 바꾸고 다시 시작한다(`auto`)
 pub fn detect_target(os: &str, arch: &str, mark: BundleMark, exe_in_app_bundle: bool) -> Option<Target> {
     match (os, mark) {
         ("windows", BundleMark::Nsis) => Some(Target::nsis()),
         ("linux", BundleMark::Deb) if arch == "x86_64" => Some(Target { kind: InstallKind::Deb, platform: PLATFORM_KEY_DEB_X64, asset_arch: "amd64" }),
         ("macos", BundleMark::App) if exe_in_app_bundle => match arch {
-            "aarch64" => Some(Target { kind: InstallKind::Dmg, platform: PLATFORM_KEY_DMG_ARM64, asset_arch: "arm64" }),
-            "x86_64" => Some(Target { kind: InstallKind::Dmg, platform: PLATFORM_KEY_DMG_X64, asset_arch: "x64" }),
+            "aarch64" => Some(Target { kind: InstallKind::MacApp, platform: PLATFORM_KEY_APP_ARM64, asset_arch: "arm64" }),
+            "x86_64" => Some(Target { kind: InstallKind::MacApp, platform: PLATFORM_KEY_APP_X64, asset_arch: "x64" }),
             _ => None,
         },
         _ => None,

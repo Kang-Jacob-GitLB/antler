@@ -41,8 +41,8 @@ describe('latest.json (Tauri 업데이터)', () => {
     expect(out).toBe(read('tests', 'fixtures', 'update', 'latest.json'))
   })
 
-  it('수동 경로(dmg·deb) 항목까지 담은 표본(latest-all.json)도 스크립트 출력과 바이트까지 같다 — Rust 시험이 대상마다 check_manifest_for 에 먹인다', () => {
-    const extras = M.MANUAL_ASSETS.map((a: { key: string; name: (v: string) => string }) => ({ key: a.key, fileName: a.name('2.0.0'), signature: SIG }))
+  it('수동 경로(dmg·deb)·macOS 앱 번들 항목까지 담은 표본(latest-all.json)도 스크립트 출력과 바이트까지 같다 — Rust 시험이 대상마다 check_manifest_for 에 먹인다', () => {
+    const extras = M.SIGNED_ASSETS.map((a: { key: string; name: (v: string) => string }) => ({ key: a.key, fileName: a.name('2.0.0'), signature: SIG }))
     const out = M.buildLatestJson({ version: '2.0.0', fileName: M.installerName('2.0.0'), signature: SIG, pubDate: DATE, extras })
     expect(out).toBe(read('tests', 'fixtures', 'update', 'latest-all.json'))
   })
@@ -54,11 +54,17 @@ describe('latest.json (Tauri 업데이터)', () => {
     // 앱의 기대 이름(Target::asset_name): Antler-<v>-<arm64|x64>.dmg · antler_<v>_amd64.deb
     expect(rs).toContain('format!("Antler-{v}-{}.dmg", self.asset_arch)')
     expect(rs).toContain('format!("antler_{v}_{}.deb", self.asset_arch)')
+    // macOS 앱 번들(앱 안 설치): 키·이름(Target::asset_name — Antler-<v>-<arm64|x64>.app.tar.gz)
+    const appKeys = [...rs.matchAll(/pub const PLATFORM_KEY_(?:APP_ARM64|APP_X64): &str = "([^"]+)";/g)].map((m) => m[1])
+    expect(appKeys).toEqual(M.APP_ASSETS.map((a: { key: string }) => a.key))
+    expect(rs).toContain('format!("Antler-{v}-{}.app.tar.gz", self.asset_arch)')
+    expect(M.APP_ASSETS.map((a: { name: (v: string) => string }) => a.name('2.0.0'))).toEqual(['Antler-2.0.0-arm64.app.tar.gz', 'Antler-2.0.0-x64.app.tar.gz'])
     expect(M.MANUAL_ASSETS.map((a: { name: (v: string) => string }) => a.name('2.0.0'))).toEqual(['Antler-2.0.0-arm64.dmg', 'Antler-2.0.0-x64.dmg', 'antler_2.0.0_amd64.deb'])
     // 워크플로의 "설치본 이름 정리"가 같은 이름으로 만든다
     const wf = read('.github', 'workflows', 'tauri-package.yml')
     expect(wf).toContain('out/Antler-${VERSION}-${{ matrix.arch }}.dmg')
     expect(wf).toContain('out/antler_${VERSION}_${{ matrix.arch }}.deb')
+    expect(wf).toContain('out/Antler-${VERSION}-${{ matrix.arch }}.app.tar.gz')
     // 이 이름들은 TS 수동 경로(pickAsset)의 이름 규칙이기도 하다
     for (const a of M.MANUAL_ASSETS as { name: (v: string) => string }[]) expect(tsIsSafeFileName(a.name('2.0.0'))).toBe(true)
   })
@@ -167,8 +173,8 @@ describe('makeManifests (실물 대조 가드)', () => {
     const dir = installerDir('2.0.0', content)
     const r = M.makeManifests({ signed: true, dir, version: '2.0.0', signatureText: `${SIG}\n`, migration: undefined, now: DATE })
     expect(Object.keys(r.files).sort()).toEqual(['latest.json', 'latest.yml'])
-    // 이 폴더에는 macOS·Linux 설치본이 없다 — 항목을 건너뛰었다고 경고한다(Windows 항목은 정상)
-    expect(r.warnings).toHaveLength(3)
+    // 이 폴더에는 macOS·Linux 설치본이 없다 — 항목(dmg 2·deb·앱 번들 2)을 건너뛰었다고 경고한다(Windows 항목은 정상)
+    expect(r.warnings).toHaveLength(5)
     expect(r.warnings.every((w: string) => w.includes('없어 latest.json 의'))).toBe(true)
     expect(Object.keys(JSON.parse(r.files['latest.json']).platforms)).toEqual(['windows-x86_64-nsis', 'windows-x86_64'])
     expect(r.sha512).toBe(sha)

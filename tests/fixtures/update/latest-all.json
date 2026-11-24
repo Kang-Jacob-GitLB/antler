@@ -21,6 +21,14 @@
     "linux-x86_64-deb": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==",
       "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/antler_2.0.0_amd64.deb"
+    },
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==",
+      "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/Antler-2.0.0-arm64.app.tar.gz"
+    },
+    "darwin-x86_64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZQpSVVE9PQ==",
+      "url": "https://github.com/Kang-Jacob-GitLB/antler/releases/download/v2.0.0/Antler-2.0.0-x64.app.tar.gz"
     }
   }
 }
