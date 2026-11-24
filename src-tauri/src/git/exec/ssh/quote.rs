@@ -21,6 +21,7 @@
 
 use std::fmt;
 
+use crate::git::exec::common::NO_ASKPASS_ARGS;
 use crate::git::exec::{build_git_args, merged_env, FetchEnv};
 
 /// 인용·명령 구성 실패. 문구는 TS 의 `Error` 메시지와 같다(골든이 글자 단위로 비교한다)
@@ -191,7 +192,7 @@ fn build_ps_command<S: AsRef<str>>(repo_path: &str, args: &[S], env: &[(String, 
     let mut argv = build_git_args(ps_repo_path(repo_path), args);
     if no_askpass {
         // `-C <path>` 바로 뒤(전역 인자와 같은 자리). 빈 core.askPass 는 SSH_ASKPASS 로도 내려가지 않는다(git prompt.c)
-        argv.splice(2..2, ["-c".to_string(), "core.askPass=".to_string()]);
+        argv.splice(2..2, NO_ASKPASS_ARGS.iter().map(|s| (*s).to_string()));
     }
     out.push_str("& git.exe");
     for a in &argv {

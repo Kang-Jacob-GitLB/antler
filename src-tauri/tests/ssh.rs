@@ -292,7 +292,7 @@ async fn 원격_로그인_셸이_posix_가_아니면_사용자_값이_든_명령
 
 #[tokio::test]
 async fn powershell_로그인_셸은_두_번_확인한_뒤_powershell_규칙으로_명령을_만든다() {
-    let e = Env::with(|o| o.shell = Shell::PowerShell).await;
+    let e = Env::with(|o| o.shell = Shell::Pwsh).await;
     let ex = e.ex();
     // 시험 서버는 PowerShell 문법을 풀지 않고 실패(1)로 답한다 — 보낸 문자열만 본다
     let r = run(&ex, &e.repo, &["rev-parse", "HEAD"]).await.unwrap();
@@ -311,7 +311,7 @@ async fn powershell_로그인_셸은_두_번_확인한_뒤_powershell_규칙으�
 
 #[tokio::test]
 async fn 첫_확인만_powershell_처럼_보이면_거부한다() {
-    let e = Env::with(|o| o.shell = Shell::FakePowerShell).await;
+    let e = Env::with(|o| o.shell = Shell::FakePwsh).await;
     let ex = e.ex();
     let m = message(run(&ex, &e.repo, &["rev-parse", "HEAD"]).await);
     assert!(m.contains("POSIX 셸이 아닙니다"), "{m}");
