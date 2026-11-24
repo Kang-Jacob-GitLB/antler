@@ -36,3 +36,6 @@
 - 호스트 키가 이미 `known_hosts` 에 있어야 한다 — 처음이면 ssh CLI 로 한 번 접속해 둔다.
 - 원격 로그인 셸은 POSIX 계열(sh/bash/zsh/fish)이어야 한다.
 - `ProxyCommand` 와 호스트에 걸리는 `Match` 블록은 무시하지 않고 **거부**한다(잘못된 곳에 접속하는 것을 막기 위해).
+  예외는 `ProxyCommand ssh <별칭> socat - UNIX-CONNECT:<절대경로>` 한 모양뿐이다 — 명령을 실행하지 않고, `<별칭>` 을 점프 홉으로 접속한 뒤
+  그 서버의 유닉스 소켓으로 direct-streamlocal 채널을 연다(역방향 터널 소켓 경유용. 점프 서버 sshd 의 `AllowStreamLocalForwarding` 이 켜져 있어야 한다).
+  옵션·`user@`·`%` 토큰·`$`·`~`·상대 경로·`..` 가 섞이거나 `ProxyJump` 와 같이 있으면 거부한다.

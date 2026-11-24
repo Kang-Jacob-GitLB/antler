@@ -25,7 +25,7 @@ disallowed-methods = [
   { path = "reqwest::ClientBuilder::tls_danger_accept_invalid_certs", reason = "인증서 검증을 끄지 않는다" },
   { path = "reqwest::ClientBuilder::tls_danger_accept_invalid_hostnames", reason = "호스트 이름 검증을 끄지 않는다" },
   # SSH(src/git/exec/ssh): 연결·인증·포워딩 API 는 connection.rs·auth.rs 한 곳에서만, 허용된 것만 쓴다 — 호스트 키 검증(TOFU 없음)·인증 수단(키·agent 뿐)·
-  # 원격 명령(build_remote_command 만)을 우회하는 호출이 생기지 않게 한다. connection.rs 의 connect_stream·channel_open_direct_tcpip(ProxyJump)·Channel::exec(프로브·open_exec(run·stream 공용)) 만
+  # 원격 명령(build_remote_command 만)을 우회하는 호출이 생기지 않게 한다. connection.rs 의 connect_stream·channel_open_direct_tcpip(ProxyJump)·channel_open_direct_streamlocal(ProxyCommand socat 소켓 경유)·Channel::exec(프로브·open_exec(run·stream 공용)) 만
   # `#[allow(clippy::disallowed_methods)]` 와 이유를 단다. 시험 서버·날 클라이언트(tests/ssh/)는 같은 방식으로 allow 한다
   { path = "russh::client::connect", reason = "SSH 연결은 ssh/connection.rs 에서만 맺는다(호스트 키 검증·시간 제한·방어)" },
   { path = "russh::client::connect_stream", reason = "SSH 연결은 ssh/connection.rs 에서만 맺는다(호스트 키 검증·시간 제한·방어)" },
@@ -44,7 +44,7 @@ disallowed-methods = [
   { path = "russh::client::Handle::streamlocal_forward", reason = "소켓 포워딩을 요청하지 않는다" },
   { path = "russh::client::Handle::cancel_streamlocal_forward", reason = "소켓 포워딩을 쓰지 않는다" },
   { path = "russh::client::Handle::channel_open_direct_tcpip", reason = "direct-tcpip 는 ProxyJump(ssh/connection.rs)에서만 연다" },
-  { path = "russh::client::Handle::channel_open_direct_streamlocal", reason = "소켓 포워딩을 쓰지 않는다" },
+  { path = "russh::client::Handle::channel_open_direct_streamlocal", reason = "direct-streamlocal 은 ProxyCommand socat 소켓 경유(ssh/connection.rs)에서만 연다" },
   { path = "russh::client::Handle::channel_open_x11", reason = "X11 을 쓰지 않는다" },
   { path = "russh::channels::Channel::agent_forward", reason = "agent 전달을 요청하지 않는다" },
   { path = "russh::channels::Channel::request_x11", reason = "X11 전달을 요청하지 않는다" },

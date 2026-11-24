@@ -632,6 +632,27 @@ async fn 점프_호스트를_거쳐_대상에_접속한다_각_호스트_키를_
 }
 
 #[tokio::test]
+async fn proxy_command_socat_소켓_경유는_점프_홉의_direct_streamlocal_로_접속한다() {
+    let e = Env::new().await;
+    let jump = TestServer::start(Opts::new(vec![e.client.public_key().clone()])).await;
+    let home = Home::new(&e.client);
+    // 시험 서버는 `/antler-test/<포트>` 소켓을 127.0.0.1:<포트> 로 이어 준다
+    let socket = format!("/antler-test/{}", e.server.port);
+    home.write_config(&format!(
+        "{}{}",
+        Env::host_block("jump", jump.port, &home, ""),
+        Env::host_block("target", e.server.port, &home, &format!("  ProxyCommand ssh jump socat - UNIX-CONNECT:{socket}\n"))
+    ));
+    home.write_known_hosts(&(known_hosts_line(jump.port, &jump.host_key) + &known_hosts_line(e.server.port, &e.server.host_key)));
+    let ex = home.executor("target");
+    let r = run(&ex, &e.repo, &["log", "-1", "--format=%s"]).await.unwrap();
+    assert_eq!(String::from_utf8_lossy(&r.stdout).trim(), "첫 커밋: 한글 메시지");
+    assert_eq!(jump.connections(), 1);
+    assert_eq!(jump.tunnels(), [format!("unix:{socket}")]);
+    ex.dispose();
+}
+
+#[tokio::test]
 async fn 점프_호스트_키가_틀리면_점프_단계에서_거부한다() {
     let e = Env::new().await;
     let jump = TestServer::start(Opts::new(vec![e.client.public_key().clone()])).await;
@@ -856,7 +877,7 @@ fn russh_의_연결_인증_포워딩_api_는_허용된_파일에서만_쓴다() 
         ("agent_forward", &[]),
         ("request_x11", &[]),
         ("channel_open_x11", &[]),
-        ("channel_open_direct_streamlocal", &[]),
+        ("channel_open_direct_streamlocal", &["connection.rs"]),
         ("gssapi", &[]),
         ("send_global_request", &[]),
     ];

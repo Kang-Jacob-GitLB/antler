@@ -545,6 +545,35 @@ impl server::Handler for Conn {
         Ok(())
     }
 
+    /// ProxyCommand socat 소켓 경유용 direct-streamlocal: `/antler-test/<포트>` 를 127.0.0.1:<포트> 로 이어 준다(그 밖의 경로는 거부)
+    async fn channel_open_direct_streamlocal(
+        &mut self,
+        channel: Channel<Msg>,
+        socket_path: &str,
+        reply: server::ChannelOpenHandle,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.shared.tunnels.lock().unwrap().push(format!("unix:{socket_path}"));
+        let Some(port) = socket_path.strip_prefix("/antler-test/").and_then(|p| p.parse::<u16>().ok()) else {
+            reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+            return Ok(());
+        };
+        let token = self.conn.child_token();
+        tokio::spawn(async move {
+            let Ok(mut tcp) = TcpStream::connect(("127.0.0.1", port)).await else {
+                reply.reject(russh::ChannelOpenFailure::ConnectFailed).await;
+                return;
+            };
+            reply.accept().await;
+            let mut stream = channel.into_stream();
+            tokio::select! {
+                _ = token.cancelled() => {}
+                _ = tokio::io::copy_bidirectional(&mut stream, &mut tcp) => {}
+            }
+        });
+        Ok(())
+    }
+
     /// ProxyJump 용 direct-tcpip: 대상 포트로 그대로 이어 준다
     async fn channel_open_direct_tcpip(
         &mut self,
