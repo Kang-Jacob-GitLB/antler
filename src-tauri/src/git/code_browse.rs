@@ -2,7 +2,8 @@
 //! 그 위의 git 호출(`resolve_rev`·`list_tree`·`read_blob`·`is_on_remote`). 캐시·큐·취소·envelope 은 라우터가 맡는다.
 //!
 //! 보안: renderer 값은 검증된 값(`CommitId`·`normalize_dir` 결과·`is_resolvable_ref` 를 통과한 ref)만 argv 에 들어가고, **서브커맨드·옵션은 상수**다.
-//! 해시·경로는 `<해시>:<경로>` 한 인자이거나(첫 글자가 16진수라 옵션이 아니다) `--end-of-options` 뒤다. **파일 내용은 `cat-file blob` 으로만 읽는다** —
+//! 해시·경로는 `<해시>:<경로>` 한 인자이거나(첫 글자가 16진수라 옵션이 아니다) `HEAD`·`refs/…` 로 시작하는 ref 다(`-` 로 시작할 수 없다).
+//! `--end-of-options` 는 옛 git(2.24 미만, `rev-parse` 는 2.30 미만)이 거부해서 쓰지 않는다. **파일 내용은 `cat-file blob` 으로만 읽는다** —
 //! `git show`·diff 계열과 달리 textconv·필터·속성이 적용되지 않는다. `ls-tree -l` 은 쓰지 않는다(크기를 구하려고 blob 마다 lazy fetch 가 일어난다).
 //!
 //! JS 와 맞춘 것: 이름 비교는 `toLowerCase`(`js_to_lowercase` — 길이가 달라지는 `İ`·`ẞ` 포함) 뒤 **UTF-16 코드 단위** 순이다(코드 포인트 순이 아니다 —
@@ -272,9 +273,11 @@ impl BlobRequest {
     }
 }
 
-/// `rev-parse --verify --end-of-options <ref>^{commit}`. ref 는 `is_resolvable_ref` 를 통과한 값이다
+/// `rev-parse --verify <ref>^{commit}`. ref 는 `is_resolvable_ref` 를 통과한 값이라(`HEAD`·16진수·`refs/…`) `-` 로 시작할 수 없다.
+/// `--end-of-options` 는 쓰지 않는다 — `rev-parse` 는 git 2.30 부터 받아서, 그 전 버전에서는 ref 해석이 실패했다
 pub fn resolve_rev_args(r: &str) -> Vec<String> {
-    ["rev-parse", "--verify", "--end-of-options"].iter().map(|s| (*s).to_string()).chain([format!("{r}^{{commit}}")]).collect()
+    debug_assert!(!r.starts_with('-'), "ref 는 옵션 모양일 수 없다");
+    ["rev-parse", "--verify"].iter().map(|s| (*s).to_string()).chain([format!("{r}^{{commit}}")]).collect()
 }
 
 /// `cat-file -t|-s|blob <rev>:<경로>` — 경로는 16진수 접두가 붙은 **한 인자**라 옵션으로 해석될 수 없다
@@ -627,7 +630,7 @@ mod tests {
 
     #[test]
     fn argv_는_ts_와_바이트까지_같다() {
-        assert_eq!(resolve_rev_args("HEAD"), ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"]);
+        assert_eq!(resolve_rev_args("HEAD"), ["rev-parse", "--verify", "HEAD^{commit}"]);
         assert_eq!(cat_file_args("-t", "abc:src"), ["cat-file", "-t", "abc:src"]);
         assert_eq!(cat_file_args("-s", "abc:-x"), ["cat-file", "-s", "abc:-x"]);
         assert_eq!(cat_file_args("blob", "abc:a b"), ["cat-file", "blob", "abc:a b"]);

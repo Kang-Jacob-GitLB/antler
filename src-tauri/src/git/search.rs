@@ -232,11 +232,11 @@ mod tests {
         let h = HexHash::parse(&"a".repeat(40)).unwrap();
         assert_eq!(r.reachable_args(&h), strs(&["rev-list", "-n1", &"a".repeat(40), "--not", "--ignore-missing", "--branches", "--remotes", "--tags", "HEAD"]));
         assert_eq!(req("deadbeef", None).hash_args(), strs(&["rev-parse", "--verify", "--quiet", "deadbeef^{commit}"]));
-        // 범위: solo 는 --end-of-options 뒤, glob 은 한 인자
+        // 범위: solo 는 rev 그대로, glob 은 한 인자
         let solo = req("x", Some(json!({ "solo": ["refs/heads/main", "refs/remotes/origin/*"] })));
         assert_eq!(
             solo.filter_args("--author=x")[8..],
-            strs(&["--ignore-missing", "--glob=refs/remotes/origin/*", "--end-of-options", "refs/heads/main", "--"])
+            strs(&["--ignore-missing", "--glob=refs/remotes/origin/*", "refs/heads/main", "--"])
         );
     }
 

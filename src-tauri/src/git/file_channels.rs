@@ -289,12 +289,13 @@ impl HistoryRequest {
     }
 }
 
-/// `git log --follow` 인자. rev 는 `--end-of-options` 뒤, 경로는 `--` 뒤다
+/// `git log --follow` 인자. rev 는 16진수라 옵션이 될 수 없고, 경로는 `--` 뒤다.
+/// `--end-of-options` 는 쓰지 않는다 — git 2.24 미만의 `log` 가 `unrecognized argument` 로 거부한다
 pub fn history_args(rev: &HexHash, path: &FilePath, max_count: usize) -> Vec<String> {
     let mut v: Vec<String> = ["log", "--follow", "--no-color", "--no-ext-diff"].iter().map(|s| (*s).to_string()).collect();
     v.extend(FILE_HISTORY_FORMAT_ARGS.iter().map(|s| (*s).to_string()));
     v.push(format!("--max-count={max_count}"));
-    v.extend(["--end-of-options".to_string(), rev.as_str().to_string(), "--".to_string(), path.as_str().to_string()]);
+    v.extend([rev.as_str().to_string(), "--".to_string(), path.as_str().to_string()]);
     v
 }
 
@@ -570,7 +571,6 @@ mod tests {
                 "-M",
                 "--format=%x01%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%s",
                 "--max-count=12",
-                "--end-of-options",
                 "ABCD",
                 "--",
                 "a b.txt"

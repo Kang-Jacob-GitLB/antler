@@ -367,7 +367,7 @@ mod tests {
         let strs = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<String>>();
         assert_eq!(ActivityRequest::parse(None).unwrap().args(), strs(&["log", "--format=%at", "--ignore-missing", "--branches", "--remotes", "--tags", "HEAD", "--"]));
         let solo = ActivityRequest::parse(Some(&serde_json::json!({ "solo": ["refs/heads/a", "refs/remotes/o/*"] }))).unwrap();
-        assert_eq!(solo.args(), strs(&["log", "--format=%at", "--ignore-missing", "--glob=refs/remotes/o/*", "--end-of-options", "refs/heads/a", "--"]));
+        assert_eq!(solo.args(), strs(&["log", "--format=%at", "--ignore-missing", "--glob=refs/remotes/o/*", "refs/heads/a", "--"]));
     }
 
     #[test]
